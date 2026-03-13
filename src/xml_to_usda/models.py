@@ -222,8 +222,8 @@ class ResourceIndexEntry:
 class ExportMetadata:
     source_path: str
     source_version: str | None
-    meters_per_unit: float = 0.01
-    up_axis: str = "Z"
+    meters_per_unit: float = 1.0
+    up_axis: str = "Y"
     warnings: tuple[str, ...] = ()
     unknown_sections: tuple[str, ...] = ()
     output_mode: OutputMode = OutputMode.SELF_CONTAINED

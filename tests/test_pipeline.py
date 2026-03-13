@@ -99,6 +99,8 @@ def test_usda_output_contains_ue_first_structure() -> None:
     diagnostics = validate_model(model)
     usda = render_usda(model, diagnostics)
 
+    assert 'metersPerUnit = 1' in usda.text
+    assert 'upAxis = "Y"' in usda.text
     assert 'apiSchemas = ["NaniteAssemblyRootAPI"]' in usda.text
     assert 'uniform token unreal:naniteAssembly:meshType = "skeletalMesh"' in usda.text
     assert 'custom rel unreal:naniteAssembly:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>' in usda.text
@@ -109,35 +111,60 @@ def test_usda_output_contains_ue_first_structure() -> None:
     assert 'append rel skel:animationSource = </Tree/TrunkSkelRoot/animation>' in usda.text
     assert 'apiSchemas = ["SkelBindingAPI"]' in usda.text
     assert 'uniform token[] skel:joints = [' in usda.text
+    assert 'uniform matrix4d primvars:skel:geomBindTransform = ' in usda.text
     assert 'int[] primvars:skel:jointIndices = [' in usda.text
     assert 'float[] primvars:skel:jointWeights = [' in usda.text
-    assert 'interpolation = "faceVarying"' in usda.text
+    assert 'uniform token primvars:skel:skinningMethod = "classicLinear"' in usda.text
+    assert 'interpolation = "vertex"' in usda.text
     assert 'primvars:boneCapture_pCaptPath' in usda.text
     assert 'primvars:ueJointNames' in usda.text
     assert 'primvars:localtransform' in usda.text
     assert 'def PointInstancer "PartsInstancer"' in usda.text
     assert 'apiSchemas = ["NaniteAssemblySkelBindingAPI"]' in usda.text
     assert 'token[] primvars:unreal:naniteAssembly:bindJoints = [' in usda.text
+    assert 'int[] primvars:unreal:naniteAssembly:bindJoints:indices = None' in usda.text
     assert 'float[] primvars:unreal:naniteAssembly:bindJointWeights = [' in usda.text
-    assert 'elementSize = 1' in usda.text
+    assert 'int[] primvars:unreal:naniteAssembly:bindJointWeights:indices = None' in usda.text
+    assert 'elementSize = 2' in usda.text
     assert 'interpolation = "vertex"' in usda.text
     assert 'quath[] orientations = [' in usda.text
     assert 'def Scope "Prototypes"' in usda.text
-    assert 'append references = </Tree/Branches/Mesh_1>' in usda.text
     assert 'token visibility = "invisible"' in usda.text
-    assert 'token visibility = None' not in usda.text
+    assert 'append references = </Tree/Branches/Mesh_1>' in usda.text
+    assert 'token visibility = None' in usda.text
+
+
+def test_referenced_prototypes_clear_hidden_branch_library_visibility() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    diagnostics = validate_model(model)
+    usda = render_usda(model, diagnostics)
+
+    assert 'def Xform "Mesh_1" (' in usda.text
+    assert 'def Xform "Mesh_2" (' in usda.text
+    assert 'append references = </Tree/Branches/Mesh_1>' in usda.text
+    assert 'append references = </Tree/Branches/Mesh_2>' in usda.text
+    assert usda.text.index('token visibility = "invisible"') < usda.text.index('def PointInstancer "PartsInstancer"')
+    assert usda.text.index('token visibility = None') > usda.text.index('def Scope "Prototypes"')
 
 
 def test_ue_schema_contract_matches_current_writer_contract() -> None:
     contract = DEFAULT_UE_SCHEMA_CONTRACT
 
+    assert contract.stage_meters_per_unit == 1.0
+    assert contract.stage_up_axis == "Y"
     assert contract.root_api == "NaniteAssemblyRootAPI"
     assert contract.external_ref_api == "NaniteAssemblyExternalRefAPI"
     assert contract.binding_api == "NaniteAssemblySkelBindingAPI"
     assert contract.mesh_type_attr == "unreal:naniteAssembly:meshType"
+    assert contract.root_kind == "component"
     assert contract.skeleton_relationship_attr == "custom rel unreal:naniteAssembly:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>"
     assert contract.bind_joints_attr == "token[] primvars:unreal:naniteAssembly:bindJoints"
     assert contract.bind_weights_attr == "float[] primvars:unreal:naniteAssembly:bindJointWeights"
+    assert contract.skinning_method_attr == "uniform token primvars:skel:skinningMethod"
+    assert contract.skinning_method_value == "classicLinear"
+    assert contract.point_instancer_joint_element_size == 2
     assert contract.root_api_allowed_prims == ("Xform",)
     assert contract.external_ref_api_allowed_prims == ("Xform",)
     assert contract.binding_api_allowed_prims == ("Xform", "Mesh", "SkelRoot", "PointInstancer")
@@ -152,9 +179,10 @@ def test_point_instancer_binding_attrs_use_path_like_joint_tokens() -> None:
 
     assert 'token[] primvars:unreal:naniteAssembly:bindJoints = [' in usda.text
     assert 'float[] primvars:unreal:naniteAssembly:bindJointWeights = [' in usda.text
-    assert 'elementSize = 1' in usda.text
+    assert 'elementSize = 2' in usda.text
     assert '"Tree_point_17"' in usda.text
     assert '"Tree_point_104"' in usda.text
+    assert '0]' in usda.text or ', 0,' in usda.text
 
 
 def test_point_instancer_orientations_remain_non_uniform_and_deterministic() -> None:
@@ -195,8 +223,24 @@ def test_non_default_metadata_becomes_warning() -> None:
     model = normalize_to_canonical(document, report)
     diagnostics = validate_model(model)
 
-    assert any("Non-default units hint" in issue.message for issue in diagnostics)
-    assert any("Non-default up-axis hint" in issue.message for issue in diagnostics)
+    assert not any("units hint" in issue.message for issue in diagnostics)
+    assert not any("up-axis hint" in issue.message for issue in diagnostics)
+
+
+def test_generated_usda_tracks_tutorial_reference_contract_without_houdini_only_fields() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    diagnostics = validate_model(model)
+    usda = render_usda(model, diagnostics)
+
+    assert 'kind = "component"' in usda.text
+    assert 'uniform token primvars:skel:skinningMethod = "classicLinear"' in usda.text
+    assert 'int[] primvars:unreal:naniteAssembly:bindJoints:indices = None' in usda.text
+    assert 'int[] primvars:unreal:naniteAssembly:bindJointWeights:indices = None' in usda.text
+    assert 'float primvars:pCaptFrame' not in usda.text
+    assert 'string primvars:pCaptSkelRoot' not in usda.text
+    assert 'NaniteAssemblyExternalRefAPI' not in usda.text
 
 
 def test_leaf_binding_distribution_maps_to_mesh_library_without_hardcoded_counts() -> None:

@@ -33,13 +33,13 @@ def render_usda(
     text = f'''#usda 1.0
 (
     defaultPrim = "Tree"
-    metersPerUnit = {model.metadata.meters_per_unit}
-    upAxis = "{model.metadata.up_axis}"
+    metersPerUnit = {contract.stage_meters_per_unit:g}
+    upAxis = "{contract.stage_up_axis}"
 )
 
 def Xform "Tree" (
     prepend apiSchemas = ["{contract.root_api}"]
-    kind = "component"
+    kind = "{contract.root_kind}"
 )
 {{
     uniform token {contract.mesh_type_attr} = "{contract.mesh_type_value}"
@@ -80,17 +80,19 @@ def _render_base_mesh(model: CanonicalTreeModel, contract: UeSchemaContract) -> 
         skinning = f'''
     int[] primvars:skel:jointIndices = [{joint_indices}] (
         elementSize = {mesh.skel_element_size or 1}
-        interpolation = "faceVarying"
+        interpolation = "vertex"
     )
     float[] primvars:skel:jointWeights = [{joint_weights}] (
         elementSize = {mesh.skel_element_size or 1}
-        interpolation = "faceVarying"
-    )'''
+        interpolation = "vertex"
+    )
+    {contract.skinning_method_attr} = "{contract.skinning_method_value}"'''
     return f'''def Mesh "TrunkMesh" (
     apiSchemas = ["{contract.skel_binding_api}"]
 )
 {{
     uniform token[] skel:joints = [{joint_paths}]
+    uniform matrix4d primvars:skel:geomBindTransform = {_identity_matrix()}
     rel skel:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>
     uniform token subdivisionScheme = "none"
     {_render_mesh_payload(mesh)}{skinning}
@@ -143,6 +145,7 @@ def _render_branch_prototype(prototype: Prototype) -> str:
         kind = "component"
     )
     {{
+        token visibility = "invisible"
         def Mesh "{name}_Mesh"
         {{
             {_render_mesh_payload(mesh)}
@@ -161,7 +164,7 @@ def _render_point_instancer(model: CanonicalTreeModel, contract: UeSchemaContrac
     orientations = ", ".join(leaf.orientation.to_usda() for leaf in leaves)
     scales = ", ".join(leaf.scale.to_usda() for leaf in leaves)
     names = ", ".join(f'"{_prototype_name_for_instance(leaf, prototypes)}"' for leaf in leaves)
-    binding_width, bindings = _normalized_bindings(leaves)
+    binding_width, bindings = _normalized_bindings(leaves, contract.point_instancer_joint_element_size)
     bind_joints = ", ".join(f'"{token}"' for binding in bindings for token in binding.joint_tokens)
     bind_weights = ", ".join(f"{weight:g}" for binding in bindings for weight in binding.weights)
     prototype_paths = _prototype_target_paths(model)
@@ -181,10 +184,12 @@ def _render_point_instancer(model: CanonicalTreeModel, contract: UeSchemaContrac
         elementSize = {binding_width}
         interpolation = "vertex"
     )
+    int[] primvars:unreal:naniteAssembly:bindJoints:indices = None
     {contract.bind_weights_attr} = [{bind_weights}] (
         elementSize = {binding_width}
         interpolation = "vertex"
     )
+    int[] primvars:unreal:naniteAssembly:bindJointWeights:indices = None
     int[] protoIndices = [{proto_indices}]
     rel prototypes = [{prototype_paths}]
     float3[] scales = [{scales}]
@@ -233,7 +238,7 @@ def _render_instancer_prototypes(model: CanonicalTreeModel) -> str:
                 append references = </Tree/Branches/{prototype.identity.prim_name}>
             )
             {{
-                token visibility = "invisible"
+                token visibility = None
             }}'''
         for prototype in model.prototypes
     )
@@ -313,9 +318,9 @@ def _prototype_target_paths(model: CanonicalTreeModel) -> str:
     )
 
 
-def _normalized_bindings(leaves) -> tuple[int, tuple[InstanceBinding, ...]]:
+def _normalized_bindings(leaves, target_width: int) -> tuple[int, tuple[InstanceBinding, ...]]:
     width = max((leaf.binding.element_size for leaf in leaves), default=1)
-    width = max(width, 1)
+    width = max(width, target_width, 1)
     return width, tuple(leaf.binding.padded(width) for leaf in leaves)
 
 

@@ -47,8 +47,8 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
     metadata = ExportMetadata(
         source_path=document.source_path,
         source_version=report.version,
-        meters_per_unit=0.01,
-        up_axis="Z",
+        meters_per_unit=1.0,
+        up_axis="Y",
         warnings=tuple(_metadata_warnings(report) + data_messages),
         unknown_sections=report.unknown_sections,
     )
@@ -72,10 +72,10 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
 
 def _metadata_warnings(report: ObservedXmlSchemaReport) -> list[str]:
     warnings: list[str] = []
-    if report.units_hint and report.units_hint not in {"cm", "centimeter", "centimeters"}:
-        warnings.append(f"Non-default units hint detected: {report.units_hint}")
-    if report.up_axis_hint and report.up_axis_hint.upper() != "Z":
-        warnings.append(f"Non-default up-axis hint detected: {report.up_axis_hint}")
+    if report.units_hint and report.units_hint.lower() not in {"cm", "centimeter", "centimeters", "m", "meter", "meters"}:
+        warnings.append(f"Unsupported units hint detected: {report.units_hint}")
+    if report.up_axis_hint and report.up_axis_hint.upper() not in {"Y", "Z"}:
+        warnings.append(f"Unsupported up-axis hint detected: {report.up_axis_hint}")
     if report.unknown_sections:
         warnings.append(f"Unknown XML sections detected: {', '.join(report.unknown_sections)}")
     if report.object_class_counts.get("total", 0) == 0:

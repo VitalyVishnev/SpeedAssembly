@@ -53,7 +53,7 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                 ValidationIssue(
                     severity="error",
                     code="invalid_base_mesh_skinning_shape",
-                    message="Base skeletal mesh joint index payload must match face-varying topology exactly.",
+                    message="Base skeletal mesh joint index payload must match the authored topology exactly.",
                 )
             )
         if len(model.base_mesh.skel_joint_weights) != len(model.base_mesh.face_vertex_indices):
@@ -61,7 +61,7 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                 ValidationIssue(
                     severity="error",
                     code="invalid_base_mesh_skinning_shape",
-                    message="Base skeletal mesh joint weight payload must match face-varying topology exactly.",
+                    message="Base skeletal mesh joint weight payload must match the authored topology exactly.",
                 )
             )
 
