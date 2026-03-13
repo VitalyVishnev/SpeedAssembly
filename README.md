@@ -2,6 +2,19 @@
 
 Deterministic converter for SpeedTree Raw XML that emits USDA targeting Unreal Engine 5.7 skeletal Nanite Assembly import.
 
+## Authoring rule
+
+For this project, valid output means more than “parses as USD”.
+
+Generated USDA must always include the required UE-facing:
+
+- API schemas
+- primvars
+- USD attributes
+- relationships
+
+If a required schema contract field is missing, the output is treated as broken even if the USDA is syntactically valid.
+
 ## Current baseline
 
 The active reverse-engineering baseline is:
@@ -85,6 +98,7 @@ Notes:
 - normalization builds a universal tree-asset model with source objects, branch segments, prototype library entries, reusable instances, generalized bindings, and optional spines.
 - USDA writing uses merged base geometry, `Skeleton`, reference-oriented prototypes, path-like skeletal binding tokens, and UE support primvars on `SkelRoot`.
 - writer emits `NaniteAssemblySkelBindingAPI`, `primvars:unreal:naniteAssembly:bindJoints`, and `primvars:unreal:naniteAssembly:bindJointWeights` for `PointInstancer`.
+- writer is expected to preserve required skeletal USD contract fields as well, including the importer-relevant `skel:*` authoring on the base mesh and skeleton path.
 - strict validation fails on missing base geometry, missing skeleton data, missing explicit instance bindings, and inconsistent packed arrays.
 
 ## Current phases

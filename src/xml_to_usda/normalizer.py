@@ -30,8 +30,11 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
     root = document.tree.getroot()
     data_messages: list[str] = []
 
-    source_objects = tuple(_extract_source_objects(root, data_messages))
     skeleton = tuple(_extract_skeleton(root))
+    joint_index_by_source_id = {
+        joint.source_id: index for index, joint in enumerate(skeleton) if joint.source_id is not None
+    }
+    source_objects = tuple(_extract_source_objects(root, data_messages, joint_index_by_source_id))
     mesh_library = tuple(_extract_mesh_library(root, data_messages))
     trunk_source_mesh = _extract_trunk_mesh(source_objects)
     base_mesh, base_mesh_parts = _build_base_mesh(source_objects)
@@ -105,6 +108,8 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
     merged_points: list[Vector3] = []
     merged_face_counts: list[int] = []
     merged_face_indices: list[int] = []
+    merged_joint_indices: list[int] = []
+    merged_joint_weights: list[float] = []
     merged_parts: list[BaseMeshPart] = []
 
     for source_object in candidates:
@@ -117,6 +122,8 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
         merged_points.extend(translated_points)
         merged_face_counts.extend(mesh.face_vertex_counts)
         merged_face_indices.extend(index + point_offset for index in mesh.face_vertex_indices)
+        merged_joint_indices.extend(mesh.skel_joint_indices)
+        merged_joint_weights.extend(mesh.skel_joint_weights)
         merged_parts.append(
             BaseMeshPart(
                 object_id=source_object.object_id,
@@ -136,18 +143,25 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
             points=tuple(merged_points),
             face_vertex_counts=tuple(merged_face_counts),
             face_vertex_indices=tuple(merged_face_indices),
+            skel_joint_indices=tuple(merged_joint_indices),
+            skel_joint_weights=tuple(merged_joint_weights),
+            skel_element_size=1 if merged_joint_indices else 0,
         ),
         tuple(merged_parts),
     )
 
 
-def _extract_source_objects(root: ET.Element, messages: list[str]) -> list[SourceObject]:
+def _extract_source_objects(
+    root: ET.Element,
+    messages: list[str],
+    joint_index_by_source_id: dict[int, int],
+) -> list[SourceObject]:
     source_objects: list[SourceObject] = []
     for obj in root.findall(".//Object"):
         object_id = obj.attrib.get("ID")
         if object_id is None:
             continue
-        mesh = _extract_object_mesh(obj, messages)
+        mesh = _extract_object_mesh(obj, messages, joint_index_by_source_id)
         leaf_count = _count_packed_values(obj.find("LeafReferences"), "X")
         spine = _extract_spine(obj, object_id, messages)
         source_objects.append(
@@ -186,20 +200,46 @@ def _extract_mesh_library(root: ET.Element, messages: list[str]) -> list[MeshLib
     return entries
 
 
-def _extract_object_mesh(obj: ET.Element, messages: list[str]) -> MeshData | None:
+def _extract_object_mesh(
+    obj: ET.Element,
+    messages: list[str],
+    joint_index_by_source_id: dict[int, int],
+) -> MeshData | None:
     points_node = obj.find("Points")
     triangles_node = obj.find("Triangles")
     if points_node is None or triangles_node is None:
         return None
-    return _build_mesh_data(obj.attrib.get("Name", obj.tag), points_node, triangles_node, messages)
+    vertices_node = obj.find("Vertices")
+    return _build_mesh_data(
+        obj.attrib.get("Name", obj.tag),
+        points_node,
+        triangles_node,
+        vertices_node,
+        joint_index_by_source_id,
+        messages,
+    )
 
 
-def _build_mesh_data(name: str, points_node: ET.Element, triangles_node: ET.Element, messages: list[str]) -> MeshData | None:
+def _build_mesh_data(
+    name: str,
+    points_node: ET.Element,
+    triangles_node: ET.Element,
+    vertices_node: ET.Element | None,
+    joint_index_by_source_id: dict[int, int],
+    messages: list[str],
+) -> MeshData | None:
     points = _extract_packed_points(points_node, f"{name}.points", messages)
-    face_counts, face_indices = _extract_packed_triangles(triangles_node, f"{name}.triangles", messages)
+    face_counts, face_indices, vertex_indices = _extract_packed_triangles(triangles_node, f"{name}.triangles", messages)
     if not points or not face_counts or not face_indices:
         return None
-    return _build_mesh_from_faces(name, points, face_counts, face_indices)
+    joint_indices, joint_weights = _extract_vertex_skinning(
+        vertices_node,
+        vertex_indices,
+        joint_index_by_source_id,
+        f"{name}.vertices",
+        messages,
+    )
+    return _build_mesh_from_faces(name, points, face_counts, face_indices, joint_indices, joint_weights)
 
 
 def _build_library_mesh_data(name: str, points_node: ET.Element, lod_node: ET.Element, messages: list[str]) -> MeshData | None:
@@ -210,12 +250,22 @@ def _build_library_mesh_data(name: str, points_node: ET.Element, lod_node: ET.El
     return _build_mesh_from_faces(name, points, face_counts, face_indices)
 
 
-def _build_mesh_from_faces(name: str, points: list[Vector3], face_counts: list[int], face_indices: list[int]) -> MeshData:
+def _build_mesh_from_faces(
+    name: str,
+    points: list[Vector3],
+    face_counts: list[int],
+    face_indices: list[int],
+    joint_indices: list[int] | None = None,
+    joint_weights: list[float] | None = None,
+) -> MeshData:
     return MeshData(
         name=name,
         points=tuple(points),
         face_vertex_counts=tuple(face_counts),
         face_vertex_indices=tuple(face_indices),
+        skel_joint_indices=tuple(joint_indices or ()),
+        skel_joint_weights=tuple(joint_weights or ()),
+        skel_element_size=1 if joint_indices else 0,
     )
 
 
@@ -360,7 +410,9 @@ def _build_prototypes(
     leaf_instances: tuple[LeafInstance, ...],
     mesh_library: tuple[MeshLibraryEntry, ...],
 ) -> list[Prototype]:
-    source_keys = tuple(dict.fromkeys(leaf.prototype_key for leaf in leaf_instances)) or ("LeafPrototype",)
+    if not leaf_instances:
+        return []
+    source_keys = tuple(dict.fromkeys(leaf.prototype_key for leaf in leaf_instances))
     identities = build_prototype_identities(list(source_keys))
     meshes_by_key = {f"Mesh_{entry.mesh_id}": entry for entry in mesh_library}
     prototypes: list[Prototype] = []
@@ -491,16 +543,29 @@ def _extract_packed_points(node: ET.Element, context: str, messages: list[str]) 
     return [Vector3(xs[index], ys[index], zs[index]) for index in range(count)]
 
 
-def _extract_packed_triangles(node: ET.Element, context: str, messages: list[str]) -> tuple[list[int], list[int]]:
-    indices = _read_int_list(node.findtext("PointIndices") or node.findtext("VertexIndices") or node.findtext("TriangleIndices"))
+def _extract_packed_triangles(node: ET.Element, context: str, messages: list[str]) -> tuple[list[int], list[int], list[int]]:
+    point_indices = _read_int_list(node.findtext("PointIndices") or node.findtext("TriangleIndices"))
+    vertex_indices = _read_int_list(node.findtext("VertexIndices"))
+    indices = point_indices or vertex_indices
     if not indices:
         messages.append(f"packed_array_error: {context} does not contain triangle indices")
-        return [], []
+        return [], [], []
     if len(indices) % 3 != 0:
         messages.append(f"packed_array_error: {context} index count {len(indices)} is not divisible by 3")
         indices = indices[: len(indices) - (len(indices) % 3)]
+    if vertex_indices:
+        if len(vertex_indices) % 3 != 0:
+            messages.append(f"packed_array_error: {context} vertex index count {len(vertex_indices)} is not divisible by 3")
+            vertex_indices = vertex_indices[: len(vertex_indices) - (len(vertex_indices) % 3)]
+        if len(vertex_indices) != len(indices):
+            messages.append(
+                f"packed_array_error: {context} point index count {len(indices)} does not match vertex index count {len(vertex_indices)}"
+            )
+            limit = min(len(indices), len(vertex_indices))
+            indices = indices[:limit]
+            vertex_indices = vertex_indices[:limit]
     counts = [3] * (len(indices) // 3)
-    return counts, indices
+    return counts, indices, vertex_indices
 
 
 def _extract_lod_faces(node: ET.Element, mesh_name: str, messages: list[str]) -> tuple[list[int], list[int]]:
@@ -530,6 +595,47 @@ def _extract_lod_faces(node: ET.Element, mesh_name: str, messages: list[str]) ->
         return [], []
 
     return face_counts, face_indices
+
+
+def _extract_vertex_skinning(
+    vertices_node: ET.Element | None,
+    vertex_indices: list[int],
+    joint_index_by_source_id: dict[int, int],
+    context: str,
+    messages: list[str],
+) -> tuple[list[int], list[float]]:
+    if vertices_node is None or not vertex_indices:
+        return [], []
+    source_bone_ids = _read_int_list(vertices_node.findtext("BoneID"))
+    if not source_bone_ids:
+        messages.append(f"packed_array_error: {context} missing BoneID payload for skeletal base mesh")
+        return [], []
+
+    resolved_joint_indices: list[int] = []
+    resolved_joint_weights: list[float] = []
+    for vertex_index in vertex_indices:
+        if vertex_index < 0 or vertex_index >= len(source_bone_ids):
+            messages.append(f"packed_array_error: {context} vertex index {vertex_index} exceeds BoneID count {len(source_bone_ids)}")
+            resolved_joint_indices.append(0)
+            resolved_joint_weights.append(1.0)
+            continue
+        source_bone_id = source_bone_ids[vertex_index]
+        if source_bone_id == -1:
+            source_bone_id = 0
+        elif source_bone_id < 0:
+            messages.append(f"packed_array_error: {context} BoneID {source_bone_id} is not a valid skeletal binding")
+            resolved_joint_indices.append(0)
+            resolved_joint_weights.append(1.0)
+            continue
+        joint_index = joint_index_by_source_id.get(source_bone_id)
+        if joint_index is None:
+            messages.append(f"packed_array_error: {context} BoneID {source_bone_id} does not resolve to a skeleton joint")
+            resolved_joint_indices.append(0)
+            resolved_joint_weights.append(1.0)
+            continue
+        resolved_joint_indices.append(joint_index)
+        resolved_joint_weights.append(1.0)
+    return resolved_joint_indices, resolved_joint_weights
 
 
 def _consistent_count(

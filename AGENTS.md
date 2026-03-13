@@ -50,6 +50,25 @@ Every important rule must come from:
 - source inspection,
 - or a passing UE import test.
 
+### Mandatory UE schema contract adherence
+For every generated USDA, agents must explicitly verify and preserve the **required**:
+
+- API schemas
+- primvars
+- USD attributes
+- relationships
+- metadata that UE importer behavior depends on
+
+This is mandatory, not optional polish.
+
+Rules:
+
+- If a working UE example or verified schema shows a required API schema, it must be authored in the generated USDA.
+- If a working UE example or verified schema shows a required primvar or USD attribute, it must be authored with the correct name, placement, interpolation, and `elementSize` when applicable.
+- Do not emit a “simplified” USDA that drops required schemas, primvars, or skeletal attributes just because the file remains syntactically valid USD.
+- Before calling a result “done”, compare the generated USDA against `vault` examples and local UE schema notes specifically for presence of required API schemas, primvars, and importer-relevant attributes.
+- If required UE-facing fields cannot be authored safely from source data, fail loudly instead of emitting a USDA that is missing them.
+
 ### Determinism is mandatory
 Same input + same config = same logical USDA output.
 
@@ -107,6 +126,8 @@ The USDA is expected to contain, conceptually:
 - optional external refs where appropriate
 
 Exact field names must be verified from UE schema files and working examples.
+
+In addition, the generated structure must always preserve the required UE-facing API schemas, primvars, and USD attributes needed for import. Missing required schema contract fields are treated as conversion failures.
 
 ---
 
@@ -216,6 +237,8 @@ Validation must confirm:
 - instance counts match
 - transforms are sane
 - bindings are sane
+- required API schemas are present on the correct prims
+- required primvars and importer-relevant USD attributes are present with the correct names and layout
 
 ---
 
@@ -235,6 +258,7 @@ Errors must say:
 - which assumption was missing
 
 Do **not** silently emit broken USDA.
+Do **not** silently omit required UE API schemas, primvars, or skeletal USD attributes.
 
 ---
 

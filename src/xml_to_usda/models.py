@@ -50,6 +50,9 @@ class MeshData:
     points: tuple[Vector3, ...]
     face_vertex_counts: tuple[int, ...]
     face_vertex_indices: tuple[int, ...]
+    skel_joint_indices: tuple[int, ...] = ()
+    skel_joint_weights: tuple[float, ...] = ()
+    skel_element_size: int = 0
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -65,6 +66,10 @@ def test_canonical_model_extracts_universal_tree_asset_shape() -> None:
     assert model.binding_mode == "single_joint"
     assert model.binding_element_size == 1
     assert model.trunk_mesh == model.base_mesh
+    assert model.base_mesh.skel_joint_indices
+    assert model.base_mesh.skel_joint_weights
+    assert len(model.base_mesh.skel_joint_indices) == len(model.base_mesh.face_vertex_indices)
+    assert len(model.base_mesh.skel_joint_weights) == len(model.base_mesh.face_vertex_indices)
     assert all(leaf.binding.joint_tokens for leaf in model.leaf_instances)
     assert all(len(leaf.binding.joint_tokens) == len(leaf.binding.weights) for leaf in model.leaf_instances)
     assert {prototype.source_key for prototype in model.prototypes} == {leaf.prototype_key for leaf in model.leaf_instances}
@@ -96,11 +101,17 @@ def test_usda_output_contains_ue_first_structure() -> None:
 
     assert 'apiSchemas = ["NaniteAssemblyRootAPI"]' in usda.text
     assert 'uniform token unreal:naniteAssembly:meshType = "skeletalMesh"' in usda.text
-    assert 'rel unreal:naniteAssembly:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>' in usda.text
+    assert 'custom rel unreal:naniteAssembly:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>' in usda.text
     assert 'def Xform "Branches"' in usda.text
     assert 'def SkelRoot "TrunkSkelRoot"' in usda.text
+    assert 'def SkelAnimation "animation"' in usda.text
     assert 'def Skeleton "TrunkSkeleton"' in usda.text
+    assert 'append rel skel:animationSource = </Tree/TrunkSkelRoot/animation>' in usda.text
     assert 'apiSchemas = ["SkelBindingAPI"]' in usda.text
+    assert 'uniform token[] skel:joints = [' in usda.text
+    assert 'int[] primvars:skel:jointIndices = [' in usda.text
+    assert 'float[] primvars:skel:jointWeights = [' in usda.text
+    assert 'interpolation = "faceVarying"' in usda.text
     assert 'primvars:boneCapture_pCaptPath' in usda.text
     assert 'primvars:ueJointNames' in usda.text
     assert 'primvars:localtransform' in usda.text
@@ -113,6 +124,8 @@ def test_usda_output_contains_ue_first_structure() -> None:
     assert 'quath[] orientations = [' in usda.text
     assert 'def Scope "Prototypes"' in usda.text
     assert 'append references = </Tree/Branches/Mesh_1>' in usda.text
+    assert 'token visibility = "invisible"' in usda.text
+    assert 'token visibility = None' not in usda.text
 
 
 def test_ue_schema_contract_matches_current_writer_contract() -> None:
@@ -122,7 +135,7 @@ def test_ue_schema_contract_matches_current_writer_contract() -> None:
     assert contract.external_ref_api == "NaniteAssemblyExternalRefAPI"
     assert contract.binding_api == "NaniteAssemblySkelBindingAPI"
     assert contract.mesh_type_attr == "unreal:naniteAssembly:meshType"
-    assert contract.skeleton_relationship_attr == "rel unreal:naniteAssembly:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>"
+    assert contract.skeleton_relationship_attr == "custom rel unreal:naniteAssembly:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>"
     assert contract.bind_joints_attr == "token[] primvars:unreal:naniteAssembly:bindJoints"
     assert contract.bind_weights_attr == "float[] primvars:unreal:naniteAssembly:bindJointWeights"
     assert contract.root_api_allowed_prims == ("Xform",)
@@ -163,6 +176,8 @@ def test_missing_skeleton_is_error() -> None:
     diagnostics = validate_model(model)
 
     assert any(issue.code == "missing_skeleton" and issue.severity == "error" for issue in diagnostics)
+    with pytest.raises(ValueError, match="missing_skeleton"):
+        render_usda(model, diagnostics)
 
 
 def test_missing_leaf_refs_is_warning() -> None:
@@ -204,3 +219,29 @@ def test_spines_are_optional_source_data_for_writer() -> None:
     assert model.spines
     assert all(spine.points for spine in model.spines)
     assert "Spine" not in usda.text
+
+
+def test_base_mesh_skinning_indices_resolve_to_authored_skeleton_range() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+
+    assert model.base_mesh is not None
+    assert model.base_mesh.skel_joint_indices
+    assert min(model.base_mesh.skel_joint_indices) >= 0
+    assert max(model.base_mesh.skel_joint_indices) < len(model.skeleton)
+
+
+def test_missing_prototype_mesh_becomes_error_and_blocks_writer() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    broken_model = replace(
+        model,
+        prototypes=(replace(model.prototypes[0], mesh=None),) + model.prototypes[1:],
+    )
+    diagnostics = validate_model(broken_model)
+
+    assert any(issue.code == "missing_prototype_mesh" and issue.severity == "error" for issue in diagnostics)
+    with pytest.raises(ValueError, match="missing_prototype_mesh"):
+        render_usda(broken_model, diagnostics)

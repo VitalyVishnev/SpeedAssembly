@@ -7,6 +7,16 @@ This document records the UE-specific USD schema facts currently verified from t
 
 These files are the source of truth for the UE-specific API names and attribute names used by the converter. Reference USDA samples remain useful, but they are secondary to the local UE schema.
 
+## Non-negotiable authoring rule
+
+The converter must always author the required UE-facing schema contract completely:
+
+- required API schemas must be present on the correct prims
+- required primvars must be present with the correct names, interpolation, and `elementSize` metadata when applicable
+- required USD attributes and relationships must be authored with the correct names and placement
+
+A USDA that is syntactically valid but omits required UE API schemas, primvars, or skeletal attributes is considered invalid for this project.
+
 ## Verified APIs
 
 ### `NaniteAssemblyRootAPI`
@@ -52,6 +62,21 @@ These files are the source of truth for the UE-specific API names and attribute 
   - `rel unreal:naniteAssembly:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>`
 - Point-instanced part binding should author `bindJoints` and `bindJointWeights` with `elementSize` metadata.
 - Real UE-authored tree USDA samples in `vault/` use path-like joint identity tokens plus primvar interpolation metadata rather than relying on a literal `uniform` qualifier in authored text.
+- Base skeletal mesh authoring must preserve required `UsdSkel` data, not just sibling `Skeleton` presence. In practice this includes the relevant `skel:*` relationships/attributes and any required skinning primvars shown by verified UE examples.
+
+## Required review checklist for writer changes
+
+When changing the USDA writer, explicitly check:
+
+- API schema presence
+- primvar presence
+- attribute names
+- relationship names
+- interpolation metadata
+- `elementSize` metadata
+- prim placement within the hierarchy
+
+Do this against both the local UE schema files and working `vault` examples.
 
 ## Open Questions
 

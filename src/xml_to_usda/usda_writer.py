@@ -9,7 +9,6 @@ from .models import (
     SkeletalSupportPrimvars,
     UsdAssemblyDocument,
     ValidationIssue,
-    Vector3,
 )
 from .ue_schema import DEFAULT_UE_SCHEMA_CONTRACT, UeSchemaContract
 
@@ -19,8 +18,14 @@ def render_usda(
     diagnostics: tuple[ValidationIssue, ...],
     contract: UeSchemaContract = DEFAULT_UE_SCHEMA_CONTRACT,
 ) -> UsdAssemblyDocument:
+    error_codes = [issue.code for issue in diagnostics if issue.severity == "error"]
+    if error_codes:
+        raise ValueError(
+            "Cannot author USDA while validation errors are present: " + ", ".join(sorted(dict.fromkeys(error_codes)))
+        )
     base_mesh = _render_base_mesh(model, contract)
     skeleton = _render_skeleton(model)
+    animation = _render_animation(model)
     point_instancer = _render_point_instancer(model, contract)
     branch_library = _render_branch_library(model)
     skelroot_support = _render_skelroot_support_primvars(model.skeletal_support_primvars)
@@ -33,8 +38,8 @@ def render_usda(
 )
 
 def Xform "Tree" (
-    kind = "group"
-    apiSchemas = ["{contract.root_api}"]
+    prepend apiSchemas = ["{contract.root_api}"]
+    kind = "component"
 )
 {{
     uniform token {contract.mesh_type_attr} = "{contract.mesh_type_value}"
@@ -50,6 +55,8 @@ def Xform "Tree" (
         matrix4d xformOp:transform = {_identity_matrix()}
         uniform token[] xformOpOrder = ["xformOp:transform"]
 
+{_indent(animation, 2)}
+
 {_indent(base_mesh, 2)}
 
 {_indent(skeleton, 2)}
@@ -62,28 +69,64 @@ def Xform "Tree" (
 
 
 def _render_base_mesh(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
-    mesh = model.base_mesh or _fallback_triangle("TrunkMesh")
+    if model.base_mesh is None:
+        raise ValueError("Base skeletal mesh is required before USDA authoring.")
+    mesh = model.base_mesh
+    joint_paths = _render_joint_names(model)
+    joint_indices = ", ".join(str(index) for index in mesh.skel_joint_indices)
+    joint_weights = ", ".join(f"{weight:g}" for weight in mesh.skel_joint_weights)
+    skinning = ""
+    if mesh.skel_joint_indices and mesh.skel_joint_weights:
+        skinning = f'''
+    int[] primvars:skel:jointIndices = [{joint_indices}] (
+        elementSize = {mesh.skel_element_size or 1}
+        interpolation = "faceVarying"
+    )
+    float[] primvars:skel:jointWeights = [{joint_weights}] (
+        elementSize = {mesh.skel_element_size or 1}
+        interpolation = "faceVarying"
+    )'''
     return f'''def Mesh "TrunkMesh" (
     apiSchemas = ["{contract.skel_binding_api}"]
 )
 {{
+    uniform token[] skel:joints = [{joint_paths}]
     rel skel:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>
-    {_render_mesh_payload(mesh)}
+    uniform token subdivisionScheme = "none"
+    {_render_mesh_payload(mesh)}{skinning}
 }}'''
 
 
 def _render_skeleton(model: CanonicalTreeModel) -> str:
-    return f'''def Skeleton "TrunkSkeleton"
+    return f'''def Skeleton "TrunkSkeleton" (
+    prepend apiSchemas = ["SkelBindingAPI"]
+)
 {{
+    uniform matrix4d[] bindTransforms = [{_render_bind_transforms(model)}]
+    append rel skel:animationSource = </Tree/TrunkSkelRoot/animation>
     uniform token[] joints = [{_render_joint_names(model)}]
     uniform token[] jointNames = [{_render_joint_basenames(model)}]
     float3[] restTransforms:translations = [{_render_joint_translations(model)}]
 }}'''
 
 
+def _render_animation(model: CanonicalTreeModel) -> str:
+    joints = _render_joint_names(model)
+    rotations = ", ".join(_identity_quaternion() for _ in model.skeleton)
+    scales = ", ".join("(1, 1, 1)" for _ in model.skeleton)
+    translations = _render_joint_translations(model)
+    return f'''def SkelAnimation "animation"
+{{
+    uniform token[] joints = [{joints}]
+    quath[] rotations = [{rotations}]
+    half3[] scales = [{scales}]
+    float3[] translations = [{translations}]
+}}'''
+
+
 def _render_branch_library(model: CanonicalTreeModel) -> str:
     if not model.prototypes:
-        return 'def Xform "Branches" {}'
+        return ""
     definitions = "\n".join(_render_branch_prototype(prototype) for prototype in model.prototypes)
     return f'''def Xform "Branches"
 {{
@@ -92,7 +135,9 @@ def _render_branch_library(model: CanonicalTreeModel) -> str:
 
 
 def _render_branch_prototype(prototype: Prototype) -> str:
-    mesh = prototype.mesh or _fallback_triangle(f"{prototype.identity.prim_name}_Mesh")
+    if prototype.mesh is None:
+        raise ValueError(f"Prototype {prototype.identity.prim_name} is missing mesh payload.")
+    mesh = prototype.mesh
     name = prototype.identity.prim_name
     return f'''    def Xform "{name}" (
         kind = "component"
@@ -108,6 +153,8 @@ def _render_branch_prototype(prototype: Prototype) -> str:
 def _render_point_instancer(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
     leaves = model.leaf_instances
     prototypes = model.prototypes
+    if not leaves:
+        return ""
     prototype_index_map = {prototype.source_key: index for index, prototype in enumerate(prototypes)}
     proto_indices = ", ".join(str(prototype_index_map.get(leaf.prototype_key, 0)) for leaf in leaves)
     positions = ", ".join(leaf.position.to_usda() for leaf in leaves)
@@ -122,7 +169,7 @@ def _render_point_instancer(model: CanonicalTreeModel, contract: UeSchemaContrac
     binding_support = _render_binding_support_primvars(model, bindings)
 
     return f'''def PointInstancer "PartsInstancer" (
-    apiSchemas = ["{contract.binding_api}"]
+    prepend apiSchemas = ["{contract.binding_api}"]
     kind = "group"
 )
 {{
@@ -186,7 +233,7 @@ def _render_instancer_prototypes(model: CanonicalTreeModel) -> str:
                 append references = </Tree/Branches/{prototype.identity.prim_name}>
             )
             {{
-                token visibility = None
+                token visibility = "invisible"
             }}'''
         for prototype in model.prototypes
     )
@@ -200,7 +247,9 @@ def _render_instancer_prototypes(model: CanonicalTreeModel) -> str:
 
 
 def _render_inline_instancer_prototype(prototype: Prototype) -> str:
-    mesh = prototype.mesh or _fallback_triangle(f"{prototype.identity.prim_name}_Mesh")
+    if prototype.mesh is None:
+        raise ValueError(f"Prototype {prototype.identity.prim_name} is missing mesh payload.")
+    mesh = prototype.mesh
     name = prototype.identity.prim_name
     return f'''        def Xform "{name}"
         {{
@@ -299,19 +348,6 @@ def _render_mesh_payload(mesh: MeshData) -> str:
     int[] faceVertexIndices = [{indices}]'''
 
 
-def _fallback_triangle(name: str) -> MeshData:
-    return MeshData(
-        name=name,
-        points=(
-            Vector3(0.0, 0.0, 0.0),
-            Vector3(0.01, 0.0, 0.0),
-            Vector3(0.0, 0.01, 0.0),
-        ),
-        face_vertex_counts=(3,),
-        face_vertex_indices=(0, 1, 2),
-    )
-
-
 def _indent(value: str, level: int) -> str:
     if not value:
         return ""
@@ -340,3 +376,19 @@ def _build_joint_path_map(model: CanonicalTreeModel) -> dict[str, str]:
 
 def _identity_matrix() -> str:
     return "( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )"
+
+
+def _render_bind_transforms(model: CanonicalTreeModel) -> str:
+    return ", ".join(_translation_matrix(joint.bind_translate) for joint in model.skeleton)
+
+
+def _translation_matrix(translate: Vector3) -> str:
+    return (
+        "( "
+        f"(1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), ({translate.x:g}, {translate.y:g}, {translate.z:g}, 1)"
+        " )"
+    )
+
+
+def _identity_quaternion() -> str:
+    return "(1, 0, 0, 0)"

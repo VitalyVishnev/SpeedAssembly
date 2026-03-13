@@ -31,6 +31,39 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                 message="Tree asset requires trunk/base geometry for skeletal assembly import.",
             )
         )
+    elif not model.base_mesh.skel_joint_indices or not model.base_mesh.skel_joint_weights:
+        issues.append(
+            ValidationIssue(
+                severity="error",
+                code="missing_base_mesh_skinning",
+                message="Base skeletal mesh requires explicit skel joint indices and weights derived from XML vertex bindings.",
+            )
+        )
+    else:
+        if model.base_mesh.skel_element_size <= 0:
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="invalid_base_mesh_skinning_shape",
+                    message="Base skeletal mesh skel elementSize must be greater than zero when skinning arrays are present.",
+                )
+            )
+        if len(model.base_mesh.skel_joint_indices) != len(model.base_mesh.face_vertex_indices):
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="invalid_base_mesh_skinning_shape",
+                    message="Base skeletal mesh joint index payload must match face-varying topology exactly.",
+                )
+            )
+        if len(model.base_mesh.skel_joint_weights) != len(model.base_mesh.face_vertex_indices):
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="invalid_base_mesh_skinning_shape",
+                    message="Base skeletal mesh joint weight payload must match face-varying topology exactly.",
+                )
+            )
 
     if not model.skeleton:
         issues.append(
@@ -40,6 +73,22 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                 message="Skeleton data is required for skeletal nanite assembly export.",
             )
         )
+    elif model.base_mesh is not None and model.base_mesh.skel_joint_indices:
+        skeleton_size = len(model.skeleton)
+        out_of_range = [
+            index for index in model.base_mesh.skel_joint_indices if index < 0 or index >= skeleton_size
+        ]
+        if out_of_range:
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="invalid_base_mesh_joint_index",
+                    message=(
+                        "Base skeletal mesh contains joint indices outside the authored skeleton range; "
+                        f"found {len(out_of_range)} invalid entries for {skeleton_size} joints."
+                    ),
+                )
+            )
 
     if not model.leaf_instances:
         issues.append(
@@ -58,6 +107,27 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                 message="Reusable instances must carry explicit skeletal binding data derived from the XML export.",
             )
         )
+    if model.leaf_instances:
+        prototypes_by_key = {prototype.source_key: prototype for prototype in model.prototypes}
+        for leaf in model.leaf_instances:
+            prototype = prototypes_by_key.get(leaf.prototype_key)
+            if prototype is None:
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        code="missing_prototype_mesh",
+                        message=f"Instance {leaf.name} references missing prototype {leaf.prototype_key}.",
+                    )
+                )
+                continue
+            if prototype.mesh is None:
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        code="missing_prototype_mesh",
+                        message=f"Prototype {prototype.identity.prim_name} has no resolved mesh payload.",
+                    )
+                )
 
     for leaf in model.leaf_instances:
         if len(leaf.binding.joint_tokens) != len(leaf.binding.weights):
