@@ -1,0 +1,68 @@
+#usda 1.0
+
+def Xform "Example_Skeletal_Assembly" (
+    apiSchemas = ["NaniteAssemblyRootAPI"]
+    kind = "group"
+)
+{
+    uniform token unreal:naniteAssembly:meshType = "skeletalMesh"
+    rel unreal:naniteAssembly:skeleton = </Example_Skeletal_Assembly/Base/Base_Skeleton>
+
+    def SkelRoot "Base" (
+        kind = "component"
+    )
+    {
+        def Skeleton "Base_Skeleton"
+        {
+            uniform token[] joints = ["root", "root/joint1", "root/joint2", "root/joint3"]
+            uniform token[] jointNames = ["root", "joint1", "joint2", "joint3"]
+            # ...
+        }
+
+        def Mesh "Base_Mesh" (
+            apiSchemas = ["SkelBindingAPI"]
+        )
+        {
+            rel skel:skeleton = </Example_Skeletal_Assembly/Base/Base_Skeleton>
+
+            # ...
+        }
+    }
+
+    def PointInstancer "Part_Instancer" (
+        apiSchemas = ["NaniteSkelBindingAPI"]
+        kind = "group"
+    )
+    {
+        rel prototypes = </Example_Skeletal_Assembly/Part_Instancer/Prototypes/Part_0>
+        int[] protoIndices = [0, 0, 0]
+        uniform token[] primvars:unreal:naniteAssembly:bindJoints = ["joint1", "joint2", "joint3"]
+        uniform float[] primvars:unreal:naniteAssembly:bindJointWeights = [1.0, 1.0, 1.0]
+
+        # ...
+
+        def Scope "Prototypes" (
+            kind = "group"
+        )
+        {
+            def SkelRoot "Part_0" (
+                kind = "component"
+            )
+            {
+                def Skeleton "Part_0_Skeleton"
+                {
+                    # ...
+                }
+
+                def Mesh "Part_0_Mesh" (
+                    apiSchemas = ["SkelBindingAPI"]
+                )
+                {
+                    rel skel:skeleton = </Example_Skeletal_Assembly/Part_Instancer/Part_0/Part_0_Skeleton>
+
+                    # ...
+                }
+            }
+        }
+    }
+}

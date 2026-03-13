@@ -1,0 +1,2 @@
+[console_scripts]
+xml-to-usda = xml_to_usda.cli:main

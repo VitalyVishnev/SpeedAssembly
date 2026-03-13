@@ -1,0 +1,18 @@
+<SpeedTreeRaw version="9.5.2" units="m" upAxis="Y">
+  <Tree>
+    <TrunkMesh name="Trunk">
+      <Vertices>
+        <Vertex x="0" y="0" z="0" />
+        <Vertex x="0" y="0" z="1" />
+        <Vertex x="0.1" y="0" z="1" />
+      </Vertices>
+      <Faces>
+        <Face indices="0 1 2" />
+      </Faces>
+    </TrunkMesh>
+    <Skeleton>
+      <Joint name="root" x="0" y="0" z="0" />
+    </Skeleton>
+    <LeafReferences />
+  </Tree>
+</SpeedTreeRaw>
