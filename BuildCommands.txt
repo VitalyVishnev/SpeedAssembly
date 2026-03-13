@@ -1,0 +1,2 @@
+cd "D:\3D Personal\VibeCode\XMLtoUSDAconverter"
+.\scripts\build_gui_exe.cmd

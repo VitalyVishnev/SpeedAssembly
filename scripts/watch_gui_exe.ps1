@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [int]$PollMilliseconds = 1200,
     [switch]$Clean,
@@ -7,7 +7,17 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+function Convert-ToWinPath([string]$PathValue) {
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $PathValue
+    }
+    if ($PathValue.StartsWith('\\?\')) {
+        return $PathValue.Substring(4)
+    }
+    return $PathValue
+}
+
+$repoRoot = Convert-ToWinPath ([System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')))
 $buildScript = Join-Path $PSScriptRoot 'build_gui_exe.ps1'
 $watchRoots = @(
     (Join-Path $repoRoot 'src')
@@ -26,7 +36,7 @@ function Get-WatchSignature {
         Get-ChildItem -Path $root -File -Recurse |
             Sort-Object FullName |
             ForEach-Object {
-                $entries.Add("$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)")
+                $entries.Add("$(Convert-ToWinPath $_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)")
             }
     }
 
@@ -35,7 +45,7 @@ function Get-WatchSignature {
             continue
         }
         $item = Get-Item $file
-        $entries.Add("$($item.FullName)|$($item.Length)|$($item.LastWriteTimeUtc.Ticks)")
+        $entries.Add("$(Convert-ToWinPath $item.FullName)|$($item.Length)|$($item.LastWriteTimeUtc.Ticks)")
     }
 
     return [string]::Join("`n", $entries)

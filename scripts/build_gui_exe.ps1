@@ -7,6 +7,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Convert-ToWinPath([string]$PathValue) {
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $PathValue
+    }
+    if ($PathValue.StartsWith('\\?\')) {
+        return $PathValue.Substring(4)
+    }
+    return $PathValue
+}
+
 function Get-VenvExecutable([string]$RepoRoot) {
     $cfgPath = Join-Path $RepoRoot '.venv\pyvenv.cfg'
     if (-not (Test-Path $cfgPath)) {
@@ -22,7 +32,7 @@ function Get-VenvExecutable([string]$RepoRoot) {
         $cfg[$parts[0].Trim()] = $parts[1].Trim()
     }
 
-    $pythonExe = $cfg['executable']
+    $pythonExe = Convert-ToWinPath $cfg['executable']
     if ([string]::IsNullOrWhiteSpace($pythonExe) -or -not (Test-Path $pythonExe)) {
         throw "Could not resolve base python executable from $cfgPath"
     }
@@ -30,7 +40,7 @@ function Get-VenvExecutable([string]$RepoRoot) {
     return $pythonExe
 }
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$repoRoot = Convert-ToWinPath ([System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')))
 $pythonExe = Get-VenvExecutable -RepoRoot $repoRoot
 $sitePackages = Join-Path $repoRoot '.venv\Lib\site-packages'
 $launcherScript = Join-Path $repoRoot 'scripts\launch_gui.py'

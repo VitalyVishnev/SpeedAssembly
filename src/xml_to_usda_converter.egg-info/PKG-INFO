@@ -19,13 +19,15 @@ The active reverse-engineering baseline is:
 
 - `samples/speedtree/simple_tree/variants/SimpleTree_01.xml`
 
-This sample is treated as the single source sample for the current milestone. The converter is now built around:
+This sample remains the main reverse-engineering fixture, but it is no longer treated as a hardcoded structural contract. The converter is now built around:
 
 - explicit object hierarchy parsing
-- trunk-first base mesh selection
+- rule-based base mesh selection
 - real `Bones/Bone` skeleton extraction
-- explicit leaf `BoneID` and `MeshID` bindings
+- explicit reusable-part `BoneID` and `MeshID` bindings normalized into a general skeletal binding model
 - optional `Spine` parsing for validation and future wind work
+- UE-first prototype authoring with reference-oriented `PointInstancer/Prototypes`
+- UE support primvars on `SkelRoot` such as `boneCapture_pCaptPath`, `ueJointNames`, `hierarchicalDepth`, `logicalDepth`, and `localtransform`
 
 ## Local Environment
 
@@ -90,11 +92,11 @@ Notes:
 
 ## Current scope
 
-- `inspect` reports object-class counts, hierarchy depth, spine coverage, and leaf `BoneID` / `MeshID` distributions.
-- normalization builds an explicit internal model with source objects, branch segments, mesh library entries, leaf instances, and optional spines.
-- USDA writing uses a real trunk mesh, `Skeleton`, leaf prototypes, and `PointInstancer` binding arrays authored from XML `BoneID` values.
-- writer emits `elementSize = 1` on Unreal skeletal assembly binding primvars.
-- strict validation fails on missing trunk geometry, missing skeleton data, missing explicit leaf bindings, and inconsistent packed arrays.
+- `inspect` reports object-class counts, hierarchy depth, spine coverage, binding mode, prototype strategy, and available UE support primvars.
+- normalization builds a universal tree-asset model with source objects, branch segments, prototype library entries, reusable instances, generalized bindings, and optional spines.
+- USDA writing uses merged base geometry, `Skeleton`, reference-oriented prototypes, path-like skeletal binding tokens, and UE support primvars on `SkelRoot`.
+- writer emits `NaniteAssemblySkelBindingAPI`, `primvars:unreal:naniteAssembly:bindJoints`, and `primvars:unreal:naniteAssembly:bindJointWeights` for `PointInstancer`.
+- strict validation fails on missing base geometry, missing skeleton data, missing explicit instance bindings, and inconsistent packed arrays.
 
 ## Current phases
 
