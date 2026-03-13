@@ -4,8 +4,8 @@
 
 - XML: `references/speedtree/xml/SkeletyalAssemblyTest_01.xml`
 - Inspect report: `references/reports/inspect/SkeletyalAssemblyTest_01.inspect.json`
-- Generated USDA: `references/usd/generated/SkeletyalAssemblyTest_01.generated.usda`
-- Reference USDA: `references/usd/skeletal_assemblies/example_assembly.usda`
+- Generated USDA: `vault/usd_schema/SkeletyalAssemblyTest_01.generated.usda`
+- Reference USDA: `vault/usd_schema/example_assembly.usda`
 
 ## Observed extraction summary
 
@@ -31,3 +31,4 @@
 - The generated USDA is structurally useful for regression and UE-side experiments, but it is not yet proof of successful UE 5.7 import.
 - Leaf prototype geometry is still placeholder geometry, not reconstructed source leaf mesh topology.
 - Joint assignment for leaf instances currently uses nearest bone endpoint, which is a documented heuristic and should be validated against UE import behavior.
+

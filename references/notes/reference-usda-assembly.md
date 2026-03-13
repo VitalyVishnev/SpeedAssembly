@@ -1,6 +1,6 @@
 # Reference USDA Assembly Notes
 
-This note captures findings from `references/usd/skeletal_assemblies/example_assembly.usda`.
+This note captures findings from `vault/usd_schema/example_assembly.usda`.
 
 The local UE 5.7 schema files are now the primary source of truth for UE-specific API names and allowed prim targets. This note is useful for layout comparison, but it is secondary to:
 
@@ -32,3 +32,4 @@ The local UE 5.7 schema files are now the primary source of truth for UE-specifi
 - Exact required joint path format versus short joint names for `bindJoints`.
 - Whether prototype skeletons need richer rest transforms or additional schema metadata.
 - Whether importer behavior requires anything beyond the schema-documented `elementSize` metadata for `PointInstancer` joint binding arrays.
+

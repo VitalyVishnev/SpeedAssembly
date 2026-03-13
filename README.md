@@ -54,9 +54,9 @@ python -m xml_to_usda gui
 
 ## Repo Areas
 
-- `references/` holds validated reference files and generated comparison artifacts.
+- `references/` holds real XML inputs, inspect reports, and reverse-engineering notes.
 - `samples/` is for controlled experiment inputs and expected outputs.
-- `vault/` is for immutable third-party or engine-side reference materials.
+- `vault/` is for immutable third-party or engine-side reference materials, including USDA schema references.
 
 ## Reference docs
 
@@ -66,3 +66,4 @@ python -m xml_to_usda gui
 - `references/README.md`
 - `references/notes/observed-speedtree-xml.md`
 - `references/notes/reference-usda-assembly.md`
+
