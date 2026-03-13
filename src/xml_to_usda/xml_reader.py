@@ -15,7 +15,45 @@ KNOWN_SECTION_HINTS = {
     "object_hierarchy": ("object", "objects"),
     "materials": ("material",),
     "lods": ("lod",),
-    "metadata": ("metadata", "version", "units", "axis"),
+    "metadata": ("metadata", "version", "units", "axis", "speedtreeraw"),
+}
+
+IGNORED_PAYLOAD_TAGS = {
+    "AO",
+    "BinormalX",
+    "BinormalY",
+    "BinormalZ",
+    "Blend",
+    "BoneID",
+    "GeometryType",
+    "Map",
+    "MeshID",
+    "MeshLOD",
+    "NormalX",
+    "NormalY",
+    "NormalZ",
+    "PointIndices",
+    "QuadIndices",
+    "RotAngle",
+    "RotAxisX",
+    "RotAxisY",
+    "RotAxisZ",
+    "Scale",
+    "SpeedTreeRaw",
+    "TangentX",
+    "TangentY",
+    "TangentZ",
+    "TexcoordU",
+    "TexcoordV",
+    "TriangleIndices",
+    "VertexColorA",
+    "VertexColorB",
+    "VertexColorG",
+    "VertexColorR",
+    "VertexIndices",
+    "X",
+    "Y",
+    "Z",
 }
 
 
@@ -48,6 +86,7 @@ def inspect_xml(document: SourceXmlDocument) -> ObservedXmlSchemaReport:
         sorted(
             tag
             for tag in tag_counts
+            if tag not in IGNORED_PAYLOAD_TAGS
             if not any(hint in tag.lower() for hints in KNOWN_SECTION_HINTS.values() for hint in hints)
         )
     )

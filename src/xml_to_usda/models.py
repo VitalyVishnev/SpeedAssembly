@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 
@@ -23,6 +24,11 @@ class Quaternion:
 
     def to_usda(self) -> str:
         return f"({self.real:g}, {self.i:g}, {self.j:g}, {self.k:g})"
+
+
+class OutputMode(StrEnum):
+    SELF_CONTAINED = "self_contained"
+    EXTERNAL_REFS = "external_refs"
 
 
 @dataclass(frozen=True)
@@ -52,6 +58,32 @@ class LeafReference:
 
 
 @dataclass(frozen=True)
+class PrototypeIdentity:
+    source_key: str
+    prim_name: str
+    prototype_type: str = "leaf"
+
+
+@dataclass(frozen=True)
+class SourceSampleMetadata:
+    sample_id: str
+    source_path: str
+    speedtree_version: str | None = None
+    export_profile: str | None = None
+    notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ResourceIndexEntry:
+    resource_path: str
+    category: str
+    source_label: str
+    version_hint: str | None = None
+    acquired_on: str | None = None
+    purpose: str = ""
+
+
+@dataclass(frozen=True)
 class ExportMetadata:
     source_path: str
     source_version: str | None
@@ -59,6 +91,7 @@ class ExportMetadata:
     up_axis: str = "Z"
     warnings: tuple[str, ...] = ()
     unknown_sections: tuple[str, ...] = ()
+    output_mode: OutputMode = OutputMode.SELF_CONTAINED
 
 
 @dataclass(frozen=True)
@@ -101,3 +134,20 @@ class ValidationIssue:
 class UsdAssemblyDocument:
     text: str
     diagnostics: tuple[ValidationIssue, ...]
+
+
+@dataclass(frozen=True)
+class ConversionRequest:
+    input_paths: tuple[str, ...]
+    output_path: str | None = None
+    output_directory: str | None = None
+    output_naming_template: str | None = None
+    output_mode: OutputMode = OutputMode.SELF_CONTAINED
+
+
+@dataclass(frozen=True)
+class ConversionResult:
+    input_path: str
+    output_path: str | None
+    diagnostics: tuple[ValidationIssue, ...]
+    usda_document: UsdAssemblyDocument | None = None

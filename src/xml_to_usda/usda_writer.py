@@ -1,8 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from collections import OrderedDict
 
-from .models import CanonicalTreeModel, UsdAssemblyDocument, ValidationIssue
+from .models import CanonicalTreeModel, PrototypeIdentity, UsdAssemblyDocument, ValidationIssue
+from .naming import build_prototype_identities
 from .ue_schema import DEFAULT_UE_SCHEMA_CONTRACT, UeSchemaContract
 
 
@@ -91,29 +92,48 @@ def _render_joint_translations(model: CanonicalTreeModel) -> str:
 
 def _render_point_instancer(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
     leaves = model.leaf_references
-    prototypes = list(OrderedDict.fromkeys(leaf.prototype_key for leaf in leaves)) or ["LeafPrototype"]
-    proto_index_map = {name: index for index, name in enumerate(prototypes)}
+    prototype_identities = _collect_prototype_identities(leaves)
+    proto_index_map = {identity.source_key: index for index, identity in enumerate(prototype_identities)}
     proto_indices = ", ".join(str(proto_index_map.get(leaf.prototype_key, 0)) for leaf in leaves)
     positions = ", ".join(leaf.position.to_usda() for leaf in leaves)
     orientations = ", ".join(leaf.orientation.to_usda() for leaf in leaves)
     scales = ", ".join(leaf.scale.to_usda() for leaf in leaves)
     bind_joints = ", ".join(f'"{leaf.bind_joint}"' for leaf in leaves)
     bind_weights = ", ".join(f"{leaf.bind_weight:g}" for leaf in leaves)
-    prototype_targets = [f"</Tree/PartsInstancer/Prototypes/{name}>" for name in prototypes]
+    prototype_targets = [f"</Tree/PartsInstancer/Prototypes/{identity.prim_name}>" for identity in prototype_identities]
     prototype_paths = prototype_targets[0] if len(prototype_targets) == 1 else f"[{', '.join(prototype_targets)}]"
-    bind_joints_attr = _render_instancer_binding_attr(
-        contract.bind_joints_attr,
-        bind_joints,
-        contract.point_instancer_joint_element_size,
-    )
-    bind_weights_attr = _render_instancer_binding_attr(
-        contract.bind_weights_attr,
-        bind_weights,
-        contract.point_instancer_joint_element_size,
-    )
+    prototype_defs = "\n".join(_render_prototype_definition(identity, contract) for identity in prototype_identities)
 
-    prototype_defs = "\n".join(
-        f'''        def SkelRoot "{name}" (
+    return f'''def PointInstancer "PartsInstancer" (
+    apiSchemas = ["{contract.binding_api}"]
+    kind = "group"
+)
+{{
+    rel prototypes = {prototype_paths}
+    int[] protoIndices = [{proto_indices}]
+    point3f[] positions = [{positions}]
+    quatf[] orientations = [{orientations}]
+    float3[] scales = [{scales}]
+    {contract.bind_joints_attr} = [{bind_joints}]
+    {contract.bind_weights_attr} = [{bind_weights}]
+
+    def Scope "Prototypes" (
+        kind = "group"
+    )
+    {{
+{prototype_defs}
+    }}
+}}'''
+
+
+def _collect_prototype_identities(leaves) -> tuple[PrototypeIdentity, ...]:
+    keys = list(OrderedDict.fromkeys(leaf.prototype_key for leaf in leaves)) or ["LeafPrototype"]
+    return build_prototype_identities(keys)
+
+
+def _render_prototype_definition(identity: PrototypeIdentity, contract: UeSchemaContract) -> str:
+    name = identity.prim_name
+    return f'''        def SkelRoot "{name}" (
             kind = "component"
         )
         {{
@@ -134,40 +154,11 @@ def _render_point_instancer(model: CanonicalTreeModel, contract: UeSchemaContrac
                 int[] faceVertexIndices = [0, 1, 2]
             }}
         }}'''
-        for name in prototypes
-    )
-
-    return f'''def PointInstancer "PartsInstancer" (
-    apiSchemas = ["{contract.binding_api}"]
-    kind = "group"
-)
-{{
-    rel prototypes = {prototype_paths}
-    int[] protoIndices = [{proto_indices}]
-    point3f[] positions = [{positions}]
-    quath[] orientations = [{orientations}]
-    float3[] scales = [{scales}]
-    {bind_joints_attr}
-    {bind_weights_attr}
-
-    def Scope "Prototypes" (
-        kind = "group"
-    )
-    {{
-{prototype_defs}
-    }}
-}}'''
 
 
 def _indent(value: str, level: int) -> str:
     prefix = " " * 4 * level
     return "\n".join(f"{prefix}{line}" if line else "" for line in value.splitlines())
-
-
-def _render_instancer_binding_attr(attr_decl: str, values: str, element_size: int) -> str:
-    return f'''{attr_decl} (
-        elementSize = {element_size}
-    ) = [{values}]'''
 
 
 def _build_joint_path_map(model: CanonicalTreeModel) -> dict[str, str]:

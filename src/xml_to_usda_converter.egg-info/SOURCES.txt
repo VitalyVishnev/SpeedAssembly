@@ -3,8 +3,11 @@ pyproject.toml
 src/xml_to_usda/__init__.py
 src/xml_to_usda/__main__.py
 src/xml_to_usda/cli.py
+src/xml_to_usda/gui.py
 src/xml_to_usda/models.py
+src/xml_to_usda/naming.py
 src/xml_to_usda/normalizer.py
+src/xml_to_usda/pipeline.py
 src/xml_to_usda/ue_schema.py
 src/xml_to_usda/usda_writer.py
 src/xml_to_usda/validator.py
@@ -15,4 +18,5 @@ src/xml_to_usda_converter.egg-info/dependency_links.txt
 src/xml_to_usda_converter.egg-info/entry_points.txt
 src/xml_to_usda_converter.egg-info/requires.txt
 src/xml_to_usda_converter.egg-info/top_level.txt
+tests/test_app_layers.py
 tests/test_pipeline.py

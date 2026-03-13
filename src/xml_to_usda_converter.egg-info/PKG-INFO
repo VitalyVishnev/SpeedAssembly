@@ -32,6 +32,7 @@ python --version
 python -m pytest
 python -m xml_to_usda inspect .\references\speedtree\xml\SkeletyalAssemblyTest_01.xml
 python -m xml_to_usda convert .\references\speedtree\xml\SkeletyalAssemblyTest_01.xml .\references\usd\generated\SkeletyalAssemblyTest_01.generated.usda
+python -m xml_to_usda gui
 ```
 
 If commands fail after dependency installation, the usual cause is that `.venv` is not activated in the current PowerShell session.
@@ -41,7 +42,15 @@ If commands fail after dependency installation, the usual cause is that `.venv` 
 ```powershell
 python -m xml_to_usda inspect path\to\tree.xml
 python -m xml_to_usda convert path\to\tree.xml path\to\tree.usda
+python -m xml_to_usda gui
 ```
+
+## Current Phases
+
+- `Phase 1`: golden sample pipeline and observed export comparison for one controlled SpeedTree 10 tree
+- `Phase 2`: thin desktop GUI and later `exe` packaging
+- `Phase 3`: external branch reuse from existing Unreal Engine project assets
+- `Phase 4`: Dynamic Wind JSON generation
 
 ## Status
 
@@ -50,16 +59,20 @@ python -m xml_to_usda convert path\to\tree.xml path\to\tree.usda
 - Implements a canonical model and USDA writer for `trunk + skeleton + leaf references`.
 - Reads real SpeedTree-style packed arrays for `Objects/Object/Points`, `Triangles/PointIndices`, `LeafReferences`, and `Bones`.
 - Emits USDA closer to the attached skeletal assembly reference, including `rel unreal:naniteAssembly:skeleton`, `SkelBindingAPI`, and `primvars:unreal:naniteAssembly:*` bind data.
+- Exposes a `tkinter` desktop GUI as a thin wrapper over the same conversion pipeline used by CLI.
+- Protects the immutable `vault/` from generated outputs.
 
-## Roadmap
+## Repo Areas
 
-- Replace heuristic XML extraction with sample-driven observed schema adapters.
-- Add contract tests against real `unreal/schema.usda`.
-- Add export guide once real XML samples are validated end-to-end.
+- `references/` holds validated reference files and generated comparison artifacts.
+- `samples/` is for controlled experiment inputs and expected outputs.
+- `vault/` is for immutable third-party or engine-side reference materials.
 
 ## Reference docs
 
-- `references/README.md`
 - `docs/local-python-environment.md`
+- `docs/project-roadmap.md`
+- `docs/golden-sample-workflow.md`
+- `references/README.md`
 - `references/notes/observed-speedtree-xml.md`
 - `references/notes/reference-usda-assembly.md`

@@ -2,12 +2,9 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
-from .normalizer import normalize_to_canonical
-from .usda_writer import render_usda
-from .validator import validate_model
-from .xml_reader import inspect_xml, read_source_xml, render_inspect_report
+from .pipeline import convert_file, inspect_source
+from .xml_reader import render_inspect_report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,6 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     convert_parser.add_argument("input", help="Path to the source XML file.")
     convert_parser.add_argument("output", help="Path to the output USDA file.")
 
+    subparsers.add_parser("gui", help="Launch the desktop GUI.")
     return parser
 
 
@@ -28,42 +26,36 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.command == "inspect":
-        return _run_inspect(args.input)
-    if args.command == "convert":
-        return _run_convert(args.input, args.output)
+    try:
+        if args.command == "inspect":
+            return _run_inspect(args.input)
+        if args.command == "convert":
+            return _run_convert(args.input, args.output)
+        if args.command == "gui":
+            from .gui import main as gui_main
+
+            return gui_main()
+    except ValueError as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return 2
 
     parser.error(f"Unsupported command: {args.command}")
     return 2
 
 
 def _run_inspect(input_path: str) -> int:
-    document = read_source_xml(input_path)
-    report = inspect_xml(document)
+    report = inspect_source(input_path)
     sys.stdout.write(render_inspect_report(report) + "\n")
     return 0
 
 
 def _run_convert(input_path: str, output_path: str) -> int:
-    document = read_source_xml(input_path)
-    report = inspect_xml(document)
-    model = normalize_to_canonical(document, report)
-    diagnostics = validate_model(model)
-
-    errors = [issue for issue in diagnostics if issue.severity == "error"]
-    if errors:
-        for issue in diagnostics:
-            _print_issue(issue)
-        return 1
-
-    usda_document = render_usda(model, diagnostics)
-    output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(usda_document.text, encoding="utf-8")
-
-    for issue in diagnostics:
+    result = convert_file(input_path, output_path)
+    for issue in result.diagnostics:
         _print_issue(issue)
-    sys.stdout.write(f"Wrote USDA to {output}\n")
+    if result.usda_document is None:
+        return 1
+    sys.stdout.write(f"Wrote USDA to {result.output_path}\n")
     return 0
 
 

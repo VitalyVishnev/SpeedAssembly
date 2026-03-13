@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -51,8 +51,9 @@ def test_usda_output_contains_expected_structure() -> None:
     assert 'apiSchemas = ["SkelBindingAPI"]' in usda.text
     assert 'def PointInstancer "PartsInstancer"' in usda.text
     assert 'apiSchemas = ["NaniteAssemblySkelBindingAPI"]' in usda.text
-    assert 'uniform token[] primvars:unreal:naniteAssembly:bindJoints' in usda.text
-    assert 'uniform float[] primvars:unreal:naniteAssembly:bindJointWeights' in usda.text
+    assert 'uniform token[] primvars:unreal:naniteAssembly:bindJoints = [' in usda.text
+    assert 'uniform float[] primvars:unreal:naniteAssembly:bindJointWeights = [' in usda.text
+    assert 'quatf[] orientations = [' in usda.text
     assert 'def Scope "Prototypes"' in usda.text
 
 
@@ -71,16 +72,16 @@ def test_ue_schema_contract_matches_verified_ue_57_names() -> None:
     assert contract.binding_api_allowed_prims == ("Xform", "Mesh", "SkelRoot", "PointInstancer")
 
 
-def test_point_instancer_binding_attrs_include_element_size_metadata() -> None:
+def test_point_instancer_binding_attrs_use_direct_assignment() -> None:
     document = read_source_xml(DATA_DIR / "sample_tree.xml")
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
     diagnostics = validate_model(model)
     usda = render_usda(model, diagnostics)
 
-    assert 'uniform token[] primvars:unreal:naniteAssembly:bindJoints (' in usda.text
-    assert 'uniform float[] primvars:unreal:naniteAssembly:bindJointWeights (' in usda.text
-    assert 'elementSize = 1' in usda.text
+    assert 'uniform token[] primvars:unreal:naniteAssembly:bindJoints = [' in usda.text
+    assert 'uniform float[] primvars:unreal:naniteAssembly:bindJointWeights = [' in usda.text
+    assert 'elementSize = 1' not in usda.text
 
 
 def test_missing_skeleton_is_error() -> None:
@@ -122,3 +123,12 @@ def test_real_reference_sample_extracts_observed_sections() -> None:
     assert model.trunk_mesh is not None
     assert len(model.skeleton) == 89
     assert len(model.leaf_references) == 273
+
+
+def test_real_reference_sample_filters_known_payload_noise() -> None:
+    document = read_source_xml(REFERENCES_DIR / "speedtree" / "xml" / "SkeletyalAssemblyTest_01.xml")
+    report = inspect_xml(document)
+
+    assert "AO" not in report.unknown_sections
+    assert "PointIndices" not in report.unknown_sections
+    assert "SpeedTreeRaw" not in report.unknown_sections
