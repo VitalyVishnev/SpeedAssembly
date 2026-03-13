@@ -38,8 +38,8 @@ These files are the source of truth for the UE-specific API names and attribute 
   - `SkelRoot`
   - `PointInstancer`
 - Verified fields:
-  - `uniform token[] primvars:unreal:naniteAssembly:bindJoints`
-  - `uniform float[] primvars:unreal:naniteAssembly:bindJointWeights`
+  - `primvars:unreal:naniteAssembly:bindJoints`
+  - `primvars:unreal:naniteAssembly:bindJointWeights`
 - Verified behavior note from schema:
   - when applied to a `PointInstancer`, a uniform number of joints per instance must be supplied and described via `primvars` `elementSize` metadata
 
@@ -51,12 +51,13 @@ These files are the source of truth for the UE-specific API names and attribute 
   - `uniform token unreal:naniteAssembly:meshType = "skeletalMesh"`
   - `rel unreal:naniteAssembly:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>`
 - Point-instanced part binding should author `bindJoints` and `bindJointWeights` with `elementSize` metadata.
+- Real UE-authored tree USDA samples in `vault/` use path-like joint identity tokens plus primvar interpolation metadata rather than relying on a literal `uniform` qualifier in authored text.
 
 ## Open Questions
 
 - The schema confirms names, allowed prim types, and some authoring constraints, but it does not by itself prove the minimum importable prim hierarchy for UE 5.7 skeletal Nanite assemblies.
 - The schema text allows joint names or joint paths for `bindJoints`; importer behavior still needs to confirm which form is required in practice.
-- The schema confirms `elementSize` is required for `PointInstancer` binding data, but importer/source inspection is still needed to prove whether additional metadata or exact array layout constraints exist beyond the single-joint-per-instance case used in `v1`.
+- The schema confirms `elementSize` is required for `PointInstancer` binding data, but importer/source inspection is still needed to prove the exact array layout and support-primvar requirements across all skeletal assembly cases.
 
 ## Current v1 policy
 

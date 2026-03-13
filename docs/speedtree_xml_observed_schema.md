@@ -14,17 +14,12 @@ Observed from the current `SimpleTree_01.xml` export:
 
 - root tag: `SpeedTreeRaw`
 - version: `10.0`
-- objects: `63`
-- hierarchy depth: `4`
-- object classes:
-  - trunk: `1`
-  - branch: `22`
-  - twig: `39`
-  - other: `1` root object
-- bones: `105`
-- spine-bearing objects: `23`
-- leaf references: `39`
-- mesh library entries: `2`
+- object hierarchy is present with trunk, branch, twig, and root-like objects
+- non-zero relative transforms are present
+- bones are present in a real parented hierarchy
+- spine-bearing objects are present
+- leaf references are present with explicit `BoneID` and `MeshID`
+- mesh library entries are present for reusable twig/leaf geometry
 
 ## Sections currently used by the converter
 
@@ -67,7 +62,7 @@ Relevant observed fields:
 Current policy:
 
 - keep the full source object graph in the normalized model
-- use `Trunk` object mesh as the base skeletal mesh candidate
+- determine base mesh from the available trunk/base body geometry instead of hardcoding a sample count
 - keep branch objects as separate branch segments in the normalized model
 - do not try to deduplicate branch meshes into prototypes yet
 
@@ -90,13 +85,11 @@ Current policy:
 
 - leaf instances are created directly from these arrays
 - `MeshID` selects the reusable prototype mesh
-- `BoneID` is the authoritative rigid skeletal binding source
+- `BoneID` is the authoritative skeletal binding source
+- single `BoneID` values are normalized into the general binding model rather than a sample-specific rigid binding shortcut
 - no nearest-joint heuristic is used for the baseline sample
 
-Observed distributions for the current export:
-
-- leaf `MeshID`: `{1: 13, 2: 26}`
-- leaf `BoneID` set: `17, 19, 20, 22, 24, 30, 32, 34, 35, 36, 44, 46, 49, 51, 56, 57, 59, 61, 63, 64, 66, 67, 68, 70, 71, 77, 78, 80, 84, 90, 92, 94, 96, 98, 99, 100, 101, 102, 104`
+Observed distributions for the current export are useful for regression analysis, but they are not converter contract values.
 
 ### `Bones/Bone`
 
@@ -116,6 +109,7 @@ Current policy:
 - preserve parent chain exactly
 - use `End*` as the current rest-translation source in the emitted USDA
 - require skeleton presence for skeletal export
+- derive UE support primvars from the normalized skeleton topology when the XML does not provide them explicitly
 
 ### `Object/Spine`
 
@@ -150,11 +144,11 @@ These fields are still useful for future material or shading work, but they are 
 
 Current explicit mapping rules for `SimpleTree_01.xml`:
 
-- base mesh: `Object Name="Trunk"`
+- base mesh: trunk plus branch body meshes selected from the object graph
 - skeleton: `Bones/Bone`
 - prototypes: `Meshes/Mesh` LOD0 meshes keyed by `MeshID`
 - leaf instances: `Object/LeafReferences`
-- leaf skeletal binding: `LeafReferences/BoneID`
+- leaf skeletal binding: `LeafReferences/BoneID`, normalized into the general UE binding model
 - optional validation geometry: `Object/Spine`
 
 ## Failure conditions enforced by the converter
@@ -162,7 +156,7 @@ Current explicit mapping rules for `SimpleTree_01.xml`:
 The converter currently treats the following as blocking errors for the baseline path:
 
 - missing object hierarchy
-- missing trunk mesh
+- missing base body mesh
 - missing skeleton
 - missing explicit leaf `BoneID`
 - inconsistent packed array lengths or malformed face index payloads

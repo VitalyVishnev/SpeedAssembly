@@ -14,7 +14,7 @@ authors = [
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "pyinstaller>=6.0"]
 
 [project.scripts]
 xml-to-usda = "xml_to_usda.cli:main"

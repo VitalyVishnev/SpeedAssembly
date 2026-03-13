@@ -12,8 +12,8 @@ class UeSchemaContract:
     external_ref_api: str = "NaniteAssemblyExternalRefAPI"
     skel_binding_api: str = "SkelBindingAPI"
     skeleton_relationship_attr: str = "rel unreal:naniteAssembly:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>"
-    bind_joints_attr: str = "uniform token[] primvars:unreal:naniteAssembly:bindJoints"
-    bind_weights_attr: str = "uniform float[] primvars:unreal:naniteAssembly:bindJointWeights"
+    bind_joints_attr: str = "token[] primvars:unreal:naniteAssembly:bindJoints"
+    bind_weights_attr: str = "float[] primvars:unreal:naniteAssembly:bindJointWeights"
     point_instancer_joint_element_size: int = 1
     root_api_allowed_prims: tuple[str, ...] = ("Xform",)
     external_ref_api_allowed_prims: tuple[str, ...] = ("Xform",)

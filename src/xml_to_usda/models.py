@@ -31,9 +31,15 @@ class OutputMode(StrEnum):
     EXTERNAL_REFS = "external_refs"
 
 
+class PrototypeStrategy(StrEnum):
+    INLINE_MESH = "inline_mesh"
+    REFERENCED_SCOPE = "referenced_scope"
+
+
 @dataclass(frozen=True)
 class Joint:
     name: str
+    source_id: int | None = None
     parent: str | None = None
     bind_translate: Vector3 = field(default_factory=lambda: Vector3(0.0, 0.0, 0.0))
 
@@ -47,14 +53,59 @@ class MeshData:
 
 
 @dataclass(frozen=True)
-class LeafReference:
-    name: str
-    prototype_key: str
-    position: Vector3
-    orientation: Quaternion
-    scale: Vector3
-    bind_joint: str
-    bind_weight: float = 1.0
+class Matrix4d:
+    rows: tuple[tuple[float, float, float, float], ...]
+
+    def to_usda(self) -> str:
+        row_payload = ", ".join(f"({', '.join(f'{value:g}' for value in row)})" for row in self.rows)
+        return f"( {row_payload} )"
+
+    @staticmethod
+    def identity() -> "Matrix4d":
+        return Matrix4d(
+            rows=(
+                (1.0, 0.0, 0.0, 0.0),
+                (0.0, 1.0, 0.0, 0.0),
+                (0.0, 0.0, 1.0, 0.0),
+                (0.0, 0.0, 0.0, 1.0),
+            )
+        )
+
+
+@dataclass(frozen=True)
+class InstanceBinding:
+    joint_tokens: tuple[str, ...]
+    weights: tuple[float, ...]
+
+    @property
+    def element_size(self) -> int:
+        return len(self.joint_tokens)
+
+    def padded(self, width: int) -> "InstanceBinding":
+        if width <= self.element_size:
+            return self
+        if self.element_size == 0:
+            return InstanceBinding(joint_tokens=("",) * width, weights=(0.0,) * width)
+        pad_joint = self.joint_tokens[-1]
+        pad_weights = (0.0,) * (width - self.element_size)
+        return InstanceBinding(
+            joint_tokens=self.joint_tokens + (pad_joint,) * (width - self.element_size),
+            weights=self.weights + pad_weights,
+        )
+
+    @property
+    def mode(self) -> str:
+        return "single_joint" if self.element_size <= 1 else "multi_joint"
+
+
+@dataclass(frozen=True)
+class Prototype:
+    identity: "PrototypeIdentity"
+    mesh: MeshData | None
+    source_key: str
+    source_mesh_id: int | None
+    source_name: str
+    prototype_type: str = "leaf"
 
 
 @dataclass(frozen=True)
@@ -101,18 +152,41 @@ class BranchSegment:
 
 
 @dataclass(frozen=True)
+class BaseMeshPart:
+    object_id: str
+    parent_id: str | None
+    name: str
+    translate: Vector3
+    point_offset: int
+    point_count: int
+    face_offset: int
+    face_count: int
+
+
+@dataclass(frozen=True)
 class LeafInstance:
     name: str
     prototype_key: str
     position: Vector3
     orientation: Quaternion
     scale: Vector3
-    bind_joint: str
+    binding: InstanceBinding
     source_object_id: str | None
     source_mesh_id: int | None
-    source_bone_id: int | None
+    source_bone_ids: tuple[int, ...] = ()
     mesh_lod: int | None = None
-    bind_weight: float = 1.0
+
+    @property
+    def bind_joint(self) -> str:
+        return self.binding.joint_tokens[0] if self.binding.joint_tokens else ""
+
+    @property
+    def bind_weight(self) -> float:
+        return self.binding.weights[0] if self.binding.weights else 0.0
+
+    @property
+    def source_bone_id(self) -> int | None:
+        return self.source_bone_ids[0] if self.source_bone_ids else None
 
 
 @dataclass(frozen=True)
@@ -153,6 +227,15 @@ class ExportMetadata:
 
 
 @dataclass(frozen=True)
+class SkeletalSupportPrimvars:
+    capture_paths: tuple[str, ...]
+    ue_joint_names: tuple[str, ...]
+    hierarchical_depths: tuple[int, ...]
+    logical_depths: tuple[int, ...]
+    local_transform: Matrix4d = field(default_factory=Matrix4d.identity)
+
+
+@dataclass(frozen=True)
 class SourceXmlDocument:
     source_path: str
     root_tag: str
@@ -175,22 +258,54 @@ class ObservedXmlSchemaReport:
     spine_object_count: int = 0
     leaf_binding_distribution: dict[str, int] = field(default_factory=dict)
     leaf_mesh_distribution: dict[str, int] = field(default_factory=dict)
+    base_geometry_mode: str = "unknown"
+    base_mesh_part_count: int = 0
+    base_mesh_point_count: int = 0
+    base_mesh_face_count: int = 0
+    prototype_structure: str = "unknown"
+    binding_mode: str = "none"
+    binding_element_size: int = 0
+    support_primvars: tuple[str, ...] = ()
+    orientation_sample: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
-class CanonicalTreeModel:
+class TreeAsset:
     metadata: ExportMetadata
     source_objects: tuple[SourceObject, ...]
-    trunk_mesh: MeshData | None
+    base_mesh: MeshData | None
+    trunk_source_mesh: MeshData | None
     skeleton: tuple[Joint, ...]
     leaf_instances: tuple[LeafInstance, ...]
+    base_mesh_parts: tuple[BaseMeshPart, ...] = ()
     branch_segments: tuple[BranchSegment, ...] = ()
     mesh_library: tuple[MeshLibraryEntry, ...] = ()
+    prototypes: tuple[Prototype, ...] = ()
+    prototype_strategy: PrototypeStrategy = PrototypeStrategy.REFERENCED_SCOPE
+    skeletal_support_primvars: SkeletalSupportPrimvars | None = None
     spines: tuple[SpineCurve, ...] = ()
+
+    @property
+    def trunk_mesh(self) -> MeshData | None:
+        return self.base_mesh
 
     @property
     def leaf_references(self) -> tuple[LeafInstance, ...]:
         return self.leaf_instances
+
+    @property
+    def binding_mode(self) -> str:
+        if not self.leaf_instances:
+            return "none"
+        max_width = max(leaf.binding.element_size for leaf in self.leaf_instances)
+        return "single_joint" if max_width <= 1 else "multi_joint_capable"
+
+    @property
+    def binding_element_size(self) -> int:
+        return max((leaf.binding.element_size for leaf in self.leaf_instances), default=0)
+
+
+CanonicalTreeModel = TreeAsset
 
 
 @dataclass(frozen=True)

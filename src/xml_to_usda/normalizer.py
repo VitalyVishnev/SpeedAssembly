@@ -3,17 +3,23 @@
 import math
 import xml.etree.ElementTree as ET
 
+from .naming import build_prototype_identities
 from .models import (
+    BaseMeshPart,
     Bounds,
     BranchSegment,
     CanonicalTreeModel,
     ExportMetadata,
+    InstanceBinding,
     Joint,
     LeafInstance,
     MeshData,
     MeshLibraryEntry,
     ObservedXmlSchemaReport,
+    Prototype,
+    PrototypeStrategy,
     Quaternion,
+    SkeletalSupportPrimvars,
     SourceObject,
     SpineCurve,
     Vector3,
@@ -27,9 +33,12 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
     source_objects = tuple(_extract_source_objects(root, data_messages))
     skeleton = tuple(_extract_skeleton(root))
     mesh_library = tuple(_extract_mesh_library(root, data_messages))
-    trunk_mesh = _extract_trunk_mesh(source_objects)
+    trunk_source_mesh = _extract_trunk_mesh(source_objects)
+    base_mesh, base_mesh_parts = _build_base_mesh(source_objects)
     leaf_instances = tuple(_extract_leaf_instances(root, skeleton, data_messages))
     branch_segments = tuple(_extract_branch_segments(source_objects, skeleton))
+    prototypes = tuple(_build_prototypes(leaf_instances, mesh_library))
+    skeletal_support_primvars = _build_skeletal_support_primvars(skeleton)
     spines = tuple(source_object.spine for source_object in source_objects if source_object.spine is not None)
 
     metadata = ExportMetadata(
@@ -44,11 +53,16 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
     return CanonicalTreeModel(
         metadata=metadata,
         source_objects=source_objects,
-        trunk_mesh=trunk_mesh,
+        base_mesh=base_mesh,
+        trunk_source_mesh=trunk_source_mesh,
         skeleton=skeleton,
         leaf_instances=leaf_instances,
+        base_mesh_parts=base_mesh_parts,
         branch_segments=branch_segments,
         mesh_library=mesh_library,
+        prototypes=prototypes,
+        prototype_strategy=PrototypeStrategy.REFERENCED_SCOPE,
+        skeletal_support_primvars=skeletal_support_primvars,
         spines=spines,
     )
 
@@ -76,6 +90,55 @@ def _extract_trunk_mesh(source_objects: tuple[SourceObject, ...]) -> MeshData | 
         if source_object.mesh is not None and source_object.name.lower() != "leaves":
             return source_object.mesh
     return None
+
+
+def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData | None, tuple[BaseMeshPart, ...]]:
+    candidates = [
+        source_object
+        for source_object in source_objects
+        if source_object.mesh is not None
+        if source_object.name == "Trunk" or source_object.name.startswith("Branches")
+    ]
+    if not candidates:
+        return None, ()
+
+    merged_points: list[Vector3] = []
+    merged_face_counts: list[int] = []
+    merged_face_indices: list[int] = []
+    merged_parts: list[BaseMeshPart] = []
+
+    for source_object in candidates:
+        mesh = source_object.mesh
+        if mesh is None:
+            continue
+        point_offset = len(merged_points)
+        face_offset = len(merged_face_counts)
+        translated_points = tuple(_translate_point(point, source_object.abs_translate) for point in mesh.points)
+        merged_points.extend(translated_points)
+        merged_face_counts.extend(mesh.face_vertex_counts)
+        merged_face_indices.extend(index + point_offset for index in mesh.face_vertex_indices)
+        merged_parts.append(
+            BaseMeshPart(
+                object_id=source_object.object_id,
+                parent_id=source_object.parent_id,
+                name=source_object.name,
+                translate=source_object.abs_translate,
+                point_offset=point_offset,
+                point_count=len(mesh.points),
+                face_offset=face_offset,
+                face_count=len(mesh.face_vertex_counts),
+            )
+        )
+
+    return (
+        MeshData(
+            name="TreeBaseMesh",
+            points=tuple(merged_points),
+            face_vertex_counts=tuple(merged_face_counts),
+            face_vertex_indices=tuple(merged_face_indices),
+        ),
+        tuple(merged_parts),
+    )
 
 
 def _extract_source_objects(root: ET.Element, messages: list[str]) -> list[SourceObject]:
@@ -156,6 +219,10 @@ def _build_mesh_from_faces(name: str, points: list[Vector3], face_counts: list[i
     )
 
 
+def _translate_point(point: Vector3, translate: Vector3) -> Vector3:
+    return Vector3(point.x + translate.x, point.y + translate.y, point.z + translate.z)
+
+
 def _select_primary_lod(mesh: ET.Element) -> ET.Element | None:
     lods = mesh.findall("LOD")
     if not lods:
@@ -187,6 +254,7 @@ def _extract_skeleton(root: ET.Element) -> list[Joint]:
         joints.append(
             Joint(
                 name=name,
+                source_id=int(bone_id),
                 parent=parent,
                 bind_translate=Vector3(
                     _find_float(bone, ("EndX",), default=0.0) or 0.0,
@@ -200,7 +268,6 @@ def _extract_skeleton(root: ET.Element) -> list[Joint]:
 
 def _extract_leaf_instances(root: ET.Element, skeleton: tuple[Joint, ...], messages: list[str]) -> list[LeafInstance]:
     leaf_instances: list[LeafInstance] = []
-    default_joint = skeleton[0].name if skeleton else "root"
     for obj in root.findall(".//Object"):
         leaf_ref_node = obj.find("LeafReferences")
         if leaf_ref_node is None:
@@ -238,10 +305,10 @@ def _extract_leaf_instances(root: ET.Element, skeleton: tuple[Joint, ...], messa
 
         for index in range(count):
             source_bone_id = bone_ids[index] if index < len(bone_ids) else None
-            bind_joint = _joint_name_from_bone_id(source_bone_id) if source_bone_id is not None else default_joint
             source_mesh_id = mesh_ids[index] if index < len(mesh_ids) else None
             prototype_key = f"Mesh_{source_mesh_id}" if source_mesh_id is not None else "LeafPrototype"
             uniform_scale = scales[index] if index < len(scales) else 1.0
+            binding = _binding_from_bone_id(source_bone_id)
             leaf_instances.append(
                 LeafInstance(
                     name=f"LeafRef_{len(leaf_instances):04d}",
@@ -254,10 +321,10 @@ def _extract_leaf_instances(root: ET.Element, skeleton: tuple[Joint, ...], messa
                         angles[index] if index < len(angles) else 0.0,
                     ),
                     scale=Vector3(uniform_scale, uniform_scale, uniform_scale),
-                    bind_joint=bind_joint,
+                    binding=binding,
                     source_object_id=obj.attrib.get("ID"),
                     source_mesh_id=source_mesh_id,
-                    source_bone_id=source_bone_id,
+                    source_bone_ids=(source_bone_id,) if source_bone_id is not None else (),
                     mesh_lod=mesh_lods[index] if index < len(mesh_lods) else None,
                 )
             )
@@ -287,6 +354,43 @@ def _extract_branch_segments(source_objects: tuple[SourceObject, ...], skeleton:
             )
         )
     return segments
+
+
+def _build_prototypes(
+    leaf_instances: tuple[LeafInstance, ...],
+    mesh_library: tuple[MeshLibraryEntry, ...],
+) -> list[Prototype]:
+    source_keys = tuple(dict.fromkeys(leaf.prototype_key for leaf in leaf_instances)) or ("LeafPrototype",)
+    identities = build_prototype_identities(list(source_keys))
+    meshes_by_key = {f"Mesh_{entry.mesh_id}": entry for entry in mesh_library}
+    prototypes: list[Prototype] = []
+    for identity in identities:
+        entry = meshes_by_key.get(identity.source_key)
+        prototypes.append(
+            Prototype(
+                identity=identity,
+                mesh=entry.mesh if entry is not None else None,
+                source_key=identity.source_key,
+                source_mesh_id=entry.mesh_id if entry is not None else None,
+                source_name=entry.name if entry is not None else identity.source_key,
+                prototype_type=identity.prototype_type,
+            )
+        )
+    return prototypes
+
+
+def _build_skeletal_support_primvars(skeleton: tuple[Joint, ...]) -> SkeletalSupportPrimvars | None:
+    if not skeleton:
+        return None
+    depth_by_name = _joint_hierarchy_depths(skeleton)
+    capture_paths = tuple(_capture_token_from_joint(joint, fallback_index=index) for index, joint in enumerate(skeleton))
+    hierarchical_depths = tuple(depth_by_name[joint.name] for joint in skeleton)
+    return SkeletalSupportPrimvars(
+        capture_paths=capture_paths,
+        ue_joint_names=capture_paths,
+        hierarchical_depths=hierarchical_depths,
+        logical_depths=hierarchical_depths,
+    )
 
 
 def _extract_spine(obj: ET.Element, object_id: str, messages: list[str]) -> SpineCurve | None:
@@ -333,6 +437,40 @@ def _joint_name_from_bone_id(bone_id: int | None) -> str:
     if bone_id is None:
         return "root"
     return "root" if bone_id == 0 else f"bone_{bone_id:03d}"
+
+
+def _capture_token_from_bone_id(bone_id: int | None) -> str:
+    return f"Tree_point_{bone_id or 0}"
+
+
+def _capture_token_from_joint(joint: Joint, fallback_index: int) -> str:
+    return _capture_token_from_bone_id(joint.source_id if joint.source_id is not None else fallback_index)
+
+
+def _binding_from_bone_id(source_bone_id: int | None) -> InstanceBinding:
+    if source_bone_id is None:
+        return InstanceBinding(joint_tokens=(), weights=())
+    token = _capture_token_from_bone_id(source_bone_id)
+    return InstanceBinding(joint_tokens=(token,), weights=(1.0,))
+
+
+def _joint_hierarchy_depths(skeleton: tuple[Joint, ...]) -> dict[str, int]:
+    joints_by_name = {joint.name: joint for joint in skeleton}
+    depths: dict[str, int] = {}
+
+    def resolve(name: str) -> int:
+        if name in depths:
+            return depths[name]
+        joint = joints_by_name[name]
+        if joint.parent is None or joint.parent not in joints_by_name:
+            depths[name] = 0
+        else:
+            depths[name] = resolve(joint.parent) + 1
+        return depths[name]
+
+    for joint in skeleton:
+        resolve(joint.name)
+    return depths
 
 
 def _find_float(elem: ET.Element, names: tuple[str, ...], default: float | None = None) -> float | None:

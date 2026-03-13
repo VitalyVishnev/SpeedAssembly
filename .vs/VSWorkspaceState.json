@@ -1,6 +1,9 @@
 {
   "ExpandedNodes": [
-    ""
+    "",
+    "\\src",
+    "\\src\\xml_to_usda"
   ],
+  "SelectedNode": "\\src\\xml_to_usda\\gui.py",
   "PreviewInSolutionExplorer": false
 }

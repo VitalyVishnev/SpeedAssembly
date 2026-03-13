@@ -16,7 +16,20 @@ VAULT_ROOT = REPO_ROOT / "vault"
 
 def inspect_source(input_path: str) -> ObservedXmlSchemaReport:
     document = read_source_xml(input_path)
-    return inspect_xml(document)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    return replace(
+        report,
+        base_geometry_mode=_base_geometry_mode(model),
+        base_mesh_part_count=len(model.base_mesh_parts),
+        base_mesh_point_count=len(model.base_mesh.points) if model.base_mesh is not None else 0,
+        base_mesh_face_count=len(model.base_mesh.face_vertex_counts) if model.base_mesh is not None else 0,
+        prototype_structure=model.prototype_strategy.value,
+        binding_mode=model.binding_mode,
+        binding_element_size=model.binding_element_size,
+        support_primvars=_support_primvars(model),
+        orientation_sample=tuple(leaf.orientation.to_usda() for leaf in model.leaf_instances[:3]),
+    )
 
 
 def load_canonical_model(input_path: str, output_mode: OutputMode = OutputMode.SELF_CONTAINED) -> tuple[ObservedXmlSchemaReport, CanonicalTreeModel, tuple]:
@@ -112,3 +125,15 @@ def _ensure_output_path_allowed(output_path: Path) -> None:
     resolved_vault = VAULT_ROOT.resolve()
     if resolved_output.is_relative_to(resolved_vault):
         raise ValueError(f"Generated outputs must not be written inside the immutable vault: {resolved_output}")
+
+
+def _base_geometry_mode(model: CanonicalTreeModel) -> str:
+    if not model.base_mesh_parts:
+        return "missing"
+    return "merged" if len(model.base_mesh_parts) > 1 else "trunk_only"
+
+
+def _support_primvars(model: CanonicalTreeModel) -> tuple[str, ...]:
+    if model.skeletal_support_primvars is None:
+        return ()
+    return ("boneCapture_pCaptPath", "ueJointNames", "hierarchicalDepth", "logicalDepth", "localtransform")

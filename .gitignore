@@ -4,4 +4,7 @@ __pycache__/
 *.pyc
 .vs/
 src/*.egg-info/
+build/
+dist/
+XMLtoUSDAConverter.spec
 vault/

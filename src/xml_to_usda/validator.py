@@ -19,16 +19,16 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
             ValidationIssue(
                 severity="error",
                 code="missing_object_hierarchy",
-                message="Object hierarchy data is required for SimpleTree_01 normalization.",
+                message="Object hierarchy data is required for skeletal assembly normalization.",
             )
         )
 
-    if model.trunk_mesh is None:
+    if model.base_mesh is None:
         issues.append(
             ValidationIssue(
                 severity="error",
                 code="missing_trunk_mesh",
-                message="Tree profile requires trunk/base geometry for skeletal assembly import.",
+                message="Tree asset requires trunk/base geometry for skeletal assembly import.",
             )
         )
 
@@ -46,18 +46,36 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
             ValidationIssue(
                 severity="warning",
                 code="missing_leaf_references",
-                message="No leaf references found; converter will emit a trunk-only diagnostic USDA.",
+                message="No reusable part references found; converter will emit a base-geometry-only USDA.",
             )
         )
 
-    if model.leaf_instances and any(leaf.source_bone_id is None for leaf in model.leaf_instances):
+    if model.leaf_instances and any(not leaf.binding.joint_tokens for leaf in model.leaf_instances):
         issues.append(
             ValidationIssue(
                 severity="error",
                 code="missing_leaf_binding",
-                message="Leaf instances must carry explicit BoneID bindings from the XML export.",
+                message="Reusable instances must carry explicit skeletal binding data derived from the XML export.",
             )
         )
+
+    for leaf in model.leaf_instances:
+        if len(leaf.binding.joint_tokens) != len(leaf.binding.weights):
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="invalid_binding_shape",
+                    message=f"Instance {leaf.name} has mismatched joint and weight counts.",
+                )
+            )
+        if leaf.binding.weights and abs(sum(leaf.binding.weights) - 1.0) > 1e-4:
+            issues.append(
+                ValidationIssue(
+                    severity="warning",
+                    code="non_normalized_binding_weights",
+                    message=f"Instance {leaf.name} binding weights sum to {sum(leaf.binding.weights):g} instead of 1.",
+                )
+            )
 
     if model.branch_segments and model.skeleton and not any(segment.source_joint for segment in model.branch_segments):
         issues.append(
