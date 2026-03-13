@@ -1,38 +1,53 @@
-# Golden Sample Workflow
+﻿# Golden Sample Workflow
 
 ## Purpose
 
-Use one intentionally simple SpeedTree 10 tree as the baseline experiment for proving the XML -> USDA -> UE path.
+Use `SimpleTree_01.xml` as the single baseline sample for the current skeletal assembly milestone.
 
-## Controlled tree shape
+## Locked baseline
 
-The preferred baseline sample should contain:
-- one trunk/base mesh
-- a few primary branches
-- a few secondary branches
-- two leaf meshes reused as instances
-- enough structure to make skeleton and instance binding visible in UE
+- input: `samples/speedtree/simple_tree/variants/SimpleTree_01.xml`
+- current authoring target: deterministic USDA for UE 5.7 skeletal Nanite Assembly import
+- current parsing policy: `skeleton-first`, `spine-optional`
 
-## Export workflow
+The other exported variants remain useful for reference and comparison, but they are not the active development baseline.
 
-For the same tree, export multiple XML variants with different export settings. For each variant:
-1. place the raw XML into `samples/speedtree/simple_tree/variants/`
-2. record the export settings and notes next to it
-3. generate an inspect report
-4. compare observed sections, skeleton data, and leaf reference structure
-5. decide which profile is the strongest baseline for the project
+## Expected observed signature
 
-## Expected artifacts
+`SimpleTree_01.xml` currently normalizes to:
 
-- source XML variants under `samples/speedtree/simple_tree/variants/`
-- expected inspect outputs under `samples/expected_reports/`
-- generated USDA snapshots under `samples/expected_usda/`
-- notes about differences in `vault/speedtree_export_matrix/` or project docs
+- `63` source objects
+- `1` trunk object
+- `22` branch objects
+- `39` twig objects with leaf references
+- hierarchy depth `4`
+- `105` bones
+- `23` objects carrying `Spine`
+- `39` leaf instances
+- `2` reusable twig meshes in the mesh library
 
-## Selection criteria
+## Baseline workflow
 
-Prefer the export profile that gives:
-- explicit skeleton information
-- recoverable leaf instance transforms
-- stable mesh/prototype identity
-- minimum ambiguity around branch hierarchy and object grouping
+1. Run `inspect` on `SimpleTree_01.xml` and verify the observed signature stays stable.
+2. Run `convert` and ensure validation passes with no blocking errors.
+3. Review the generated USDA for trunk `SkelRoot`, `Skeleton`, `PointInstancer`, prototype scope, and Unreal skeletal binding primvars.
+4. Use this output as the golden regression sample until a verified UE import proves that a different baseline is stronger.
+
+## Selection result
+
+Variant selection is currently resolved as follows:
+
+- `SimpleTree_01.xml` is the active baseline because it preserves object hierarchy, non-zero relative transforms, explicit leaf bindings, real skeleton data, and optional `Spine` data.
+- `Spine` is parsed and stored, but the writer does not depend on it for the current skeletal import path.
+- leaf binding comes directly from XML `LeafReferences/BoneID`; the converter does not use nearest-joint heuristics for this sample.
+
+## Regression expectations
+
+Golden-path tests should fail if any of the following drift:
+
+- object hierarchy disappears or depth changes unexpectedly
+- trunk mesh extraction stops working
+- skeleton hierarchy changes shape without an explicit fixture update
+- leaf `BoneID` set changes unexpectedly
+- leaf mesh usage changes unexpectedly
+- USDA skeletal binding arrays lose `elementSize = 1`

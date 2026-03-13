@@ -58,6 +58,64 @@ class LeafReference:
 
 
 @dataclass(frozen=True)
+class Bounds:
+    minimum: Vector3
+    maximum: Vector3
+
+
+@dataclass(frozen=True)
+class SpineCurve:
+    source_object_id: str
+    points: tuple[Vector3, ...]
+    radii: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class MeshLibraryEntry:
+    mesh_id: int
+    name: str
+    mesh: MeshData
+
+
+@dataclass(frozen=True)
+class SourceObject:
+    object_id: str
+    parent_id: str | None
+    name: str
+    abs_translate: Vector3
+    rel_translate: Vector3
+    bounds: Bounds | None = None
+    mesh: MeshData | None = None
+    leaf_instance_count: int = 0
+    spine: SpineCurve | None = None
+
+
+@dataclass(frozen=True)
+class BranchSegment:
+    object_id: str
+    parent_id: str | None
+    name: str
+    mesh: MeshData
+    spine: SpineCurve | None = None
+    source_joint: str | None = None
+
+
+@dataclass(frozen=True)
+class LeafInstance:
+    name: str
+    prototype_key: str
+    position: Vector3
+    orientation: Quaternion
+    scale: Vector3
+    bind_joint: str
+    source_object_id: str | None
+    source_mesh_id: int | None
+    source_bone_id: int | None
+    mesh_lod: int | None = None
+    bind_weight: float = 1.0
+
+
+@dataclass(frozen=True)
 class PrototypeIdentity:
     source_key: str
     prim_name: str
@@ -112,15 +170,27 @@ class ObservedXmlSchemaReport:
     version: str | None
     units_hint: str | None
     up_axis_hint: str | None
+    object_class_counts: dict[str, int] = field(default_factory=dict)
+    hierarchy_depth: int = 0
+    spine_object_count: int = 0
+    leaf_binding_distribution: dict[str, int] = field(default_factory=dict)
+    leaf_mesh_distribution: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class CanonicalTreeModel:
     metadata: ExportMetadata
+    source_objects: tuple[SourceObject, ...]
     trunk_mesh: MeshData | None
     skeleton: tuple[Joint, ...]
-    leaf_references: tuple[LeafReference, ...]
-    branch_parts: tuple[Any, ...] = ()
+    leaf_instances: tuple[LeafInstance, ...]
+    branch_segments: tuple[BranchSegment, ...] = ()
+    mesh_library: tuple[MeshLibraryEntry, ...] = ()
+    spines: tuple[SpineCurve, ...] = ()
+
+    @property
+    def leaf_references(self) -> tuple[LeafInstance, ...]:
+        return self.leaf_instances
 
 
 @dataclass(frozen=True)

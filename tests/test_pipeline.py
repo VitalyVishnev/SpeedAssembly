@@ -11,33 +11,86 @@ from xml_to_usda.xml_reader import inspect_xml, read_source_xml, render_inspect_
 
 
 DATA_DIR = Path(__file__).parent / "data"
-REFERENCES_DIR = Path(__file__).resolve().parents[1] / "references"
+SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "Samples" / "speedtree" / "simple_tree" / "variants" / "SimpleTree_01.xml"
+EXPECTED_LEAF_BONE_IDS = (
+    17,
+    19,
+    20,
+    22,
+    24,
+    30,
+    32,
+    34,
+    35,
+    36,
+    44,
+    46,
+    49,
+    51,
+    56,
+    57,
+    59,
+    61,
+    63,
+    64,
+    66,
+    67,
+    68,
+    70,
+    71,
+    77,
+    78,
+    80,
+    84,
+    90,
+    92,
+    94,
+    96,
+    98,
+    99,
+    100,
+    101,
+    102,
+    104,
+)
+EXPECTED_LEAF_BINDING_DISTRIBUTION = {str(bone_id): 1 for bone_id in EXPECTED_LEAF_BONE_IDS}
+EXPECTED_LEAF_MESH_DISTRIBUTION = {1: 13, 2: 26}
 
 
-def test_inspect_report_is_deterministic() -> None:
-    document = read_source_xml(DATA_DIR / "sample_tree.xml")
+def test_inspect_report_tracks_simple_tree_01_structure() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)
     rendered = render_inspect_report(report)
     payload = json.loads(rendered)
 
     assert payload["root_tag"] == "SpeedTreeRaw"
-    assert payload["known_sections"]["leaf_references"] >= 1
-    assert "CustomSection" in payload["unknown_sections"]
+    assert payload["hierarchy_depth"] == 4
+    assert payload["object_class_counts"]["trunk"] == 1
+    assert payload["object_class_counts"]["branch"] == 22
+    assert payload["object_class_counts"]["twig"] == 39
+    assert payload["spine_object_count"] == 23
+    assert payload["leaf_binding_distribution"] == EXPECTED_LEAF_BINDING_DISTRIBUTION
+    assert payload["leaf_mesh_distribution"] == {str(mesh_id): count for mesh_id, count in EXPECTED_LEAF_MESH_DISTRIBUTION.items()}
 
 
-def test_canonical_model_extracts_trunk_skeleton_and_leaves() -> None:
-    document = read_source_xml(DATA_DIR / "sample_tree.xml")
+def test_canonical_model_extracts_simple_tree_01_graph() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
 
     assert model.trunk_mesh is not None
-    assert len(model.skeleton) == 2
-    assert len(model.leaf_references) == 2
-    assert model.leaf_references[0].bind_joint == "branch_01"
+    assert len(model.source_objects) == 63
+    assert len(model.skeleton) == 105
+    assert len(model.branch_segments) == 22
+    assert len(model.leaf_instances) == 39
+    assert len(model.mesh_library) == 2
+    assert len(model.spines) == 23
+    assert model.leaf_instances[0].bind_joint.startswith("bone_")
+    assert model.leaf_instances[0].source_bone_id is not None
 
 
 def test_usda_output_contains_expected_structure() -> None:
-    document = read_source_xml(DATA_DIR / "sample_tree.xml")
+    document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
     diagnostics = validate_model(model)
@@ -53,6 +106,7 @@ def test_usda_output_contains_expected_structure() -> None:
     assert 'apiSchemas = ["NaniteAssemblySkelBindingAPI"]' in usda.text
     assert 'uniform token[] primvars:unreal:naniteAssembly:bindJoints = [' in usda.text
     assert 'uniform float[] primvars:unreal:naniteAssembly:bindJointWeights = [' in usda.text
+    assert 'elementSize = 1' in usda.text
     assert 'quatf[] orientations = [' in usda.text
     assert 'def Scope "Prototypes"' in usda.text
 
@@ -72,8 +126,8 @@ def test_ue_schema_contract_matches_verified_ue_57_names() -> None:
     assert contract.binding_api_allowed_prims == ("Xform", "Mesh", "SkelRoot", "PointInstancer")
 
 
-def test_point_instancer_binding_attrs_use_direct_assignment() -> None:
-    document = read_source_xml(DATA_DIR / "sample_tree.xml")
+def test_point_instancer_binding_attrs_use_explicit_leaf_bone_ids() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
     diagnostics = validate_model(model)
@@ -81,7 +135,9 @@ def test_point_instancer_binding_attrs_use_direct_assignment() -> None:
 
     assert 'uniform token[] primvars:unreal:naniteAssembly:bindJoints = [' in usda.text
     assert 'uniform float[] primvars:unreal:naniteAssembly:bindJointWeights = [' in usda.text
-    assert 'elementSize = 1' not in usda.text
+    assert 'elementSize = 1' in usda.text
+    assert '"bone_017"' in usda.text
+    assert '"bone_104"' in usda.text
 
 
 def test_missing_skeleton_is_error() -> None:
@@ -112,23 +168,29 @@ def test_non_default_metadata_becomes_warning() -> None:
     assert any("Non-default up-axis hint" in issue.message for issue in diagnostics)
 
 
-def test_real_reference_sample_extracts_observed_sections() -> None:
-    document = read_source_xml(REFERENCES_DIR / "speedtree" / "xml" / "SkeletyalAssemblyTest_01.xml")
+def test_simple_tree_01_leaf_binding_distribution_is_deterministic() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
 
-    assert report.version == "10.0"
-    assert report.known_sections["skeleton"] >= 89
-    assert report.known_sections["leaf_references"] >= 1
-    assert model.trunk_mesh is not None
-    assert len(model.skeleton) == 89
-    assert len(model.leaf_references) == 273
+    bone_ids = sorted(leaf.source_bone_id for leaf in model.leaf_instances if leaf.source_bone_id is not None)
+    mesh_distribution: dict[int, int] = {}
+    for leaf in model.leaf_instances:
+        assert leaf.source_bone_id is not None
+        assert leaf.source_mesh_id is not None
+        mesh_distribution[leaf.source_mesh_id] = mesh_distribution.get(leaf.source_mesh_id, 0) + 1
+
+    assert tuple(bone_ids) == EXPECTED_LEAF_BONE_IDS
+    assert mesh_distribution == EXPECTED_LEAF_MESH_DISTRIBUTION
 
 
-def test_real_reference_sample_filters_known_payload_noise() -> None:
-    document = read_source_xml(REFERENCES_DIR / "speedtree" / "xml" / "SkeletyalAssemblyTest_01.xml")
+def test_simple_tree_01_spines_are_optional_source_data() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    diagnostics = validate_model(model)
+    usda = render_usda(model, diagnostics)
 
-    assert "AO" not in report.unknown_sections
-    assert "PointIndices" not in report.unknown_sections
-    assert "SpeedTreeRaw" not in report.unknown_sections
+    assert len(model.spines) == 23
+    assert all(spine.points for spine in model.spines)
+    assert "Spine" not in usda.text

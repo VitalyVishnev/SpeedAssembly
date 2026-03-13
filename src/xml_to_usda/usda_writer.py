@@ -1,8 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from collections import OrderedDict
 
-from .models import CanonicalTreeModel, PrototypeIdentity, UsdAssemblyDocument, ValidationIssue
+from .models import CanonicalTreeModel, MeshData, PrototypeIdentity, UsdAssemblyDocument, ValidationIssue, Vector3
 from .naming import build_prototype_identities
 from .ue_schema import DEFAULT_UE_SCHEMA_CONTRACT, UeSchemaContract
 
@@ -52,28 +52,13 @@ def Xform "Tree" (
 
 def _render_trunk_mesh(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
     skel_rel = 'rel skel:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>'
-    if model.trunk_mesh is None:
-        return f'''def Mesh "TrunkMesh" (
-            apiSchemas = ["{contract.skel_binding_api}"]
-        )
-        {{
-            {skel_rel}
-            point3f[] points = [(0, 0, 0), (0.01, 0, 0), (0, 0.01, 0)]
-            int[] faceVertexCounts = [3]
-            int[] faceVertexIndices = [0, 1, 2]
-        }}'''
-
-    points = ", ".join(point.to_usda() for point in model.trunk_mesh.points)
-    counts = ", ".join(str(value) for value in model.trunk_mesh.face_vertex_counts)
-    indices = ", ".join(str(value) for value in model.trunk_mesh.face_vertex_indices)
+    mesh = model.trunk_mesh or _fallback_triangle("TrunkMesh")
     return f'''def Mesh "TrunkMesh" (
             apiSchemas = ["{contract.skel_binding_api}"]
         )
         {{
             {skel_rel}
-            point3f[] points = [{points}]
-            int[] faceVertexCounts = [{counts}]
-            int[] faceVertexIndices = [{indices}]
+            {_render_mesh_payload(mesh)}
         }}'''
 
 
@@ -91,8 +76,9 @@ def _render_joint_translations(model: CanonicalTreeModel) -> str:
 
 
 def _render_point_instancer(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
-    leaves = model.leaf_references
+    leaves = model.leaf_instances
     prototype_identities = _collect_prototype_identities(leaves)
+    mesh_library = {f"Mesh_{entry.mesh_id}": entry.mesh for entry in model.mesh_library}
     proto_index_map = {identity.source_key: index for index, identity in enumerate(prototype_identities)}
     proto_indices = ", ".join(str(proto_index_map.get(leaf.prototype_key, 0)) for leaf in leaves)
     positions = ", ".join(leaf.position.to_usda() for leaf in leaves)
@@ -101,8 +87,11 @@ def _render_point_instancer(model: CanonicalTreeModel, contract: UeSchemaContrac
     bind_joints = ", ".join(f'"{leaf.bind_joint}"' for leaf in leaves)
     bind_weights = ", ".join(f"{leaf.bind_weight:g}" for leaf in leaves)
     prototype_targets = [f"</Tree/PartsInstancer/Prototypes/{identity.prim_name}>" for identity in prototype_identities]
-    prototype_paths = prototype_targets[0] if len(prototype_targets) == 1 else f"[{', '.join(prototype_targets)}]"
-    prototype_defs = "\n".join(_render_prototype_definition(identity, contract) for identity in prototype_identities)
+    prototype_paths = f"[{', '.join(prototype_targets)}]" if prototype_targets else "[]"
+    prototype_defs = "\n".join(
+        _render_prototype_definition(identity, mesh_library.get(identity.source_key), contract)
+        for identity in prototype_identities
+    )
 
     return f'''def PointInstancer "PartsInstancer" (
     apiSchemas = ["{contract.binding_api}"]
@@ -114,8 +103,12 @@ def _render_point_instancer(model: CanonicalTreeModel, contract: UeSchemaContrac
     point3f[] positions = [{positions}]
     quatf[] orientations = [{orientations}]
     float3[] scales = [{scales}]
-    {contract.bind_joints_attr} = [{bind_joints}]
-    {contract.bind_weights_attr} = [{bind_weights}]
+    {contract.bind_joints_attr} = [{bind_joints}] (
+        elementSize = 1
+    )
+    {contract.bind_weights_attr} = [{bind_weights}] (
+        elementSize = 1
+    )
 
     def Scope "Prototypes" (
         kind = "group"
@@ -131,8 +124,9 @@ def _collect_prototype_identities(leaves) -> tuple[PrototypeIdentity, ...]:
     return build_prototype_identities(keys)
 
 
-def _render_prototype_definition(identity: PrototypeIdentity, contract: UeSchemaContract) -> str:
+def _render_prototype_definition(identity: PrototypeIdentity, mesh: MeshData | None, contract: UeSchemaContract) -> str:
     name = identity.prim_name
+    prototype_mesh = mesh or _fallback_triangle(f"{name}_Mesh")
     return f'''        def SkelRoot "{name}" (
             kind = "component"
         )
@@ -149,11 +143,31 @@ def _render_prototype_definition(identity: PrototypeIdentity, contract: UeSchema
             )
             {{
                 rel skel:skeleton = </Tree/PartsInstancer/Prototypes/{name}/{name}_Skeleton>
-                point3f[] points = [(0, 0, 0), (0.01, 0, 0), (0, 0.01, 0)]
-                int[] faceVertexCounts = [3]
-                int[] faceVertexIndices = [0, 1, 2]
+                {_render_mesh_payload(prototype_mesh)}
             }}
         }}'''
+
+
+def _render_mesh_payload(mesh: MeshData) -> str:
+    points = ", ".join(point.to_usda() for point in mesh.points)
+    counts = ", ".join(str(value) for value in mesh.face_vertex_counts)
+    indices = ", ".join(str(value) for value in mesh.face_vertex_indices)
+    return f'''point3f[] points = [{points}]
+            int[] faceVertexCounts = [{counts}]
+            int[] faceVertexIndices = [{indices}]'''
+
+
+def _fallback_triangle(name: str) -> MeshData:
+    return MeshData(
+        name=name,
+        points=(
+            Vector3(0.0, 0.0, 0.0),
+            Vector3(0.01, 0.0, 0.0),
+            Vector3(0.0, 0.01, 0.0),
+        ),
+        face_vertex_counts=(3,),
+        face_vertex_indices=(0, 1, 2),
+    )
 
 
 def _indent(value: str, level: int) -> str:

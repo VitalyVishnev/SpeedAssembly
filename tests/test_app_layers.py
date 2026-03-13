@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 
@@ -10,6 +10,7 @@ from xml_to_usda.pipeline import REPO_ROOT, convert_file, convert_request
 
 
 DATA_DIR = Path(__file__).parent / "data"
+SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "Samples" / "speedtree" / "simple_tree" / "variants" / "SimpleTree_01.xml"
 
 
 def test_stable_prim_name_is_ascii_safe() -> None:
@@ -25,17 +26,15 @@ def test_prototype_identities_are_deterministic_and_unique() -> None:
 
 
 def test_generated_outputs_cannot_be_written_into_vault() -> None:
-    input_path = DATA_DIR / "sample_tree.xml"
     output_path = REPO_ROOT / "vault" / "notes" / "illegal_output.usda"
 
     with pytest.raises(ValueError, match="immutable vault"):
-        convert_file(str(input_path), str(output_path))
+        convert_file(str(SIMPLE_TREE_01), str(output_path))
 
 
 def test_batch_ready_request_supports_output_directory_and_template(tmp_path: Path) -> None:
-    input_path = DATA_DIR / "sample_tree.xml"
     request = ConversionRequest(
-        input_paths=(str(input_path),),
+        input_paths=(str(SIMPLE_TREE_01),),
         output_directory=str(tmp_path),
         output_naming_template="{stem}_generated",
         output_mode=OutputMode.SELF_CONTAINED,
@@ -44,8 +43,9 @@ def test_batch_ready_request_supports_output_directory_and_template(tmp_path: Pa
     result = convert_request(request)[0]
 
     assert result.output_path is not None
-    assert result.output_path.endswith("sample_tree_generated.usda")
+    assert result.output_path.endswith("SimpleTree_01_generated.usda")
     assert Path(result.output_path).exists()
+    assert result.usda_document is not None
 
 
 def _build_tk_root_or_skip():
