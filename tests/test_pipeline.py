@@ -124,6 +124,11 @@ def test_usda_output_contains_ue_first_structure() -> None:
     assert 'def Scope "Materials"' in usda.text
     assert 'def Material "Material_0_0"' in usda.text
     assert 'def Material "Material_2_2"' in usda.text
+    assert 'token outputs:surface.connect = </Tree/Materials/Material_0_0/Material_0_0_shader.outputs:surface>' in usda.text
+    assert 'token outputs:surface.connect = </Tree/Materials/Material_2_2/Material_2_2_shader.outputs:surface>' in usda.text
+    assert 'uniform token info:id = "UsdPreviewSurface"' in usda.text
+    assert 'color3f inputs:diffuseColor = (0.8, 0.8, 0.8)' in usda.text
+    assert 'color3f inputs:diffuseColor = (0.280385, 0.431373, 0)' in usda.text
     assert 'def SkelRoot "BaseTreeSkelRoot"' in usda.text
     assert 'def SkelAnimation "BaseTreeAnimation"' in usda.text
     assert 'def Skeleton "MainSkeleton"' in usda.text

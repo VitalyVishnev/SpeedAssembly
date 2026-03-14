@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from .models import CanonicalTreeModel, ConversionRequest, ConversionResult, ObservedXmlSchemaReport, OutputMode
+from .models import CanonicalTreeModel, ConversionRequest, ConversionResult, MaterialSpec, ObservedXmlSchemaReport, OutputMode
 from .normalizer import normalize_to_canonical
 from .usda_writer import render_usda
 from .validator import validate_model
@@ -12,6 +12,8 @@ from .xml_reader import inspect_xml, read_source_xml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VAULT_ROOT = REPO_ROOT / "vault"
+BASELINE_BARK_MATERIAL_ID = 0
+BASELINE_LEAVES_MATERIAL_ID = 2
 
 
 def inspect_source(input_path: str) -> ObservedXmlSchemaReport:
@@ -34,10 +36,16 @@ def inspect_source(input_path: str) -> ObservedXmlSchemaReport:
     )
 
 
-def load_canonical_model(input_path: str, output_mode: OutputMode = OutputMode.SELF_CONTAINED) -> tuple[ObservedXmlSchemaReport, CanonicalTreeModel, tuple]:
+def load_canonical_model(
+    input_path: str,
+    output_mode: OutputMode = OutputMode.SELF_CONTAINED,
+    bark_material_path: str | None = None,
+    leaves_material_path: str | None = None,
+) -> tuple[ObservedXmlSchemaReport, CanonicalTreeModel, tuple]:
     document = read_source_xml(input_path)
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
+    model = _apply_material_role_overrides(model, bark_material_path, leaves_material_path)
     metadata = replace(model.metadata, output_mode=output_mode)
     model = replace(model, metadata=metadata)
     diagnostics = validate_model(model)
@@ -48,8 +56,16 @@ def convert_file(
     input_path: str,
     output_path: str | None,
     output_mode: OutputMode = OutputMode.SELF_CONTAINED,
+    bark_material_path: str | None = None,
+    leaves_material_path: str | None = None,
 ) -> ConversionResult:
-    request = ConversionRequest(input_paths=(input_path,), output_path=output_path, output_mode=output_mode)
+    request = ConversionRequest(
+        input_paths=(input_path,),
+        output_path=output_path,
+        output_mode=output_mode,
+        bark_material_path=bark_material_path,
+        leaves_material_path=leaves_material_path,
+    )
     return convert_request(request)[0]
 
 
@@ -65,7 +81,12 @@ def convert_request(request: ConversionRequest) -> tuple[ConversionResult, ...]:
         if resolved_output is not None:
             _ensure_output_path_allowed(resolved_output)
 
-        _, model, diagnostics = load_canonical_model(input_path, request.output_mode)
+        _, model, diagnostics = load_canonical_model(
+            input_path,
+            request.output_mode,
+            bark_material_path=request.bark_material_path,
+            leaves_material_path=request.leaves_material_path,
+        )
         errors = [issue for issue in diagnostics if issue.severity == "error"]
         if errors:
             results.append(
@@ -156,3 +177,26 @@ def _prototype_material_distribution(model: CanonicalTreeModel) -> dict[str, int
             key = str(section.material_id)
             distribution[key] = distribution.get(key, 0) + len(section.face_indices)
     return dict(sorted(distribution.items(), key=lambda item: int(item[0]) if item[0].lstrip("-").isdigit() else item[0]))
+
+
+def _apply_material_role_overrides(
+    model: CanonicalTreeModel,
+    bark_material_path: str | None,
+    leaves_material_path: str | None,
+) -> CanonicalTreeModel:
+    if not bark_material_path and not leaves_material_path:
+        return model
+
+    overrides = {
+        BASELINE_BARK_MATERIAL_ID: bark_material_path,
+        BASELINE_LEAVES_MATERIAL_ID: leaves_material_path,
+    }
+    materials = tuple(_apply_material_override(material, overrides) for material in model.materials)
+    return replace(model, materials=materials)
+
+
+def _apply_material_override(material: MaterialSpec, overrides: dict[int, str | None]) -> MaterialSpec:
+    ue_asset_path = overrides.get(material.source_id)
+    if not ue_asset_path:
+        return material
+    return replace(material, ue_asset_path=ue_asset_path)

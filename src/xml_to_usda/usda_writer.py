@@ -31,7 +31,7 @@ def render_usda(
     base_mesh = _render_base_mesh(model, contract)
     main_skeleton = _render_main_skeleton(model, contract)
     point_instancer = _render_point_instancer(model, contract)
-    materials = _render_materials_scope(model.materials)
+    materials = _render_materials_scope(model.materials, contract.root_prim_name)
     prototype_library = (
         _render_prototype_library(model, contract) if model.prototype_strategy == PrototypeStrategy.REFERENCED_SCOPE else ""
     )
@@ -77,19 +77,34 @@ def Xform "{contract.root_prim_name}" (
     return UsdAssemblyDocument(text=text, diagnostics=diagnostics)
 
 
-def _render_materials_scope(materials: tuple[MaterialSpec, ...]) -> str:
+def _render_materials_scope(materials: tuple[MaterialSpec, ...], root_prim_name: str) -> str:
     if not materials:
         return ""
-    definitions = "\n".join(_render_material(material) for material in materials)
+    definitions = "\n".join(_render_material(material, root_prim_name) for material in materials)
     return f'''def Scope "Materials"
 {{
 {definitions}
 }}'''
 
 
-def _render_material(material: MaterialSpec) -> str:
-    return f'''    def Material "{_material_prim_name_from_id(material.source_id)}"
+def _render_material(material: MaterialSpec, root_prim_name: str) -> str:
+    material_name = _material_prim_name(material)
+    shader_name = _material_shader_name(material)
+    diffuse_color = _material_diffuse_color(material)
+    unreal_output = _render_unreal_material_output(material, root_prim_name)
+    return f'''    def Material "{material_name}"
     {{
+        token outputs:displacement.connect = </{root_prim_name}/Materials/{material_name}/{shader_name}.outputs:displacement>
+        token outputs:surface.connect = </{root_prim_name}/Materials/{material_name}/{shader_name}.outputs:surface>
+{_indent(unreal_output, 2)}
+
+        def Shader "{shader_name}"
+        {{
+            uniform token info:id = "UsdPreviewSurface"
+            color3f inputs:diffuseColor = {diffuse_color}
+            token outputs:displacement
+            token outputs:surface
+        }}
     }}'''
 
 
@@ -444,6 +459,49 @@ def _material_prim_name_from_id(material_id: int, name: str | None = None) -> st
     if not safe_name:
         safe_name = f"Material_{material_id}"
     return f"{safe_name}_{material_id}"
+
+
+def _material_shader_name(material: MaterialSpec) -> str:
+    return f"{_material_prim_name(material)}_shader"
+
+
+def _material_unreal_shader_name(material: MaterialSpec) -> str:
+    return f"{_material_prim_name(material)}_unreal_shader"
+
+
+def _render_unreal_material_output(material: MaterialSpec, root_prim_name: str) -> str:
+    if not material.ue_asset_path:
+        return ""
+    material_name = _material_prim_name(material)
+    shader_name = _material_unreal_shader_name(material)
+    return f'''token outputs:unreal:surface.connect = </{root_prim_name}/Materials/{material_name}/{shader_name}.outputs:out>
+
+def Shader "{shader_name}"
+{{
+    uniform token info:implementationSource = "sourceAsset"
+    uniform asset info:unreal:sourceAsset = @{material.ue_asset_path}@
+    token outputs:out
+}}'''
+
+
+def _material_diffuse_color(material: MaterialSpec) -> str:
+    color_map = next((dict(payload) for map_name, payload in material.maps if map_name == "Color"), None)
+    if color_map is None:
+        return "(0.5, 0.5, 0.5)"
+    red = _clamp_material_channel(color_map.get("ColorR"))
+    green = _clamp_material_channel(color_map.get("ColorG"))
+    blue = _clamp_material_channel(color_map.get("ColorB"))
+    return f"({red:g}, {green:g}, {blue:g})"
+
+
+def _clamp_material_channel(value: str | None) -> float:
+    if value is None:
+        return 0.5
+    try:
+        numeric = float(value)
+    except ValueError:
+        return 0.5
+    return max(0.0, min(1.0, numeric))
 
 
 def _render_joint_paths(model: CanonicalTreeModel) -> str:

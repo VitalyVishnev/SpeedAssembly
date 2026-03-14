@@ -369,6 +369,8 @@ class ConversionRequest:
     output_directory: str | None = None
     output_naming_template: str | None = None
     output_mode: OutputMode = OutputMode.SELF_CONTAINED
+    bark_material_path: str | None = None
+    leaves_material_path: str | None = None
 
 
 @dataclass(frozen=True)

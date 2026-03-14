@@ -15,6 +15,8 @@ class ConversionApp:
 
         self.input_var = tk.StringVar()
         self.output_var = tk.StringVar()
+        self.bark_material_var = tk.StringVar()
+        self.leaves_material_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Single-file mode. Batch and naming rules will be added in a later phase.")
 
         self._build_layout()
@@ -25,7 +27,7 @@ class ConversionApp:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(4, weight=1)
+        frame.rowconfigure(6, weight=1)
 
         ttk.Label(frame, text="Source XML").grid(row=0, column=0, sticky="w", pady=(0, 8))
         ttk.Entry(frame, textvariable=self.input_var).grid(row=0, column=1, sticky="ew", padx=(12, 12), pady=(0, 8))
@@ -35,15 +37,21 @@ class ConversionApp:
         ttk.Entry(frame, textvariable=self.output_var).grid(row=1, column=1, sticky="ew", padx=(12, 12), pady=(0, 8))
         ttk.Button(frame, text="Save As...", command=self.browse_output).grid(row=1, column=2, sticky="ew", pady=(0, 8))
 
-        ttk.Label(frame, textvariable=self.status_var).grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 12))
-        ttk.Button(frame, text="Convert", command=self.run_conversion).grid(row=2, column=2, sticky="ew", pady=(0, 12))
+        ttk.Label(frame, text="Bark Material Path").grid(row=2, column=0, sticky="w", pady=(0, 8))
+        ttk.Entry(frame, textvariable=self.bark_material_var).grid(row=2, column=1, sticky="ew", padx=(12, 12), pady=(0, 8))
+
+        ttk.Label(frame, text="Leaves Material Path").grid(row=3, column=0, sticky="w", pady=(0, 8))
+        ttk.Entry(frame, textvariable=self.leaves_material_var).grid(row=3, column=1, sticky="ew", padx=(12, 12), pady=(0, 8))
+
+        ttk.Label(frame, textvariable=self.status_var).grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 12))
+        ttk.Button(frame, text="Convert", command=self.run_conversion).grid(row=4, column=2, sticky="ew", pady=(0, 12))
 
         button_row = ttk.Frame(frame)
-        button_row.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        button_row.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(0, 8))
         ttk.Button(button_row, text="Copy Log", command=self.copy_log).pack(side="right")
 
         self.log_widget = tk.Text(frame, wrap="word", height=18)
-        self.log_widget.grid(row=4, column=0, columnspan=3, sticky="nsew")
+        self.log_widget.grid(row=6, column=0, columnspan=3, sticky="nsew")
         self.log_widget.configure(state="disabled")
         self.log_widget.bind("<Control-c>", self._handle_copy_shortcut)
         self.log_widget.bind("<Control-C>", self._handle_copy_shortcut)
@@ -73,22 +81,39 @@ class ConversionApp:
     def run_conversion(self) -> None:
         input_path = self.input_var.get().strip()
         output_path = self.output_var.get().strip()
+        bark_material_path = self.bark_material_var.get().strip()
+        leaves_material_path = self.leaves_material_var.get().strip()
         if not input_path:
             messagebox.showerror("Missing input", "Select a source XML file.")
             return
         if not output_path:
             messagebox.showerror("Missing output", "Select an output USDA path.")
             return
+        validation_error = self._validate_material_paths(bark_material_path, leaves_material_path)
+        if validation_error is not None:
+            messagebox.showerror("Invalid material path", validation_error)
+            return
 
         try:
-            result = convert_file(input_path, output_path)
+            result = convert_file(
+                input_path,
+                output_path,
+                bark_material_path=bark_material_path or None,
+                leaves_material_path=leaves_material_path or None,
+            )
         except Exception as exc:
             self.status_var.set("Conversion failed.")
             self._set_log(str(exc))
             messagebox.showerror("Conversion failed", str(exc))
             return
 
-        self._set_log(format_conversion_results((result,)))
+        self._set_log(
+            format_conversion_results(
+                (result,),
+                bark_material_path=bark_material_path or None,
+                leaves_material_path=leaves_material_path or None,
+            )
+        )
         if result.usda_document is None:
             self.status_var.set("Conversion finished with errors.")
             messagebox.showerror("Conversion failed", "See diagnostics in the log area.")
@@ -117,9 +142,20 @@ class ConversionApp:
         self.log_widget.insert("1.0", text)
         self.log_widget.configure(state="disabled")
 
+    def _validate_material_paths(self, bark_material_path: str, leaves_material_path: str) -> str | None:
+        for label, path in (("Bark", bark_material_path), ("Leaves", leaves_material_path)):
+            if path and not _is_valid_unreal_asset_path(path):
+                return f"{label} material path must start with /Game/."
+        return None
 
-def format_conversion_results(results) -> str:
+
+def format_conversion_results(results, bark_material_path: str | None = None, leaves_material_path: str | None = None) -> str:
     lines: list[str] = []
+    if bark_material_path or leaves_material_path:
+        lines.append("Material overrides:")
+        lines.append(f"  - bark: {bark_material_path or '<none>'}")
+        lines.append(f"  - leaves: {leaves_material_path or '<none>'}")
+        lines.append("")
     for result in results:
         lines.append(f"Input: {result.input_path}")
         lines.append(f"Output: {result.output_path or '<not written>'}")
@@ -132,6 +168,10 @@ def format_conversion_results(results) -> str:
         lines.append("Status: success" if result.usda_document is not None else "Status: failed")
         lines.append("")
     return "\n".join(lines).strip()
+
+
+def _is_valid_unreal_asset_path(path: str) -> bool:
+    return path.startswith("/Game/")
 
 
 def main() -> int:
