@@ -32,7 +32,7 @@ class OutputMode(StrEnum):
 
 
 class PrototypeStrategy(StrEnum):
-    INLINE_MESH = "inline_mesh"
+    INLINE_SKELETAL_TWIG = "inline_skeletal_twig"
     REFERENCED_SCOPE = "referenced_scope"
 
 
@@ -41,7 +41,16 @@ class Joint:
     name: str
     source_id: int | None = None
     parent: str | None = None
-    bind_translate: Vector3 = field(default_factory=lambda: Vector3(0.0, 0.0, 0.0))
+    bind_transform: "Matrix4d" = field(default_factory=lambda: Matrix4d.identity())
+    rest_transform: "Matrix4d" = field(default_factory=lambda: Matrix4d.identity())
+
+    @property
+    def bind_translate(self) -> Vector3:
+        return self.bind_transform.translation
+
+    @property
+    def rest_translate(self) -> Vector3:
+        return self.rest_transform.translation
 
 
 @dataclass(frozen=True)
@@ -73,6 +82,22 @@ class Matrix4d:
                 (0.0, 0.0, 0.0, 1.0),
             )
         )
+
+    @staticmethod
+    def from_translation(translate: Vector3) -> "Matrix4d":
+        return Matrix4d(
+            rows=(
+                (1.0, 0.0, 0.0, 0.0),
+                (0.0, 1.0, 0.0, 0.0),
+                (0.0, 0.0, 1.0, 0.0),
+                (translate.x, translate.y, translate.z, 1.0),
+            )
+        )
+
+    @property
+    def translation(self) -> Vector3:
+        row = self.rows[3]
+        return Vector3(row[0], row[1], row[2])
 
 
 @dataclass(frozen=True)

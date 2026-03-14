@@ -19,7 +19,7 @@ Observed from the current `SimpleTree_01.xml` export:
 - bones are present in a real parented hierarchy
 - spine-bearing objects are present
 - leaf references are present with explicit `BoneID` and `MeshID`
-- mesh library entries are present for reusable twig/leaf geometry
+- mesh library entries are present for reusable twig-with-leaf geometry
 
 ## Sections currently used by the converter
 
@@ -64,11 +64,11 @@ Current policy:
 - keep the full source object graph in the normalized model
 - determine base mesh from the available trunk/base body geometry instead of hardcoding a sample count
 - keep branch objects as separate branch segments in the normalized model
-- do not try to deduplicate branch meshes into prototypes yet
+- keep large `Branches_*` object meshes in the unique base skeletal mesh; do not instance them through `PointInstancer`
 
 ### `Object/LeafReferences`
 
-Leaf instances are authored from explicit per-object `LeafReferences` blocks.
+Twig instances are authored from explicit per-object `LeafReferences` blocks.
 
 Relevant observed fields:
 
@@ -83,11 +83,12 @@ Relevant observed fields:
 
 Current policy:
 
-- leaf instances are created directly from these arrays
-- `MeshID` selects the reusable prototype mesh
-- `BoneID` is the authoritative skeletal binding source
+- repeated twig instances are created directly from these arrays
+- `MeshID` selects the reusable twig prototype mesh
+- `BoneID` is the authoritative skeletal binding source for the shared trunk skeleton
 - single `BoneID` values are normalized into the general binding model rather than a sample-specific rigid binding shortcut
 - no nearest-joint heuristic is used for the baseline sample
+- in the current baseline, `LeafReferences` are treated as SpeedTree leaf-node output that carries a small twig-with-leaf assembly
 
 Observed distributions for the current export are useful for regression analysis, but they are not converter contract values.
 
@@ -107,9 +108,12 @@ Current policy:
 
 - create one normalized joint per XML bone
 - preserve parent chain exactly
-- use `End*` as the current rest-translation source in the emitted USDA
+- use `Start*` as the current joint-position source for authored `bindTransforms`
+- derive local `restTransforms` and `SkelAnimation.translations` from parent-relative deltas between joint positions
+- treat `End*` as segment extent data, not as the emitted joint transform, for the current tutorial-aligned contract
 - require skeleton presence for skeletal export
 - derive UE support primvars from the normalized skeleton topology when the XML does not provide them explicitly
+- fail loudly if `StartX|StartY|StartZ` are missing on any bone needed for skeleton normalization
 
 ### `Object/Spine`
 
@@ -146,9 +150,9 @@ Current explicit mapping rules for `SimpleTree_01.xml`:
 
 - base mesh: trunk plus branch body meshes selected from the object graph
 - skeleton: `Bones/Bone`
-- prototypes: `Meshes/Mesh` LOD0 meshes keyed by `MeshID`
-- leaf instances: `Object/LeafReferences`
-- leaf skeletal binding: `LeafReferences/BoneID`, normalized into the general UE binding model
+- prototypes: `Meshes/Mesh` LOD0 meshes keyed by `MeshID` and authored as skeletal twig prototypes
+- twig instances: `Object/LeafReferences`
+- twig skeletal binding: `LeafReferences/BoneID`, normalized into the general UE binding model
 - optional validation geometry: `Object/Spine`
 
 ## Failure conditions enforced by the converter
@@ -158,5 +162,5 @@ The converter currently treats the following as blocking errors for the baseline
 - missing object hierarchy
 - missing base body mesh
 - missing skeleton
-- missing explicit leaf `BoneID`
+- missing explicit twig `BoneID`
 - inconsistent packed array lengths or malformed face index payloads

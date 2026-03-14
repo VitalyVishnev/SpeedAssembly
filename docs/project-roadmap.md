@@ -4,11 +4,17 @@
 
 Goal: prove one controlled SpeedTree 10 tree imports into UE 5.7.x through the current self-contained USDA path.
 
+Current status:
+
+- import now succeeds for the baseline sample
+- remaining work for this phase is visual correctness of transforms / rig fidelity, not basic importer acceptance
+
 Deliverables:
 - one simple SpeedTree tree with multiple XML export variants
 - inspect reports for every export variant
 - chosen baseline export profile
 - expected USDA and observed notes
+- importer validation notes in `docs/import_validation.md`
 
 ## Phase 2 - Desktop GUI and exe packaging
 

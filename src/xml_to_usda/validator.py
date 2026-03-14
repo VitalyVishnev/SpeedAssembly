@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from .models import CanonicalTreeModel, ValidationIssue
+from .models import CanonicalTreeModel, PrototypeStrategy, ValidationIssue
 
 
 ERROR_MARKERS = {
     "packed_array_error:": "inconsistent_packed_arrays",
     "missing_object_hierarchy:": "missing_object_hierarchy",
     "missing_leaf_binding:": "missing_leaf_binding",
+    "missing_skeleton_transform:": "missing_skeleton_transform",
     "skeleton_object_mismatch:": "skeleton_object_mismatch",
 }
 
@@ -48,20 +49,20 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                     message="Base skeletal mesh skel elementSize must be greater than zero when skinning arrays are present.",
                 )
             )
-        if len(model.base_mesh.skel_joint_indices) != len(model.base_mesh.face_vertex_indices):
+        if len(model.base_mesh.skel_joint_indices) != len(model.base_mesh.points):
             issues.append(
                 ValidationIssue(
                     severity="error",
                     code="invalid_base_mesh_skinning_shape",
-                    message="Base skeletal mesh joint index payload must match the authored topology exactly.",
+                    message="Base skeletal mesh joint index payload must match the authored point count for vertex interpolation.",
                 )
             )
-        if len(model.base_mesh.skel_joint_weights) != len(model.base_mesh.face_vertex_indices):
+        if len(model.base_mesh.skel_joint_weights) != len(model.base_mesh.points):
             issues.append(
                 ValidationIssue(
                     severity="error",
                     code="invalid_base_mesh_skinning_shape",
-                    message="Base skeletal mesh joint weight payload must match the authored topology exactly.",
+                    message="Base skeletal mesh joint weight payload must match the authored point count for vertex interpolation.",
                 )
             )
 
@@ -107,6 +108,15 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                 message="Reusable instances must carry explicit skeletal binding data derived from the XML export.",
             )
         )
+    if model.leaf_instances and model.prototype_strategy != PrototypeStrategy.INLINE_SKELETAL_TWIG:
+        issues.append(
+            ValidationIssue(
+                severity="error",
+                code="unsupported_prototype_strategy",
+                message="Skeletal twig instancing requires inline skeletal twig prototypes under PointInstancer/Prototypes.",
+            )
+        )
+    skeleton_joint_tokens = _valid_binding_joint_tokens(model)
     if model.leaf_instances:
         prototypes_by_key = {prototype.source_key: prototype for prototype in model.prototypes}
         for leaf in model.leaf_instances:
@@ -119,6 +129,18 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                         message=f"Instance {leaf.name} references missing prototype {leaf.prototype_key}.",
                     )
                 )
+            invalid_tokens = [token for token in leaf.binding.joint_tokens if token and token not in skeleton_joint_tokens]
+            if invalid_tokens:
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        code="invalid_binding_joint",
+                        message=(
+                            f"Instance {leaf.name} references skeletal joints that do not exist in the authored skeleton: "
+                            + ", ".join(invalid_tokens)
+                        ),
+                    )
+                )
                 continue
             if prototype.mesh is None:
                 issues.append(
@@ -126,6 +148,18 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                         severity="error",
                         code="missing_prototype_mesh",
                         message=f"Prototype {prototype.identity.prim_name} has no resolved mesh payload.",
+                    )
+                )
+                continue
+            if not prototype.mesh.points or not prototype.mesh.face_vertex_counts or not prototype.mesh.face_vertex_indices:
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        code="invalid_prototype_mesh",
+                        message=(
+                            f"Prototype {prototype.identity.prim_name} must contain point and face topology payloads "
+                            "before skeletal twig authoring."
+                        ),
                     )
                 )
 
@@ -188,3 +222,24 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
             )
 
     return tuple(issues)
+
+
+def _valid_binding_joint_tokens(model: CanonicalTreeModel) -> set[str]:
+    joints_by_name = {joint.name: joint for joint in model.skeleton}
+    path_map: dict[str, str] = {}
+
+    def resolve(name: str) -> str:
+        if name in path_map:
+            return path_map[name]
+        joint = joints_by_name[name]
+        if joint.parent is None or joint.parent not in joints_by_name:
+            path_map[name] = joint.name
+        else:
+            path_map[name] = f"{resolve(joint.parent)}/{joint.name}"
+        return path_map[name]
+
+    tokens = set()
+    for joint in model.skeleton:
+        tokens.add(joint.name)
+        tokens.add(resolve(joint.name))
+    return tokens

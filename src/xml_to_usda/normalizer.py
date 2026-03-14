@@ -13,6 +13,7 @@ from .models import (
     InstanceBinding,
     Joint,
     LeafInstance,
+    Matrix4d,
     MeshData,
     MeshLibraryEntry,
     ObservedXmlSchemaReport,
@@ -30,7 +31,7 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
     root = document.tree.getroot()
     data_messages: list[str] = []
 
-    skeleton = tuple(_extract_skeleton(root))
+    skeleton = tuple(_extract_skeleton(root, data_messages))
     joint_index_by_source_id = {
         joint.source_id: index for index, joint in enumerate(skeleton) if joint.source_id is not None
     }
@@ -64,7 +65,7 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
         branch_segments=branch_segments,
         mesh_library=mesh_library,
         prototypes=prototypes,
-        prototype_strategy=PrototypeStrategy.REFERENCED_SCOPE,
+        prototype_strategy=PrototypeStrategy.INLINE_SKELETAL_TWIG,
         skeletal_support_primvars=skeletal_support_primvars,
         spines=spines,
     )
@@ -234,7 +235,9 @@ def _build_mesh_data(
         return None
     joint_indices, joint_weights = _extract_vertex_skinning(
         vertices_node,
+        face_indices,
         vertex_indices,
+        len(points),
         joint_index_by_source_id,
         f"{name}.vertices",
         messages,
@@ -286,31 +289,56 @@ def _select_primary_lod(mesh: ET.Element) -> ET.Element | None:
     return lods[0]
 
 
-def _extract_skeleton(root: ET.Element) -> list[Joint]:
+def _extract_skeleton(root: ET.Element, messages: list[str]) -> list[Joint]:
     bones = root.findall(".//Bones/Bone")
     if not bones:
         return []
 
-    joints: list[Joint] = []
+    raw_bones: list[tuple[int, int | None, Vector3]] = []
     for bone in bones:
         bone_id = bone.attrib.get("ID")
         if bone_id is None or not bone_id.lstrip("-").isdigit():
             continue
         parent_id = bone.attrib.get("ParentID")
-        name = _joint_name_from_bone_id(int(bone_id))
-        parent = None
+        start_x = _find_float(bone, ("StartX",), default=None)
+        start_y = _find_float(bone, ("StartY",), default=None)
+        start_z = _find_float(bone, ("StartZ",), default=None)
+        if start_x is None or start_y is None or start_z is None:
+            messages.append(
+                f"missing_skeleton_transform: bone {bone_id} is missing StartX/StartY/StartZ required for rest pose authoring"
+            )
+            continue
+        parsed_parent_id = None
         if parent_id not in {None, "", "-1"} and parent_id.lstrip("-").isdigit():
-            parent = _joint_name_from_bone_id(int(parent_id))
+            parsed_parent_id = int(parent_id)
+        raw_bones.append(
+            (
+                int(bone_id),
+                parsed_parent_id,
+                Vector3(start_x, start_y, start_z),
+            )
+        )
+
+    start_by_id = {bone_id: start for bone_id, _, start in raw_bones}
+    joints: list[Joint] = []
+    for bone_id, parsed_parent_id, start in raw_bones:
+        parent = _joint_name_from_bone_id(parsed_parent_id) if parsed_parent_id is not None else None
+        if parsed_parent_id is None or parsed_parent_id not in start_by_id:
+            rest_translate = start
+        else:
+            parent_start = start_by_id[parsed_parent_id]
+            rest_translate = Vector3(
+                start.x - parent_start.x,
+                start.y - parent_start.y,
+                start.z - parent_start.z,
+            )
         joints.append(
             Joint(
-                name=name,
-                source_id=int(bone_id),
+                name=_joint_name_from_bone_id(bone_id),
+                source_id=bone_id,
                 parent=parent,
-                bind_translate=Vector3(
-                    _find_float(bone, ("EndX",), default=0.0) or 0.0,
-                    _find_float(bone, ("EndY",), default=0.0) or 0.0,
-                    _find_float(bone, ("EndZ",), default=0.0) or 0.0,
-                ),
+                bind_transform=Matrix4d.from_translation(start),
+                rest_transform=Matrix4d.from_translation(rest_translate),
             )
         )
     return joints
@@ -502,7 +530,7 @@ def _capture_token_from_joint(joint: Joint, fallback_index: int) -> str:
 def _binding_from_bone_id(source_bone_id: int | None) -> InstanceBinding:
     if source_bone_id is None:
         return InstanceBinding(joint_tokens=(), weights=())
-    token = _capture_token_from_bone_id(source_bone_id)
+    token = _joint_name_from_bone_id(source_bone_id)
     return InstanceBinding(joint_tokens=(token,), weights=(1.0,))
 
 
@@ -599,42 +627,63 @@ def _extract_lod_faces(node: ET.Element, mesh_name: str, messages: list[str]) ->
 
 def _extract_vertex_skinning(
     vertices_node: ET.Element | None,
+    point_indices: list[int],
     vertex_indices: list[int],
+    point_count: int,
     joint_index_by_source_id: dict[int, int],
     context: str,
     messages: list[str],
 ) -> tuple[list[int], list[float]]:
-    if vertices_node is None or not vertex_indices:
+    if vertices_node is None or not point_indices:
         return [], []
     source_bone_ids = _read_int_list(vertices_node.findtext("BoneID"))
     if not source_bone_ids:
         messages.append(f"packed_array_error: {context} missing BoneID payload for skeletal base mesh")
         return [], []
 
-    resolved_joint_indices: list[int] = []
-    resolved_joint_weights: list[float] = []
-    for vertex_index in vertex_indices:
+    if vertex_indices and len(vertex_indices) != len(point_indices):
+        messages.append(
+            f"packed_array_error: {context} point index count {len(point_indices)} does not match vertex index count {len(vertex_indices)}"
+        )
+    point_vertex_pairs = zip(point_indices, vertex_indices or point_indices, strict=False)
+
+    resolved_joint_indices = [0] * point_count
+    resolved_joint_weights = [1.0] * point_count
+    assigned_points = [False] * point_count
+
+    for point_index, vertex_index in point_vertex_pairs:
+        if point_index < 0 or point_index >= point_count:
+            messages.append(f"packed_array_error: {context} point index {point_index} exceeds point count {point_count}")
+            continue
         if vertex_index < 0 or vertex_index >= len(source_bone_ids):
             messages.append(f"packed_array_error: {context} vertex index {vertex_index} exceeds BoneID count {len(source_bone_ids)}")
-            resolved_joint_indices.append(0)
-            resolved_joint_weights.append(1.0)
             continue
         source_bone_id = source_bone_ids[vertex_index]
         if source_bone_id == -1:
             source_bone_id = 0
         elif source_bone_id < 0:
             messages.append(f"packed_array_error: {context} BoneID {source_bone_id} is not a valid skeletal binding")
-            resolved_joint_indices.append(0)
-            resolved_joint_weights.append(1.0)
             continue
         joint_index = joint_index_by_source_id.get(source_bone_id)
         if joint_index is None:
             messages.append(f"packed_array_error: {context} BoneID {source_bone_id} does not resolve to a skeleton joint")
-            resolved_joint_indices.append(0)
-            resolved_joint_weights.append(1.0)
             continue
-        resolved_joint_indices.append(joint_index)
-        resolved_joint_weights.append(1.0)
+
+        if assigned_points[point_index] and resolved_joint_indices[point_index] != joint_index:
+            messages.append(
+                f"packed_array_error: {context} point {point_index} resolves to conflicting skeletal joints "
+                f"{resolved_joint_indices[point_index]} and {joint_index}"
+            )
+            continue
+
+        resolved_joint_indices[point_index] = joint_index
+        resolved_joint_weights[point_index] = 1.0
+        assigned_points[point_index] = True
+
+    for point_index, assigned in enumerate(assigned_points):
+        if not assigned:
+            messages.append(f"packed_array_error: {context} point {point_index} did not resolve to any skeletal binding")
+
     return resolved_joint_indices, resolved_joint_weights
 
 

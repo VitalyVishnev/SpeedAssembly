@@ -17,6 +17,7 @@ from xml_to_usda.xml_reader import inspect_xml, read_source_xml, render_inspect_
 DATA_DIR = Path(__file__).parent / "data"
 SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "Samples" / "speedtree" / "simple_tree" / "variants" / "SimpleTree_01.xml"
 EXPECTED_BRANCH_1_FIRST_POINT = (6.012271, 18.755458, 527.466196)
+EXPECTED_FIRST_CHILD_JOINT_POSITION = (-0.409338, 1.30253, 58.5628)
 
 
 def test_inspect_report_tracks_structure_without_sample_specific_contracts() -> None:
@@ -35,7 +36,7 @@ def test_inspect_report_tracks_structure_without_sample_specific_contracts() -> 
     assert payload["base_mesh_part_count"] >= 2
     assert payload["base_mesh_point_count"] > 0
     assert payload["base_mesh_face_count"] > 0
-    assert payload["prototype_structure"] == "referenced_scope"
+    assert payload["prototype_structure"] == "inline_skeletal_twig"
     assert payload["binding_mode"] == "single_joint"
     assert payload["binding_element_size"] == 1
     assert set(payload["support_primvars"]) == {
@@ -68,10 +69,15 @@ def test_canonical_model_extracts_universal_tree_asset_shape() -> None:
     assert model.trunk_mesh == model.base_mesh
     assert model.base_mesh.skel_joint_indices
     assert model.base_mesh.skel_joint_weights
-    assert len(model.base_mesh.skel_joint_indices) == len(model.base_mesh.face_vertex_indices)
-    assert len(model.base_mesh.skel_joint_weights) == len(model.base_mesh.face_vertex_indices)
+    assert (model.skeleton[0].bind_translate.x, model.skeleton[0].bind_translate.y, model.skeleton[0].bind_translate.z) == pytest.approx((0.0, 0.0, 0.0))
+    assert (model.skeleton[0].rest_translate.x, model.skeleton[0].rest_translate.y, model.skeleton[0].rest_translate.z) == pytest.approx((0.0, 0.0, 0.0))
+    assert (model.skeleton[1].bind_translate.x, model.skeleton[1].bind_translate.y, model.skeleton[1].bind_translate.z) == pytest.approx(EXPECTED_FIRST_CHILD_JOINT_POSITION)
+    assert (model.skeleton[1].rest_translate.x, model.skeleton[1].rest_translate.y, model.skeleton[1].rest_translate.z) == pytest.approx(EXPECTED_FIRST_CHILD_JOINT_POSITION)
+    assert len(model.base_mesh.skel_joint_indices) == len(model.base_mesh.points)
+    assert len(model.base_mesh.skel_joint_weights) == len(model.base_mesh.points)
     assert all(leaf.binding.joint_tokens for leaf in model.leaf_instances)
     assert all(len(leaf.binding.joint_tokens) == len(leaf.binding.weights) for leaf in model.leaf_instances)
+    assert all(token.startswith("bone_") or token == "root" for leaf in model.leaf_instances for token in leaf.binding.joint_tokens)
     assert {prototype.source_key for prototype in model.prototypes} == {leaf.prototype_key for leaf in model.leaf_instances}
 
 
@@ -103,18 +109,23 @@ def test_usda_output_contains_ue_first_structure() -> None:
     assert 'upAxis = "Y"' in usda.text
     assert 'apiSchemas = ["NaniteAssemblyRootAPI"]' in usda.text
     assert 'uniform token unreal:naniteAssembly:meshType = "skeletalMesh"' in usda.text
-    assert 'custom rel unreal:naniteAssembly:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>' in usda.text
-    assert 'def Xform "Branches"' in usda.text
+    assert 'rel unreal:naniteAssembly:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>' in usda.text
     assert 'def SkelRoot "TrunkSkelRoot"' in usda.text
     assert 'def SkelAnimation "animation"' in usda.text
     assert 'def Skeleton "TrunkSkeleton"' in usda.text
     assert 'append rel skel:animationSource = </Tree/TrunkSkelRoot/animation>' in usda.text
-    assert 'apiSchemas = ["SkelBindingAPI"]' in usda.text
+    assert 'prepend apiSchemas = ["SkelBindingAPI"]' in usda.text
+    assert 'uniform token purpose = "guide"' in usda.text
+    assert 'uniform token visibility = "invisible"' in usda.text
     assert 'uniform token[] skel:joints = [' in usda.text
     assert 'uniform matrix4d primvars:skel:geomBindTransform = ' in usda.text
-    assert 'int[] primvars:skel:jointIndices = [' in usda.text
-    assert 'float[] primvars:skel:jointWeights = [' in usda.text
+    assert 'uniform int[] primvars:skel:jointIndices = [' in usda.text
+    assert 'uniform float[] primvars:skel:jointWeights = [' in usda.text
     assert 'uniform token primvars:skel:skinningMethod = "classicLinear"' in usda.text
+    assert 'uniform matrix4d[] bindTransforms = [' in usda.text
+    assert 'uniform matrix4d[] restTransforms = [' in usda.text
+    assert 'float3[] restTransforms:translations = [' not in usda.text
+    assert 'uniform token orientation = "leftHanded"' in usda.text
     assert 'interpolation = "vertex"' in usda.text
     assert 'primvars:boneCapture_pCaptPath' in usda.text
     assert 'primvars:ueJointNames' in usda.text
@@ -129,24 +140,31 @@ def test_usda_output_contains_ue_first_structure() -> None:
     assert 'interpolation = "vertex"' in usda.text
     assert 'quath[] orientations = [' in usda.text
     assert 'def Scope "Prototypes"' in usda.text
-    assert 'token visibility = "invisible"' in usda.text
-    assert 'append references = </Tree/Branches/Mesh_1>' in usda.text
-    assert 'token visibility = None' in usda.text
+    assert 'def Xform "Mesh_1"' in usda.text
+    assert 'def SkelRoot "Part_skelroot"' in usda.text
+    assert 'def Mesh "Part_mesh"' in usda.text
+    assert 'def Skeleton "skeleton"' in usda.text
+    bind_joints_payload = _slice_between(
+        usda.text,
+        'token[] primvars:unreal:naniteAssembly:bindJoints = [',
+        'int[] primvars:unreal:naniteAssembly:bindJoints:indices = None',
+    )
+    assert '"Tree_point_' not in bind_joints_payload
 
 
-def test_referenced_prototypes_clear_hidden_branch_library_visibility() -> None:
+def test_inline_prototypes_are_authored_under_instancer_scope() -> None:
     document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
     diagnostics = validate_model(model)
     usda = render_usda(model, diagnostics)
 
-    assert 'def Xform "Mesh_1" (' in usda.text
-    assert 'def Xform "Mesh_2" (' in usda.text
-    assert 'append references = </Tree/Branches/Mesh_1>' in usda.text
-    assert 'append references = </Tree/Branches/Mesh_2>' in usda.text
-    assert usda.text.index('token visibility = "invisible"') < usda.text.index('def PointInstancer "PartsInstancer"')
-    assert usda.text.index('token visibility = None') > usda.text.index('def Scope "Prototypes"')
+    assert 'def Xform "Branches"' not in usda.text
+    assert 'append references = </Tree/Branches/Mesh_1>' not in usda.text
+    assert 'append references = </Tree/Branches/Mesh_2>' not in usda.text
+    assert 'rel prototypes = [</Tree/PartsInstancer/Prototypes/Mesh_1>, </Tree/PartsInstancer/Prototypes/Mesh_2>]' in usda.text
+    assert usda.text.index('def Scope "Prototypes"') < usda.text.index('def Xform "Mesh_1"')
+    assert usda.text.index('def Xform "Mesh_1"') < usda.text.index('def SkelRoot "Part_skelroot"')
 
 
 def test_ue_schema_contract_matches_current_writer_contract() -> None:
@@ -159,7 +177,7 @@ def test_ue_schema_contract_matches_current_writer_contract() -> None:
     assert contract.binding_api == "NaniteAssemblySkelBindingAPI"
     assert contract.mesh_type_attr == "unreal:naniteAssembly:meshType"
     assert contract.root_kind == "component"
-    assert contract.skeleton_relationship_attr == "custom rel unreal:naniteAssembly:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>"
+    assert contract.skeleton_relationship_attr == "rel unreal:naniteAssembly:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>"
     assert contract.bind_joints_attr == "token[] primvars:unreal:naniteAssembly:bindJoints"
     assert contract.bind_weights_attr == "float[] primvars:unreal:naniteAssembly:bindJointWeights"
     assert contract.skinning_method_attr == "uniform token primvars:skel:skinningMethod"
@@ -180,9 +198,20 @@ def test_point_instancer_binding_attrs_use_path_like_joint_tokens() -> None:
     assert 'token[] primvars:unreal:naniteAssembly:bindJoints = [' in usda.text
     assert 'float[] primvars:unreal:naniteAssembly:bindJointWeights = [' in usda.text
     assert 'elementSize = 2' in usda.text
-    assert '"Tree_point_17"' in usda.text
-    assert '"Tree_point_104"' in usda.text
-    assert '0]' in usda.text or ', 0,' in usda.text
+    bind_joints_payload = _slice_between(
+        usda.text,
+        'token[] primvars:unreal:naniteAssembly:bindJoints = [',
+        'int[] primvars:unreal:naniteAssembly:bindJoints:indices = None',
+    )
+    bind_weights_payload = _slice_between(
+        usda.text,
+        'float[] primvars:unreal:naniteAssembly:bindJointWeights = [',
+        'int[] primvars:unreal:naniteAssembly:bindJointWeights:indices = None',
+    )
+    assert '"bone_017"' in bind_joints_payload
+    assert '"bone_104"' in bind_joints_payload
+    assert '"Tree_point_17"' not in bind_joints_payload
+    assert '0]' in bind_weights_payload or ', 0,' in bind_weights_payload
 
 
 def test_point_instancer_orientations_remain_non_uniform_and_deterministic() -> None:
@@ -236,11 +265,44 @@ def test_generated_usda_tracks_tutorial_reference_contract_without_houdini_only_
 
     assert 'kind = "component"' in usda.text
     assert 'uniform token primvars:skel:skinningMethod = "classicLinear"' in usda.text
+    assert 'uniform matrix4d[] restTransforms = [' in usda.text
+    assert 'float3[] translations = [(0, 0, 0),' in usda.text
     assert 'int[] primvars:unreal:naniteAssembly:bindJoints:indices = None' in usda.text
     assert 'int[] primvars:unreal:naniteAssembly:bindJointWeights:indices = None' in usda.text
     assert 'float primvars:pCaptFrame' not in usda.text
     assert 'string primvars:pCaptSkelRoot' not in usda.text
     assert 'NaniteAssemblyExternalRefAPI' not in usda.text
+    assert 'def SkelRoot "Part_skelroot"' in usda.text
+    assert 'def Mesh "Part_mesh"' in usda.text
+    assert 'def Skeleton "skeleton"' in usda.text
+
+
+def test_twig_prototypes_are_authored_as_single_joint_skeletal_meshes() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    diagnostics = validate_model(model)
+    usda = render_usda(model, diagnostics)
+
+    assert 'append rel skel:skeleton = </Tree/PartsInstancer/Prototypes/Mesh_1/Part_skelroot/skeleton>' in usda.text
+    assert 'uniform token[] joints = ["root"]' in usda.text
+    assert 'uniform token[] jointNames = ["root"]' in usda.text
+    assert 'uniform matrix4d[] bindTransforms = [( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )]' in usda.text
+    assert 'uniform matrix4d[] restTransforms = [( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )]' in usda.text
+    assert 'elementSize = 1' in usda.text
+    assert 'uniform token primvars:skel:skinningMethod = "classicLinear"' in usda.text
+
+
+def test_referenced_prototype_strategy_is_blocked_for_skeletal_twig_export() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    broken_model = replace(model, prototype_strategy=model.prototype_strategy.REFERENCED_SCOPE)
+    diagnostics = validate_model(broken_model)
+
+    assert any(issue.code == "unsupported_prototype_strategy" and issue.severity == "error" for issue in diagnostics)
+    with pytest.raises(ValueError, match="unsupported_prototype_strategy"):
+        render_usda(broken_model, diagnostics)
 
 
 def test_leaf_binding_distribution_maps_to_mesh_library_without_hardcoded_counts() -> None:
@@ -274,6 +336,7 @@ def test_base_mesh_skinning_indices_resolve_to_authored_skeleton_range() -> None
     assert model.base_mesh.skel_joint_indices
     assert min(model.base_mesh.skel_joint_indices) >= 0
     assert max(model.base_mesh.skel_joint_indices) < len(model.skeleton)
+    assert len(model.base_mesh.skel_joint_indices) == len(model.base_mesh.points)
 
 
 def test_missing_prototype_mesh_becomes_error_and_blocks_writer() -> None:
@@ -289,3 +352,9 @@ def test_missing_prototype_mesh_becomes_error_and_blocks_writer() -> None:
     assert any(issue.code == "missing_prototype_mesh" and issue.severity == "error" for issue in diagnostics)
     with pytest.raises(ValueError, match="missing_prototype_mesh"):
         render_usda(broken_model, diagnostics)
+
+
+def _slice_between(text: str, start: str, end: str) -> str:
+    start_index = text.index(start)
+    end_index = text.index(end, start_index)
+    return text[start_index:end_index]
