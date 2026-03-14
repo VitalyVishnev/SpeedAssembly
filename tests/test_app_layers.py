@@ -242,13 +242,63 @@ def test_gui_persists_material_paths_after_successful_conversion(
         root.destroy()
 
 
-def test_gui_invalid_material_path_blocks_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gui_persists_material_paths_without_running_conversion(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    settings_path = tmp_path / "gui_settings.json"
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
+
+    app = ConversionApp(root)
+    app.bark_material_var.set("/Game/Assembly/Custom/Bark_A.Bark_A")
+    app.leaves_material_var.set("/Game/Assembly/Custom/Leaves_A.Leaves_A")
+    app._handle_window_close()
+
+    assert settings_path.exists()
+    assert settings_path.read_text(encoding="utf-8") == (
+        '{\n'
+        '  "bark_material_path": "/Game/Assembly/Custom/Bark_A.Bark_A",\n'
+        '  "leaves_material_path": "/Game/Assembly/Custom/Leaves_A.Leaves_A"\n'
+        '}'
+    )
+
+
+def test_gui_persists_latest_field_edits_immediately(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    settings_path = tmp_path / "gui_settings.json"
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
+
+    try:
+        app = ConversionApp(root)
+        app.bark_material_var.set("/Game/Assembly/Latest/Bark_Final.Bark_Final")
+        app.leaves_material_var.set("/Game/Assembly/Latest/Leaves_Final.Leaves_Final")
+
+        assert settings_path.exists()
+        assert settings_path.read_text(encoding="utf-8") == (
+            '{\n'
+            '  "bark_material_path": "/Game/Assembly/Latest/Bark_Final.Bark_Final",\n'
+            '  "leaves_material_path": "/Game/Assembly/Latest/Leaves_Final.Leaves_Final"\n'
+            '}'
+        )
+    finally:
+        root.destroy()
+
+
+def test_gui_invalid_material_path_blocks_conversion(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _, root = _build_tk_root_or_skip()
     from xml_to_usda.gui import ConversionApp
 
     convert_mock = Mock()
     error_messages: list[str] = []
 
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
     monkeypatch.setattr("xml_to_usda.gui.convert_file", convert_mock)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda _title, message: error_messages.append(message))
@@ -267,13 +317,15 @@ def test_gui_invalid_material_path_blocks_conversion(monkeypatch: pytest.MonkeyP
         root.destroy()
 
 
-def test_gui_invalid_part_mesh_path_blocks_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gui_invalid_part_mesh_path_blocks_conversion(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _, root = _build_tk_root_or_skip()
     from xml_to_usda.gui import ConversionApp
 
     convert_mock = Mock()
     error_messages: list[str] = []
 
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
     monkeypatch.setattr("xml_to_usda.gui.convert_file", convert_mock)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda _title, message: error_messages.append(message))

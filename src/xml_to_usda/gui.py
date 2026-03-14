@@ -26,6 +26,7 @@ class ConversionApp:
         self._load_settings()
 
         self._build_layout()
+        self._install_persistence_hooks()
 
     def _build_layout(self) -> None:
         frame = ttk.Frame(self.root, padding=16)
@@ -206,6 +207,18 @@ class ConversionApp:
         state = "normal" if self.use_existing_part_meshes_var.get() else "disabled"
         self.part_mesh_mapping_widget.configure(state=state)
 
+    def _install_persistence_hooks(self) -> None:
+        self.bark_material_var.trace_add("write", self._handle_persisted_field_change)
+        self.leaves_material_var.trace_add("write", self._handle_persisted_field_change)
+        self.root.protocol("WM_DELETE_WINDOW", self._handle_window_close)
+
+    def _handle_persisted_field_change(self, *_args) -> None:
+        self._save_settings()
+
+    def _handle_window_close(self) -> None:
+        self._save_settings()
+        self.root.destroy()
+
     def _load_settings(self) -> None:
         settings = self._read_settings()
         self.bark_material_var.set(settings.get("bark_material_path", ""))
@@ -227,12 +240,16 @@ class ConversionApp:
         }
 
     def _save_settings(self) -> None:
-        self.SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "bark_material_path": self.bark_material_var.get().strip(),
-            "leaves_material_path": self.leaves_material_var.get().strip(),
-        }
-        self.SETTINGS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        try:
+            self.SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "bark_material_path": self.bark_material_var.get().strip(),
+                "leaves_material_path": self.leaves_material_var.get().strip(),
+            }
+            self.SETTINGS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError:
+            # Persistence must not block the GUI or conversion flow.
+            return
 
 
 def format_conversion_results(

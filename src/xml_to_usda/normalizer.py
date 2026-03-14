@@ -550,11 +550,10 @@ def _rebalance_assembly_part_prototype_scales(
     compensation_by_key: dict[str, float] = {}
     for entry in mesh_library:
         prototype_key = f"Mesh_{entry.mesh_id}"
-        compensation = entry.original_scale
-        if compensation is None or not math.isfinite(compensation) or compensation <= 1.0:
-            fallback_scale = observed_scale_by_key.get(prototype_key)
-            if fallback_scale is not None and math.isfinite(fallback_scale) and fallback_scale > 4.0:
-                compensation = fallback_scale
+        compensation = None
+        fallback_scale = observed_scale_by_key.get(prototype_key)
+        if fallback_scale is not None and math.isfinite(fallback_scale) and fallback_scale > 4.0:
+            compensation = fallback_scale
         if compensation is not None and math.isfinite(compensation) and compensation > 1.0:
             compensation_by_key[prototype_key] = compensation
 

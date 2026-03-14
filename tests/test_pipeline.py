@@ -8,8 +8,10 @@ from pathlib import Path
 import pytest
 
 from xml_to_usda.normalizer import normalize_to_canonical
-from xml_to_usda.models import MaterialSpec, MeshSection
+from xml_to_usda.models import AssemblyPartInstance, MaterialSpec, MeshLibraryEntry, MeshSection, Vector3
+from xml_to_usda.normalizer import _rebalance_assembly_part_prototype_scales
 from xml_to_usda.pipeline import convert_file, inspect_source, load_canonical_model
+from xml_to_usda.source_transform import build_source_transform
 from xml_to_usda.ue_schema import DEFAULT_UE_SCHEMA_CONTRACT
 from xml_to_usda.usda_writer import render_usda
 from xml_to_usda.validator import validate_model
@@ -21,8 +23,8 @@ SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "samples" / "speedtree" /
 LEAFREFS_ON_TRUNK = DATA_DIR / "leafrefs_on_trunk.xml"
 LEAFREFS_ON_BRANCH_LEVELS = DATA_DIR / "leafrefs_on_branch_levels.xml"
 INVALID_LEAF_BONE = DATA_DIR / "invalid_leaf_bone.xml"
-EXPECTED_BRANCH_1_FIRST_POINT = (0.06012271, 5.27466196, -0.18755458)
-EXPECTED_FIRST_CHILD_JOINT_POSITION = (-0.00409338, 0.585628, -0.0130253)
+EXPECTED_BRANCH_1_FIRST_POINT = (6.012271, 527.466196, -18.755458)
+EXPECTED_FIRST_CHILD_JOINT_POSITION = (-0.409338, 58.5628, -1.30253)
 
 
 def test_inspect_report_tracks_structure_without_sample_specific_contracts() -> None:
@@ -160,6 +162,73 @@ def test_face_varying_uvs_fall_back_to_point_indices_when_vertex_indices_are_mis
     assert [(uv.x, uv.y) for uv in uv_coords] == pytest.approx(
         [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (0.0, 0.0), (0.0, 1.0), (1.0, 0.0)]
     )
+
+
+def test_speedtree_xml_without_units_uses_meter_source_scale() -> None:
+    root = ET.fromstring(
+        """
+        <SpeedTreeRaw>
+            <Objects>
+                <Object>
+                    <LeafReferences>
+                        <Scale>100 100 100</Scale>
+                    </LeafReferences>
+                </Object>
+            </Objects>
+        </SpeedTreeRaw>
+        """
+    )
+
+    transform = build_source_transform(root, units_hint=None, up_axis_hint=None)
+
+    assert transform.source_units == "m"
+    assert transform.linear_scale == pytest.approx(1.0)
+
+
+def test_speedtree_xml_ignores_non_meter_units_hint_and_uses_meter_source_scale() -> None:
+    root = ET.fromstring(
+        """
+        <SpeedTreeRaw units="cm">
+            <Objects>
+                <Object>
+                    <LeafReferences>
+                        <Scale>0.72 0.81 1.05</Scale>
+                    </LeafReferences>
+                </Object>
+            </Objects>
+        </SpeedTreeRaw>
+        """
+    )
+
+    transform = build_source_transform(root, units_hint="cm", up_axis_hint=None)
+
+    assert transform.source_units == "m"
+    assert transform.linear_scale == pytest.approx(1.0)
+
+
+def test_original_scale_does_not_upscale_prototypes_when_instance_scales_are_near_one() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    assert model.mesh_library
+    assert model.assembly_parts
+
+    near_one_parts = tuple(
+        replace(part, scale=Vector3(1.0, 1.0, 1.0))
+        for part in model.assembly_parts
+        if part.prototype_key == "Mesh_1"
+    )
+    untouched_parts = tuple(part for part in model.assembly_parts if part.prototype_key != "Mesh_1")
+    assembly_parts = near_one_parts + untouched_parts
+
+    entry = next(entry for entry in model.mesh_library if entry.mesh_id == 1)
+    original_first_point = entry.mesh.points[0]
+
+    rebalanced_parts, rebalanced_library = _rebalance_assembly_part_prototype_scales(assembly_parts, model.mesh_library)
+    rebalanced_entry = next(entry for entry in rebalanced_library if entry.mesh_id == 1)
+
+    assert rebalanced_entry.mesh.points[0] == original_first_point
+    assert next(part for part in rebalanced_parts if part.prototype_key == "Mesh_1").scale == Vector3(1.0, 1.0, 1.0)
 
 
 def test_usda_output_contains_ue_first_structure() -> None:

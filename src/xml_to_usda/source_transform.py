@@ -88,7 +88,9 @@ class SourceTransform:
 
 
 def build_source_transform(root: ET.Element, units_hint: str | None, up_axis_hint: str | None) -> SourceTransform:
-    source_units = _normalize_units(units_hint) or "cm"
+    # Phase 1 importer contract now assumes SpeedTree XML exports are authored in meters.
+    # We keep the USDA stage in meters as well, so no unit rescale should be applied here.
+    source_units = "m"
     source_up_axis = _normalize_up_axis(up_axis_hint) or _infer_up_axis_from_mesh_orientation(root) or "Z"
     return SourceTransform(
         source_units=source_units,
@@ -118,3 +120,4 @@ def _infer_up_axis_from_mesh_orientation(root: ET.Element) -> str | None:
         if orient.endswith("Z"):
             return "Z"
     return None
+
