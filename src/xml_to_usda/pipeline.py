@@ -24,6 +24,8 @@ def inspect_source(input_path: str) -> ObservedXmlSchemaReport:
         base_mesh_part_count=len(model.base_tree_parts),
         base_mesh_point_count=len(model.base_mesh.points) if model.base_mesh is not None else 0,
         base_mesh_face_count=len(model.base_mesh.face_vertex_counts) if model.base_mesh is not None else 0,
+        base_material_distribution=_mesh_material_distribution(model.base_mesh),
+        prototype_material_distribution=_prototype_material_distribution(model),
         prototype_structure=model.prototype_strategy.value,
         binding_mode=model.binding_mode,
         binding_element_size=model.binding_element_size,
@@ -137,3 +139,20 @@ def _support_primvars(model: CanonicalTreeModel) -> tuple[str, ...]:
     if model.skeletal_support_primvars is None:
         return ()
     return ("boneCapture_pCaptPath", "ueJointNames", "hierarchicalDepth", "logicalDepth", "localtransform")
+
+
+def _mesh_material_distribution(mesh) -> dict[str, int]:
+    if mesh is None:
+        return {}
+    return {str(section.material_id): len(section.face_indices) for section in mesh.sections}
+
+
+def _prototype_material_distribution(model: CanonicalTreeModel) -> dict[str, int]:
+    distribution: dict[str, int] = {}
+    for prototype in model.prototypes:
+        if prototype.mesh is None:
+            continue
+        for section in prototype.mesh.sections:
+            key = str(section.material_id)
+            distribution[key] = distribution.get(key, 0) + len(section.face_indices)
+    return dict(sorted(distribution.items(), key=lambda item: int(item[0]) if item[0].lstrip("-").isdigit() else item[0]))

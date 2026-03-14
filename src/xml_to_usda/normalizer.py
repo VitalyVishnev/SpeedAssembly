@@ -2,6 +2,7 @@
 
 import math
 import xml.etree.ElementTree as ET
+from collections import defaultdict
 from dataclasses import replace
 
 from .naming import build_prototype_identities
@@ -14,9 +15,11 @@ from .models import (
     ExportMetadata,
     InstanceBinding,
     Joint,
+    MaterialSpec,
     Matrix4d,
     MeshData,
     MeshLibraryEntry,
+    MeshSection,
     ObservedXmlSchemaReport,
     Prototype,
     PrototypeStrategy,
@@ -34,19 +37,25 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
     data_messages: list[str] = []
     # Stage metadata alone is not enough. Every spatial payload must be remapped into stage space here.
     source_transform = build_source_transform(root, report.units_hint, report.up_axis_hint)
+    materials = tuple(_extract_materials(root))
+    material_ids = {material.source_id for material in materials}
 
     skeleton = tuple(_extract_skeleton(root, data_messages, source_transform))
     joint_index_by_source_id = {
         joint.source_id: index for index, joint in enumerate(skeleton) if joint.source_id is not None
     }
-    source_objects = tuple(_extract_source_objects(root, data_messages, joint_index_by_source_id, source_transform))
-    mesh_library = tuple(_extract_mesh_library(root, data_messages, source_transform))
+    source_objects = tuple(
+        _extract_source_objects(root, data_messages, joint_index_by_source_id, source_transform, material_ids)
+    )
+    mesh_library = tuple(_extract_mesh_library(root, data_messages, source_transform, material_ids))
     base_mesh, base_tree_parts = _build_base_mesh(source_objects)
     # The project contract treats LeafReferences as the source of repeated Assembly Parts.
-    assembly_parts = tuple(_extract_assembly_parts_from_leaf_references(root, data_messages, source_transform))
+    assembly_parts = tuple(
+        _extract_assembly_parts_from_leaf_references(root, data_messages, source_transform, material_ids)
+    )
     assembly_parts, mesh_library = _rebalance_assembly_part_prototype_scales(assembly_parts, mesh_library)
     branch_segments = tuple(_extract_branch_segments(source_objects, skeleton))
-    prototypes = tuple(_build_prototypes(assembly_parts, mesh_library))
+    prototypes = tuple(_build_prototypes(assembly_parts, mesh_library, data_messages))
     skeletal_support_primvars = _build_skeletal_support_primvars(skeleton)
     spines = tuple(source_object.spine for source_object in source_objects if source_object.spine is not None)
 
@@ -61,6 +70,7 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
 
     return CanonicalTreeModel(
         metadata=metadata,
+        materials=materials,
         source_objects=source_objects,
         base_mesh=base_mesh,
         skeleton=skeleton,
@@ -90,6 +100,28 @@ def _metadata_warnings(report: ObservedXmlSchemaReport) -> list[str]:
     return warnings
 
 
+def _extract_materials(root: ET.Element) -> list[MaterialSpec]:
+    materials: list[MaterialSpec] = []
+    for material_node in root.findall(".//Materials/Material"):
+        source_id = material_node.attrib.get("ID")
+        if source_id is None or not source_id.lstrip("-").isdigit():
+            continue
+        maps: list[tuple[str, tuple[tuple[str, str], ...]]] = []
+        for map_node in material_node.findall("Map"):
+            map_name = map_node.attrib.get("Name", "Map")
+            payload = tuple(sorted((key, value) for key, value in map_node.attrib.items() if key != "Name"))
+            maps.append((map_name, payload))
+        materials.append(
+            MaterialSpec(
+                source_id=int(source_id),
+                name=material_node.attrib.get("Name", f"Material_{source_id}"),
+                two_sided=material_node.attrib.get("TwoSided") == "1",
+                maps=tuple(maps),
+            )
+        )
+    return materials
+
+
 def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData | None, tuple[BaseTreePart, ...]]:
     candidates = [
         source_object
@@ -105,6 +137,7 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
     merged_face_indices: list[int] = []
     merged_joint_indices: list[int] = []
     merged_joint_weights: list[float] = []
+    merged_sections: dict[int, list[int]] = defaultdict(list)
     merged_parts: list[BaseTreePart] = []
 
     for source_object in candidates:
@@ -119,6 +152,8 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
         merged_face_indices.extend(index + point_offset for index in mesh.face_vertex_indices)
         merged_joint_indices.extend(mesh.skel_joint_indices)
         merged_joint_weights.extend(mesh.skel_joint_weights)
+        for section in mesh.sections:
+            merged_sections[section.material_id].extend(face_offset + face_index for face_index in section.face_indices)
         merged_parts.append(
             BaseTreePart(
                 object_id=source_object.object_id,
@@ -138,6 +173,7 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
             points=tuple(merged_points),
             face_vertex_counts=tuple(merged_face_counts),
             face_vertex_indices=tuple(merged_face_indices),
+            sections=_ordered_sections(merged_sections),
             skel_joint_indices=tuple(merged_joint_indices),
             skel_joint_weights=tuple(merged_joint_weights),
             skel_element_size=1 if merged_joint_indices else 0,
@@ -151,13 +187,14 @@ def _extract_source_objects(
     messages: list[str],
     joint_index_by_source_id: dict[int, int],
     source_transform: SourceTransform,
+    material_ids: set[int],
 ) -> list[SourceObject]:
     source_objects: list[SourceObject] = []
     for obj in root.findall(".//Object"):
         object_id = obj.attrib.get("ID")
         if object_id is None:
             continue
-        mesh = _extract_object_mesh(obj, messages, joint_index_by_source_id, source_transform)
+        mesh = _extract_object_mesh(obj, messages, joint_index_by_source_id, source_transform, material_ids)
         leaf_count = _count_packed_values(obj.find("LeafReferences"), "X")
         spine = _extract_spine(obj, object_id, messages, source_transform)
         source_objects.append(
@@ -176,7 +213,12 @@ def _extract_source_objects(
     return source_objects
 
 
-def _extract_mesh_library(root: ET.Element, messages: list[str], source_transform: SourceTransform) -> list[MeshLibraryEntry]:
+def _extract_mesh_library(
+    root: ET.Element,
+    messages: list[str],
+    source_transform: SourceTransform,
+    material_ids: set[int],
+) -> list[MeshLibraryEntry]:
     entries: list[MeshLibraryEntry] = []
     for mesh in root.findall(".//Meshes/Mesh"):
         mesh_id = mesh.attrib.get("ID")
@@ -196,6 +238,7 @@ def _extract_mesh_library(root: ET.Element, messages: list[str], source_transfor
             lod,
             messages,
             source_transform,
+            material_ids,
         )
         if mesh_data is not None:
             entries.append(
@@ -214,6 +257,7 @@ def _extract_object_mesh(
     messages: list[str],
     joint_index_by_source_id: dict[int, int],
     source_transform: SourceTransform,
+    material_ids: set[int],
 ) -> MeshData | None:
     points_node = obj.find("Points")
     triangles_node = obj.find("Triangles")
@@ -228,6 +272,7 @@ def _extract_object_mesh(
         joint_index_by_source_id,
         messages,
         source_transform,
+        material_ids,
     )
 
 
@@ -239,9 +284,15 @@ def _build_mesh_data(
     joint_index_by_source_id: dict[int, int],
     messages: list[str],
     source_transform: SourceTransform,
+    material_ids: set[int],
 ) -> MeshData | None:
     points = _extract_packed_points(points_node, f"{name}.points", messages, source_transform)
-    face_counts, face_indices, vertex_indices = _extract_packed_triangles(triangles_node, f"{name}.triangles", messages)
+    face_counts, face_indices, vertex_indices, sections = _extract_packed_triangles(
+        triangles_node,
+        f"{name}.triangles",
+        messages,
+        material_ids,
+    )
     if not points or not face_counts or not face_indices:
         return None
     joint_indices, joint_weights = _extract_vertex_skinning(
@@ -253,7 +304,7 @@ def _build_mesh_data(
         f"{name}.vertices",
         messages,
     )
-    return _build_mesh_from_faces(name, points, face_counts, face_indices, joint_indices, joint_weights)
+    return _build_mesh_from_faces(name, points, face_counts, face_indices, sections, joint_indices, joint_weights)
 
 
 def _build_library_mesh_data(
@@ -262,12 +313,13 @@ def _build_library_mesh_data(
     lod_node: ET.Element,
     messages: list[str],
     source_transform: SourceTransform,
+    material_ids: set[int],
 ) -> MeshData | None:
     points = _extract_packed_points(points_node, f"{name}.points", messages, source_transform)
-    face_counts, face_indices = _extract_lod_faces(lod_node, name, messages)
+    face_counts, face_indices, sections = _extract_lod_faces(lod_node, name, messages, material_ids)
     if not points or not face_counts or not face_indices:
         return None
-    return _build_mesh_from_faces(name, points, face_counts, face_indices)
+    return _build_mesh_from_faces(name, points, face_counts, face_indices, sections)
 
 
 def _build_mesh_from_faces(
@@ -275,6 +327,7 @@ def _build_mesh_from_faces(
     points: list[Vector3],
     face_counts: list[int],
     face_indices: list[int],
+    sections: tuple[MeshSection, ...],
     joint_indices: list[int] | None = None,
     joint_weights: list[float] | None = None,
 ) -> MeshData:
@@ -283,6 +336,7 @@ def _build_mesh_from_faces(
         points=tuple(points),
         face_vertex_counts=tuple(face_counts),
         face_vertex_indices=tuple(face_indices),
+        sections=sections,
         skel_joint_indices=tuple(joint_indices or ()),
         skel_joint_weights=tuple(joint_weights or ()),
         skel_element_size=1 if joint_indices else 0,
@@ -365,6 +419,7 @@ def _extract_assembly_parts_from_leaf_references(
     root: ET.Element,
     messages: list[str],
     source_transform: SourceTransform,
+    material_ids: set[int],
 ) -> list[AssemblyPartInstance]:
     assembly_parts: list[AssemblyPartInstance] = []
     for obj in root.findall(".//Object"):
@@ -383,6 +438,7 @@ def _extract_assembly_parts_from_leaf_references(
         mesh_ids = _read_int_list(leaf_ref_node.findtext("MeshID"))
         mesh_lods = _read_int_list(leaf_ref_node.findtext("MeshLOD"))
         bone_ids = _read_int_list(leaf_ref_node.findtext("BoneID"))
+        source_material_id = _read_material_id(leaf_ref_node, f"LeafReferences[{obj.attrib.get('Name', obj.attrib.get('ID', '?'))}]", messages, material_ids)
 
         count = _consistent_count(
             f"LeafReferences[{obj.attrib.get('Name', obj.attrib.get('ID', '?'))}]",
@@ -427,6 +483,7 @@ def _extract_assembly_parts_from_leaf_references(
                     binding=binding,
                     source_object_id=obj.attrib.get("ID"),
                     source_mesh_id=source_mesh_id,
+                    source_material_id=source_material_id,
                     source_bone_ids=(source_bone_id,) if source_bone_id is not None else (),
                     mesh_lod=mesh_lods[index] if index < len(mesh_lods) else None,
                 )
@@ -519,19 +576,27 @@ def _assembly_part_scale_medians(assembly_parts: tuple[AssemblyPartInstance, ...
 def _build_prototypes(
     assembly_parts: tuple[AssemblyPartInstance, ...],
     mesh_library: tuple[MeshLibraryEntry, ...],
+    messages: list[str],
 ) -> list[Prototype]:
     if not assembly_parts:
         return []
     source_keys = tuple(dict.fromkeys(part.prototype_key for part in assembly_parts))
     identities = build_prototype_identities(list(source_keys))
     meshes_by_key = {f"Mesh_{entry.mesh_id}": entry for entry in mesh_library}
+    fallback_materials: dict[str, set[int]] = defaultdict(set)
+    for part in assembly_parts:
+        if part.source_material_id is not None:
+            fallback_materials[part.prototype_key].add(part.source_material_id)
     prototypes: list[Prototype] = []
     for identity in identities:
         entry = meshes_by_key.get(identity.source_key)
+        mesh = entry.mesh if entry is not None else None
+        if mesh is not None:
+            mesh = _apply_fallback_material_sections(mesh, identity.source_key, fallback_materials.get(identity.source_key, set()), messages)
         prototypes.append(
             Prototype(
                 identity=identity,
-                mesh=entry.mesh if entry is not None else None,
+                mesh=mesh,
                 source_key=identity.source_key,
                 source_mesh_id=entry.mesh_id if entry is not None else None,
                 source_name=entry.name if entry is not None else identity.source_key,
@@ -681,13 +746,18 @@ def _extract_packed_points(
     return [source_transform.point_to_stage(Vector3(xs[index], ys[index], zs[index])) for index in range(count)]
 
 
-def _extract_packed_triangles(node: ET.Element, context: str, messages: list[str]) -> tuple[list[int], list[int], list[int]]:
+def _extract_packed_triangles(
+    node: ET.Element,
+    context: str,
+    messages: list[str],
+    material_ids: set[int],
+) -> tuple[list[int], list[int], list[int], tuple[MeshSection, ...]]:
     point_indices = _read_int_list(node.findtext("PointIndices") or node.findtext("TriangleIndices"))
     vertex_indices = _read_int_list(node.findtext("VertexIndices"))
     indices = point_indices or vertex_indices
     if not indices:
         messages.append(f"packed_array_error: {context} does not contain triangle indices")
-        return [], [], []
+        return [], [], [], ()
     if len(indices) % 3 != 0:
         messages.append(f"packed_array_error: {context} index count {len(indices)} is not divisible by 3")
         indices = indices[: len(indices) - (len(indices) % 3)]
@@ -703,36 +773,73 @@ def _extract_packed_triangles(node: ET.Element, context: str, messages: list[str
             indices = indices[:limit]
             vertex_indices = vertex_indices[:limit]
     counts = [3] * (len(indices) // 3)
-    return counts, indices, vertex_indices
+    material_id = _read_material_id(node, context, messages, material_ids)
+    sections = _single_material_sections(material_id, len(counts))
+    return counts, indices, vertex_indices, sections
 
 
-def _extract_lod_faces(node: ET.Element, mesh_name: str, messages: list[str]) -> tuple[list[int], list[int]]:
+def _extract_lod_faces(
+    node: ET.Element,
+    mesh_name: str,
+    messages: list[str],
+    material_ids: set[int],
+) -> tuple[list[int], list[int], tuple[MeshSection, ...]]:
     face_counts: list[int] = []
     face_indices: list[int] = []
+    sections_by_material: dict[int, list[int]] = defaultdict(list)
+    face_offset = 0
 
-    triangle_indices = _read_int_list(node.findtext("TriangleIndices"))
-    if triangle_indices:
+    for triangles_node in node.findall("Triangles"):
+        triangle_indices = _read_int_list(triangles_node.findtext("PointIndices") or triangles_node.findtext("TriangleIndices"))
+        if not triangle_indices:
+            continue
         if len(triangle_indices) % 3 != 0:
             messages.append(
-                f"packed_array_error: {mesh_name}.TriangleIndices index count {len(triangle_indices)} is not divisible by 3"
+                f"packed_array_error: {mesh_name}.Triangles index count {len(triangle_indices)} is not divisible by 3"
             )
             triangle_indices = triangle_indices[: len(triangle_indices) - (len(triangle_indices) % 3)]
-        face_counts.extend([3] * (len(triangle_indices) // 3))
+        triangle_count = len(triangle_indices) // 3
+        face_counts.extend([3] * triangle_count)
         face_indices.extend(triangle_indices)
+        material_id = _read_material_id(triangles_node, f"{mesh_name}.Triangles", messages, material_ids)
+        if material_id is not None:
+            sections_by_material[material_id].extend(range(face_offset, face_offset + triangle_count))
+        face_offset += triangle_count
 
     quad_indices = _read_int_list(node.findtext("QuadIndices"))
     if quad_indices:
         if len(quad_indices) % 4 != 0:
             messages.append(f"packed_array_error: {mesh_name}.QuadIndices index count {len(quad_indices)} is not divisible by 4")
             quad_indices = quad_indices[: len(quad_indices) - (len(quad_indices) % 4)]
-        face_counts.extend([4] * (len(quad_indices) // 4))
+        quad_count = len(quad_indices) // 4
+        face_counts.extend([4] * quad_count)
         face_indices.extend(quad_indices)
+        material_id = _read_material_id(node, f"{mesh_name}.QuadIndices", messages, material_ids)
+        if material_id is not None:
+            sections_by_material[material_id].extend(range(face_offset, face_offset + quad_count))
+        face_offset += quad_count
+
+    if not face_indices:
+        triangle_indices = _read_int_list(node.findtext("TriangleIndices"))
+        if triangle_indices:
+            if len(triangle_indices) % 3 != 0:
+                messages.append(
+                    f"packed_array_error: {mesh_name}.TriangleIndices index count {len(triangle_indices)} is not divisible by 3"
+                )
+                triangle_indices = triangle_indices[: len(triangle_indices) - (len(triangle_indices) % 3)]
+            triangle_count = len(triangle_indices) // 3
+            face_counts.extend([3] * triangle_count)
+            face_indices.extend(triangle_indices)
+            material_id = _read_material_id(node, f"{mesh_name}.TriangleIndices", messages, material_ids)
+            if material_id is not None:
+                sections_by_material[material_id].extend(range(face_offset, face_offset + triangle_count))
+            face_offset += triangle_count
 
     if not face_indices:
         messages.append(f"packed_array_error: mesh {mesh_name} does not contain any triangle or quad indices")
-        return [], []
+        return [], [], ()
 
-    return face_counts, face_indices
+    return face_counts, face_indices, _ordered_sections(sections_by_material)
 
 
 def _extract_vertex_skinning(
@@ -795,6 +902,61 @@ def _extract_vertex_skinning(
             messages.append(f"packed_array_error: {context} point {point_index} did not resolve to any skeletal binding")
 
     return resolved_joint_indices, resolved_joint_weights
+
+
+def _read_material_id(
+    node: ET.Element,
+    context: str,
+    messages: list[str],
+    material_ids: set[int],
+) -> int | None:
+    raw_material_id = node.attrib.get("Material")
+    if raw_material_id is None:
+        return None
+    if not raw_material_id.lstrip("-").isdigit():
+        messages.append(f"invalid_material_id: {context} uses non-numeric material id {raw_material_id!r}")
+        return None
+    material_id = int(raw_material_id)
+    if material_id not in material_ids:
+        messages.append(f"missing_material_definition: {context} references undefined material id {material_id}")
+    return material_id
+
+
+def _single_material_sections(material_id: int | None, face_count: int) -> tuple[MeshSection, ...]:
+    if material_id is None or face_count <= 0:
+        return ()
+    return (MeshSection(material_id=material_id, face_indices=tuple(range(face_count))),)
+
+
+def _ordered_sections(sections_by_material: dict[int, list[int]]) -> tuple[MeshSection, ...]:
+    return tuple(
+        MeshSection(material_id=material_id, face_indices=tuple(sorted(face_indices)))
+        for material_id, face_indices in sorted(sections_by_material.items())
+        if face_indices
+    )
+
+
+def _apply_fallback_material_sections(
+    mesh: MeshData,
+    prototype_key: str,
+    fallback_material_ids: set[int],
+    messages: list[str],
+) -> MeshData:
+    if mesh.sections:
+        if fallback_material_ids and {section.material_id for section in mesh.sections} != fallback_material_ids:
+            messages.append(
+                f"material_conflict: prototype {prototype_key} uses mesh-authored material ids "
+                f"{sorted(section.material_id for section in mesh.sections)} over LeafReferences ids {sorted(fallback_material_ids)}"
+            )
+        return mesh
+    if not fallback_material_ids:
+        return mesh
+    if len(fallback_material_ids) > 1:
+        messages.append(
+            f"material_conflict: prototype {prototype_key} has multiple LeafReferences material ids {sorted(fallback_material_ids)} without mesh-authored sections"
+        )
+    chosen_material_id = min(fallback_material_ids)
+    return replace(mesh, sections=_single_material_sections(chosen_material_id, len(mesh.face_vertex_counts)))
 
 
 def _consistent_count(

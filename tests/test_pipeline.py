@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from xml_to_usda.normalizer import normalize_to_canonical
+from xml_to_usda.models import MaterialSpec, MeshSection
 from xml_to_usda.pipeline import inspect_source
 from xml_to_usda.ue_schema import DEFAULT_UE_SCHEMA_CONTRACT
 from xml_to_usda.usda_writer import render_usda
@@ -33,6 +34,9 @@ def test_inspect_report_tracks_structure_without_sample_specific_contracts() -> 
     assert "Spine" not in payload["unknown_sections"]
     assert payload["leaf_binding_distribution"]
     assert payload["leaf_mesh_distribution"]
+    assert payload["material_count"] == 2
+    assert payload["base_material_distribution"] == {"0": payload["base_mesh_face_count"]}
+    assert payload["prototype_material_distribution"]["2"] > 0
     assert payload["base_geometry_mode"] == "merged"
     assert payload["base_mesh_part_count"] >= 2
     assert payload["base_mesh_point_count"] > 0
@@ -56,6 +60,7 @@ def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
     model = normalize_to_canonical(document, report)
 
     assert model.base_mesh is not None
+    assert len(model.materials) == 2
     assert model.source_objects
     assert model.skeleton
     assert model.base_tree_parts
@@ -74,6 +79,12 @@ def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
     assert (model.skeleton[1].rest_translate.x, model.skeleton[1].rest_translate.y, model.skeleton[1].rest_translate.z) == pytest.approx(EXPECTED_FIRST_CHILD_JOINT_POSITION)
     assert len(model.base_mesh.skel_joint_indices) == len(model.base_mesh.points)
     assert len(model.base_mesh.skel_joint_weights) == len(model.base_mesh.points)
+    assert {material.source_id for material in model.materials} == {0, 2}
+    assert {section.material_id for section in model.base_mesh.sections} == {0}
+    assert all(
+        prototype.mesh is not None and {section.material_id for section in prototype.mesh.sections} == {2}
+        for prototype in model.prototypes
+    )
     assert all(part.binding.joint_tokens for part in model.assembly_parts)
     assert all(len(part.binding.joint_tokens) == len(part.binding.weights) for part in model.assembly_parts)
     assert all(token.startswith("bone_") or token == "root" for part in model.assembly_parts for token in part.binding.joint_tokens)
@@ -110,6 +121,9 @@ def test_usda_output_contains_ue_first_structure() -> None:
     assert 'apiSchemas = ["NaniteAssemblyRootAPI"]' in usda.text
     assert 'uniform token unreal:naniteAssembly:meshType = "skeletalMesh"' in usda.text
     assert 'rel unreal:naniteAssembly:skeleton = </Tree/BaseTreeSkelRoot/MainSkeleton>' in usda.text
+    assert 'def Scope "Materials"' in usda.text
+    assert 'def Material "Material_0_0"' in usda.text
+    assert 'def Material "Material_2_2"' in usda.text
     assert 'def SkelRoot "BaseTreeSkelRoot"' in usda.text
     assert 'def SkelAnimation "BaseTreeAnimation"' in usda.text
     assert 'def Skeleton "MainSkeleton"' in usda.text
@@ -125,6 +139,8 @@ def test_usda_output_contains_ue_first_structure() -> None:
     assert 'uniform matrix4d[] bindTransforms = [' in usda.text
     assert 'uniform matrix4d[] restTransforms = [' in usda.text
     assert 'float3[] restTransforms:translations = [' not in usda.text
+    assert 'rel material:binding = </Tree/Materials/Material_0_0>' in usda.text
+    assert 'rel material:binding = </Tree/Materials/Material_2_2>' in usda.text
     assert 'uniform token orientation = "rightHanded"' in usda.text
     assert 'interpolation = "vertex"' in usda.text
     assert 'primvars:boneCapture_pCaptPath' in usda.text
@@ -349,6 +365,7 @@ def test_leaf_binding_distribution_maps_to_mesh_library_without_hardcoded_counts
     mesh_ids = {entry.mesh_id for entry in model.mesh_library}
     assert all(part.source_mesh_id in mesh_ids for part in model.assembly_parts if part.source_mesh_id is not None)
     assert sum(1 for part in model.assembly_parts if part.source_bone_id is not None) == len(model.assembly_parts)
+    assert all(part.source_material_id == 2 for part in model.assembly_parts)
 
 
 def test_spines_are_optional_source_data_for_writer() -> None:
@@ -388,6 +405,39 @@ def test_missing_prototype_mesh_becomes_error_and_blocks_writer() -> None:
     assert any(issue.code == "missing_prototype_mesh" and issue.severity == "error" for issue in diagnostics)
     with pytest.raises(ValueError, match="missing_prototype_mesh"):
         render_usda(broken_model, diagnostics)
+
+
+def test_multi_material_prototype_authors_geom_subsets() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    prototype = model.prototypes[0]
+    assert prototype.mesh is not None
+
+    synthetic_mesh = replace(
+        prototype.mesh,
+        sections=(
+            MeshSection(material_id=0, face_indices=(0,)),
+            MeshSection(material_id=2, face_indices=tuple(range(1, len(prototype.mesh.face_vertex_counts)))),
+        ),
+    )
+    synthetic_model = replace(
+        model,
+        materials=(
+            MaterialSpec(source_id=0, name="Default_Mat"),
+            MaterialSpec(source_id=2, name="Twigs_Mat"),
+        ),
+        prototypes=(replace(prototype, mesh=synthetic_mesh),) + model.prototypes[1:],
+    )
+
+    diagnostics = validate_model(synthetic_model)
+    usda = render_usda(synthetic_model, diagnostics)
+
+    assert 'uniform token subsetFamily:materialBind:familyType = "nonOverlapping"' in usda.text
+    assert 'def GeomSubset "Material_0_0"' in usda.text
+    assert 'def GeomSubset "Material_2_2"' in usda.text
+    assert 'uniform token familyName = "materialBind"' in usda.text
+    assert 'uniform token elementType = "face"' in usda.text
 
 
 def _slice_between(text: str, start: str, end: str) -> str:

@@ -120,6 +120,7 @@ def inspect_xml(document: SourceXmlDocument) -> ObservedXmlSchemaReport:
         spine_object_count=spine_object_count,
         leaf_binding_distribution=leaf_binding_distribution,
         leaf_mesh_distribution=leaf_mesh_distribution,
+        material_count=len(root.findall(".//Materials/Material")),
     )
 
 
@@ -146,6 +147,9 @@ def render_inspect_report(report: ObservedXmlSchemaReport) -> str:
         "spine_object_count": report.spine_object_count,
         "leaf_binding_distribution": report.leaf_binding_distribution,
         "leaf_mesh_distribution": report.leaf_mesh_distribution,
+        "material_count": report.material_count,
+        "base_material_distribution": report.base_material_distribution,
+        "prototype_material_distribution": report.prototype_material_distribution,
         "tag_counts": report.tag_counts,
         "attributes_by_tag": {k: list(v) for k, v in report.attributes_by_tag.items()},
     }

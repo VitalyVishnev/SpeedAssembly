@@ -4,7 +4,9 @@ from .models import (
     AssemblyPartInstance,
     CanonicalTreeModel,
     InstanceBinding,
+    MaterialSpec,
     MeshData,
+    MeshSection,
     Prototype,
     PrototypeStrategy,
     SkeletalSupportPrimvars,
@@ -29,6 +31,7 @@ def render_usda(
     base_mesh = _render_base_mesh(model, contract)
     main_skeleton = _render_main_skeleton(model, contract)
     point_instancer = _render_point_instancer(model, contract)
+    materials = _render_materials_scope(model.materials)
     prototype_library = (
         _render_prototype_library(model, contract) if model.prototype_strategy == PrototypeStrategy.REFERENCED_SCOPE else ""
     )
@@ -48,6 +51,8 @@ def Xform "{contract.root_prim_name}" (
 {{
     uniform token {contract.mesh_type_attr} = "{contract.mesh_type_value}"
     {contract.skeleton_relationship_attr}
+
+{_indent(materials, 1)}
 
 {_indent(prototype_library, 1)}
 
@@ -72,6 +77,46 @@ def Xform "{contract.root_prim_name}" (
     return UsdAssemblyDocument(text=text, diagnostics=diagnostics)
 
 
+def _render_materials_scope(materials: tuple[MaterialSpec, ...]) -> str:
+    if not materials:
+        return ""
+    definitions = "\n".join(_render_material(material) for material in materials)
+    return f'''def Scope "Materials"
+{{
+{definitions}
+}}'''
+
+
+def _render_material(material: MaterialSpec) -> str:
+    return f'''    def Material "{_material_prim_name_from_id(material.source_id)}"
+    {{
+    }}'''
+
+
+def _render_material_binding(mesh: MeshData) -> str:
+    if not mesh.sections:
+        return ""
+    if len(mesh.sections) == 1:
+        section = mesh.sections[0]
+        return f'rel material:binding = </Tree/Materials/{_material_prim_name_from_id(section.material_id)}>'
+    subsets = "\n".join(_render_geom_subset(section) for section in mesh.sections)
+    return f'''uniform token subsetFamily:materialBind:familyType = "nonOverlapping"
+{subsets}'''
+
+
+def _render_geom_subset(section: MeshSection) -> str:
+    indices = ", ".join(str(index) for index in section.face_indices)
+    return f'''def GeomSubset "{_material_prim_name_from_id(section.material_id)}" (
+    prepend apiSchemas = ["MaterialBindingAPI"]
+)
+{{
+    uniform token elementType = "face"
+    uniform token familyName = "materialBind"
+    int[] indices = [{indices}]
+    rel material:binding = </Tree/Materials/{_material_prim_name_from_id(section.material_id)}>
+}}'''
+
+
 def _render_base_mesh(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
     if model.base_mesh is None:
         raise ValueError("Base skeletal tree mesh is required before USDA authoring.")
@@ -92,6 +137,7 @@ def _render_base_mesh(model: CanonicalTreeModel, contract: UeSchemaContract) -> 
         interpolation = "vertex"
     )
     {contract.skinning_method_attr} = "{contract.skinning_method_value}"'''
+    material_binding = _render_material_binding(mesh)
 
     return f'''def Mesh "{contract.base_mesh_name}" (
     prepend apiSchemas = ["{contract.skel_binding_api}"]
@@ -101,6 +147,7 @@ def _render_base_mesh(model: CanonicalTreeModel, contract: UeSchemaContract) -> 
     uniform matrix4d primvars:skel:geomBindTransform = {_identity_matrix()}
     append rel skel:skeleton = {contract.main_skeleton_path}
     uniform token subdivisionScheme = "none"
+{_indent(material_binding, 1)}
     {_render_mesh_payload(mesh, contract.mesh_orientation)}{skinning}
 }}'''
 
@@ -148,6 +195,7 @@ def _render_library_prototype(prototype: Prototype, contract: UeSchemaContract) 
     if prototype.mesh is None:
         raise ValueError(f"Prototype {prototype.identity.prim_name} is missing mesh payload.")
 
+    material_binding = _render_material_binding(prototype.mesh)
     return f'''    def Xform "{prototype.identity.prim_name}" (
         kind = "component"
     )
@@ -156,6 +204,7 @@ def _render_library_prototype(prototype: Prototype, contract: UeSchemaContract) 
         def Mesh "{contract.base_mesh_name}"
         {{
             uniform token subdivisionScheme = "none"
+{_indent(material_binding, 3)}
             {_render_mesh_payload(prototype.mesh, contract.mesh_orientation)}
         }}
     }}'''
@@ -272,6 +321,7 @@ def _render_inline_instancer_prototype(prototype: Prototype, contract: UeSchemaC
 
     name = prototype.identity.prim_name
     skinning = _render_single_joint_skinning(prototype.mesh, contract)
+    material_binding = _render_material_binding(prototype.mesh)
     return f'''        def Xform "{name}"
         {{
             def SkelRoot "{contract.part_skel_root_name}" (
@@ -294,6 +344,7 @@ def _render_inline_instancer_prototype(prototype: Prototype, contract: UeSchemaC
                     uniform matrix4d primvars:skel:geomBindTransform = {_identity_matrix()}
                     append rel skel:skeleton = {contract.part_skeleton_path(name)}
                     uniform token subdivisionScheme = "none"
+{_indent(material_binding, 5)}
                     {_render_mesh_payload(prototype.mesh, contract.mesh_orientation)}
 {_indent(skinning, 5)}
                 }}
@@ -382,6 +433,17 @@ def _prototype_name_for_instance(part: AssemblyPartInstance, prototypes: tuple[P
         if prototype.source_key == part.prototype_key:
             return prototype.source_name
     return part.prototype_key
+
+
+def _material_prim_name(material: MaterialSpec) -> str:
+    return _material_prim_name_from_id(material.source_id)
+
+
+def _material_prim_name_from_id(material_id: int, name: str | None = None) -> str:
+    safe_name = "".join(character if character.isalnum() else "_" for character in (name or f"Material_{material_id}")).strip("_")
+    if not safe_name:
+        safe_name = f"Material_{material_id}"
+    return f"{safe_name}_{material_id}"
 
 
 def _render_joint_paths(model: CanonicalTreeModel) -> str:

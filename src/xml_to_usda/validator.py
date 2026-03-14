@@ -5,6 +5,9 @@ from .models import CanonicalTreeModel, PrototypeStrategy, ValidationIssue
 
 ERROR_MARKERS = {
     "packed_array_error:": "inconsistent_packed_arrays",
+    "invalid_material_id:": "invalid_material_id",
+    "missing_material_definition:": "missing_material_definition",
+    "material_conflict:": "material_conflict",
     "missing_object_hierarchy:": "missing_object_hierarchy",
     "missing_leaf_binding:": "missing_leaf_binding",
     "missing_skeleton_transform:": "missing_skeleton_transform",
@@ -14,6 +17,7 @@ ERROR_MARKERS = {
 
 def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
     issues: list[ValidationIssue] = []
+    material_ids = {material.source_id for material in model.materials}
 
     if not model.source_objects:
         issues.append(
@@ -49,6 +53,12 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                     message="Base skeletal mesh skel elementSize must be greater than zero when skinning arrays are present.",
                 )
             )
+        issues.extend(_validate_mesh_materials(model.base_mesh, material_ids, "BaseTreeMesh"))
+
+    if model.materials:
+        for prototype in model.prototypes:
+            if prototype.mesh is not None:
+                issues.extend(_validate_mesh_materials(prototype.mesh, material_ids, f"Prototype {prototype.identity.prim_name}"))
         if len(model.base_mesh.skel_joint_indices) != len(model.base_mesh.points):
             issues.append(
                 ValidationIssue(
@@ -222,6 +232,51 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
             )
 
     return tuple(issues)
+
+
+def _validate_mesh_materials(mesh, material_ids: set[int], label: str) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    if not mesh.sections:
+        return issues
+    seen_faces: set[int] = set()
+    face_count = len(mesh.face_vertex_counts)
+    for section in mesh.sections:
+        if section.material_id not in material_ids:
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="missing_material_definition",
+                    message=f"{label} references undefined material id {section.material_id}.",
+                )
+            )
+        invalid_faces = [face_index for face_index in section.face_indices if face_index < 0 or face_index >= face_count]
+        if invalid_faces:
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="invalid_material_section",
+                    message=f"{label} contains out-of-range face indices in material section {section.material_id}.",
+                )
+            )
+        overlap = seen_faces.intersection(section.face_indices)
+        if overlap:
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="overlapping_material_sections",
+                    message=f"{label} has overlapping material sections on faces {sorted(overlap)[:8]}.",
+                )
+            )
+        seen_faces.update(section.face_indices)
+    if len(seen_faces) != face_count:
+        issues.append(
+            ValidationIssue(
+                severity="error",
+                code="incomplete_material_sections",
+                message=f"{label} material sections cover {len(seen_faces)} of {face_count} faces.",
+            )
+        )
+    return issues
 
 
 def _valid_binding_joint_tokens(model: CanonicalTreeModel) -> set[str]:

@@ -59,9 +59,25 @@ class MeshData:
     points: tuple[Vector3, ...]
     face_vertex_counts: tuple[int, ...]
     face_vertex_indices: tuple[int, ...]
+    sections: tuple["MeshSection", ...] = ()
     skel_joint_indices: tuple[int, ...] = ()
     skel_joint_weights: tuple[float, ...] = ()
     skel_element_size: int = 0
+
+
+@dataclass(frozen=True)
+class MaterialSpec:
+    source_id: int
+    name: str
+    two_sided: bool = False
+    maps: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
+    ue_asset_path: str | None = None
+
+
+@dataclass(frozen=True)
+class MeshSection:
+    material_id: int
+    face_indices: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -202,6 +218,7 @@ class AssemblyPartInstance:
     binding: InstanceBinding
     source_object_id: str | None
     source_mesh_id: int | None
+    source_material_id: int | None = None
     source_bone_ids: tuple[int, ...] = ()
     mesh_lod: int | None = None
 
@@ -287,6 +304,9 @@ class ObservedXmlSchemaReport:
     spine_object_count: int = 0
     leaf_binding_distribution: dict[str, int] = field(default_factory=dict)
     leaf_mesh_distribution: dict[str, int] = field(default_factory=dict)
+    material_count: int = 0
+    base_material_distribution: dict[str, int] = field(default_factory=dict)
+    prototype_material_distribution: dict[str, int] = field(default_factory=dict)
     base_geometry_mode: str = "unknown"
     base_mesh_part_count: int = 0
     base_mesh_point_count: int = 0
@@ -301,6 +321,7 @@ class ObservedXmlSchemaReport:
 @dataclass(frozen=True)
 class TreeAsset:
     metadata: ExportMetadata
+    materials: tuple[MaterialSpec, ...]
     source_objects: tuple[SourceObject, ...]
     base_mesh: MeshData | None
     skeleton: tuple[Joint, ...]

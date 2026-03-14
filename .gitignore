@@ -8,3 +8,4 @@ build/
 dist/
 XMLtoUSDAConverter.spec
 vault/
+samples/speedtree/simple_tree/variants/*.usda
