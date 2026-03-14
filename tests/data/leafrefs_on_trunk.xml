@@ -1,0 +1,57 @@
+<SpeedTreeRaw VersionMajor="9" VersionMinor="5" units="m" upAxis="Y">
+  <Materials>
+    <Material ID="0" Name="Bark">
+      <Map Name="Color" ColorR="0.5" ColorG="0.4" ColorB="0.3" />
+    </Material>
+    <Material ID="2" Name="Leaves">
+      <Map Name="Color" ColorR="0.2" ColorG="0.7" ColorB="0.2" />
+    </Material>
+  </Materials>
+  <Bones>
+    <Bone ID="0" ParentID="-1" StartX="0" StartY="0" StartZ="0" />
+    <Bone ID="1" ParentID="0" StartX="0" StartY="1" StartZ="0" />
+  </Bones>
+  <Objects>
+    <Object ID="1" Name="Trunk" AbsX="0" AbsY="0" AbsZ="0" RelX="0" RelY="0" RelZ="0">
+      <Points>
+        <X>0 0 0</X>
+        <Y>0 1 1</Y>
+        <Z>0 0 1</Z>
+      </Points>
+      <Vertices>
+        <BoneID>0 0 0</BoneID>
+      </Vertices>
+      <Triangles Material="0">
+        <PointIndices>0 1 2</PointIndices>
+        <VertexIndices>0 1 2</VertexIndices>
+      </Triangles>
+      <LeafReferences Material="2">
+        <X>0.1</X>
+        <Y>1.25</Y>
+        <Z>0.1</Z>
+        <Scale>1</Scale>
+        <RotAxisX>0</RotAxisX>
+        <RotAxisY>1</RotAxisY>
+        <RotAxisZ>0</RotAxisZ>
+        <RotAngle>15</RotAngle>
+        <MeshID>1</MeshID>
+        <MeshLOD>0</MeshLOD>
+        <BoneID>1</BoneID>
+      </LeafReferences>
+    </Object>
+  </Objects>
+  <Meshes>
+    <Mesh ID="1" Name="LeafCluster_A">
+      <LOD Level="0" OriginalScale="1">
+        <Vertices>
+          <X>0 0.3 0</X>
+          <Y>0 0 0.3</Y>
+          <Z>0 0 0</Z>
+        </Vertices>
+        <Triangles Material="2">
+          <PointIndices>0 1 2</PointIndices>
+        </Triangles>
+      </LOD>
+    </Mesh>
+  </Meshes>
+</SpeedTreeRaw>

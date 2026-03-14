@@ -8,6 +8,7 @@ from .models import (
     MeshData,
     MeshSection,
     Prototype,
+    PrototypeResolutionMode,
     PrototypeStrategy,
     SkeletalSupportPrimvars,
     UsdAssemblyDocument,
@@ -316,18 +317,23 @@ def _render_binding_support_primvars(model: CanonicalTreeModel, bindings: tuple[
 
 
 def _render_instancer_prototypes(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
-    if model.prototype_strategy == PrototypeStrategy.INLINE_SKELETAL_PART:
-        return "\n".join(_render_inline_instancer_prototype(prototype, contract) for prototype in model.prototypes)
-
-    return "\n".join(
-        f'''        def "{prototype.identity.prim_name}" (
+    rendered: list[str] = []
+    for prototype in model.prototypes:
+        if prototype.resolution_mode == PrototypeResolutionMode.EXTERNAL_ASSET:
+            rendered.append(_render_external_instancer_prototype(prototype, contract))
+            continue
+        if model.prototype_strategy == PrototypeStrategy.INLINE_SKELETAL_PART:
+            rendered.append(_render_inline_instancer_prototype(prototype, contract))
+            continue
+        rendered.append(
+            f'''        def "{prototype.identity.prim_name}" (
             append references = </{contract.root_prim_name}/PrototypeLibrary/{prototype.identity.prim_name}>
         )
         {{
             token visibility = None
         }}'''
-        for prototype in model.prototypes
-    )
+        )
+    return "\n".join(rendered)
 
 
 def _render_inline_instancer_prototype(prototype: Prototype, contract: UeSchemaContract) -> str:
@@ -377,6 +383,18 @@ def _render_inline_instancer_prototype(prototype: Prototype, contract: UeSchemaC
                     uniform token visibility = "invisible"
                 }}
             }}
+        }}'''
+
+
+def _render_external_instancer_prototype(prototype: Prototype, contract: UeSchemaContract) -> str:
+    if not prototype.mesh_asset_path:
+        raise ValueError(f"Prototype {prototype.identity.prim_name} is missing Unreal asset path.")
+    return f'''        def Xform "{prototype.identity.prim_name}" (
+            prepend apiSchemas = ["{contract.external_ref_api}"]
+            kind = "component"
+        )
+        {{
+            uniform token unreal:naniteAssembly:meshAssetPath = "{prototype.mesh_asset_path}"
         }}'''
 
 

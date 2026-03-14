@@ -103,7 +103,7 @@ def inspect_xml(document: SourceXmlDocument) -> ObservedXmlSchemaReport:
     )
 
     object_class_counts, hierarchy_depth, spine_object_count = _inspect_object_hierarchy(root)
-    leaf_binding_distribution, leaf_mesh_distribution = _inspect_leaf_bindings(root)
+    leaf_binding_distribution, leaf_mesh_distribution, leaf_source_object_distribution = _inspect_leaf_bindings(root)
 
     return ObservedXmlSchemaReport(
         source_path=document.source_path,
@@ -120,6 +120,7 @@ def inspect_xml(document: SourceXmlDocument) -> ObservedXmlSchemaReport:
         spine_object_count=spine_object_count,
         leaf_binding_distribution=leaf_binding_distribution,
         leaf_mesh_distribution=leaf_mesh_distribution,
+        leaf_source_object_distribution=leaf_source_object_distribution,
         material_count=len(root.findall(".//Materials/Material")),
     )
 
@@ -147,6 +148,7 @@ def render_inspect_report(report: ObservedXmlSchemaReport) -> str:
         "spine_object_count": report.spine_object_count,
         "leaf_binding_distribution": report.leaf_binding_distribution,
         "leaf_mesh_distribution": report.leaf_mesh_distribution,
+        "leaf_source_object_distribution": report.leaf_source_object_distribution,
         "material_count": report.material_count,
         "base_material_distribution": report.base_material_distribution,
         "prototype_material_distribution": report.prototype_material_distribution,
@@ -223,15 +225,24 @@ def _inspect_object_hierarchy(root: ET.Element) -> tuple[dict[str, int], int, in
     return dict(sorted(class_counts.items())), hierarchy_depth, spine_object_count
 
 
-def _inspect_leaf_bindings(root: ET.Element) -> tuple[dict[str, int], dict[str, int]]:
+def _inspect_leaf_bindings(root: ET.Element) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
     bone_counts: Counter[str] = Counter()
     mesh_counts: Counter[str] = Counter()
+    source_object_counts: Counter[str] = Counter()
 
-    for leaf_ref in root.findall(".//LeafReferences"):
+    for obj in root.findall(".//Object"):
+        leaf_ref = obj.find("LeafReferences")
+        if leaf_ref is None:
+            continue
         bone_counts.update(_read_tokens(leaf_ref.findtext("BoneID")))
         mesh_counts.update(_read_tokens(leaf_ref.findtext("MeshID")))
+        source_object_counts[obj.attrib.get("Name", obj.attrib.get("ID", "Object"))] += 1
 
-    return _sort_numeric_key_dict(bone_counts), _sort_numeric_key_dict(mesh_counts)
+    return (
+        _sort_numeric_key_dict(bone_counts),
+        _sort_numeric_key_dict(mesh_counts),
+        dict(sorted(source_object_counts.items())),
+    )
 
 
 def _read_tokens(raw: str | None) -> list[str]:

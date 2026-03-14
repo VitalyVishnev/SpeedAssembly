@@ -8,7 +8,7 @@ import pytest
 
 from xml_to_usda.normalizer import normalize_to_canonical
 from xml_to_usda.models import MaterialSpec, MeshSection
-from xml_to_usda.pipeline import inspect_source
+from xml_to_usda.pipeline import convert_file, inspect_source, load_canonical_model
 from xml_to_usda.ue_schema import DEFAULT_UE_SCHEMA_CONTRACT
 from xml_to_usda.usda_writer import render_usda
 from xml_to_usda.validator import validate_model
@@ -17,6 +17,9 @@ from xml_to_usda.xml_reader import inspect_xml, read_source_xml, render_inspect_
 
 DATA_DIR = Path(__file__).parent / "data"
 SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "samples" / "speedtree" / "simple_tree" / "variants" / "SimpleTree_01.xml"
+LEAFREFS_ON_TRUNK = DATA_DIR / "leafrefs_on_trunk.xml"
+LEAFREFS_ON_BRANCH_LEVELS = DATA_DIR / "leafrefs_on_branch_levels.xml"
+INVALID_LEAF_BONE = DATA_DIR / "invalid_leaf_bone.xml"
 EXPECTED_BRANCH_1_FIRST_POINT = (0.06012271, 5.27466196, -0.18755458)
 EXPECTED_FIRST_CHILD_JOINT_POSITION = (-0.00409338, 0.585628, -0.0130253)
 
@@ -34,6 +37,7 @@ def test_inspect_report_tracks_structure_without_sample_specific_contracts() -> 
     assert "Spine" not in payload["unknown_sections"]
     assert payload["leaf_binding_distribution"]
     assert payload["leaf_mesh_distribution"]
+    assert payload["leaf_source_object_distribution"]
     assert payload["material_count"] == 2
     assert payload["base_material_distribution"] == {"0": payload["base_mesh_face_count"]}
     assert payload["prototype_material_distribution"]["2"] > 0
@@ -170,6 +174,28 @@ def test_usda_output_contains_ue_first_structure() -> None:
         'int[] primvars:unreal:naniteAssembly:bindJoints:indices = None',
     )
     assert '"Tree_point_' not in bind_joints_payload
+
+
+def test_material_bindings_stay_on_mesh_prims_only() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    diagnostics = validate_model(model)
+    usda = render_usda(model, diagnostics)
+
+    root_slice = _slice_between(
+        usda.text,
+        'def Xform "Tree"',
+        'def SkelRoot "BaseTreeSkelRoot"',
+    )
+    instancer_slice = _slice_between(
+        usda.text,
+        'def PointInstancer "AssemblyPartsInstancer"',
+        'def Scope "Prototypes"',
+    )
+
+    assert 'material:binding' not in root_slice
+    assert 'material:binding' not in instancer_slice
 
 
 def test_inline_prototypes_are_authored_under_instancer_scope() -> None:
@@ -360,6 +386,93 @@ def test_referenced_prototype_strategy_is_blocked_for_skeletal_assembly_part_exp
     assert any(issue.code == "unsupported_prototype_strategy" and issue.severity == "error" for issue in diagnostics)
     with pytest.raises(ValueError, match="unsupported_prototype_strategy"):
         render_usda(broken_model, diagnostics)
+
+
+def test_leaf_references_on_trunk_normalize_without_breaking_part_binding() -> None:
+    document = read_source_xml(LEAFREFS_ON_TRUNK)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    diagnostics = validate_model(model)
+
+    assert model.base_mesh is not None
+    assert model.base_tree_parts[0].name == "Trunk"
+    assert len(model.assembly_parts) == 1
+    assert model.assembly_parts[0].source_object_id == "1"
+    assert model.assembly_parts[0].bind_joint == "bone_001"
+    assert not any(issue.severity == "error" for issue in diagnostics)
+
+
+def test_leaf_references_on_multiple_branch_levels_preserve_deeper_hierarchy_and_sources() -> None:
+    report = inspect_source(LEAFREFS_ON_BRANCH_LEVELS)
+    document = read_source_xml(LEAFREFS_ON_BRANCH_LEVELS)
+    model = normalize_to_canonical(document, inspect_xml(document))
+    diagnostics = validate_model(model)
+
+    assert report.hierarchy_depth == 3
+    assert report.leaf_source_object_distribution == {"Branches_2": 1, "Branches_3": 1, "Trunk": 1}
+    assert report.leaf_mesh_distribution == {"1": 2, "2": 1}
+    assert len(model.base_tree_parts) == 4
+    assert [part.source_object_id for part in model.assembly_parts] == ["1", "3", "4"]
+    assert [part.bind_joint for part in model.assembly_parts] == ["root", "bone_002", "bone_003"]
+    assert not any(issue.severity == "error" for issue in diagnostics)
+
+
+def test_invalid_leaf_bone_is_reported_as_binding_error() -> None:
+    document = read_source_xml(INVALID_LEAF_BONE)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    diagnostics = validate_model(model)
+
+    assert any(issue.code == "invalid_binding_joint" and issue.severity == "error" for issue in diagnostics)
+
+
+def test_existing_part_mesh_override_authors_external_refs_in_mixed_mode(tmp_path: Path) -> None:
+    result = convert_file(
+        str(SIMPLE_TREE_01),
+        str(tmp_path / "external_parts.usda"),
+        use_existing_part_meshes=True,
+        part_mesh_asset_paths=(("Mesh_1", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
+    )
+
+    assert result.usda_document is not None
+    assert 'prepend apiSchemas = ["NaniteAssemblyExternalRefAPI"]' in result.usda_document.text
+    assert 'uniform token unreal:naniteAssembly:meshAssetPath = "/Game/TreeParts/SK_Twig01.SK_Twig01"' in result.usda_document.text
+    assert 'def Xform "Mesh_1" (' in result.usda_document.text
+    assert 'append rel skel:skeleton = </Tree/AssemblyPartsInstancer/Prototypes/Mesh_2/PartSkelRoot/PartSkeleton>' in result.usda_document.text
+
+
+def test_unused_existing_part_mesh_override_becomes_warning() -> None:
+    _, model, diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        use_existing_part_meshes=True,
+        part_mesh_asset_paths=(("Mesh_999", "/Game/TreeParts/SK_Missing.SK_Missing"),),
+    )
+
+    assert any(issue.code == "metadata_warning" and "Mesh_999" in issue.message for issue in diagnostics)
+
+
+def test_part_mesh_override_requires_explicit_existing_parts_mode(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="use_existing_part_meshes=True"):
+        convert_file(
+            str(SIMPLE_TREE_01),
+            str(tmp_path / "tree.usda"),
+            part_mesh_asset_paths=(("Mesh_1", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
+        )
+
+
+def test_realistic_multi_material_part_mesh_authors_geom_subsets() -> None:
+    document = read_source_xml(LEAFREFS_ON_BRANCH_LEVELS)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    diagnostics = validate_model(model)
+    usda = render_usda(model, diagnostics)
+
+    multi_material_prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_2")
+    assert multi_material_prototype.mesh is not None
+    assert {section.material_id for section in multi_material_prototype.mesh.sections} == {0, 2}
+    assert 'def GeomSubset "Material_0_0"' in usda.text
+    assert 'def GeomSubset "Material_2_2"' in usda.text
+    assert 'uniform token subsetFamily:materialBind:familyType = "nonOverlapping"' in usda.text
 
 
 def test_leaf_binding_distribution_maps_to_mesh_library_without_hardcoded_counts() -> None:

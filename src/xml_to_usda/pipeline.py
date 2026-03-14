@@ -3,7 +3,16 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from .models import CanonicalTreeModel, ConversionRequest, ConversionResult, MaterialSpec, ObservedXmlSchemaReport, OutputMode
+from .models import (
+    CanonicalTreeModel,
+    ConversionRequest,
+    ConversionResult,
+    MaterialSpec,
+    ObservedXmlSchemaReport,
+    OutputMode,
+    Prototype,
+    PrototypeResolutionMode,
+)
 from .normalizer import normalize_to_canonical
 from .usda_writer import render_usda
 from .validator import validate_model
@@ -41,11 +50,14 @@ def load_canonical_model(
     output_mode: OutputMode = OutputMode.SELF_CONTAINED,
     bark_material_path: str | None = None,
     leaves_material_path: str | None = None,
+    use_existing_part_meshes: bool = False,
+    part_mesh_asset_paths: tuple[tuple[str, str], ...] = (),
 ) -> tuple[ObservedXmlSchemaReport, CanonicalTreeModel, tuple]:
     document = read_source_xml(input_path)
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
     model = _apply_material_role_overrides(model, bark_material_path, leaves_material_path)
+    model = _apply_external_part_mesh_overrides(model, use_existing_part_meshes, part_mesh_asset_paths)
     metadata = replace(model.metadata, output_mode=output_mode)
     model = replace(model, metadata=metadata)
     diagnostics = validate_model(model)
@@ -58,6 +70,8 @@ def convert_file(
     output_mode: OutputMode = OutputMode.SELF_CONTAINED,
     bark_material_path: str | None = None,
     leaves_material_path: str | None = None,
+    use_existing_part_meshes: bool = False,
+    part_mesh_asset_paths: tuple[tuple[str, str], ...] = (),
 ) -> ConversionResult:
     request = ConversionRequest(
         input_paths=(input_path,),
@@ -65,6 +79,8 @@ def convert_file(
         output_mode=output_mode,
         bark_material_path=bark_material_path,
         leaves_material_path=leaves_material_path,
+        use_existing_part_meshes=use_existing_part_meshes,
+        part_mesh_asset_paths=part_mesh_asset_paths,
     )
     return convert_request(request)[0]
 
@@ -74,6 +90,8 @@ def convert_request(request: ConversionRequest) -> tuple[ConversionResult, ...]:
         raise ValueError("ConversionRequest requires at least one input path.")
     if request.output_path and len(request.input_paths) != 1:
         raise ValueError("Explicit output_path is only valid for single-file conversion.")
+    if request.part_mesh_asset_paths and not request.use_existing_part_meshes:
+        raise ValueError("part_mesh_asset_paths require use_existing_part_meshes=True.")
 
     results: list[ConversionResult] = []
     for input_path in request.input_paths:
@@ -86,6 +104,8 @@ def convert_request(request: ConversionRequest) -> tuple[ConversionResult, ...]:
             request.output_mode,
             bark_material_path=request.bark_material_path,
             leaves_material_path=request.leaves_material_path,
+            use_existing_part_meshes=request.use_existing_part_meshes,
+            part_mesh_asset_paths=request.part_mesh_asset_paths,
         )
         errors = [issue for issue in diagnostics if issue.severity == "error"]
         if errors:
@@ -200,3 +220,78 @@ def _apply_material_override(material: MaterialSpec, overrides: dict[int, str | 
     if not ue_asset_path:
         return material
     return replace(material, ue_asset_path=ue_asset_path)
+
+
+def _apply_external_part_mesh_overrides(
+    model: CanonicalTreeModel,
+    use_existing_part_meshes: bool,
+    part_mesh_asset_paths: tuple[tuple[str, str], ...],
+) -> CanonicalTreeModel:
+    if not use_existing_part_meshes:
+        return model
+
+    overrides = _normalize_part_mesh_asset_paths(part_mesh_asset_paths)
+    if not overrides:
+        return model
+
+    unused_keys = sorted(set(overrides) - {prototype.source_key for prototype in model.prototypes})
+    metadata = model.metadata
+    if unused_keys:
+        metadata = replace(
+            metadata,
+            warnings=metadata.warnings + tuple(
+                f"Unused existing PartMesh override ignored: {source_key}" for source_key in unused_keys
+            ),
+        )
+
+    prototypes = tuple(_apply_external_part_mesh_override(prototype, overrides) for prototype in model.prototypes)
+    return replace(model, prototypes=prototypes, metadata=metadata)
+
+
+def _apply_external_part_mesh_override(
+    prototype: Prototype,
+    overrides: dict[str, str],
+) -> Prototype:
+    mesh_asset_path = overrides.get(prototype.source_key)
+    if mesh_asset_path is None:
+        return prototype
+    return replace(
+        prototype,
+        resolution_mode=PrototypeResolutionMode.EXTERNAL_ASSET,
+        mesh_asset_path=mesh_asset_path,
+    )
+
+
+def _normalize_part_mesh_asset_paths(
+    part_mesh_asset_paths: tuple[tuple[str, str], ...],
+) -> dict[str, str]:
+    overrides: dict[str, str] = {}
+    for raw_key, raw_asset_path in part_mesh_asset_paths:
+        source_key = _normalize_prototype_override_key(raw_key)
+        if not source_key:
+            raise ValueError("PartMesh override keys must not be empty.")
+        asset_path = raw_asset_path.strip()
+        if not _is_valid_unreal_asset_path(asset_path):
+            raise ValueError(f"PartMesh asset path for {source_key} must start with /Game/.")
+        existing = overrides.get(source_key)
+        if existing is not None and existing != asset_path:
+            raise ValueError(f"Duplicate PartMesh override for {source_key} uses conflicting asset paths.")
+        overrides[source_key] = asset_path
+    return overrides
+
+
+def _normalize_prototype_override_key(raw_key: str) -> str:
+    key = raw_key.strip()
+    if not key:
+        return ""
+    lower_key = key.lower()
+    for prefix in ("mesh_", "meshid:", "mesh_id:"):
+        if lower_key.startswith(prefix) and key[len(prefix):].strip().isdigit():
+            return f"Mesh_{int(key[len(prefix):].strip())}"
+    if key.isdigit():
+        return f"Mesh_{int(key)}"
+    return key
+
+
+def _is_valid_unreal_asset_path(path: str) -> bool:
+    return path.startswith("/Game/")

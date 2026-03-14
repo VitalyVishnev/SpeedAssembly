@@ -68,6 +68,8 @@ def test_gui_smoke_builds_window() -> None:
         assert app.root.title() == "Convert XML -> USDA"
         assert hasattr(app, "bark_material_var")
         assert hasattr(app, "leaves_material_var")
+        assert hasattr(app, "use_existing_part_meshes_var")
+        assert hasattr(app, "part_mesh_mapping_widget")
         assert "Single-file mode" in app.status_var.get()
     finally:
         root.destroy()
@@ -109,10 +111,27 @@ def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatc
     _, root = _build_tk_root_or_skip()
     from xml_to_usda.gui import ConversionApp
 
-    calls: list[tuple[str, str, str | None, str | None]] = []
+    calls: list[tuple[str, str, str | None, str | None, bool, tuple[tuple[str, str], ...]]] = []
 
-    def fake_convert_file(input_path, output_path, output_mode=OutputMode.SELF_CONTAINED, bark_material_path=None, leaves_material_path=None):
-        calls.append((input_path, output_path, bark_material_path, leaves_material_path))
+    def fake_convert_file(
+        input_path,
+        output_path,
+        output_mode=OutputMode.SELF_CONTAINED,
+        bark_material_path=None,
+        leaves_material_path=None,
+        use_existing_part_meshes=False,
+        part_mesh_asset_paths=(),
+    ):
+        calls.append(
+            (
+                input_path,
+                output_path,
+                bark_material_path,
+                leaves_material_path,
+                use_existing_part_meshes,
+                part_mesh_asset_paths,
+            )
+        )
         return ConversionResult(
             input_path=input_path,
             output_path=output_path,
@@ -130,6 +149,10 @@ def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatc
         app.output_var.set(str(Path("out.usda")))
         app.bark_material_var.set("/Game/TestMaterials/M_Bark_Test")
         app.leaves_material_var.set("/Game/TestMaterials/M_Leaves_Test")
+        app.use_existing_part_meshes_var.set(True)
+        app._toggle_part_mesh_mapping_state()
+        app.part_mesh_mapping_widget.delete("1.0", "end")
+        app.part_mesh_mapping_widget.insert("1.0", "Mesh_1=/Game/TreeParts/SK_Twig01.SK_Twig01")
 
         app.run_conversion()
 
@@ -139,9 +162,12 @@ def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatc
                 "out.usda",
                 "/Game/TestMaterials/M_Bark_Test",
                 "/Game/TestMaterials/M_Leaves_Test",
+                True,
+                (("Mesh_1", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
             )
         ]
         assert "Material overrides:" in app.log_widget.get("1.0", "end-1c")
+        assert "Existing PartMesh overrides:" in app.log_widget.get("1.0", "end-1c")
     finally:
         root.destroy()
 
@@ -167,6 +193,34 @@ def test_gui_invalid_material_path_blocks_conversion(monkeypatch: pytest.MonkeyP
 
         convert_mock.assert_not_called()
         assert error_messages == ["Bark material path must start with /Game/."]
+    finally:
+        root.destroy()
+
+
+def test_gui_invalid_part_mesh_path_blocks_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    convert_mock = Mock()
+    error_messages: list[str] = []
+
+    monkeypatch.setattr("xml_to_usda.gui.convert_file", convert_mock)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda _title, message: error_messages.append(message))
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        app.output_var.set("out.usda")
+        app.use_existing_part_meshes_var.set(True)
+        app._toggle_part_mesh_mapping_state()
+        app.part_mesh_mapping_widget.delete("1.0", "end")
+        app.part_mesh_mapping_widget.insert("1.0", "Mesh_1=Not/Game/Path")
+
+        app.run_conversion()
+
+        convert_mock.assert_not_called()
+        assert error_messages == ["PartMesh asset path on line 1 must start with /Game/."]
     finally:
         root.destroy()
 

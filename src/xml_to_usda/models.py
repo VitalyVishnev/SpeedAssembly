@@ -36,6 +36,11 @@ class PrototypeStrategy(StrEnum):
     REFERENCED_SCOPE = "referenced_scope"
 
 
+class PrototypeResolutionMode(StrEnum):
+    INLINE_MESH = "inline_mesh"
+    EXTERNAL_ASSET = "external_asset"
+
+
 @dataclass(frozen=True)
 class Joint:
     name: str
@@ -150,6 +155,8 @@ class Prototype:
     source_mesh_id: int | None
     source_name: str
     prototype_type: str = "assembly_part"
+    resolution_mode: PrototypeResolutionMode = PrototypeResolutionMode.INLINE_MESH
+    mesh_asset_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -304,6 +311,7 @@ class ObservedXmlSchemaReport:
     spine_object_count: int = 0
     leaf_binding_distribution: dict[str, int] = field(default_factory=dict)
     leaf_mesh_distribution: dict[str, int] = field(default_factory=dict)
+    leaf_source_object_distribution: dict[str, int] = field(default_factory=dict)
     material_count: int = 0
     base_material_distribution: dict[str, int] = field(default_factory=dict)
     prototype_material_distribution: dict[str, int] = field(default_factory=dict)
@@ -371,6 +379,8 @@ class ConversionRequest:
     output_mode: OutputMode = OutputMode.SELF_CONTAINED
     bark_material_path: str | None = None
     leaves_material_path: str | None = None
+    use_existing_part_meshes: bool = False
+    part_mesh_asset_paths: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

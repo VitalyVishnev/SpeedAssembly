@@ -17,6 +17,7 @@ class ConversionApp:
         self.output_var = tk.StringVar()
         self.bark_material_var = tk.StringVar()
         self.leaves_material_var = tk.StringVar()
+        self.use_existing_part_meshes_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="Single-file mode. Batch and naming rules will be added in a later phase.")
 
         self._build_layout()
@@ -27,7 +28,7 @@ class ConversionApp:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(6, weight=1)
+        frame.rowconfigure(9, weight=1)
 
         ttk.Label(frame, text="Source XML").grid(row=0, column=0, sticky="w", pady=(0, 8))
         ttk.Entry(frame, textvariable=self.input_var).grid(row=0, column=1, sticky="ew", padx=(12, 12), pady=(0, 8))
@@ -43,18 +44,35 @@ class ConversionApp:
         ttk.Label(frame, text="Leaves Material Path").grid(row=3, column=0, sticky="w", pady=(0, 8))
         ttk.Entry(frame, textvariable=self.leaves_material_var).grid(row=3, column=1, sticky="ew", padx=(12, 12), pady=(0, 8))
 
-        ttk.Label(frame, textvariable=self.status_var).grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 12))
-        ttk.Button(frame, text="Convert", command=self.run_conversion).grid(row=4, column=2, sticky="ew", pady=(0, 12))
+        ttk.Checkbutton(
+            frame,
+            text="Use Existing PartMeshes",
+            variable=self.use_existing_part_meshes_var,
+            command=self._toggle_part_mesh_mapping_state,
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 8))
+
+        ttk.Label(frame, text="PartMesh Asset Mappings").grid(row=5, column=0, sticky="nw", pady=(0, 8))
+        self.part_mesh_mapping_widget = tk.Text(frame, wrap="word", height=4)
+        self.part_mesh_mapping_widget.grid(row=5, column=1, columnspan=2, sticky="ew", padx=(12, 0), pady=(0, 8))
+
+        ttk.Label(
+            frame,
+            text="One mapping per line. Supported keys: Mesh_1, 1, meshid:1.",
+        ).grid(row=6, column=1, columnspan=2, sticky="w", pady=(0, 8))
+
+        ttk.Label(frame, textvariable=self.status_var).grid(row=7, column=0, columnspan=2, sticky="w", pady=(0, 12))
+        ttk.Button(frame, text="Convert", command=self.run_conversion).grid(row=7, column=2, sticky="ew", pady=(0, 12))
 
         button_row = ttk.Frame(frame)
-        button_row.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        button_row.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(0, 8))
         ttk.Button(button_row, text="Copy Log", command=self.copy_log).pack(side="right")
 
         self.log_widget = tk.Text(frame, wrap="word", height=18)
-        self.log_widget.grid(row=6, column=0, columnspan=3, sticky="nsew")
+        self.log_widget.grid(row=9, column=0, columnspan=3, sticky="nsew")
         self.log_widget.configure(state="disabled")
         self.log_widget.bind("<Control-c>", self._handle_copy_shortcut)
         self.log_widget.bind("<Control-C>", self._handle_copy_shortcut)
+        self._toggle_part_mesh_mapping_state()
 
     def browse_input(self) -> None:
         selected = filedialog.askopenfilename(
@@ -83,6 +101,7 @@ class ConversionApp:
         output_path = self.output_var.get().strip()
         bark_material_path = self.bark_material_var.get().strip()
         leaves_material_path = self.leaves_material_var.get().strip()
+        use_existing_part_meshes = bool(self.use_existing_part_meshes_var.get())
         if not input_path:
             messagebox.showerror("Missing input", "Select a source XML file.")
             return
@@ -93,6 +112,11 @@ class ConversionApp:
         if validation_error is not None:
             messagebox.showerror("Invalid material path", validation_error)
             return
+        try:
+            part_mesh_asset_paths = self._parse_part_mesh_asset_paths(use_existing_part_meshes)
+        except ValueError as exc:
+            messagebox.showerror("Invalid PartMesh mapping", str(exc))
+            return
 
         try:
             result = convert_file(
@@ -100,6 +124,8 @@ class ConversionApp:
                 output_path,
                 bark_material_path=bark_material_path or None,
                 leaves_material_path=leaves_material_path or None,
+                use_existing_part_meshes=use_existing_part_meshes,
+                part_mesh_asset_paths=part_mesh_asset_paths,
             )
         except Exception as exc:
             self.status_var.set("Conversion failed.")
@@ -112,6 +138,8 @@ class ConversionApp:
                 (result,),
                 bark_material_path=bark_material_path or None,
                 leaves_material_path=leaves_material_path or None,
+                use_existing_part_meshes=use_existing_part_meshes,
+                part_mesh_asset_paths=part_mesh_asset_paths,
             )
         )
         if result.usda_document is None:
@@ -148,13 +176,51 @@ class ConversionApp:
                 return f"{label} material path must start with /Game/."
         return None
 
+    def _parse_part_mesh_asset_paths(self, use_existing_part_meshes: bool) -> tuple[tuple[str, str], ...]:
+        if not use_existing_part_meshes:
+            return ()
 
-def format_conversion_results(results, bark_material_path: str | None = None, leaves_material_path: str | None = None) -> str:
+        mappings: list[tuple[str, str]] = []
+        raw_text = self.part_mesh_mapping_widget.get("1.0", "end-1c")
+        for line_number, raw_line in enumerate(raw_text.splitlines(), start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                raise ValueError(f"PartMesh mapping line {line_number} must use KEY=/Game/... format.")
+            source_key, asset_path = (segment.strip() for segment in line.split("=", 1))
+            if not source_key:
+                raise ValueError(f"PartMesh mapping line {line_number} is missing a prototype key.")
+            if not _is_valid_unreal_asset_path(asset_path):
+                raise ValueError(f"PartMesh asset path on line {line_number} must start with /Game/.")
+            mappings.append((source_key, asset_path))
+        return tuple(mappings)
+
+    def _toggle_part_mesh_mapping_state(self) -> None:
+        state = "normal" if self.use_existing_part_meshes_var.get() else "disabled"
+        self.part_mesh_mapping_widget.configure(state=state)
+
+
+def format_conversion_results(
+    results,
+    bark_material_path: str | None = None,
+    leaves_material_path: str | None = None,
+    use_existing_part_meshes: bool = False,
+    part_mesh_asset_paths: tuple[tuple[str, str], ...] = (),
+) -> str:
     lines: list[str] = []
     if bark_material_path or leaves_material_path:
         lines.append("Material overrides:")
         lines.append(f"  - bark: {bark_material_path or '<none>'}")
         lines.append(f"  - leaves: {leaves_material_path or '<none>'}")
+        lines.append("")
+    if use_existing_part_meshes:
+        lines.append("Existing PartMesh overrides:")
+        if part_mesh_asset_paths:
+            for source_key, asset_path in part_mesh_asset_paths:
+                lines.append(f"  - {source_key}: {asset_path}")
+        else:
+            lines.append("  - enabled with no explicit mappings")
         lines.append("")
     for result in results:
         lines.append(f"Input: {result.input_path}")

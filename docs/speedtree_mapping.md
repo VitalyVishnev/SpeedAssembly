@@ -32,8 +32,15 @@ Use it for:
 - unique object hierarchy
 - unique tree mesh payloads
 - the geometry that becomes the `Base Skeletal Tree`
+- placement of `LeafReferences` on any supported hierarchy level
 
 `Branches_*` style body geometry belongs to the Base Skeletal Tree, not to instanced parts.
+
+Current observed implementation rule:
+
+- `Trunk` and `Branches_*` objects are merged into the `Base Skeletal Tree`
+
+Treat this as the current supported rule, not as a formal SpeedTree guarantee. If additional real exports prove the rule too narrow, update the normalizer only after validating the new pattern.
 
 ### `Bones/Bone`
 
@@ -56,8 +63,21 @@ Use it for:
 - repeated part placement
 - repeated part prototype selection
 - repeated part binding back to the `Main Skeleton`
+- fallback material assignment when the mesh library prototype has no face-authored material sections
 
 `LeafReferences` does not mean the payload is semantically only leaves. It is the XML source of repeated parts.
+
+Current supported structural cases:
+
+- `LeafReferences` may appear on `Trunk`
+- `LeafReferences` may appear on intermediate branch levels
+- `LeafReferences` may appear on deeper branch levels before the final repeated detail
+- `BoneID` may point at trunk or branch joints as long as it resolves into the `Main Skeleton`
+
+Current explicit non-goal for `Phase 1`:
+
+- nested `part-on-part` hierarchy is not supported as a structural model
+- inherited binding from one repeated part instance to another repeated part instance is not supported
 
 ### `Meshes/Mesh`
 
@@ -67,15 +87,25 @@ Use it for:
 
 - prototype mesh selection keyed by `MeshID`
 - part geometry reconstruction
+- prototype face-level material sections derived from `Triangles Material="..."`
+
+If the reusable mesh library prototype already carries face-authored material sections, those sections win over `LeafReferences Material`.
+
+Current conflict policy:
+
+- mesh-authored material sections take precedence
+- `LeafReferences Material` becomes a fallback only when the prototype mesh carries no sections
+- a mismatch is logged as a warning, not treated as a hard failure, if the prototype mesh itself is internally valid
 
 ## Current part interpretation
 
 For the current project contract:
 
 - repeated parts are emitted as `Assembly Parts`
-- each part is authored as a skeletal part
-- each part has a one-bone local `Part Skeleton`
+- each inline part is authored as a skeletal part
+- each inline part has a one-bone local `Part Skeleton`
 - the instance binds back to the `Main Skeleton`
+- an optional external reuse path may map a prototype key such as `Mesh_1` to an existing Unreal skeletal mesh asset
 
 ## Failure conditions
 

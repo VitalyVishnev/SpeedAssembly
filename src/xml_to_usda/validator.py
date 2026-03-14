@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .models import CanonicalTreeModel, PrototypeStrategy, ValidationIssue
+from .models import CanonicalTreeModel, PrototypeResolutionMode, PrototypeStrategy, ValidationIssue
 
 
 ERROR_MARKERS = {
@@ -13,6 +13,7 @@ ERROR_MARKERS = {
     "missing_skeleton_transform:": "missing_skeleton_transform",
     "skeleton_object_mismatch:": "skeleton_object_mismatch",
 }
+WARNING_MARKER_CODES = {"material_conflict", "skeleton_object_mismatch"}
 
 
 def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
@@ -152,6 +153,28 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                     )
                 )
                 continue
+            if prototype.resolution_mode == PrototypeResolutionMode.EXTERNAL_ASSET:
+                if not prototype.mesh_asset_path:
+                    issues.append(
+                        ValidationIssue(
+                            severity="error",
+                            code="missing_prototype_asset_path",
+                            message=f"Prototype {prototype.identity.prim_name} is marked as external but has no Unreal asset path.",
+                        )
+                    )
+                    continue
+                if not _is_valid_unreal_asset_path(prototype.mesh_asset_path):
+                    issues.append(
+                        ValidationIssue(
+                            severity="error",
+                            code="invalid_prototype_asset_path",
+                            message=(
+                                f"Prototype {prototype.identity.prim_name} uses invalid Unreal asset path "
+                                f"{prototype.mesh_asset_path!r}; expected a /Game/... asset reference."
+                            ),
+                        )
+                    )
+                continue
             if prototype.mesh is None:
                 issues.append(
                     ValidationIssue(
@@ -216,7 +239,7 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                 matched_code = code
                 issues.append(
                     ValidationIssue(
-                        severity="error" if code != "skeleton_object_mismatch" else "warning",
+                        severity="warning" if code in WARNING_MARKER_CODES else "error",
                         code=code,
                         message=warning.split(": ", 1)[1] if ": " in warning else warning,
                     )
@@ -298,3 +321,7 @@ def _valid_binding_joint_tokens(model: CanonicalTreeModel) -> set[str]:
         tokens.add(joint.name)
         tokens.add(resolve(joint.name))
     return tokens
+
+
+def _is_valid_unreal_asset_path(path: str) -> bool:
+    return path.startswith("/Game/")
