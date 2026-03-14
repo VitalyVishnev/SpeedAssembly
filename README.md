@@ -1,60 +1,28 @@
-﻿# XML to USDA Converter
+# XML to USDA Converter
 
 Deterministic converter for SpeedTree Raw XML that emits USDA targeting Unreal Engine 5.7 skeletal Nanite Assembly import.
 
-## Authoring rule
+This is not a generic XML-to-USD tool. It is a skeletal tree assembly authoring pipeline.
 
-For this project, valid output means more than “parses as USD”.
+## Project model
 
-Generated USDA must always include the required UE-facing:
+The project treats the source tree as two major components:
 
-- API schemas
-- primvars
-- USD attributes
-- relationships
-
-If a required schema contract field is missing, the output is treated as broken even if the USDA is syntactically valid.
+- `Base Skeletal Tree`
+  All unique tree geometry on the `Main Skeleton`.
+- `Assembly Parts`
+  Everything sourced from `LeafReferences`, instanced through `PointInstancer`, each part authored as a skeletal mesh with a one-bone local skeleton.
 
 ## Current baseline
 
-The active reverse-engineering baseline is:
+The active baseline sample is:
 
 - `samples/speedtree/simple_tree/variants/SimpleTree_01.xml`
 
-This sample remains the main reverse-engineering fixture, but it is no longer treated as a hardcoded structural contract. The converter is now built around:
+Current status:
 
-- explicit object hierarchy parsing
-- rule-based base mesh selection
-- real `Bones/Bone` skeleton extraction
-- explicit reusable-part `BoneID` and `MeshID` bindings normalized into a general skeletal binding model
-- optional `Spine` parsing for validation and future wind work
-- UE-first prototype authoring with reference-oriented `PointInstancer/Prototypes`
-- UE support primvars on `SkelRoot` such as `boneCapture_pCaptPath`, `ueJointNames`, `hierarchicalDepth`, `logicalDepth`, and `localtransform`
-
-## Local Environment
-
-This project uses a local `.venv` inside the repository. After the environment is created, install and run everything from that environment instead of relying on global `python`, `pytest`, or globally installed packages.
-
-### Windows PowerShell bootstrap
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e .[dev]
-```
-
-### Smoke check
-
-```powershell
-python --version
-python -m pytest
-python -m xml_to_usda inspect .\samples\speedtree\simple_tree\variants\SimpleTree_01.xml
-python -m xml_to_usda convert .\samples\speedtree\simple_tree\variants\SimpleTree_01.xml .\samples\expected_usda\SimpleTree_01.generated.usda
-python -m xml_to_usda gui
-```
-
-If commands fail after dependency installation, the usual cause is that `.venv` is not activated in the current PowerShell session.
+- UE accepts the generated baseline USDA as skeletal Nanite Assembly input
+- transform and visual fidelity still need refinement
 
 ## Commands
 
@@ -64,60 +32,32 @@ python -m xml_to_usda convert path\to\tree.xml path\to\tree.usda
 python -m xml_to_usda gui
 ```
 
-## Fast exe loop
-
-The easiest local entry points are the `.cmd` wrappers:
+## Build helpers
 
 ```powershell
 .\scripts\build_gui_exe.cmd
 .\scripts\watch_gui_exe.cmd
 ```
 
-Direct PowerShell variants are also available:
-
-```powershell
-.\scripts\build_gui_exe.ps1
-.\scripts\watch_gui_exe.ps1
-```
-
 Output exe path:
 
 - `dist\XMLtoUSDAConverter.exe`
 
-Notes:
+## Docs
 
-- the build uses `scripts/launch_gui.py` as the PyInstaller entry point
-- `build_gui_exe.ps1` resolves the real interpreter from `.venv\pyvenv.cfg`, so it does not depend on the broken `Scripts\python.exe` launcher
-- if `PyInstaller` is missing in `.venv`, `build_gui_exe.ps1` bootstraps it through `pip --python .venv install -e .[dev]`
-- `watch_gui_exe.ps1` watches `src/` and `pyproject.toml`, then rebuilds the exe automatically
-- the `.cmd` wrappers run PowerShell with `ExecutionPolicy Bypass`, which is the simplest one-click path on Windows
-
-## Current scope
-
-- `inspect` reports object-class counts, hierarchy depth, spine coverage, binding mode, prototype strategy, and available UE support primvars.
-- normalization builds a universal tree-asset model with source objects, branch segments, prototype library entries, reusable instances, generalized bindings, and optional spines.
-- USDA writing uses merged base geometry, `Skeleton`, reference-oriented prototypes, path-like skeletal binding tokens, and UE support primvars on `SkelRoot`.
-- writer emits `NaniteAssemblySkelBindingAPI`, `primvars:unreal:naniteAssembly:bindJoints`, and `primvars:unreal:naniteAssembly:bindJointWeights` for `PointInstancer`.
-- writer is expected to preserve required skeletal USD contract fields as well, including the importer-relevant `skel:*` authoring on the base mesh and skeleton path.
-- strict validation fails on missing base geometry, missing skeleton data, missing explicit instance bindings, and inconsistent packed arrays.
-
-## Current phases
-
-- `Phase 1`: one verified SimpleTree baseline and deterministic XML -> USDA pipeline
-- `Phase 2`: thin desktop GUI and later `exe` packaging
-- `Phase 3`: external branch reuse from existing Unreal Engine project assets
-- `Phase 4`: Dynamic Wind JSON generation
+- `AGENTS.md`
+  Mission, hard rules, and canonical terminology.
+- `docs/ue_import_contract.md`
+  Importer-facing USDA structure and required UE/USD contract.
+- `docs/speedtree_mapping.md`
+  SpeedTree XML to project-concept mapping.
+- `docs/workflow_status.md`
+  Baseline sample, current status, and workflow.
+- `docs/local-python-environment.md`
+  Local environment setup.
 
 ## Repo areas
 
-- `samples/` holds controlled XML inputs and expected outputs.
-- `docs/` holds observed schema notes, workflow notes, and local environment setup.
-- `vault/` holds immutable third-party or engine-side references.
-
-## Reference docs
-
-- `docs/local-python-environment.md`
-- `docs/project-roadmap.md`
-- `docs/golden-sample-workflow.md`
-- `docs/speedtree_xml_observed_schema.md`
-- `docs/ue_schema_notes.md`
+- `samples/` holds controlled XML inputs and generated outputs.
+- `docs/` holds the compact project documentation set.
+- `vault/` holds reference USDA, UE schema, importer source, and related research artifacts.
