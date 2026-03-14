@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .models import (
+    AssemblyPartInstance,
     CanonicalTreeModel,
     InstanceBinding,
     MeshData,
@@ -23,21 +24,24 @@ def render_usda(
         raise ValueError(
             "Cannot author USDA while validation errors are present: " + ", ".join(sorted(dict.fromkeys(error_codes)))
         )
+
+    base_animation = _render_base_animation(model, contract)
     base_mesh = _render_base_mesh(model, contract)
-    skeleton = _render_skeleton(model)
-    animation = _render_animation(model)
+    main_skeleton = _render_main_skeleton(model, contract)
     point_instancer = _render_point_instancer(model, contract)
-    branch_library = _render_branch_library(model) if model.prototype_strategy == PrototypeStrategy.REFERENCED_SCOPE else ""
+    prototype_library = (
+        _render_prototype_library(model, contract) if model.prototype_strategy == PrototypeStrategy.REFERENCED_SCOPE else ""
+    )
     skelroot_support = _render_skelroot_support_primvars(model.skeletal_support_primvars)
 
     text = f'''#usda 1.0
 (
-    defaultPrim = "Tree"
+    defaultPrim = "{contract.root_prim_name}"
     metersPerUnit = {contract.stage_meters_per_unit:g}
     upAxis = "{contract.stage_up_axis}"
 )
 
-def Xform "Tree" (
+def Xform "{contract.root_prim_name}" (
     prepend apiSchemas = ["{contract.root_api}"]
     kind = "{contract.root_kind}"
 )
@@ -45,9 +49,9 @@ def Xform "Tree" (
     uniform token {contract.mesh_type_attr} = "{contract.mesh_type_value}"
     {contract.skeleton_relationship_attr}
 
-{_indent(branch_library, 1)}
+{_indent(prototype_library, 1)}
 
-    def SkelRoot "TrunkSkelRoot" (
+    def SkelRoot "{contract.base_skel_root_name}" (
         kind = "component"
     )
     {{
@@ -55,11 +59,11 @@ def Xform "Tree" (
         matrix4d xformOp:transform = {_identity_matrix()}
         uniform token[] xformOpOrder = ["xformOp:transform"]
 
-{_indent(animation, 2)}
+{_indent(base_animation, 2)}
 
 {_indent(base_mesh, 2)}
 
-{_indent(skeleton, 2)}
+{_indent(main_skeleton, 2)}
     }}
 
 {_indent(point_instancer, 1)}
@@ -70,9 +74,10 @@ def Xform "Tree" (
 
 def _render_base_mesh(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
     if model.base_mesh is None:
-        raise ValueError("Base skeletal mesh is required before USDA authoring.")
+        raise ValueError("Base skeletal tree mesh is required before USDA authoring.")
+
     mesh = model.base_mesh
-    joint_paths = _render_joint_names(model)
+    joint_paths = _render_joint_paths(model)
     joint_indices = ", ".join(str(index) for index in mesh.skel_joint_indices)
     joint_weights = ", ".join(f"{weight:g}" for weight in mesh.skel_joint_weights)
     skinning = ""
@@ -87,39 +92,40 @@ def _render_base_mesh(model: CanonicalTreeModel, contract: UeSchemaContract) -> 
         interpolation = "vertex"
     )
     {contract.skinning_method_attr} = "{contract.skinning_method_value}"'''
-    return f'''def Mesh "TrunkMesh" (
+
+    return f'''def Mesh "{contract.base_mesh_name}" (
     prepend apiSchemas = ["{contract.skel_binding_api}"]
 )
 {{
     uniform token[] skel:joints = [{joint_paths}]
     uniform matrix4d primvars:skel:geomBindTransform = {_identity_matrix()}
-    append rel skel:skeleton = </Tree/TrunkSkelRoot/TrunkSkeleton>
+    append rel skel:skeleton = {contract.main_skeleton_path}
     uniform token subdivisionScheme = "none"
-    {_render_mesh_payload(mesh)}{skinning}
+    {_render_mesh_payload(mesh, contract.mesh_orientation)}{skinning}
 }}'''
 
 
-def _render_skeleton(model: CanonicalTreeModel) -> str:
-    return f'''def Skeleton "TrunkSkeleton" (
-    prepend apiSchemas = ["SkelBindingAPI"]
+def _render_main_skeleton(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
+    return f'''def Skeleton "{contract.skeleton_name}" (
+    prepend apiSchemas = ["{contract.skel_binding_api}"]
 )
 {{
     uniform matrix4d[] bindTransforms = [{_render_bind_transforms(model)}]
     uniform token[] jointNames = [{_render_joint_basenames(model)}]
-    uniform token[] joints = [{_render_joint_names(model)}]
+    uniform token[] joints = [{_render_joint_paths(model)}]
     uniform token purpose = "guide"
     uniform matrix4d[] restTransforms = [{_render_rest_transforms(model)}]
-    append rel skel:animationSource = </Tree/TrunkSkelRoot/animation>
+    append rel skel:animationSource = {contract.base_animation_path}
     uniform token visibility = "invisible"
 }}'''
 
 
-def _render_animation(model: CanonicalTreeModel) -> str:
-    joints = _render_joint_names(model)
+def _render_base_animation(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
+    joints = _render_joint_paths(model)
     rotations = ", ".join(_identity_quaternion() for _ in model.skeleton)
     scales = ", ".join("(1, 1, 1)" for _ in model.skeleton)
     translations = _render_joint_rest_translations(model)
-    return f'''def SkelAnimation "animation"
+    return f'''def SkelAnimation "{contract.base_animation_name}"
 {{
     uniform token[] joints = [{joints}]
     quath[] rotations = [{rotations}]
@@ -128,53 +134,53 @@ def _render_animation(model: CanonicalTreeModel) -> str:
 }}'''
 
 
-def _render_branch_library(model: CanonicalTreeModel) -> str:
+def _render_prototype_library(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
     if not model.prototypes:
         return ""
-    definitions = "\n".join(_render_branch_prototype(prototype) for prototype in model.prototypes)
-    return f'''def Xform "Branches"
+    definitions = "\n".join(_render_library_prototype(prototype, contract) for prototype in model.prototypes)
+    return f'''def Xform "PrototypeLibrary"
 {{
 {definitions}
 }}'''
 
 
-def _render_branch_prototype(prototype: Prototype) -> str:
+def _render_library_prototype(prototype: Prototype, contract: UeSchemaContract) -> str:
     if prototype.mesh is None:
         raise ValueError(f"Prototype {prototype.identity.prim_name} is missing mesh payload.")
-    mesh = prototype.mesh
-    name = prototype.identity.prim_name
-    return f'''    def Xform "{name}" (
+
+    return f'''    def Xform "{prototype.identity.prim_name}" (
         kind = "component"
     )
+    {{
+        token visibility = "invisible"
+        def Mesh "{contract.base_mesh_name}"
         {{
-            token visibility = "invisible"
-            def Mesh "{name}_Mesh"
-            {{
-                uniform token subdivisionScheme = "none"
-                {_render_mesh_payload(mesh)}
-            }}
-        }}'''
+            uniform token subdivisionScheme = "none"
+            {_render_mesh_payload(prototype.mesh, contract.mesh_orientation)}
+        }}
+    }}'''
 
 
 def _render_point_instancer(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
-    leaves = model.leaf_instances
+    assembly_parts = model.assembly_parts
     prototypes = model.prototypes
-    if not leaves:
+    if not assembly_parts:
         return ""
+
     prototype_index_map = {prototype.source_key: index for index, prototype in enumerate(prototypes)}
-    proto_indices = ", ".join(str(prototype_index_map.get(leaf.prototype_key, 0)) for leaf in leaves)
-    positions = ", ".join(leaf.position.to_usda() for leaf in leaves)
-    orientations = ", ".join(leaf.orientation.to_usda() for leaf in leaves)
-    scales = ", ".join(leaf.scale.to_usda() for leaf in leaves)
-    names = ", ".join(f'"{_prototype_name_for_instance(leaf, prototypes)}"' for leaf in leaves)
-    binding_width, bindings = _normalized_bindings(leaves, contract.point_instancer_joint_element_size)
+    proto_indices = ", ".join(str(prototype_index_map.get(part.prototype_key, 0)) for part in assembly_parts)
+    positions = ", ".join(part.position.to_usda() for part in assembly_parts)
+    orientations = ", ".join(part.orientation.to_usda() for part in assembly_parts)
+    scales = ", ".join(part.scale.to_usda() for part in assembly_parts)
+    names = ", ".join(f'"{_prototype_name_for_instance(part, prototypes)}"' for part in assembly_parts)
+    binding_width, bindings = _normalized_bindings(assembly_parts, contract.point_instancer_joint_element_size)
     bind_joints = ", ".join(f'"{token}"' for binding in bindings for token in binding.joint_tokens)
     bind_weights = ", ".join(f"{weight:g}" for binding in bindings for weight in binding.weights)
-    prototype_paths = _prototype_target_paths(model)
-    prototype_defs = _render_instancer_prototypes(model)
+    prototype_paths = _prototype_target_paths(model, contract)
+    prototype_defs = _render_instancer_prototypes(model, contract)
     binding_support = _render_binding_support_primvars(model, bindings)
 
-    return f'''def PointInstancer "PartsInstancer" (
+    return f'''def PointInstancer "{contract.assembly_parts_instancer_name}" (
     prepend apiSchemas = ["{contract.binding_api}"]
     kind = "group"
 )
@@ -200,7 +206,7 @@ def _render_point_instancer(model: CanonicalTreeModel, contract: UeSchemaContrac
         interpolation = "varying"
     )
 
-    def Scope "Prototypes" (
+    def Scope "{contract.prototype_scope_name}" (
         kind = "group"
     )
     {{
@@ -213,6 +219,7 @@ def _render_binding_support_primvars(model: CanonicalTreeModel, bindings: tuple[
     support = model.skeletal_support_primvars
     if support is None or not bindings:
         return ""
+
     path_map = _build_joint_path_map(model)
     hierarchical_map = {token: depth for token, depth in zip(support.capture_paths, support.hierarchical_depths)}
     logical_map = {token: depth for token, depth in zip(support.capture_paths, support.logical_depths)}
@@ -226,6 +233,7 @@ def _render_binding_support_primvars(model: CanonicalTreeModel, bindings: tuple[
         logical_map[joint.name] = logical_depth
         hierarchical_map[path_map[joint.name]] = hierarchical_depth
         logical_map[path_map[joint.name]] = logical_depth
+
     hierarchical_values = [str(hierarchical_map.get(token, 0)) for binding in bindings for token in binding.joint_tokens]
     logical_values = [str(logical_map.get(token, 0)) for binding in bindings for token in binding.joint_tokens]
     lengths = ", ".join(str(binding.element_size) for binding in bindings)
@@ -243,41 +251,34 @@ def _render_binding_support_primvars(model: CanonicalTreeModel, bindings: tuple[
     )'''
 
 
-def _render_instancer_prototypes(model: CanonicalTreeModel) -> str:
-    if model.prototype_strategy == PrototypeStrategy.INLINE_SKELETAL_TWIG:
-        return "\n".join(_render_inline_instancer_prototype(prototype) for prototype in model.prototypes)
+def _render_instancer_prototypes(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
+    if model.prototype_strategy == PrototypeStrategy.INLINE_SKELETAL_PART:
+        return "\n".join(_render_inline_instancer_prototype(prototype, contract) for prototype in model.prototypes)
 
-    definitions = "\n".join(
-        f'''            def "{prototype.identity.prim_name}" (
-                append references = </Tree/Branches/{prototype.identity.prim_name}>
-            )
-            {{
-                token visibility = None
-            }}'''
+    return "\n".join(
+        f'''        def "{prototype.identity.prim_name}" (
+            append references = </{contract.root_prim_name}/PrototypeLibrary/{prototype.identity.prim_name}>
+        )
+        {{
+            token visibility = None
+        }}'''
         for prototype in model.prototypes
     )
-    return f'''def Xform "Tree"
-{{
-    def Xform "Branches"
-    {{
-{definitions}
-    }}
-}}'''
 
 
-def _render_inline_instancer_prototype(prototype: Prototype) -> str:
+def _render_inline_instancer_prototype(prototype: Prototype, contract: UeSchemaContract) -> str:
     if prototype.mesh is None:
         raise ValueError(f"Prototype {prototype.identity.prim_name} is missing mesh payload.")
-    mesh = prototype.mesh
+
     name = prototype.identity.prim_name
-    skinning = _render_single_joint_skinning(mesh)
+    skinning = _render_single_joint_skinning(prototype.mesh, contract)
     return f'''        def Xform "{name}"
         {{
-            def SkelRoot "Part_skelroot" (
+            def SkelRoot "{contract.part_skel_root_name}" (
                 kind = "component"
             )
             {{
-                def SkelAnimation "animation"
+                def SkelAnimation "{contract.part_animation_name}"
                 {{
                     uniform token[] joints = ["root"]
                     quath[] rotations = [{_identity_quaternion()}]
@@ -285,20 +286,20 @@ def _render_inline_instancer_prototype(prototype: Prototype) -> str:
                     float3[] translations = [(0, 0, 0)]
                 }}
 
-                def Mesh "Part_mesh" (
-                    prepend apiSchemas = ["SkelBindingAPI"]
+                def Mesh "{contract.part_mesh_name}" (
+                    prepend apiSchemas = ["{contract.skel_binding_api}"]
                 )
                 {{
                     uniform token[] skel:joints = ["root"]
                     uniform matrix4d primvars:skel:geomBindTransform = {_identity_matrix()}
-                    append rel skel:skeleton = </Tree/PartsInstancer/Prototypes/{name}/Part_skelroot/skeleton>
+                    append rel skel:skeleton = {contract.part_skeleton_path(name)}
                     uniform token subdivisionScheme = "none"
-                    {_render_mesh_payload(mesh)}
+                    {_render_mesh_payload(prototype.mesh, contract.mesh_orientation)}
 {_indent(skinning, 5)}
                 }}
 
-                def Skeleton "skeleton" (
-                    prepend apiSchemas = ["SkelBindingAPI"]
+                def Skeleton "{contract.part_skeleton_name}" (
+                    prepend apiSchemas = ["{contract.skel_binding_api}"]
                 )
                 {{
                     uniform matrix4d[] bindTransforms = [{_identity_matrix()}]
@@ -306,7 +307,7 @@ def _render_inline_instancer_prototype(prototype: Prototype) -> str:
                     uniform token[] joints = ["root"]
                     uniform token purpose = "guide"
                     uniform matrix4d[] restTransforms = [{_identity_matrix()}]
-                    append rel skel:animationSource = </Tree/PartsInstancer/Prototypes/{name}/Part_skelroot/animation>
+                    append rel skel:animationSource = {contract.part_animation_path(name)}
                     uniform token visibility = "invisible"
                 }}
             }}
@@ -316,6 +317,7 @@ def _render_inline_instancer_prototype(prototype: Prototype) -> str:
 def _render_skelroot_support_primvars(support: SkeletalSupportPrimvars | None) -> str:
     if support is None:
         return ""
+
     capture_paths = ", ".join(f'"{token}"' for token in support.capture_paths)
     ue_joint_names = ", ".join(f'"{token}"' for token in support.ue_joint_names)
     joint_count = len(support.capture_paths)
@@ -357,29 +359,32 @@ def _render_skelroot_support_primvars(support: SkeletalSupportPrimvars | None) -
         )'''
 
 
-def _prototype_target_paths(model: CanonicalTreeModel) -> str:
-    if model.prototype_strategy == PrototypeStrategy.INLINE_SKELETAL_TWIG:
-        return ", ".join(f"</Tree/PartsInstancer/Prototypes/{prototype.identity.prim_name}>" for prototype in model.prototypes)
+def _prototype_target_paths(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
+    if model.prototype_strategy == PrototypeStrategy.INLINE_SKELETAL_PART:
+        return ", ".join(contract.prototype_root_path(prototype.identity.prim_name) for prototype in model.prototypes)
     return ", ".join(
-        f"</Tree/PartsInstancer/Prototypes/Tree/Branches/{prototype.identity.prim_name}>"
+        f"</{contract.root_prim_name}/{contract.assembly_parts_instancer_name}/{contract.prototype_scope_name}/{prototype.identity.prim_name}>"
         for prototype in model.prototypes
     )
 
 
-def _normalized_bindings(leaves, target_width: int) -> tuple[int, tuple[InstanceBinding, ...]]:
-    width = max((leaf.binding.element_size for leaf in leaves), default=1)
+def _normalized_bindings(
+    assembly_parts: tuple[AssemblyPartInstance, ...],
+    target_width: int,
+) -> tuple[int, tuple[InstanceBinding, ...]]:
+    width = max((part.binding.element_size for part in assembly_parts), default=1)
     width = max(width, target_width, 1)
-    return width, tuple(leaf.binding.padded(width) for leaf in leaves)
+    return width, tuple(part.binding.padded(width) for part in assembly_parts)
 
 
-def _prototype_name_for_instance(leaf, prototypes: tuple[Prototype, ...]) -> str:
+def _prototype_name_for_instance(part: AssemblyPartInstance, prototypes: tuple[Prototype, ...]) -> str:
     for prototype in prototypes:
-        if prototype.source_key == leaf.prototype_key:
+        if prototype.source_key == part.prototype_key:
             return prototype.source_name
-    return leaf.prototype_key
+    return part.prototype_key
 
 
-def _render_joint_names(model: CanonicalTreeModel) -> str:
+def _render_joint_paths(model: CanonicalTreeModel) -> str:
     path_map = _build_joint_path_map(model)
     return ", ".join(f'"{path_map[joint.name]}"' for joint in model.skeleton)
 
@@ -392,11 +397,12 @@ def _render_joint_rest_translations(model: CanonicalTreeModel) -> str:
     return ", ".join(joint.rest_translate.to_usda() for joint in model.skeleton)
 
 
-def _render_mesh_payload(mesh: MeshData) -> str:
+def _render_mesh_payload(mesh: MeshData, mesh_orientation: str) -> str:
+    # The source-to-stage conversion is a pure rotation plus uniform scale, so winding is preserved.
     points = ", ".join(point.to_usda() for point in mesh.points)
     counts = ", ".join(str(value) for value in mesh.face_vertex_counts)
     indices = ", ".join(str(value) for value in mesh.face_vertex_indices)
-    return f'''uniform token orientation = "leftHanded"
+    return f'''uniform token orientation = "{mesh_orientation}"
     point3f[] points = [{points}] (
         interpolation = "vertex"
     )
@@ -404,7 +410,7 @@ def _render_mesh_payload(mesh: MeshData) -> str:
     int[] faceVertexIndices = [{indices}]'''
 
 
-def _render_single_joint_skinning(mesh: MeshData) -> str:
+def _render_single_joint_skinning(mesh: MeshData, contract: UeSchemaContract) -> str:
     joint_indices = ", ".join("0" for _ in mesh.points)
     joint_weights = ", ".join("1" for _ in mesh.points)
     return f'''uniform int[] primvars:skel:jointIndices = [{joint_indices}] (
@@ -415,7 +421,7 @@ uniform float[] primvars:skel:jointWeights = [{joint_weights}] (
     elementSize = 1
     interpolation = "vertex"
 )
-uniform token primvars:skel:skinningMethod = "classicLinear"'''
+{contract.skinning_method_attr} = "{contract.skinning_method_value}"'''
 
 
 def _indent(value: str, level: int) -> str:

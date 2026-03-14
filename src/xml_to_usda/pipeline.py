@@ -21,14 +21,14 @@ def inspect_source(input_path: str) -> ObservedXmlSchemaReport:
     return replace(
         report,
         base_geometry_mode=_base_geometry_mode(model),
-        base_mesh_part_count=len(model.base_mesh_parts),
+        base_mesh_part_count=len(model.base_tree_parts),
         base_mesh_point_count=len(model.base_mesh.points) if model.base_mesh is not None else 0,
         base_mesh_face_count=len(model.base_mesh.face_vertex_counts) if model.base_mesh is not None else 0,
         prototype_structure=model.prototype_strategy.value,
         binding_mode=model.binding_mode,
         binding_element_size=model.binding_element_size,
         support_primvars=_support_primvars(model),
-        orientation_sample=tuple(leaf.orientation.to_usda() for leaf in model.leaf_instances[:3]),
+        orientation_sample=tuple(part.orientation.to_usda() for part in model.assembly_parts[:3]),
     )
 
 
@@ -128,9 +128,9 @@ def _ensure_output_path_allowed(output_path: Path) -> None:
 
 
 def _base_geometry_mode(model: CanonicalTreeModel) -> str:
-    if not model.base_mesh_parts:
+    if not model.base_tree_parts:
         return "missing"
-    return "merged" if len(model.base_mesh_parts) > 1 else "trunk_only"
+    return "merged" if len(model.base_tree_parts) > 1 else "single_object"
 
 
 def _support_primvars(model: CanonicalTreeModel) -> tuple[str, ...]:

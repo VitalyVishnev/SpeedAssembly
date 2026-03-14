@@ -13,6 +13,7 @@ KNOWN_SECTION_HINTS = {
     "trunk_mesh": ("trunk", "mesh", "geometry", "vertices", "faces", "triangles", "points"),
     "leaf_references": ("leaf", "leafref", "leafreference"),
     "object_hierarchy": ("object", "objects"),
+    "spines": ("spine",),
     "materials": ("material",),
     "lods": ("lod",),
     "metadata": ("metadata", "version", "units", "axis", "speedtreeraw"),

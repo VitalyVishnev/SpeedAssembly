@@ -28,8 +28,8 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
         issues.append(
             ValidationIssue(
                 severity="error",
-                code="missing_trunk_mesh",
-                message="Tree asset requires trunk/base geometry for skeletal assembly import.",
+                code="missing_base_tree_mesh",
+                message="Tree asset requires Base Skeletal Tree geometry for skeletal assembly import.",
             )
         )
     elif not model.base_mesh.skel_joint_indices or not model.base_mesh.skel_joint_weights:
@@ -91,52 +91,52 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                 )
             )
 
-    if not model.leaf_instances:
+    if not model.assembly_parts:
         issues.append(
             ValidationIssue(
                 severity="warning",
                 code="missing_leaf_references",
-                message="No reusable part references found; converter will emit a base-geometry-only USDA.",
+                message="No LeafReferences / Assembly Parts found; converter will emit a base-only USDA.",
             )
         )
 
-    if model.leaf_instances and any(not leaf.binding.joint_tokens for leaf in model.leaf_instances):
+    if model.assembly_parts and any(not part.binding.joint_tokens for part in model.assembly_parts):
         issues.append(
             ValidationIssue(
                 severity="error",
                 code="missing_leaf_binding",
-                message="Reusable instances must carry explicit skeletal binding data derived from the XML export.",
+                message="Assembly Part instances must carry explicit skeletal binding data derived from the XML export.",
             )
         )
-    if model.leaf_instances and model.prototype_strategy != PrototypeStrategy.INLINE_SKELETAL_TWIG:
+    if model.assembly_parts and model.prototype_strategy != PrototypeStrategy.INLINE_SKELETAL_PART:
         issues.append(
             ValidationIssue(
                 severity="error",
                 code="unsupported_prototype_strategy",
-                message="Skeletal twig instancing requires inline skeletal twig prototypes under PointInstancer/Prototypes.",
+                message="Skeletal Assembly Part instancing requires inline skeletal part prototypes under PointInstancer/Prototypes.",
             )
         )
     skeleton_joint_tokens = _valid_binding_joint_tokens(model)
-    if model.leaf_instances:
+    if model.assembly_parts:
         prototypes_by_key = {prototype.source_key: prototype for prototype in model.prototypes}
-        for leaf in model.leaf_instances:
-            prototype = prototypes_by_key.get(leaf.prototype_key)
+        for part in model.assembly_parts:
+            prototype = prototypes_by_key.get(part.prototype_key)
             if prototype is None:
                 issues.append(
                     ValidationIssue(
                         severity="error",
                         code="missing_prototype_mesh",
-                        message=f"Instance {leaf.name} references missing prototype {leaf.prototype_key}.",
+                        message=f"Assembly Part instance {part.name} references missing prototype {part.prototype_key}.",
                     )
                 )
-            invalid_tokens = [token for token in leaf.binding.joint_tokens if token and token not in skeleton_joint_tokens]
+            invalid_tokens = [token for token in part.binding.joint_tokens if token and token not in skeleton_joint_tokens]
             if invalid_tokens:
                 issues.append(
                     ValidationIssue(
                         severity="error",
                         code="invalid_binding_joint",
                         message=(
-                            f"Instance {leaf.name} references skeletal joints that do not exist in the authored skeleton: "
+                            f"Assembly Part instance {part.name} references skeletal joints that do not exist in the authored skeleton: "
                             + ", ".join(invalid_tokens)
                         ),
                     )
@@ -158,26 +158,26 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                         code="invalid_prototype_mesh",
                         message=(
                             f"Prototype {prototype.identity.prim_name} must contain point and face topology payloads "
-                            "before skeletal twig authoring."
+                            "before skeletal Assembly Part authoring."
                         ),
                     )
                 )
 
-    for leaf in model.leaf_instances:
-        if len(leaf.binding.joint_tokens) != len(leaf.binding.weights):
+    for part in model.assembly_parts:
+        if len(part.binding.joint_tokens) != len(part.binding.weights):
             issues.append(
                 ValidationIssue(
                     severity="error",
                     code="invalid_binding_shape",
-                    message=f"Instance {leaf.name} has mismatched joint and weight counts.",
+                    message=f"Assembly Part instance {part.name} has mismatched joint and weight counts.",
                 )
             )
-        if leaf.binding.weights and abs(sum(leaf.binding.weights) - 1.0) > 1e-4:
+        if part.binding.weights and abs(sum(part.binding.weights) - 1.0) > 1e-4:
             issues.append(
                 ValidationIssue(
                     severity="warning",
                     code="non_normalized_binding_weights",
-                    message=f"Instance {leaf.name} binding weights sum to {sum(leaf.binding.weights):g} instead of 1.",
+                    message=f"Assembly Part instance {part.name} binding weights sum to {sum(part.binding.weights):g} instead of 1.",
                 )
             )
 

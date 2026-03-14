@@ -32,7 +32,7 @@ class OutputMode(StrEnum):
 
 
 class PrototypeStrategy(StrEnum):
-    INLINE_SKELETAL_TWIG = "inline_skeletal_twig"
+    INLINE_SKELETAL_PART = "inline_skeletal_part"
     REFERENCED_SCOPE = "referenced_scope"
 
 
@@ -133,7 +133,7 @@ class Prototype:
     source_key: str
     source_mesh_id: int | None
     source_name: str
-    prototype_type: str = "leaf"
+    prototype_type: str = "assembly_part"
 
 
 @dataclass(frozen=True)
@@ -154,6 +154,7 @@ class MeshLibraryEntry:
     mesh_id: int
     name: str
     mesh: MeshData
+    original_scale: float | None = None
 
 
 @dataclass(frozen=True)
@@ -165,7 +166,7 @@ class SourceObject:
     rel_translate: Vector3
     bounds: Bounds | None = None
     mesh: MeshData | None = None
-    leaf_instance_count: int = 0
+    assembly_part_reference_count: int = 0
     spine: SpineCurve | None = None
 
 
@@ -180,7 +181,7 @@ class BranchSegment:
 
 
 @dataclass(frozen=True)
-class BaseMeshPart:
+class BaseTreePart:
     object_id: str
     parent_id: str | None
     name: str
@@ -192,7 +193,7 @@ class BaseMeshPart:
 
 
 @dataclass(frozen=True)
-class LeafInstance:
+class AssemblyPartInstance:
     name: str
     prototype_key: str
     position: Vector3
@@ -221,7 +222,7 @@ class LeafInstance:
 class PrototypeIdentity:
     source_key: str
     prim_name: str
-    prototype_type: str = "leaf"
+    prototype_type: str = "assembly_part"
 
 
 @dataclass(frozen=True)
@@ -302,10 +303,9 @@ class TreeAsset:
     metadata: ExportMetadata
     source_objects: tuple[SourceObject, ...]
     base_mesh: MeshData | None
-    trunk_source_mesh: MeshData | None
     skeleton: tuple[Joint, ...]
-    leaf_instances: tuple[LeafInstance, ...]
-    base_mesh_parts: tuple[BaseMeshPart, ...] = ()
+    assembly_parts: tuple[AssemblyPartInstance, ...]
+    base_tree_parts: tuple[BaseTreePart, ...] = ()
     branch_segments: tuple[BranchSegment, ...] = ()
     mesh_library: tuple[MeshLibraryEntry, ...] = ()
     prototypes: tuple[Prototype, ...] = ()
@@ -314,23 +314,15 @@ class TreeAsset:
     spines: tuple[SpineCurve, ...] = ()
 
     @property
-    def trunk_mesh(self) -> MeshData | None:
-        return self.base_mesh
-
-    @property
-    def leaf_references(self) -> tuple[LeafInstance, ...]:
-        return self.leaf_instances
-
-    @property
     def binding_mode(self) -> str:
-        if not self.leaf_instances:
+        if not self.assembly_parts:
             return "none"
-        max_width = max(leaf.binding.element_size for leaf in self.leaf_instances)
+        max_width = max(part.binding.element_size for part in self.assembly_parts)
         return "single_joint" if max_width <= 1 else "multi_joint_capable"
 
     @property
     def binding_element_size(self) -> int:
-        return max((leaf.binding.element_size for leaf in self.leaf_instances), default=0)
+        return max((part.binding.element_size for part in self.assembly_parts), default=0)
 
 
 CanonicalTreeModel = TreeAsset

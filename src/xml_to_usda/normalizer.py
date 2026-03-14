@@ -2,17 +2,18 @@
 
 import math
 import xml.etree.ElementTree as ET
+from dataclasses import replace
 
 from .naming import build_prototype_identities
 from .models import (
-    BaseMeshPart,
+    AssemblyPartInstance,
+    BaseTreePart,
     Bounds,
     BranchSegment,
     CanonicalTreeModel,
     ExportMetadata,
     InstanceBinding,
     Joint,
-    LeafInstance,
     Matrix4d,
     MeshData,
     MeshLibraryEntry,
@@ -25,31 +26,35 @@ from .models import (
     SpineCurve,
     Vector3,
 )
+from .source_transform import SourceTransform, build_source_transform
 
 
 def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> CanonicalTreeModel:
     root = document.tree.getroot()
     data_messages: list[str] = []
+    # Stage metadata alone is not enough. Every spatial payload must be remapped into stage space here.
+    source_transform = build_source_transform(root, report.units_hint, report.up_axis_hint)
 
-    skeleton = tuple(_extract_skeleton(root, data_messages))
+    skeleton = tuple(_extract_skeleton(root, data_messages, source_transform))
     joint_index_by_source_id = {
         joint.source_id: index for index, joint in enumerate(skeleton) if joint.source_id is not None
     }
-    source_objects = tuple(_extract_source_objects(root, data_messages, joint_index_by_source_id))
-    mesh_library = tuple(_extract_mesh_library(root, data_messages))
-    trunk_source_mesh = _extract_trunk_mesh(source_objects)
-    base_mesh, base_mesh_parts = _build_base_mesh(source_objects)
-    leaf_instances = tuple(_extract_leaf_instances(root, skeleton, data_messages))
+    source_objects = tuple(_extract_source_objects(root, data_messages, joint_index_by_source_id, source_transform))
+    mesh_library = tuple(_extract_mesh_library(root, data_messages, source_transform))
+    base_mesh, base_tree_parts = _build_base_mesh(source_objects)
+    # The project contract treats LeafReferences as the source of repeated Assembly Parts.
+    assembly_parts = tuple(_extract_assembly_parts_from_leaf_references(root, data_messages, source_transform))
+    assembly_parts, mesh_library = _rebalance_assembly_part_prototype_scales(assembly_parts, mesh_library)
     branch_segments = tuple(_extract_branch_segments(source_objects, skeleton))
-    prototypes = tuple(_build_prototypes(leaf_instances, mesh_library))
+    prototypes = tuple(_build_prototypes(assembly_parts, mesh_library))
     skeletal_support_primvars = _build_skeletal_support_primvars(skeleton)
     spines = tuple(source_object.spine for source_object in source_objects if source_object.spine is not None)
 
     metadata = ExportMetadata(
         source_path=document.source_path,
         source_version=report.version,
-        meters_per_unit=1.0,
-        up_axis="Y",
+        meters_per_unit=source_transform.target_meters_per_unit,
+        up_axis=source_transform.target_up_axis,
         warnings=tuple(_metadata_warnings(report) + data_messages),
         unknown_sections=report.unknown_sections,
     )
@@ -58,14 +63,13 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
         metadata=metadata,
         source_objects=source_objects,
         base_mesh=base_mesh,
-        trunk_source_mesh=trunk_source_mesh,
         skeleton=skeleton,
-        leaf_instances=leaf_instances,
-        base_mesh_parts=base_mesh_parts,
+        assembly_parts=assembly_parts,
+        base_tree_parts=base_tree_parts,
         branch_segments=branch_segments,
         mesh_library=mesh_library,
         prototypes=prototypes,
-        prototype_strategy=PrototypeStrategy.INLINE_SKELETAL_TWIG,
+        prototype_strategy=PrototypeStrategy.INLINE_SKELETAL_PART,
         skeletal_support_primvars=skeletal_support_primvars,
         spines=spines,
     )
@@ -86,17 +90,7 @@ def _metadata_warnings(report: ObservedXmlSchemaReport) -> list[str]:
     return warnings
 
 
-def _extract_trunk_mesh(source_objects: tuple[SourceObject, ...]) -> MeshData | None:
-    for source_object in source_objects:
-        if source_object.name == "Trunk" and source_object.mesh is not None:
-            return source_object.mesh
-    for source_object in source_objects:
-        if source_object.mesh is not None and source_object.name.lower() != "leaves":
-            return source_object.mesh
-    return None
-
-
-def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData | None, tuple[BaseMeshPart, ...]]:
+def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData | None, tuple[BaseTreePart, ...]]:
     candidates = [
         source_object
         for source_object in source_objects
@@ -111,7 +105,7 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
     merged_face_indices: list[int] = []
     merged_joint_indices: list[int] = []
     merged_joint_weights: list[float] = []
-    merged_parts: list[BaseMeshPart] = []
+    merged_parts: list[BaseTreePart] = []
 
     for source_object in candidates:
         mesh = source_object.mesh
@@ -126,7 +120,7 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
         merged_joint_indices.extend(mesh.skel_joint_indices)
         merged_joint_weights.extend(mesh.skel_joint_weights)
         merged_parts.append(
-            BaseMeshPart(
+            BaseTreePart(
                 object_id=source_object.object_id,
                 parent_id=source_object.parent_id,
                 name=source_object.name,
@@ -156,32 +150,33 @@ def _extract_source_objects(
     root: ET.Element,
     messages: list[str],
     joint_index_by_source_id: dict[int, int],
+    source_transform: SourceTransform,
 ) -> list[SourceObject]:
     source_objects: list[SourceObject] = []
     for obj in root.findall(".//Object"):
         object_id = obj.attrib.get("ID")
         if object_id is None:
             continue
-        mesh = _extract_object_mesh(obj, messages, joint_index_by_source_id)
+        mesh = _extract_object_mesh(obj, messages, joint_index_by_source_id, source_transform)
         leaf_count = _count_packed_values(obj.find("LeafReferences"), "X")
-        spine = _extract_spine(obj, object_id, messages)
+        spine = _extract_spine(obj, object_id, messages, source_transform)
         source_objects.append(
             SourceObject(
                 object_id=object_id,
                 parent_id=obj.attrib.get("ParentID"),
                 name=obj.attrib.get("Name", f"Object_{object_id}"),
-                abs_translate=_vector_from_named_attributes(obj, ("AbsX", "AbsY", "AbsZ")),
-                rel_translate=_vector_from_named_attributes(obj, ("RelX", "RelY", "RelZ")),
-                bounds=_extract_bounds(obj),
+                abs_translate=_vector_from_named_attributes(obj, ("AbsX", "AbsY", "AbsZ"), source_transform),
+                rel_translate=_vector_from_named_attributes(obj, ("RelX", "RelY", "RelZ"), source_transform),
+                bounds=_extract_bounds(obj, source_transform),
                 mesh=mesh,
-                leaf_instance_count=leaf_count,
+                assembly_part_reference_count=leaf_count,
                 spine=spine,
             )
         )
     return source_objects
 
 
-def _extract_mesh_library(root: ET.Element, messages: list[str]) -> list[MeshLibraryEntry]:
+def _extract_mesh_library(root: ET.Element, messages: list[str], source_transform: SourceTransform) -> list[MeshLibraryEntry]:
     entries: list[MeshLibraryEntry] = []
     for mesh in root.findall(".//Meshes/Mesh"):
         mesh_id = mesh.attrib.get("ID")
@@ -195,9 +190,22 @@ def _extract_mesh_library(root: ET.Element, messages: list[str]) -> list[MeshLib
         if vertices is None:
             messages.append(f"packed_array_error: mesh {mesh.attrib.get('Name', mesh.tag)} missing vertices payload")
             continue
-        mesh_data = _build_library_mesh_data(mesh.attrib.get("Name", f"Mesh_{mesh_id}"), vertices, lod, messages)
+        mesh_data = _build_library_mesh_data(
+            mesh.attrib.get("Name", f"Mesh_{mesh_id}"),
+            vertices,
+            lod,
+            messages,
+            source_transform,
+        )
         if mesh_data is not None:
-            entries.append(MeshLibraryEntry(mesh_id=int(mesh_id), name=mesh_data.name, mesh=mesh_data))
+            entries.append(
+                MeshLibraryEntry(
+                    mesh_id=int(mesh_id),
+                    name=mesh_data.name,
+                    mesh=mesh_data,
+                    original_scale=_read_positive_float(lod.attrib.get("OriginalScale")),
+                )
+            )
     return entries
 
 
@@ -205,6 +213,7 @@ def _extract_object_mesh(
     obj: ET.Element,
     messages: list[str],
     joint_index_by_source_id: dict[int, int],
+    source_transform: SourceTransform,
 ) -> MeshData | None:
     points_node = obj.find("Points")
     triangles_node = obj.find("Triangles")
@@ -218,6 +227,7 @@ def _extract_object_mesh(
         vertices_node,
         joint_index_by_source_id,
         messages,
+        source_transform,
     )
 
 
@@ -228,8 +238,9 @@ def _build_mesh_data(
     vertices_node: ET.Element | None,
     joint_index_by_source_id: dict[int, int],
     messages: list[str],
+    source_transform: SourceTransform,
 ) -> MeshData | None:
-    points = _extract_packed_points(points_node, f"{name}.points", messages)
+    points = _extract_packed_points(points_node, f"{name}.points", messages, source_transform)
     face_counts, face_indices, vertex_indices = _extract_packed_triangles(triangles_node, f"{name}.triangles", messages)
     if not points or not face_counts or not face_indices:
         return None
@@ -245,8 +256,14 @@ def _build_mesh_data(
     return _build_mesh_from_faces(name, points, face_counts, face_indices, joint_indices, joint_weights)
 
 
-def _build_library_mesh_data(name: str, points_node: ET.Element, lod_node: ET.Element, messages: list[str]) -> MeshData | None:
-    points = _extract_packed_points(points_node, f"{name}.points", messages)
+def _build_library_mesh_data(
+    name: str,
+    points_node: ET.Element,
+    lod_node: ET.Element,
+    messages: list[str],
+    source_transform: SourceTransform,
+) -> MeshData | None:
+    points = _extract_packed_points(points_node, f"{name}.points", messages, source_transform)
     face_counts, face_indices = _extract_lod_faces(lod_node, name, messages)
     if not points or not face_counts or not face_indices:
         return None
@@ -289,7 +306,7 @@ def _select_primary_lod(mesh: ET.Element) -> ET.Element | None:
     return lods[0]
 
 
-def _extract_skeleton(root: ET.Element, messages: list[str]) -> list[Joint]:
+def _extract_skeleton(root: ET.Element, messages: list[str], source_transform: SourceTransform) -> list[Joint]:
     bones = root.findall(".//Bones/Bone")
     if not bones:
         return []
@@ -315,7 +332,7 @@ def _extract_skeleton(root: ET.Element, messages: list[str]) -> list[Joint]:
             (
                 int(bone_id),
                 parsed_parent_id,
-                Vector3(start_x, start_y, start_z),
+                source_transform.point_to_stage(Vector3(start_x, start_y, start_z)),
             )
         )
 
@@ -344,8 +361,12 @@ def _extract_skeleton(root: ET.Element, messages: list[str]) -> list[Joint]:
     return joints
 
 
-def _extract_leaf_instances(root: ET.Element, skeleton: tuple[Joint, ...], messages: list[str]) -> list[LeafInstance]:
-    leaf_instances: list[LeafInstance] = []
+def _extract_assembly_parts_from_leaf_references(
+    root: ET.Element,
+    messages: list[str],
+    source_transform: SourceTransform,
+) -> list[AssemblyPartInstance]:
+    assembly_parts: list[AssemblyPartInstance] = []
     for obj in root.findall(".//Object"):
         leaf_ref_node = obj.find("LeafReferences")
         if leaf_ref_node is None:
@@ -387,15 +408,19 @@ def _extract_leaf_instances(root: ET.Element, skeleton: tuple[Joint, ...], messa
             prototype_key = f"Mesh_{source_mesh_id}" if source_mesh_id is not None else "LeafPrototype"
             uniform_scale = scales[index] if index < len(scales) else 1.0
             binding = _binding_from_bone_id(source_bone_id)
-            leaf_instances.append(
-                LeafInstance(
-                    name=f"LeafRef_{len(leaf_instances):04d}",
+            assembly_parts.append(
+                AssemblyPartInstance(
+                    name=f"AssemblyPart_{len(assembly_parts):04d}",
                     prototype_key=prototype_key,
-                    position=Vector3(xs[index], ys[index], zs[index]),
+                    position=source_transform.point_to_stage(Vector3(xs[index], ys[index], zs[index])),
                     orientation=_quaternion_from_axis_angle(
-                        axis_x[index] if index < len(axis_x) else 0.0,
-                        axis_y[index] if index < len(axis_y) else 0.0,
-                        axis_z[index] if index < len(axis_z) else 1.0,
+                        source_transform.axis_to_stage(
+                            Vector3(
+                                axis_x[index] if index < len(axis_x) else 0.0,
+                                axis_y[index] if index < len(axis_y) else 0.0,
+                                axis_z[index] if index < len(axis_z) else 1.0,
+                            )
+                        ),
                         angles[index] if index < len(angles) else 0.0,
                     ),
                     scale=Vector3(uniform_scale, uniform_scale, uniform_scale),
@@ -406,7 +431,7 @@ def _extract_leaf_instances(root: ET.Element, skeleton: tuple[Joint, ...], messa
                     mesh_lod=mesh_lods[index] if index < len(mesh_lods) else None,
                 )
             )
-    return leaf_instances
+    return assembly_parts
 
 
 def _extract_branch_segments(source_objects: tuple[SourceObject, ...], skeleton: tuple[Joint, ...]) -> list[BranchSegment]:
@@ -434,13 +459,70 @@ def _extract_branch_segments(source_objects: tuple[SourceObject, ...], skeleton:
     return segments
 
 
+def _rebalance_assembly_part_prototype_scales(
+    assembly_parts: tuple[AssemblyPartInstance, ...],
+    mesh_library: tuple[MeshLibraryEntry, ...],
+) -> tuple[tuple[AssemblyPartInstance, ...], tuple[MeshLibraryEntry, ...]]:
+    if not assembly_parts or not mesh_library:
+        return assembly_parts, mesh_library
+
+    observed_scale_by_key = _assembly_part_scale_medians(assembly_parts)
+    compensation_by_key: dict[str, float] = {}
+    for entry in mesh_library:
+        prototype_key = f"Mesh_{entry.mesh_id}"
+        compensation = entry.original_scale
+        if compensation is None or not math.isfinite(compensation) or compensation <= 1.0:
+            fallback_scale = observed_scale_by_key.get(prototype_key)
+            if fallback_scale is not None and math.isfinite(fallback_scale) and fallback_scale > 4.0:
+                compensation = fallback_scale
+        if compensation is not None and math.isfinite(compensation) and compensation > 1.0:
+            compensation_by_key[prototype_key] = compensation
+
+    if not compensation_by_key:
+        return assembly_parts, mesh_library
+
+    # SpeedTree often stores part meshes at tiny library scale and restores size with LeafReferences instance scale.
+    # Baking the stable prototype scale into the mesh keeps standalone skeletal part assets readable for UE/Nanite.
+    rebalanced_mesh_library = tuple(
+        replace(entry, mesh=_scale_mesh(entry.mesh, compensation_by_key[f"Mesh_{entry.mesh_id}"]))
+        if f"Mesh_{entry.mesh_id}" in compensation_by_key
+        else entry
+        for entry in mesh_library
+    )
+    rebalanced_assembly_parts = tuple(
+        replace(part, scale=_scale_vector(part.scale, 1.0 / compensation_by_key[part.prototype_key]))
+        if part.prototype_key in compensation_by_key
+        else part
+        for part in assembly_parts
+    )
+    return rebalanced_assembly_parts, rebalanced_mesh_library
+
+
+def _assembly_part_scale_medians(assembly_parts: tuple[AssemblyPartInstance, ...]) -> dict[str, float]:
+    scales_by_key: dict[str, list[float]] = {}
+    for part in assembly_parts:
+        if not math.isclose(part.scale.x, part.scale.y) or not math.isclose(part.scale.y, part.scale.z):
+            continue
+        scales_by_key.setdefault(part.prototype_key, []).append(part.scale.x)
+
+    medians: dict[str, float] = {}
+    for prototype_key, scales in scales_by_key.items():
+        ordered = sorted(scales)
+        midpoint = len(ordered) // 2
+        if len(ordered) % 2 == 0:
+            medians[prototype_key] = (ordered[midpoint - 1] + ordered[midpoint]) * 0.5
+        else:
+            medians[prototype_key] = ordered[midpoint]
+    return medians
+
+
 def _build_prototypes(
-    leaf_instances: tuple[LeafInstance, ...],
+    assembly_parts: tuple[AssemblyPartInstance, ...],
     mesh_library: tuple[MeshLibraryEntry, ...],
 ) -> list[Prototype]:
-    if not leaf_instances:
+    if not assembly_parts:
         return []
-    source_keys = tuple(dict.fromkeys(leaf.prototype_key for leaf in leaf_instances))
+    source_keys = tuple(dict.fromkeys(part.prototype_key for part in assembly_parts))
     identities = build_prototype_identities(list(source_keys))
     meshes_by_key = {f"Mesh_{entry.mesh_id}": entry for entry in mesh_library}
     prototypes: list[Prototype] = []
@@ -459,6 +541,17 @@ def _build_prototypes(
     return prototypes
 
 
+def _scale_mesh(mesh: MeshData, factor: float) -> MeshData:
+    return replace(
+        mesh,
+        points=tuple(_scale_vector(point, factor) for point in mesh.points),
+    )
+
+
+def _scale_vector(vector: Vector3, factor: float) -> Vector3:
+    return Vector3(vector.x * factor, vector.y * factor, vector.z * factor)
+
+
 def _build_skeletal_support_primvars(skeleton: tuple[Joint, ...]) -> SkeletalSupportPrimvars | None:
     if not skeleton:
         return None
@@ -473,7 +566,12 @@ def _build_skeletal_support_primvars(skeleton: tuple[Joint, ...]) -> SkeletalSup
     )
 
 
-def _extract_spine(obj: ET.Element, object_id: str, messages: list[str]) -> SpineCurve | None:
+def _extract_spine(
+    obj: ET.Element,
+    object_id: str,
+    messages: list[str],
+    source_transform: SourceTransform,
+) -> SpineCurve | None:
     spine_node = obj.find("Spine")
     if spine_node is None:
         return None
@@ -489,28 +587,35 @@ def _extract_spine(obj: ET.Element, object_id: str, messages: list[str]) -> Spin
     )
     if count == 0:
         return None
-    points = tuple(Vector3(xs[index], ys[index], zs[index]) for index in range(count))
+    points = tuple(
+        source_transform.point_to_stage(Vector3(xs[index], ys[index], zs[index]))
+        for index in range(count)
+    )
     usable_radii = tuple(radii[:count]) if radii else ()
     return SpineCurve(source_object_id=object_id, points=points, radii=usable_radii)
 
 
-def _extract_bounds(obj: ET.Element) -> Bounds | None:
+def _extract_bounds(obj: ET.Element, source_transform: SourceTransform) -> Bounds | None:
     min_components = (obj.attrib.get("BoundsMinX"), obj.attrib.get("BoundsMinY"), obj.attrib.get("BoundsMinZ"))
     max_components = (obj.attrib.get("BoundsMaxX"), obj.attrib.get("BoundsMaxY"), obj.attrib.get("BoundsMaxZ"))
     if any(component is None for component in min_components + max_components):
         return None
-    return Bounds(
+    return source_transform.bounds_to_stage(Bounds(
         minimum=Vector3(float(min_components[0]), float(min_components[1]), float(min_components[2])),
         maximum=Vector3(float(max_components[0]), float(max_components[1]), float(max_components[2])),
-    )
+    ))
 
 
-def _vector_from_named_attributes(elem: ET.Element, names: tuple[str, str, str]) -> Vector3:
-    return Vector3(
+def _vector_from_named_attributes(
+    elem: ET.Element,
+    names: tuple[str, str, str],
+    source_transform: SourceTransform,
+) -> Vector3:
+    return source_transform.point_to_stage(Vector3(
         _find_float(elem, (names[0],), default=0.0) or 0.0,
         _find_float(elem, (names[1],), default=0.0) or 0.0,
         _find_float(elem, (names[2],), default=0.0) or 0.0,
-    )
+    ))
 
 
 def _joint_name_from_bone_id(bone_id: int | None) -> str:
@@ -563,12 +668,17 @@ def _find_float(elem: ET.Element, names: tuple[str, ...], default: float | None 
     return default
 
 
-def _extract_packed_points(node: ET.Element, context: str, messages: list[str]) -> list[Vector3]:
+def _extract_packed_points(
+    node: ET.Element,
+    context: str,
+    messages: list[str],
+    source_transform: SourceTransform,
+) -> list[Vector3]:
     xs = _read_float_list(node.findtext("X"))
     ys = _read_float_list(node.findtext("Y"))
     zs = _read_float_list(node.findtext("Z"))
     count = _consistent_count(context, messages, required=[("X", xs), ("Y", ys), ("Z", zs)])
-    return [Vector3(xs[index], ys[index], zs[index]) for index in range(count)]
+    return [source_transform.point_to_stage(Vector3(xs[index], ys[index], zs[index])) for index in range(count)]
 
 
 def _extract_packed_triangles(node: ET.Element, context: str, messages: list[str]) -> tuple[list[int], list[int], list[int]]:
@@ -739,15 +849,25 @@ def _read_int_list(raw: str | None) -> list[int]:
     return values
 
 
-def _quaternion_from_axis_angle(x: float, y: float, z: float, angle_degrees: float) -> Quaternion:
-    length = math.sqrt(x * x + y * y + z * z)
+def _read_positive_float(raw: str | None) -> float | None:
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if math.isfinite(value) and value > 0.0 else None
+
+
+def _quaternion_from_axis_angle(axis: Vector3, angle_degrees: float) -> Quaternion:
+    length = math.sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z)
     if length == 0.0:
         return Quaternion(1.0, 0.0, 0.0, 0.0)
     half_angle = math.radians(angle_degrees) * 0.5
     sin_half = math.sin(half_angle)
     return Quaternion(
         real=math.cos(half_angle),
-        i=(x / length) * sin_half,
-        j=(y / length) * sin_half,
-        k=(z / length) * sin_half,
+        i=(axis.x / length) * sin_half,
+        j=(axis.y / length) * sin_half,
+        k=(axis.z / length) * sin_half,
     )

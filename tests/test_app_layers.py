@@ -10,7 +10,7 @@ from xml_to_usda.pipeline import REPO_ROOT, convert_file, convert_request
 
 
 DATA_DIR = Path(__file__).parent / "data"
-SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "Samples" / "speedtree" / "simple_tree" / "variants" / "SimpleTree_01.xml"
+SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "samples" / "speedtree" / "simple_tree" / "variants" / "SimpleTree_01.xml"
 
 
 def test_stable_prim_name_is_ascii_safe() -> None:
