@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import json
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -8,6 +9,9 @@ from .pipeline import convert_file
 
 
 class ConversionApp:
+    SETTINGS_DIR = Path.home() / ".xml_to_usda"
+    SETTINGS_PATH = SETTINGS_DIR / "gui_settings.json"
+
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Convert XML -> USDA")
@@ -19,6 +23,7 @@ class ConversionApp:
         self.leaves_material_var = tk.StringVar()
         self.use_existing_part_meshes_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="Single-file mode. Batch and naming rules will be added in a later phase.")
+        self._load_settings()
 
         self._build_layout()
 
@@ -133,6 +138,7 @@ class ConversionApp:
             messagebox.showerror("Conversion failed", str(exc))
             return
 
+        self._save_settings()
         self._set_log(
             format_conversion_results(
                 (result,),
@@ -199,6 +205,34 @@ class ConversionApp:
     def _toggle_part_mesh_mapping_state(self) -> None:
         state = "normal" if self.use_existing_part_meshes_var.get() else "disabled"
         self.part_mesh_mapping_widget.configure(state=state)
+
+    def _load_settings(self) -> None:
+        settings = self._read_settings()
+        self.bark_material_var.set(settings.get("bark_material_path", ""))
+        self.leaves_material_var.set(settings.get("leaves_material_path", ""))
+
+    def _read_settings(self) -> dict[str, str]:
+        if not self.SETTINGS_PATH.exists():
+            return {}
+        try:
+            payload = json.loads(self.SETTINGS_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        return {
+            key: value
+            for key, value in payload.items()
+            if key in {"bark_material_path", "leaves_material_path"} and isinstance(value, str)
+        }
+
+    def _save_settings(self) -> None:
+        self.SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "bark_material_path": self.bark_material_var.get().strip(),
+            "leaves_material_path": self.leaves_material_var.get().strip(),
+        }
+        self.SETTINGS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def format_conversion_results(

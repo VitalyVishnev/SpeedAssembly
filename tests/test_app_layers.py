@@ -172,6 +172,76 @@ def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatc
         root.destroy()
 
 
+def test_gui_loads_persisted_material_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    settings_path = tmp_path / "gui_settings.json"
+    settings_path.write_text(
+        '{"bark_material_path": "/Game/TestMaterials/M_Bark_Test", "leaves_material_path": "/Game/TestMaterials/M_Leaves_Test"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
+
+    try:
+        app = ConversionApp(root)
+        assert app.bark_material_var.get() == "/Game/TestMaterials/M_Bark_Test"
+        assert app.leaves_material_var.get() == "/Game/TestMaterials/M_Leaves_Test"
+    finally:
+        root.destroy()
+
+
+def test_gui_persists_material_paths_after_successful_conversion(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    settings_path = tmp_path / "gui_settings.json"
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
+
+    def fake_convert_file(
+        input_path,
+        output_path,
+        output_mode=OutputMode.SELF_CONTAINED,
+        bark_material_path=None,
+        leaves_material_path=None,
+        use_existing_part_meshes=False,
+        part_mesh_asset_paths=(),
+    ):
+        return ConversionResult(
+            input_path=input_path,
+            output_path=output_path,
+            diagnostics=(),
+            usda_document=Mock(),
+        )
+
+    monkeypatch.setattr("xml_to_usda.gui.convert_file", fake_convert_file)
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        app.output_var.set("out.usda")
+        app.bark_material_var.set("/Game/TestMaterials/M_Bark_Test")
+        app.leaves_material_var.set("/Game/TestMaterials/M_Leaves_Test")
+
+        app.run_conversion()
+
+        assert settings_path.exists()
+        assert settings_path.read_text(encoding="utf-8") == (
+            '{\n'
+            '  "bark_material_path": "/Game/TestMaterials/M_Bark_Test",\n'
+            '  "leaves_material_path": "/Game/TestMaterials/M_Leaves_Test"\n'
+            '}'
+        )
+    finally:
+        root.destroy()
+
+
 def test_gui_invalid_material_path_blocks_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
     _, root = _build_tk_root_or_skip()
     from xml_to_usda.gui import ConversionApp

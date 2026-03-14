@@ -308,7 +308,14 @@ def _build_mesh_data(
         f"{name}.vertices",
         messages,
     )
-    uv_coords = _extract_face_varying_uvs(vertices_node, vertex_indices, face_indices, f"{name}.vertices", messages)
+    uv_coords = _extract_face_varying_uvs(
+        vertices_node,
+        vertex_indices,
+        face_indices,
+        f"{name}.vertices",
+        messages,
+        allow_point_index_fallback=False,
+    )
     return _build_mesh_from_faces(name, points, face_counts, face_indices, sections, uv_coords, joint_indices, joint_weights)
 
 
@@ -325,7 +332,14 @@ def _build_library_mesh_data(
     if not points or not face_counts or not face_indices:
         return None
     vertex_indices = _extract_lod_vertex_indices(lod_node, face_indices, name, messages)
-    uv_coords = _extract_face_varying_uvs(points_node, vertex_indices, face_indices, f"{name}.vertices", messages)
+    uv_coords = _extract_face_varying_uvs(
+        points_node,
+        vertex_indices,
+        face_indices,
+        f"{name}.vertices",
+        messages,
+        allow_point_index_fallback=True,
+    )
     return _build_mesh_from_faces(name, points, face_counts, face_indices, sections, uv_coords)
 
 
@@ -919,6 +933,7 @@ def _extract_face_varying_uvs(
     face_indices: list[int],
     context: str,
     messages: list[str],
+    allow_point_index_fallback: bool = False,
 ) -> list[Vector2]:
     if vertices_node is None:
         return []
@@ -936,21 +951,24 @@ def _extract_face_varying_uvs(
     uv_count = min(len(u_coords), len(v_coords))
     if uv_count == 0:
         return []
-    if not vertex_indices:
+    if vertex_indices:
+        authored_indices = vertex_indices
+    elif allow_point_index_fallback:
+        authored_indices = face_indices
+    else:
         if uv_count != len(face_indices):
             messages.append(
                 f"packed_array_error: {context} UV count {uv_count} requires VertexIndices for face-varying authoring with {len(face_indices)} face vertices"
             )
             return []
-        return [Vector2(u_coords[index], v_coords[index]) for index in range(uv_count)]
-
-    if len(vertex_indices) != len(face_indices):
+        authored_indices = list(range(uv_count))
+    if len(authored_indices) != len(face_indices):
         messages.append(
-            f"packed_array_error: {context} vertex index count {len(vertex_indices)} does not match face vertex count {len(face_indices)} for UV authoring"
+            f"packed_array_error: {context} vertex index count {len(authored_indices)} does not match face vertex count {len(face_indices)} for UV authoring"
         )
-    limit = min(len(vertex_indices), len(face_indices))
+    limit = min(len(authored_indices), len(face_indices))
     uv_coords: list[Vector2] = []
-    for vertex_index in vertex_indices[:limit]:
+    for vertex_index in authored_indices[:limit]:
         if vertex_index < 0 or vertex_index >= uv_count:
             messages.append(f"packed_array_error: {context} UV vertex index {vertex_index} exceeds texcoord count {uv_count}")
             continue

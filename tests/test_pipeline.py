@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import xml.etree.ElementTree as ET
 from dataclasses import replace
 from pathlib import Path
 
@@ -123,13 +124,42 @@ def test_mesh_uvs_follow_vertex_indices_for_face_varying_authoring() -> None:
     assert model.base_mesh is not None
     assert len(model.base_mesh.uv_coords) == len(model.base_mesh.face_vertex_indices)
     first_uv = model.base_mesh.uv_coords[0]
-    assert (first_uv.x, first_uv.y) == pytest.approx((0.25, 0.9166667))
+    assert (first_uv.x, first_uv.y) == pytest.approx((-0.591758, 0.5572639))
 
     prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_1")
     assert prototype.mesh is not None
     assert len(prototype.mesh.uv_coords) == len(prototype.mesh.face_vertex_indices)
     prototype_first_uv = prototype.mesh.uv_coords[0]
-    assert (prototype_first_uv.x, prototype_first_uv.y) == pytest.approx((1.0, 0.9166667))
+    assert (prototype_first_uv.x, prototype_first_uv.y) == pytest.approx((0.8333333, 0.3333333))
+
+
+def test_face_varying_uvs_fall_back_to_point_indices_when_vertex_indices_are_missing() -> None:
+    from xml_to_usda.normalizer import _extract_face_varying_uvs
+
+    vertices_node = ET.fromstring(
+        """
+        <Vertices>
+            <TexcoordU>0 1 0</TexcoordU>
+            <TexcoordV>0 0 1</TexcoordV>
+        </Vertices>
+        """
+    )
+    messages: list[str] = []
+
+    uv_coords = _extract_face_varying_uvs(
+        vertices_node=vertices_node,
+        vertex_indices=[],
+        face_indices=[0, 1, 2, 0, 2, 1],
+        context="SyntheticMesh.vertices",
+        messages=messages,
+        allow_point_index_fallback=True,
+    )
+
+    assert messages == []
+    assert len(uv_coords) == 6
+    assert [(uv.x, uv.y) for uv in uv_coords] == pytest.approx(
+        [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (0.0, 0.0), (0.0, 1.0), (1.0, 0.0)]
+    )
 
 
 def test_usda_output_contains_ue_first_structure() -> None:
