@@ -27,6 +27,7 @@ from .models import (
     SkeletalSupportPrimvars,
     SourceObject,
     SpineCurve,
+    Vector2,
     Vector3,
 )
 from .source_transform import SourceTransform, build_source_transform
@@ -135,6 +136,7 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
     merged_points: list[Vector3] = []
     merged_face_counts: list[int] = []
     merged_face_indices: list[int] = []
+    merged_uv_coords: list[Vector2] = []
     merged_joint_indices: list[int] = []
     merged_joint_weights: list[float] = []
     merged_sections: dict[int, list[int]] = defaultdict(list)
@@ -150,6 +152,7 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
         merged_points.extend(translated_points)
         merged_face_counts.extend(mesh.face_vertex_counts)
         merged_face_indices.extend(index + point_offset for index in mesh.face_vertex_indices)
+        merged_uv_coords.extend(mesh.uv_coords)
         merged_joint_indices.extend(mesh.skel_joint_indices)
         merged_joint_weights.extend(mesh.skel_joint_weights)
         for section in mesh.sections:
@@ -173,6 +176,7 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
             points=tuple(merged_points),
             face_vertex_counts=tuple(merged_face_counts),
             face_vertex_indices=tuple(merged_face_indices),
+            uv_coords=tuple(merged_uv_coords),
             sections=_ordered_sections(merged_sections),
             skel_joint_indices=tuple(merged_joint_indices),
             skel_joint_weights=tuple(merged_joint_weights),
@@ -304,7 +308,8 @@ def _build_mesh_data(
         f"{name}.vertices",
         messages,
     )
-    return _build_mesh_from_faces(name, points, face_counts, face_indices, sections, joint_indices, joint_weights)
+    uv_coords = _extract_face_varying_uvs(vertices_node, vertex_indices, face_indices, f"{name}.vertices", messages)
+    return _build_mesh_from_faces(name, points, face_counts, face_indices, sections, uv_coords, joint_indices, joint_weights)
 
 
 def _build_library_mesh_data(
@@ -319,7 +324,9 @@ def _build_library_mesh_data(
     face_counts, face_indices, sections = _extract_lod_faces(lod_node, name, messages, material_ids)
     if not points or not face_counts or not face_indices:
         return None
-    return _build_mesh_from_faces(name, points, face_counts, face_indices, sections)
+    vertex_indices = _extract_lod_vertex_indices(lod_node, face_indices, name, messages)
+    uv_coords = _extract_face_varying_uvs(points_node, vertex_indices, face_indices, f"{name}.vertices", messages)
+    return _build_mesh_from_faces(name, points, face_counts, face_indices, sections, uv_coords)
 
 
 def _build_mesh_from_faces(
@@ -328,6 +335,7 @@ def _build_mesh_from_faces(
     face_counts: list[int],
     face_indices: list[int],
     sections: tuple[MeshSection, ...],
+    uv_coords: list[Vector2] | None = None,
     joint_indices: list[int] | None = None,
     joint_weights: list[float] | None = None,
 ) -> MeshData:
@@ -336,6 +344,7 @@ def _build_mesh_from_faces(
         points=tuple(points),
         face_vertex_counts=tuple(face_counts),
         face_vertex_indices=tuple(face_indices),
+        uv_coords=tuple(uv_coords or ()),
         sections=sections,
         skel_joint_indices=tuple(joint_indices or ()),
         skel_joint_weights=tuple(joint_weights or ()),
@@ -902,6 +911,80 @@ def _extract_vertex_skinning(
             messages.append(f"packed_array_error: {context} point {point_index} did not resolve to any skeletal binding")
 
     return resolved_joint_indices, resolved_joint_weights
+
+
+def _extract_face_varying_uvs(
+    vertices_node: ET.Element | None,
+    vertex_indices: list[int],
+    face_indices: list[int],
+    context: str,
+    messages: list[str],
+) -> list[Vector2]:
+    if vertices_node is None:
+        return []
+    u_coords = _read_float_list(vertices_node.findtext("TexcoordU"))
+    v_coords = _read_float_list(vertices_node.findtext("TexcoordV"))
+    if not u_coords and not v_coords:
+        return []
+    if not u_coords or not v_coords:
+        messages.append(f"packed_array_error: {context} UV payload is incomplete")
+        return []
+    if len(u_coords) != len(v_coords):
+        messages.append(
+            f"packed_array_error: {context} TexcoordU count {len(u_coords)} does not match TexcoordV count {len(v_coords)}"
+        )
+    uv_count = min(len(u_coords), len(v_coords))
+    if uv_count == 0:
+        return []
+    if not vertex_indices:
+        if uv_count != len(face_indices):
+            messages.append(
+                f"packed_array_error: {context} UV count {uv_count} requires VertexIndices for face-varying authoring with {len(face_indices)} face vertices"
+            )
+            return []
+        return [Vector2(u_coords[index], v_coords[index]) for index in range(uv_count)]
+
+    if len(vertex_indices) != len(face_indices):
+        messages.append(
+            f"packed_array_error: {context} vertex index count {len(vertex_indices)} does not match face vertex count {len(face_indices)} for UV authoring"
+        )
+    limit = min(len(vertex_indices), len(face_indices))
+    uv_coords: list[Vector2] = []
+    for vertex_index in vertex_indices[:limit]:
+        if vertex_index < 0 or vertex_index >= uv_count:
+            messages.append(f"packed_array_error: {context} UV vertex index {vertex_index} exceeds texcoord count {uv_count}")
+            continue
+        uv_coords.append(Vector2(u_coords[vertex_index], v_coords[vertex_index]))
+    if len(uv_coords) != len(face_indices):
+        messages.append(
+            f"packed_array_error: {context} authored UV count {len(uv_coords)} does not match face vertex count {len(face_indices)}"
+        )
+        return []
+    return uv_coords
+
+
+def _extract_lod_vertex_indices(
+    node: ET.Element,
+    face_indices: list[int],
+    mesh_name: str,
+    messages: list[str],
+) -> list[int]:
+    vertex_indices: list[int] = []
+    for triangles_node in node.findall("Triangles"):
+        indices = _read_int_list(triangles_node.findtext("VertexIndices"))
+        if not indices:
+            continue
+        if len(indices) % 3 != 0:
+            messages.append(
+                f"packed_array_error: {mesh_name}.Triangles vertex index count {len(indices)} is not divisible by 3"
+            )
+            indices = indices[: len(indices) - (len(indices) % 3)]
+        vertex_indices.extend(indices)
+    if vertex_indices and len(vertex_indices) != len(face_indices):
+        messages.append(
+            f"packed_array_error: {mesh_name}.Triangles vertex index count {len(vertex_indices)} does not match face vertex count {len(face_indices)}"
+        )
+    return vertex_indices[: len(face_indices)]
 
 
 def _read_material_id(

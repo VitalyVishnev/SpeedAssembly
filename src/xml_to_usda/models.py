@@ -16,6 +16,15 @@ class Vector3:
 
 
 @dataclass(frozen=True)
+class Vector2:
+    x: float
+    y: float
+
+    def to_usda(self) -> str:
+        return f"({self.x:g}, {self.y:g})"
+
+
+@dataclass(frozen=True)
 class Quaternion:
     real: float
     i: float
@@ -64,6 +73,7 @@ class MeshData:
     points: tuple[Vector3, ...]
     face_vertex_counts: tuple[int, ...]
     face_vertex_indices: tuple[int, ...]
+    uv_coords: tuple[Vector2, ...] = ()
     sections: tuple["MeshSection", ...] = ()
     skel_joint_indices: tuple[int, ...] = ()
     skel_joint_weights: tuple[float, ...] = ()

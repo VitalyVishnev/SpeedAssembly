@@ -77,12 +77,14 @@ def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
     assert model.binding_element_size == 1
     assert model.base_mesh.skel_joint_indices
     assert model.base_mesh.skel_joint_weights
+    assert model.base_mesh.uv_coords
     assert (model.skeleton[0].bind_translate.x, model.skeleton[0].bind_translate.y, model.skeleton[0].bind_translate.z) == pytest.approx((0.0, 0.0, 0.0))
     assert (model.skeleton[0].rest_translate.x, model.skeleton[0].rest_translate.y, model.skeleton[0].rest_translate.z) == pytest.approx((0.0, 0.0, 0.0))
     assert (model.skeleton[1].bind_translate.x, model.skeleton[1].bind_translate.y, model.skeleton[1].bind_translate.z) == pytest.approx(EXPECTED_FIRST_CHILD_JOINT_POSITION)
     assert (model.skeleton[1].rest_translate.x, model.skeleton[1].rest_translate.y, model.skeleton[1].rest_translate.z) == pytest.approx(EXPECTED_FIRST_CHILD_JOINT_POSITION)
     assert len(model.base_mesh.skel_joint_indices) == len(model.base_mesh.points)
     assert len(model.base_mesh.skel_joint_weights) == len(model.base_mesh.points)
+    assert len(model.base_mesh.uv_coords) == len(model.base_mesh.face_vertex_indices)
     assert {material.source_id for material in model.materials} == {0, 2}
     assert {section.material_id for section in model.base_mesh.sections} == {0}
     assert all(
@@ -111,6 +113,23 @@ def test_base_tree_mesh_merges_trunk_and_branch_geometry_in_stage_space() -> Non
     assert translated_point.x == pytest.approx(EXPECTED_BRANCH_1_FIRST_POINT[0])
     assert translated_point.y == pytest.approx(EXPECTED_BRANCH_1_FIRST_POINT[1])
     assert translated_point.z == pytest.approx(EXPECTED_BRANCH_1_FIRST_POINT[2])
+
+
+def test_mesh_uvs_follow_vertex_indices_for_face_varying_authoring() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+
+    assert model.base_mesh is not None
+    assert len(model.base_mesh.uv_coords) == len(model.base_mesh.face_vertex_indices)
+    first_uv = model.base_mesh.uv_coords[0]
+    assert (first_uv.x, first_uv.y) == pytest.approx((0.25, 0.9166667))
+
+    prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_1")
+    assert prototype.mesh is not None
+    assert len(prototype.mesh.uv_coords) == len(prototype.mesh.face_vertex_indices)
+    prototype_first_uv = prototype.mesh.uv_coords[0]
+    assert (prototype_first_uv.x, prototype_first_uv.y) == pytest.approx((1.0, 0.9166667))
 
 
 def test_usda_output_contains_ue_first_structure() -> None:
@@ -152,6 +171,8 @@ def test_usda_output_contains_ue_first_structure() -> None:
     assert 'rel material:binding = </Tree/Materials/Material_2_2>' in usda.text
     assert 'uniform token orientation = "rightHanded"' in usda.text
     assert 'interpolation = "vertex"' in usda.text
+    assert 'texCoord2f[] primvars:st = [' in usda.text
+    assert 'interpolation = "faceVarying"' in usda.text
     assert 'primvars:boneCapture_pCaptPath' in usda.text
     assert 'primvars:ueJointNames' in usda.text
     assert 'primvars:localtransform' in usda.text

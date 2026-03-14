@@ -540,12 +540,19 @@ def _render_mesh_payload(mesh: MeshData, mesh_orientation: str) -> str:
     points = ", ".join(point.to_usda() for point in mesh.points)
     counts = ", ".join(str(value) for value in mesh.face_vertex_counts)
     indices = ", ".join(str(value) for value in mesh.face_vertex_indices)
+    uv_payload = ""
+    if mesh.uv_coords:
+        uvs = ", ".join(uv.to_usda() for uv in mesh.uv_coords)
+        uv_payload = f'''
+    texCoord2f[] primvars:st = [{uvs}] (
+        interpolation = "faceVarying"
+    )'''
     return f'''uniform token orientation = "{mesh_orientation}"
     point3f[] points = [{points}] (
         interpolation = "vertex"
     )
     int[] faceVertexCounts = [{counts}]
-    int[] faceVertexIndices = [{indices}]'''
+    int[] faceVertexIndices = [{indices}]{uv_payload}'''
 
 
 def _render_single_joint_skinning(mesh: MeshData, contract: UeSchemaContract) -> str:
