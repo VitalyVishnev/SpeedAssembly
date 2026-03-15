@@ -5,7 +5,16 @@ from unittest.mock import Mock
 
 import pytest
 
-from xml_to_usda.models import ConversionRequest, ConversionResult, OutputMode, ValidationIssue
+from xml_to_usda.models import (
+    ConversionRequest,
+    ConversionResult,
+    DynamicWindData,
+    DynamicWindJointAssignment,
+    DynamicWindSimulationGroup,
+    OutputMode,
+    ValidationIssue,
+    WindJsonResult,
+)
 from xml_to_usda.naming import build_prototype_identities, make_stable_prim_name
 from xml_to_usda.pipeline import REPO_ROOT, convert_file, convert_request
 
@@ -69,8 +78,10 @@ def test_gui_smoke_builds_window() -> None:
         assert hasattr(app, "bark_material_var")
         assert hasattr(app, "leaves_material_var")
         assert hasattr(app, "use_existing_part_meshes_var")
+        assert hasattr(app, "gust_attenuation_var")
+        assert hasattr(app, "wind_frame")
         assert hasattr(app, "part_mesh_mapping_widget")
-        assert "Single-file mode" in app.status_var.get()
+        assert "Dynamic Wind JSON" in app.status_var.get()
     finally:
         root.destroy()
 
@@ -103,8 +114,8 @@ def test_convert_file_applies_baseline_material_overrides(tmp_path: Path) -> Non
     assert result.usda_document is not None
     assert 'token outputs:unreal:surface.connect = </Tree/Materials/Material_1_1/Material_1_1_unreal_shader.outputs:out>' in result.usda_document.text
     assert 'token outputs:unreal:surface.connect = </Tree/Materials/Material_2_2/Material_2_2_unreal_shader.outputs:out>' in result.usda_document.text
-    assert 'uniform asset info:unreal:sourceAsset = @/Game/TestMaterials/M_Bark_Test@' in result.usda_document.text
-    assert 'uniform asset info:unreal:sourceAsset = @/Game/TestMaterials/M_Leaves_Test@' in result.usda_document.text
+    assert 'uniform asset info:unreal:sourceAsset = @/Game/TestMaterials/M_Bark_Test.M_Bark_Test@' in result.usda_document.text
+    assert 'uniform asset info:unreal:sourceAsset = @/Game/TestMaterials/M_Leaves_Test.M_Leaves_Test@' in result.usda_document.text
 
 
 def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -172,13 +183,109 @@ def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatc
         root.destroy()
 
 
+def test_gui_refresh_wind_groups_builds_slider_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    dynamic_wind = DynamicWindData(
+        joint_assignments=(
+            DynamicWindJointAssignment(joint_name="root", simulation_group_index=0, branch_order=0),
+            DynamicWindJointAssignment(joint_name="branch_1", simulation_group_index=1, branch_order=1),
+            DynamicWindJointAssignment(joint_name="branch_2", simulation_group_index=2, branch_order=2),
+        ),
+        simulation_groups=(
+            DynamicWindSimulationGroup(group_index=0, branch_order=0, is_trunk_group=True),
+            DynamicWindSimulationGroup(group_index=1, branch_order=1),
+            DynamicWindSimulationGroup(group_index=2, branch_order=2),
+        ),
+    )
+
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda _input_path: dynamic_wind)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+
+        app.refresh_wind_groups()
+
+        assert len(app._wind_group_rows) == 3
+        assert app._wind_group_rows[0]["group_index"] == 0
+        assert app._wind_group_rows[1]["group_index"] == 1
+    finally:
+        root.destroy()
+
+
+def test_gui_generate_wind_json_uses_slider_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    dynamic_wind = DynamicWindData(
+        joint_assignments=(DynamicWindJointAssignment(joint_name="root", simulation_group_index=0, branch_order=0),),
+        simulation_groups=(
+            DynamicWindSimulationGroup(group_index=0, branch_order=0, is_trunk_group=True),
+            DynamicWindSimulationGroup(group_index=1, branch_order=1),
+        ),
+    )
+    calls: list[tuple] = []
+
+    def fake_generate_wind_json(
+        input_path,
+        output_path,
+        group_settings=(),
+        gust_attenuation=0.0,
+        is_ground_cover=False,
+    ):
+        calls.append((input_path, output_path, group_settings, gust_attenuation, is_ground_cover))
+        return WindJsonResult(
+            input_path=input_path,
+            output_path=output_path,
+            dynamic_wind=DynamicWindData(
+                joint_assignments=dynamic_wind.joint_assignments,
+                simulation_groups=group_settings,
+                gust_attenuation=gust_attenuation,
+                is_ground_cover=is_ground_cover,
+            ),
+        )
+
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda _input_path: dynamic_wind)
+    monkeypatch.setattr("xml_to_usda.gui.generate_wind_json", fake_generate_wind_json)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        app.output_var.set("out.usda")
+        app.refresh_wind_groups()
+        app._wind_group_rows[0]["influence_var"].set(0.7)
+        app._wind_group_rows[0]["shift_var"].set(0.2)
+        app._wind_group_rows[1]["influence_var"].set(0.55)
+        app._wind_group_rows[1]["shift_var"].set(0.05)
+        app.gust_attenuation_var.set(0.6)
+        app.is_ground_cover_var.set(True)
+
+        app.run_generate_wind_json()
+
+        assert calls
+        assert calls[0][0] == str(SIMPLE_TREE_01)
+        assert calls[0][1] == "out_DynamicWind.json"
+        assert calls[0][2][0].influence == pytest.approx(0.7)
+        assert calls[0][2][0].shift_top == pytest.approx(0.2)
+        assert calls[0][2][1].influence == pytest.approx(0.55)
+        assert calls[0][3] == pytest.approx(0.6)
+        assert calls[0][4] is True
+    finally:
+        root.destroy()
+
+
 def test_gui_loads_persisted_material_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _, root = _build_tk_root_or_skip()
     from xml_to_usda.gui import ConversionApp
 
     settings_path = tmp_path / "gui_settings.json"
     settings_path.write_text(
-        '{"bark_material_path": "/Game/TestMaterials/M_Bark_Test", "leaves_material_path": "/Game/TestMaterials/M_Leaves_Test"}',
+        '{"bark_material_path": "/Game/TestMaterials/M_Bark_Test", "leaves_material_path": "/Game/TestMaterials/M_Leaves_Test", "gust_attenuation": 0.25, "is_ground_cover": true, "wind_group_settings": {"0": {"influence": 1.4, "shift_top": 0.1}}}',
         encoding="utf-8",
     )
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
@@ -188,6 +295,8 @@ def test_gui_loads_persisted_material_paths(monkeypatch: pytest.MonkeyPatch, tmp
         app = ConversionApp(root)
         assert app.bark_material_var.get() == "/Game/TestMaterials/M_Bark_Test"
         assert app.leaves_material_var.get() == "/Game/TestMaterials/M_Leaves_Test"
+        assert app.gust_attenuation_var.get() == pytest.approx(0.25)
+        assert app.is_ground_cover_var.get() is True
     finally:
         root.destroy()
 
@@ -235,7 +344,10 @@ def test_gui_persists_material_paths_after_successful_conversion(
         assert settings_path.read_text(encoding="utf-8") == (
             '{\n'
             '  "bark_material_path": "/Game/TestMaterials/M_Bark_Test",\n'
-            '  "leaves_material_path": "/Game/TestMaterials/M_Leaves_Test"\n'
+            '  "leaves_material_path": "/Game/TestMaterials/M_Leaves_Test",\n'
+            '  "gust_attenuation": 0.0,\n'
+            '  "is_ground_cover": false,\n'
+            '  "wind_group_settings": {}\n'
             '}'
         )
     finally:
@@ -261,7 +373,10 @@ def test_gui_persists_material_paths_without_running_conversion(
     assert settings_path.read_text(encoding="utf-8") == (
         '{\n'
         '  "bark_material_path": "/Game/Assembly/Custom/Bark_A.Bark_A",\n'
-        '  "leaves_material_path": "/Game/Assembly/Custom/Leaves_A.Leaves_A"\n'
+        '  "leaves_material_path": "/Game/Assembly/Custom/Leaves_A.Leaves_A",\n'
+        '  "gust_attenuation": 0.0,\n'
+        '  "is_ground_cover": false,\n'
+        '  "wind_group_settings": {}\n'
         '}'
     )
 
@@ -283,7 +398,10 @@ def test_gui_persists_latest_field_edits_immediately(monkeypatch: pytest.MonkeyP
         assert settings_path.read_text(encoding="utf-8") == (
             '{\n'
             '  "bark_material_path": "/Game/Assembly/Latest/Bark_Final.Bark_Final",\n'
-            '  "leaves_material_path": "/Game/Assembly/Latest/Leaves_Final.Leaves_Final"\n'
+            '  "leaves_material_path": "/Game/Assembly/Latest/Leaves_Final.Leaves_Final",\n'
+            '  "gust_attenuation": 0.0,\n'
+            '  "is_ground_cover": false,\n'
+            '  "wind_group_settings": {}\n'
             '}'
         )
     finally:

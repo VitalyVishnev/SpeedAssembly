@@ -7,10 +7,21 @@ from pathlib import Path
 
 import pytest
 
+from xml_to_usda.dynamic_wind import build_dynamic_wind_data
 from xml_to_usda.normalizer import normalize_to_canonical
-from xml_to_usda.models import Color4, MaterialSpec, MeshSection, Vector3
+from xml_to_usda.models import (
+    Color4,
+    DynamicWindSimulationGroup,
+    Joint,
+    MaterialSpec,
+    Matrix4d,
+    MeshData,
+    MeshSection,
+    SourceObject,
+    Vector3,
+)
 from xml_to_usda.normalizer import _rebalance_assembly_part_prototype_scales, _vertex_color_material_sections
-from xml_to_usda.pipeline import convert_file, inspect_source, load_canonical_model
+from xml_to_usda.pipeline import convert_file, generate_wind_json, inspect_source, inspect_wind_data, load_canonical_model
 from xml_to_usda.source_transform import build_source_transform
 from xml_to_usda.ue_schema import DEFAULT_UE_SCHEMA_CONTRACT
 from xml_to_usda.usda_writer import render_usda
@@ -76,6 +87,7 @@ def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
     assert model.mesh_library
     assert model.prototypes
     assert model.skeletal_support_primvars is not None
+    assert model.dynamic_wind is not None
     assert model.binding_mode == "single_joint"
     assert model.binding_element_size == 1
     assert model.base_mesh.skel_joint_indices
@@ -98,6 +110,195 @@ def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
     assert all(len(part.binding.joint_tokens) == len(part.binding.weights) for part in model.assembly_parts)
     assert all(token.startswith("bone_") or token == "root" for part in model.assembly_parts for token in part.binding.joint_tokens)
     assert {prototype.source_key for prototype in model.prototypes} == {part.prototype_key for part in model.assembly_parts}
+
+
+def test_dynamic_wind_groups_follow_skeleton_branch_orders_without_fixed_cap() -> None:
+    skeleton = (
+        Joint(name="root", parent=None, bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(name="trunk_1", parent="root", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(name="branch_1", parent="root", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(name="branch_1_main", parent="branch_1", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(name="branch_2", parent="branch_1", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(name="branch_2_main", parent="branch_2", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(name="branch_3", parent="branch_2", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(name="branch_4", parent="branch_3", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+    )
+    source_objects = (
+        SourceObject(
+            object_id="1",
+            parent_id=None,
+            name="Trunk",
+            abs_translate=Vector3(0.0, 0.0, 0.0),
+            rel_translate=Vector3(0.0, 0.0, 0.0),
+            mesh=MeshData(
+                name="Trunk",
+                points=(Vector3(0.0, 0.0, 0.0),),
+                face_vertex_counts=(),
+                face_vertex_indices=(),
+                skel_joint_indices=(0, 1),
+                skel_joint_weights=(1.0, 1.0),
+                skel_element_size=1,
+            ),
+        ),
+        SourceObject(
+            object_id="2",
+            parent_id="1",
+            name="Branches_1",
+            abs_translate=Vector3(0.0, 0.0, 0.0),
+            rel_translate=Vector3(0.0, 0.0, 0.0),
+            mesh=MeshData(
+                name="Branches_1",
+                points=(Vector3(0.0, 0.0, 0.0),),
+                face_vertex_counts=(),
+                face_vertex_indices=(),
+                skel_joint_indices=(2, 3),
+                skel_joint_weights=(1.0, 1.0),
+                skel_element_size=1,
+            ),
+        ),
+        SourceObject(
+            object_id="3",
+            parent_id="2",
+            name="Branches_2",
+            abs_translate=Vector3(0.0, 0.0, 0.0),
+            rel_translate=Vector3(0.0, 0.0, 0.0),
+            mesh=MeshData(
+                name="Branches_2",
+                points=(Vector3(0.0, 0.0, 0.0),),
+                face_vertex_counts=(),
+                face_vertex_indices=(),
+                skel_joint_indices=(4, 5),
+                skel_joint_weights=(1.0, 1.0),
+                skel_element_size=1,
+            ),
+        ),
+        SourceObject(
+            object_id="4",
+            parent_id="3",
+            name="Branches_3",
+            abs_translate=Vector3(0.0, 0.0, 0.0),
+            rel_translate=Vector3(0.0, 0.0, 0.0),
+            mesh=MeshData(
+                name="Branches_3",
+                points=(Vector3(0.0, 0.0, 0.0),),
+                face_vertex_counts=(),
+                face_vertex_indices=(),
+                skel_joint_indices=(6,),
+                skel_joint_weights=(1.0,),
+                skel_element_size=1,
+            ),
+        ),
+        SourceObject(
+            object_id="5",
+            parent_id="4",
+            name="Branches_4",
+            abs_translate=Vector3(0.0, 0.0, 0.0),
+            rel_translate=Vector3(0.0, 0.0, 0.0),
+            mesh=MeshData(
+                name="Branches_4",
+                points=(Vector3(0.0, 0.0, 0.0),),
+                face_vertex_counts=(),
+                face_vertex_indices=(),
+                skel_joint_indices=(7,),
+                skel_joint_weights=(1.0,),
+                skel_element_size=1,
+            ),
+        ),
+    )
+
+    dynamic_wind = build_dynamic_wind_data(skeleton, source_objects=source_objects)
+
+    assert len(dynamic_wind.simulation_groups) == 5
+    assert dynamic_wind.simulation_groups[0].is_trunk_group is True
+    assert [group.branch_order for group in dynamic_wind.simulation_groups] == [0, 1, 2, 3, 4]
+
+
+def test_dynamic_wind_logical_depth_hints_use_object_anchor_joint_only() -> None:
+    skeleton = (
+        Joint(name="root", parent=None, bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(name="trunk_mid", parent="root", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(name="branch_start", parent="trunk_mid", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(name="branch_tip", parent="branch_start", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+    )
+    source_objects = (
+        SourceObject(
+            object_id="1",
+            parent_id=None,
+            name="Trunk",
+            abs_translate=Vector3(0.0, 0.0, 0.0),
+            rel_translate=Vector3(0.0, 0.0, 0.0),
+            mesh=MeshData(
+                name="Trunk",
+                points=(Vector3(0.0, 0.0, 0.0),),
+                face_vertex_counts=(),
+                face_vertex_indices=(),
+                skel_joint_indices=(0, 1, 1),
+                skel_joint_weights=(1.0, 1.0, 1.0),
+                skel_element_size=1,
+            ),
+        ),
+        SourceObject(
+            object_id="2",
+            parent_id="1",
+            name="Branches_1",
+            abs_translate=Vector3(0.0, 0.0, 0.0),
+            rel_translate=Vector3(0.0, 0.0, 0.0),
+            mesh=MeshData(
+                name="Branches_1",
+                points=(Vector3(0.0, 0.0, 0.0),),
+                face_vertex_counts=(),
+                face_vertex_indices=(),
+                skel_joint_indices=(1, 1, 2, 2, 2, 3),
+                skel_joint_weights=(1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
+                skel_element_size=1,
+            ),
+        ),
+    )
+
+    dynamic_wind = build_dynamic_wind_data(skeleton, source_objects=source_objects)
+    assignments = {assignment.joint_name: assignment.simulation_group_index for assignment in dynamic_wind.joint_assignments}
+
+    assert assignments["root"] == 0
+    assert assignments["trunk_mid"] == 0
+    assert assignments["branch_start"] == 1
+    assert assignments["branch_tip"] == 0
+
+
+def test_dynamic_wind_json_generation_writes_groups_and_respects_slider_values(tmp_path: Path) -> None:
+    output_path = tmp_path / "SimpleTree_01_DynamicWind.json"
+    result = generate_wind_json(
+        str(SIMPLE_TREE_01),
+        str(output_path),
+        group_settings=(
+            DynamicWindSimulationGroup(group_index=0, branch_order=0, influence=1.8, shift_top=0.15, is_trunk_group=True),
+            DynamicWindSimulationGroup(group_index=1, branch_order=1, influence=1.2, shift_top=0.05),
+        ),
+        gust_attenuation=0.6,
+        is_ground_cover=True,
+    )
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert result.output_path == str(output_path)
+    assert payload["Joints"]
+    assert payload["SimulationGroups"]
+    assert payload["SimulationGroups"][0]["bIsTrunkGroup"] is True
+    assert payload["SimulationGroups"][0]["Influence"] == pytest.approx(1.8)
+    assert payload["SimulationGroups"][0]["ShiftTop"] == pytest.approx(0.15)
+    assert payload["SimulationGroups"][1]["Influence"] == pytest.approx(1.2)
+    if len(payload["SimulationGroups"]) > 2:
+        assert payload["SimulationGroups"][2]["Influence"] == pytest.approx(1.2)
+        assert payload["SimulationGroups"][2]["ShiftTop"] == pytest.approx(0.05)
+    assert payload["bIsGroundCover"] is True
+    assert payload["GustAttenuation"] == pytest.approx(0.6)
+
+
+def test_inspect_wind_data_uses_normalized_skeleton_hierarchy() -> None:
+    dynamic_wind = inspect_wind_data(str(LEAFREFS_ON_BRANCH_LEVELS))
+
+    assert len(dynamic_wind.simulation_groups) == 4
+    assert dynamic_wind.simulation_groups[0].is_trunk_group is True
+    assert [group.branch_order for group in dynamic_wind.simulation_groups] == [0, 1, 2, 3]
 
 
 def test_base_tree_mesh_merges_trunk_and_branch_geometry_in_stage_space() -> None:
@@ -188,6 +389,40 @@ def test_vertex_color_black_faces_become_leaves_sections_for_prototypes() -> Non
     sections = _vertex_color_material_sections(synthetic_mesh)
 
     assert sections == (
+        MeshSection(material_id=1, face_indices=(1,)),
+        MeshSection(material_id=2, face_indices=(0,)),
+    )
+
+
+def test_vertex_colors_override_authored_prototype_sections_when_present() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    model = normalize_to_canonical(document, inspect_xml(document))
+    prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_1")
+    assert prototype.mesh is not None
+
+    synthetic_mesh = replace(
+        prototype.mesh,
+        face_vertex_counts=(3, 3),
+        face_vertex_indices=(0, 1, 2, 3, 4, 5),
+        vertex_colors=(
+            Color4(0.0, 0.0, 0.0),
+            Color4(0.0, 0.0, 0.0),
+            Color4(0.0, 0.0, 0.0),
+            Color4(1.0, 1.0, 1.0),
+            Color4(1.0, 1.0, 1.0),
+            Color4(1.0, 1.0, 1.0),
+        ),
+        sections=(
+            MeshSection(material_id=1, face_indices=(0,)),
+            MeshSection(material_id=2, face_indices=(1,)),
+        ),
+    )
+
+    from xml_to_usda.normalizer import _resolve_prototype_material_sections
+
+    resolved = _resolve_prototype_material_sections(synthetic_mesh, "Mesh_1", {2}, [])
+
+    assert resolved.sections == (
         MeshSection(material_id=1, face_indices=(1,)),
         MeshSection(material_id=2, face_indices=(0,)),
     )

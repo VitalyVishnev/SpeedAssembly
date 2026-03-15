@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 from collections import defaultdict
 from dataclasses import replace
 
+from .dynamic_wind import build_dynamic_wind_data
 from .naming import build_prototype_identities
 from .models import (
     AssemblyPartInstance,
@@ -64,6 +65,7 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
     prototypes = tuple(_build_prototypes(assembly_parts, mesh_library, data_messages))
     skeletal_support_primvars = _build_skeletal_support_primvars(skeleton)
     spines = tuple(source_object.spine for source_object in source_objects if source_object.spine is not None)
+    dynamic_wind = build_dynamic_wind_data(skeleton, source_objects=source_objects)
 
     metadata = ExportMetadata(
         source_path=document.source_path,
@@ -88,6 +90,7 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
         prototype_strategy=PrototypeStrategy.INLINE_SKELETAL_PART,
         skeletal_support_primvars=skeletal_support_primvars,
         spines=spines,
+        dynamic_wind=dynamic_wind,
     )
 
 
@@ -521,7 +524,7 @@ def _extract_assembly_parts_from_leaf_references(
                                 axis_z[index] if index < len(axis_z) else 1.0,
                             )
                         ),
-                        angles[index] if index < len(angles) else 0.0,
+                        -(angles[index] if index < len(angles) else 0.0),
                     ),
                     scale=Vector3(uniform_scale, uniform_scale, uniform_scale),
                     binding=binding,
@@ -660,13 +663,15 @@ def _resolve_prototype_material_sections(
     fallback_material_ids: set[int],
     messages: list[str],
 ) -> MeshData:
-    # Preserve explicitly-authored two-material prototype sections when they already match the project baseline.
-    authored_material_ids = {section.material_id for section in mesh.sections}
-    if len(authored_material_ids) > 1 and authored_material_ids == {PRIMARY_MATERIAL_ID, LEAVES_MATERIAL_ID}:
-        return mesh
-
     vertex_color_sections = _vertex_color_material_sections(mesh)
     if vertex_color_sections is not None:
+        authored_material_ids = {section.material_id for section in mesh.sections}
+        resolved_material_ids = {section.material_id for section in vertex_color_sections}
+        if authored_material_ids and authored_material_ids != resolved_material_ids:
+            messages.append(
+                f"material_conflict: prototype {prototype_key} uses vertex-color-derived material ids "
+                f"{sorted(resolved_material_ids)} over mesh-authored material ids {sorted(authored_material_ids)}"
+            )
         return replace(mesh, sections=vertex_color_sections)
 
     return _apply_fallback_material_sections(mesh, prototype_key, fallback_material_ids, messages)

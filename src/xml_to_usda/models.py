@@ -363,6 +363,7 @@ class TreeAsset:
     prototype_strategy: PrototypeStrategy = PrototypeStrategy.REFERENCED_SCOPE
     skeletal_support_primvars: SkeletalSupportPrimvars | None = None
     spines: tuple[SpineCurve, ...] = ()
+    dynamic_wind: "DynamicWindData | None" = None
 
     @property
     def binding_mode(self) -> str:
@@ -411,3 +412,37 @@ class ConversionResult:
     output_path: str | None
     diagnostics: tuple[ValidationIssue, ...]
     usda_document: UsdAssemblyDocument | None = None
+
+
+@dataclass(frozen=True)
+class DynamicWindJointAssignment:
+    joint_name: str
+    simulation_group_index: int
+    branch_order: int
+
+
+@dataclass(frozen=True)
+class DynamicWindSimulationGroup:
+    group_index: int
+    branch_order: int
+    influence: float = 1.0
+    shift_top: float = 0.0
+    is_trunk_group: bool = False
+    use_dual_influence: bool = False
+    min_influence: float = 0.0
+    max_influence: float = 0.0
+
+
+@dataclass(frozen=True)
+class DynamicWindData:
+    joint_assignments: tuple[DynamicWindJointAssignment, ...]
+    simulation_groups: tuple[DynamicWindSimulationGroup, ...]
+    is_ground_cover: bool = False
+    gust_attenuation: float = 0.0
+
+
+@dataclass(frozen=True)
+class WindJsonResult:
+    input_path: str
+    output_path: str
+    dynamic_wind: DynamicWindData

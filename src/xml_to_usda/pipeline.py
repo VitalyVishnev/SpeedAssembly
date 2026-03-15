@@ -3,15 +3,19 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+from .dynamic_wind import build_dynamic_wind_data, write_dynamic_wind_json
 from .models import (
     CanonicalTreeModel,
     ConversionRequest,
     ConversionResult,
+    DynamicWindData,
+    DynamicWindSimulationGroup,
     MaterialSpec,
     ObservedXmlSchemaReport,
     OutputMode,
     Prototype,
     PrototypeResolutionMode,
+    WindJsonResult,
 )
 from .normalizer import normalize_to_canonical
 from .usda_writer import render_usda
@@ -135,6 +139,42 @@ def convert_request(request: ConversionRequest) -> tuple[ConversionResult, ...]:
     return tuple(results)
 
 
+def inspect_wind_data(input_path: str) -> DynamicWindData:
+    document = read_source_xml(input_path)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    if model.dynamic_wind is None:
+        return build_dynamic_wind_data(model.skeleton, source_objects=model.source_objects)
+    return model.dynamic_wind
+
+
+def generate_wind_json(
+    input_path: str,
+    output_path: str,
+    group_settings: tuple[DynamicWindSimulationGroup, ...] = (),
+    gust_attenuation: float = 0.0,
+    is_ground_cover: bool = False,
+) -> WindJsonResult:
+    document = read_source_xml(input_path)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    dynamic_wind = build_dynamic_wind_data(
+        model.skeleton,
+        source_objects=model.source_objects,
+        group_settings=group_settings,
+        gust_attenuation=gust_attenuation,
+        is_ground_cover=is_ground_cover,
+    )
+    if not dynamic_wind.joint_assignments:
+        raise ValueError("missing_skeleton: wind JSON generation requires a normalized skeleton.")
+    resolved_output = write_dynamic_wind_json(dynamic_wind, output_path)
+    return WindJsonResult(
+        input_path=input_path,
+        output_path=str(resolved_output),
+        dynamic_wind=dynamic_wind,
+    )
+
+
 def _resolve_output_path(request: ConversionRequest, input_path: str) -> Path | None:
     if request.output_path:
         return Path(request.output_path)
@@ -219,7 +259,7 @@ def _apply_material_override(material: MaterialSpec, overrides: dict[int, str | 
     ue_asset_path = overrides.get(material.source_id)
     if not ue_asset_path:
         return material
-    return replace(material, ue_asset_path=ue_asset_path)
+    return replace(material, ue_asset_path=_normalize_unreal_asset_path(ue_asset_path))
 
 
 def _apply_external_part_mesh_overrides(
@@ -270,7 +310,7 @@ def _normalize_part_mesh_asset_paths(
         source_key = _normalize_prototype_override_key(raw_key)
         if not source_key:
             raise ValueError("PartMesh override keys must not be empty.")
-        asset_path = raw_asset_path.strip()
+        asset_path = _normalize_unreal_asset_path(raw_asset_path)
         if not _is_valid_unreal_asset_path(asset_path):
             raise ValueError(f"PartMesh asset path for {source_key} must start with /Game/.")
         existing = overrides.get(source_key)
@@ -295,3 +335,13 @@ def _normalize_prototype_override_key(raw_key: str) -> str:
 
 def _is_valid_unreal_asset_path(path: str) -> bool:
     return path.startswith("/Game/")
+
+
+def _normalize_unreal_asset_path(path: str) -> str:
+    normalized = path.strip()
+    if not normalized.startswith("/Game/"):
+        return normalized
+    package_path = normalized.rsplit("/", 1)[-1]
+    if "." in package_path:
+        return normalized
+    return f"{normalized}.{package_path}"

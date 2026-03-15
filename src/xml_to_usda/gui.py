@@ -1,28 +1,37 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from .pipeline import convert_file
+from .models import DynamicWindSimulationGroup
+from .pipeline import convert_file, generate_wind_json, inspect_wind_data
 
 
 class ConversionApp:
     SETTINGS_DIR = Path.home() / ".xml_to_usda"
     SETTINGS_PATH = SETTINGS_DIR / "gui_settings.json"
+    MAX_WIND_INFLUENCE = 1.0
+    MAX_SHIFT_TOP = 1.0
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Convert XML -> USDA")
-        self.root.minsize(760, 480)
+        self.root.minsize(900, 620)
 
         self.input_var = tk.StringVar()
         self.output_var = tk.StringVar()
         self.bark_material_var = tk.StringVar()
         self.leaves_material_var = tk.StringVar()
         self.use_existing_part_meshes_var = tk.BooleanVar(value=False)
-        self.status_var = tk.StringVar(value="Single-file mode. Batch and naming rules will be added in a later phase.")
+        self.gust_attenuation_var = tk.DoubleVar(value=0.0)
+        self.is_ground_cover_var = tk.BooleanVar(value=False)
+        self.status_var = tk.StringVar(
+            value="Single-file mode. Convert and Dynamic Wind JSON generation are available."
+        )
+        self._wind_group_rows: list[dict[str, object]] = []
+        self._persisted_wind_group_settings: dict[str, dict[str, float]] = {}
         self._load_settings()
 
         self._build_layout()
@@ -34,7 +43,7 @@ class ConversionApp:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(9, weight=1)
+        frame.rowconfigure(11, weight=1)
 
         ttk.Label(frame, text="Source XML").grid(row=0, column=0, sticky="w", pady=(0, 8))
         ttk.Entry(frame, textvariable=self.input_var).grid(row=0, column=1, sticky="ew", padx=(12, 12), pady=(0, 8))
@@ -66,15 +75,55 @@ class ConversionApp:
             text="One mapping per line. Supported keys: Mesh_1, 1, meshid:1.",
         ).grid(row=6, column=1, columnspan=2, sticky="w", pady=(0, 8))
 
-        ttk.Label(frame, textvariable=self.status_var).grid(row=7, column=0, columnspan=2, sticky="w", pady=(0, 12))
-        ttk.Button(frame, text="Convert", command=self.run_conversion).grid(row=7, column=2, sticky="ew", pady=(0, 12))
+        self.wind_frame = ttk.LabelFrame(frame, text="Wind Profile", padding=12)
+        self.wind_frame.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(4, 12))
+        self.wind_frame.columnconfigure(1, weight=1)
+        self.wind_frame.columnconfigure(3, weight=1)
+
+        ttk.Button(self.wind_frame, text="Refresh Wind Groups", command=self.refresh_wind_groups).grid(
+            row=0, column=0, sticky="w", pady=(0, 8)
+        )
+        ttk.Checkbutton(
+            self.wind_frame,
+            text="Ground Cover",
+            variable=self.is_ground_cover_var,
+        ).grid(row=0, column=1, sticky="w", padx=(12, 0), pady=(0, 8))
+
+        ttk.Label(self.wind_frame, text="Gust Attenuation").grid(row=1, column=0, sticky="w", pady=(0, 8))
+        self.gust_value_var = tk.StringVar(value=f"{self.gust_attenuation_var.get():.2f}")
+        tk.Scale(
+            self.wind_frame,
+            from_=0.0,
+            to=5.0,
+            resolution=0.05,
+            orient="horizontal",
+            variable=self.gust_attenuation_var,
+            command=lambda value: self._handle_gust_change(float(value)),
+        ).grid(row=1, column=1, columnspan=2, sticky="ew", padx=(12, 12), pady=(0, 8))
+        ttk.Label(self.wind_frame, textvariable=self.gust_value_var, width=6).grid(row=1, column=3, sticky="e", pady=(0, 8))
+
+        ttk.Label(
+            self.wind_frame,
+            text="Group sliders are built from the normalized skeleton hierarchy. Trunk = Group 0.",
+        ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(0, 8))
+
+        self.wind_groups_container = ttk.Frame(self.wind_frame)
+        self.wind_groups_container.grid(row=3, column=0, columnspan=4, sticky="ew")
+        self.wind_groups_container.columnconfigure(1, weight=1)
+        self.wind_groups_container.columnconfigure(3, weight=1)
+
+        ttk.Label(frame, textvariable=self.status_var).grid(row=8, column=0, columnspan=2, sticky="w", pady=(0, 12))
+        action_row = ttk.Frame(frame)
+        action_row.grid(row=8, column=2, sticky="e", pady=(0, 12))
+        ttk.Button(action_row, text="Generate Wind JSON", command=self.run_generate_wind_json).pack(side="right")
+        ttk.Button(action_row, text="Convert", command=self.run_conversion).pack(side="right", padx=(0, 8))
 
         button_row = ttk.Frame(frame)
-        button_row.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        button_row.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(0, 8))
         ttk.Button(button_row, text="Copy Log", command=self.copy_log).pack(side="right")
 
         self.log_widget = tk.Text(frame, wrap="word", height=18)
-        self.log_widget.grid(row=9, column=0, columnspan=3, sticky="nsew")
+        self.log_widget.grid(row=11, column=0, columnspan=3, sticky="nsew")
         self.log_widget.configure(state="disabled")
         self.log_widget.bind("<Control-c>", self._handle_copy_shortcut)
         self.log_widget.bind("<Control-C>", self._handle_copy_shortcut)
@@ -90,6 +139,7 @@ class ConversionApp:
         self.input_var.set(selected)
         if not self.output_var.get():
             self.output_var.set(str(Path(selected).with_suffix(".usda")))
+        self.refresh_wind_groups()
 
     def browse_output(self) -> None:
         initial = self.output_var.get() or "tree.usda"
@@ -101,6 +151,25 @@ class ConversionApp:
         )
         if selected:
             self.output_var.set(selected)
+
+    def refresh_wind_groups(self) -> None:
+        input_path = self.input_var.get().strip()
+        if not input_path:
+            messagebox.showerror("Missing input", "Select a source XML file before loading wind groups.")
+            return
+        try:
+            dynamic_wind = inspect_wind_data(input_path)
+        except Exception as exc:
+            self.status_var.set("Wind group inspection failed.")
+            self._set_log(str(exc))
+            messagebox.showerror("Wind group inspection failed", str(exc))
+            return
+
+        self._rebuild_wind_group_controls(dynamic_wind.simulation_groups)
+        self.status_var.set(
+            f"Loaded {len(dynamic_wind.simulation_groups)} wind groups from skeleton hierarchy."
+        )
+        self._set_log(format_wind_group_summary(dynamic_wind))
 
     def run_conversion(self) -> None:
         input_path = self.input_var.get().strip()
@@ -157,6 +226,36 @@ class ConversionApp:
         self.status_var.set(f"Wrote USDA to {result.output_path}")
         messagebox.showinfo("Conversion complete", f"Wrote USDA to {result.output_path}")
 
+    def run_generate_wind_json(self) -> None:
+        input_path = self.input_var.get().strip()
+        if not input_path:
+            messagebox.showerror("Missing input", "Select a source XML file.")
+            return
+        if not self._wind_group_rows:
+            self.refresh_wind_groups()
+            if not self._wind_group_rows:
+                return
+
+        output_path = str(self._derive_wind_json_output_path())
+        try:
+            result = generate_wind_json(
+                input_path,
+                output_path,
+                group_settings=self._collect_wind_group_settings(),
+                gust_attenuation=float(self.gust_attenuation_var.get()),
+                is_ground_cover=bool(self.is_ground_cover_var.get()),
+            )
+        except Exception as exc:
+            self.status_var.set("Wind JSON generation failed.")
+            self._set_log(str(exc))
+            messagebox.showerror("Wind JSON generation failed", str(exc))
+            return
+
+        self._save_settings()
+        self._set_log(format_wind_json_result(result))
+        self.status_var.set(f"Wrote wind JSON to {result.output_path}")
+        messagebox.showinfo("Wind JSON complete", f"Wrote wind JSON to {result.output_path}")
+
     def copy_log(self) -> None:
         self.root.clipboard_clear()
         self.root.clipboard_append(self._get_copy_text())
@@ -210,6 +309,8 @@ class ConversionApp:
     def _install_persistence_hooks(self) -> None:
         self.bark_material_var.trace_add("write", self._handle_persisted_field_change)
         self.leaves_material_var.trace_add("write", self._handle_persisted_field_change)
+        self.gust_attenuation_var.trace_add("write", self._handle_persisted_field_change)
+        self.is_ground_cover_var.trace_add("write", self._handle_persisted_field_change)
         self.root.protocol("WM_DELETE_WINDOW", self._handle_window_close)
 
     def _handle_persisted_field_change(self, *_args) -> None:
@@ -221,10 +322,13 @@ class ConversionApp:
 
     def _load_settings(self) -> None:
         settings = self._read_settings()
-        self.bark_material_var.set(settings.get("bark_material_path", ""))
-        self.leaves_material_var.set(settings.get("leaves_material_path", ""))
+        self.bark_material_var.set(str(settings.get("bark_material_path", "")))
+        self.leaves_material_var.set(str(settings.get("leaves_material_path", "")))
+        self.gust_attenuation_var.set(float(settings.get("gust_attenuation", 0.0)))
+        self.is_ground_cover_var.set(bool(settings.get("is_ground_cover", False)))
+        self._persisted_wind_group_settings = dict(settings.get("wind_group_settings", {}))
 
-    def _read_settings(self) -> dict[str, str]:
+    def _read_settings(self) -> dict:
         if not self.SETTINGS_PATH.exists():
             return {}
         try:
@@ -233,10 +337,19 @@ class ConversionApp:
             return {}
         if not isinstance(payload, dict):
             return {}
+        wind_group_settings = payload.get("wind_group_settings", {})
+        if not isinstance(wind_group_settings, dict):
+            wind_group_settings = {}
         return {
-            key: value
-            for key, value in payload.items()
-            if key in {"bark_material_path", "leaves_material_path"} and isinstance(value, str)
+            "bark_material_path": payload.get("bark_material_path", ""),
+            "leaves_material_path": payload.get("leaves_material_path", ""),
+            "gust_attenuation": payload.get("gust_attenuation", 0.0),
+            "is_ground_cover": payload.get("is_ground_cover", False),
+            "wind_group_settings": {
+                str(key): value
+                for key, value in wind_group_settings.items()
+                if isinstance(value, dict)
+            },
         }
 
     def _save_settings(self) -> None:
@@ -245,11 +358,121 @@ class ConversionApp:
             payload = {
                 "bark_material_path": self.bark_material_var.get().strip(),
                 "leaves_material_path": self.leaves_material_var.get().strip(),
+                "gust_attenuation": round(float(self.gust_attenuation_var.get()), 4),
+                "is_ground_cover": bool(self.is_ground_cover_var.get()),
+                "wind_group_settings": self._serialize_wind_group_settings(),
             }
             self.SETTINGS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         except OSError:
-            # Persistence must not block the GUI or conversion flow.
             return
+
+    def _serialize_wind_group_settings(self) -> dict[str, dict[str, float]]:
+        if not self._wind_group_rows:
+            return dict(self._persisted_wind_group_settings)
+        serialized: dict[str, dict[str, float]] = {}
+        for row in self._wind_group_rows:
+            group_index = int(row["group_index"])
+            influence_var = row["influence_var"]
+            shift_var = row["shift_var"]
+            serialized[str(group_index)] = {
+                "influence": round(float(influence_var.get()), 4),
+                "shift_top": round(float(shift_var.get()), 4),
+            }
+        self._persisted_wind_group_settings = serialized
+        return serialized
+
+    def _derive_wind_json_output_path(self) -> Path:
+        output_path = self.output_var.get().strip()
+        if output_path:
+            resolved_output = Path(output_path)
+            return resolved_output.with_name(f"{resolved_output.stem}_DynamicWind.json")
+        return Path(self.input_var.get().strip()).with_name(f"{Path(self.input_var.get().strip()).stem}_DynamicWind.json")
+
+    def _rebuild_wind_group_controls(self, groups: tuple[DynamicWindSimulationGroup, ...]) -> None:
+        for child in self.wind_groups_container.winfo_children():
+            child.destroy()
+        self._wind_group_rows.clear()
+
+        if not groups:
+            ttk.Label(self.wind_groups_container, text="No skeleton joints found.").grid(row=0, column=0, sticky="w")
+            return
+
+        for row_index, group in enumerate(groups):
+            title = f"Group {group.group_index} ({'Trunk' if group.is_trunk_group else f'Branch Level {group.branch_order}'})"
+            ttk.Label(self.wind_groups_container, text=title).grid(row=row_index * 2, column=0, sticky="w", pady=(4, 0))
+
+            influence_var = tk.DoubleVar(value=self._persisted_group_value(group.group_index, "influence", group.influence))
+            influence_value_var = tk.StringVar(value=f"{influence_var.get():.2f}")
+            tk.Scale(
+                self.wind_groups_container,
+                from_=0.0,
+                to=self.MAX_WIND_INFLUENCE,
+                resolution=0.05,
+                orient="horizontal",
+                variable=influence_var,
+                command=lambda value, value_var=influence_value_var: self._handle_scale_change(value, value_var),
+            ).grid(row=row_index * 2, column=1, sticky="ew", padx=(12, 12), pady=(4, 0))
+            ttk.Label(self.wind_groups_container, textvariable=influence_value_var, width=6).grid(
+                row=row_index * 2, column=2, sticky="e", pady=(4, 0)
+            )
+
+            shift_var = tk.DoubleVar(value=self._persisted_group_value(group.group_index, "shift_top", group.shift_top))
+            shift_value_var = tk.StringVar(value=f"{shift_var.get():.2f}")
+            ttk.Label(self.wind_groups_container, text="Shift Top").grid(row=row_index * 2 + 1, column=0, sticky="w")
+            tk.Scale(
+                self.wind_groups_container,
+                from_=0.0,
+                to=self.MAX_SHIFT_TOP,
+                resolution=0.01,
+                orient="horizontal",
+                variable=shift_var,
+                command=lambda value, value_var=shift_value_var: self._handle_scale_change(value, value_var),
+            ).grid(row=row_index * 2 + 1, column=1, sticky="ew", padx=(12, 12), pady=(0, 4))
+            ttk.Label(self.wind_groups_container, textvariable=shift_value_var, width=6).grid(
+                row=row_index * 2 + 1, column=2, sticky="e", pady=(0, 4)
+            )
+
+            self._wind_group_rows.append(
+                {
+                    "group_index": group.group_index,
+                    "branch_order": group.branch_order,
+                    "is_trunk_group": group.is_trunk_group,
+                    "influence_var": influence_var,
+                    "shift_var": shift_var,
+                }
+            )
+
+        self._save_settings()
+
+    def _persisted_group_value(self, group_index: int, field_name: str, default: float) -> float:
+        persisted = self._persisted_wind_group_settings.get(str(group_index), {})
+        value = persisted.get(field_name, default)
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return default
+        maximum = self.MAX_SHIFT_TOP if field_name == "shift_top" else self.MAX_WIND_INFLUENCE
+        return max(0.0, min(numeric_value, maximum))
+
+    def _collect_wind_group_settings(self) -> tuple[DynamicWindSimulationGroup, ...]:
+        return tuple(
+            DynamicWindSimulationGroup(
+                group_index=int(row["group_index"]),
+                branch_order=int(row["branch_order"]),
+                influence=float(row["influence_var"].get()),
+                shift_top=float(row["shift_var"].get()),
+                is_trunk_group=bool(row["is_trunk_group"]),
+            )
+            for row in self._wind_group_rows
+        )
+
+    def _handle_gust_change(self, value: float) -> None:
+        self.gust_value_var.set(f"{value:.2f}")
+        self._save_settings()
+
+    def _handle_scale_change(self, value: str, value_var: tk.StringVar) -> None:
+        value_var.set(f"{float(value):.2f}")
+        self._save_settings()
 
 
 def format_conversion_results(
@@ -285,6 +508,40 @@ def format_conversion_results(
         lines.append("Status: success" if result.usda_document is not None else "Status: failed")
         lines.append("")
     return "\n".join(lines).strip()
+
+
+def format_wind_group_summary(dynamic_wind) -> str:
+    lines = [
+        f"Wind groups detected: {len(dynamic_wind.simulation_groups)}",
+        f"Joints classified: {len(dynamic_wind.joint_assignments)}",
+        "",
+    ]
+    for group in dynamic_wind.simulation_groups:
+        joint_count = sum(
+            1 for assignment in dynamic_wind.joint_assignments if assignment.simulation_group_index == group.group_index
+        )
+        label = "Trunk" if group.is_trunk_group else f"Branch level {group.branch_order}"
+        lines.append(
+            f"Group {group.group_index}: {label}, branch_order={group.branch_order}, joints={joint_count}"
+        )
+    return "\n".join(lines)
+
+
+def format_wind_json_result(result) -> str:
+    lines = [
+        f"Input: {result.input_path}",
+        f"Output: {result.output_path}",
+        f"Wind groups: {len(result.dynamic_wind.simulation_groups)}",
+        f"Joints: {len(result.dynamic_wind.joint_assignments)}",
+        f"Gust Attenuation: {result.dynamic_wind.gust_attenuation:.2f}",
+        f"Ground Cover: {result.dynamic_wind.is_ground_cover}",
+        "",
+    ]
+    for group in result.dynamic_wind.simulation_groups:
+        lines.append(
+            f"Group {group.group_index}: influence={group.influence:.2f}, shiftTop={group.shift_top:.2f}, trunk={group.is_trunk_group}"
+        )
+    return "\n".join(lines)
 
 
 def _is_valid_unreal_asset_path(path: str) -> bool:

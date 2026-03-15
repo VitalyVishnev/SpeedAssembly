@@ -4,3 +4,8 @@ name = "XMLtoUSDAconverter"
 
 [setup]
 script = ""
+
+[[actions]]
+name = "build"
+icon = "run"
+command = ".\\scripts\\build_gui_exe.cmd"
