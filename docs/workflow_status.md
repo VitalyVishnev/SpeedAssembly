@@ -34,12 +34,14 @@ The project has also passed automated `Phase 1` regression coverage for:
 - invalid leaf binding rejection
 - multi-material part authoring through `GeomSubset`
 - mixed inline plus external `PartMesh` prototype resolution
+- separate Dynamic Wind JSON generation from the normalized skeleton
 
 The project has not passed the final `Phase 1` quality gate yet:
 
 - only one real SpeedTree XML sample is currently checked into the repository
 - transform fidelity still requires manual UE validation across more than one real export
 - texture/material fidelity still requires manual UE validation with real bark and leaf shaders
+- wind tuning still requires broader manual UE comparison against more than one reference tree
 
 ## Phase 1 Definition Of Done
 
@@ -88,6 +90,7 @@ Run this checklist for every real `Phase 1` sample:
 5. parts do not drift away from the main skeleton
 6. bark and leaves materials resolve correctly
 7. existing external `PartMesh` references still import through the assembly path when enabled
+8. wind JSON reimport produces sane trunk and branch bending
 
 ## Current milestone sequence
 
@@ -95,4 +98,5 @@ Run this checklist for every real `Phase 1` sample:
 2. validate transform and rig fidelity across more real exports
 3. validate texture and material fidelity in UE
 4. keep optional external `PartMesh` reuse stable
-5. only then generalize to later features such as wind and UV modification
+5. stabilize Dynamic Wind JSON behavior and document the observed UE contract
+6. only then generalize to later features such as UV modification
