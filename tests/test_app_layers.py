@@ -101,7 +101,7 @@ def test_convert_file_applies_baseline_material_overrides(tmp_path: Path) -> Non
     )
 
     assert result.usda_document is not None
-    assert 'token outputs:unreal:surface.connect = </Tree/Materials/Material_0_0/Material_0_0_unreal_shader.outputs:out>' in result.usda_document.text
+    assert 'token outputs:unreal:surface.connect = </Tree/Materials/Material_1_1/Material_1_1_unreal_shader.outputs:out>' in result.usda_document.text
     assert 'token outputs:unreal:surface.connect = </Tree/Materials/Material_2_2/Material_2_2_unreal_shader.outputs:out>' in result.usda_document.text
     assert 'uniform asset info:unreal:sourceAsset = @/Game/TestMaterials/M_Bark_Test@' in result.usda_document.text
     assert 'uniform asset info:unreal:sourceAsset = @/Game/TestMaterials/M_Leaves_Test@' in result.usda_document.text
@@ -358,3 +358,4 @@ def test_gui_copy_uses_full_log_when_selection_missing() -> None:
         assert root.clipboard_get() == "line one\nline two"
     finally:
         root.destroy()
+

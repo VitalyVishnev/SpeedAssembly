@@ -21,7 +21,7 @@ from .xml_reader import inspect_xml, read_source_xml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VAULT_ROOT = REPO_ROOT / "vault"
-BASELINE_BARK_MATERIAL_ID = 0
+BASELINE_BARK_MATERIAL_ID = 1
 BASELINE_LEAVES_MATERIAL_ID = 2
 
 

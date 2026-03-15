@@ -1,6 +1,6 @@
 <SpeedTreeRaw VersionMajor="9" VersionMinor="5" units="m" upAxis="Y">
   <Materials>
-    <Material ID="0" Name="Bark" />
+    <Material ID="1" Name="Bark" />
     <Material ID="2" Name="Leaves" />
   </Materials>
   <Bones>
@@ -17,7 +17,7 @@
       <Vertices>
         <BoneID>0 0 0</BoneID>
       </Vertices>
-      <Triangles Material="0">
+      <Triangles Material="1">
         <PointIndices>0 1 2</PointIndices>
         <VertexIndices>0 1 2</VertexIndices>
       </Triangles>
@@ -51,3 +51,4 @@
     </Mesh>
   </Meshes>
 </SpeedTreeRaw>
+

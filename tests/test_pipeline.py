@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 
 from xml_to_usda.normalizer import normalize_to_canonical
-from xml_to_usda.models import AssemblyPartInstance, MaterialSpec, MeshLibraryEntry, MeshSection, Vector3
-from xml_to_usda.normalizer import _rebalance_assembly_part_prototype_scales
+from xml_to_usda.models import Color4, MaterialSpec, MeshSection, Vector3
+from xml_to_usda.normalizer import _rebalance_assembly_part_prototype_scales, _vertex_color_material_sections
 from xml_to_usda.pipeline import convert_file, inspect_source, load_canonical_model
 from xml_to_usda.source_transform import build_source_transform
 from xml_to_usda.ue_schema import DEFAULT_UE_SCHEMA_CONTRACT
@@ -42,8 +42,8 @@ def test_inspect_report_tracks_structure_without_sample_specific_contracts() -> 
     assert payload["leaf_mesh_distribution"]
     assert payload["leaf_source_object_distribution"]
     assert payload["material_count"] == 2
-    assert payload["base_material_distribution"] == {"0": payload["base_mesh_face_count"]}
-    assert payload["prototype_material_distribution"]["2"] > 0
+    assert payload["base_material_distribution"] == {"1": payload["base_mesh_face_count"]}
+    assert payload["prototype_material_distribution"]["1"] > 0
     assert payload["base_geometry_mode"] == "merged"
     assert payload["base_mesh_part_count"] >= 2
     assert payload["base_mesh_point_count"] > 0
@@ -88,10 +88,10 @@ def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
     assert len(model.base_mesh.skel_joint_indices) == len(model.base_mesh.points)
     assert len(model.base_mesh.skel_joint_weights) == len(model.base_mesh.points)
     assert len(model.base_mesh.uv_coords) == len(model.base_mesh.face_vertex_indices)
-    assert {material.source_id for material in model.materials} == {0, 2}
-    assert {section.material_id for section in model.base_mesh.sections} == {0}
+    assert {material.source_id for material in model.materials} == {1, 2}
+    assert {section.material_id for section in model.base_mesh.sections} == {1}
     assert all(
-        prototype.mesh is not None and {section.material_id for section in prototype.mesh.sections} == {2}
+        prototype.mesh is not None and {section.material_id for section in prototype.mesh.sections} == {1}
         for prototype in model.prototypes
     )
     assert all(part.binding.joint_tokens for part in model.assembly_parts)
@@ -162,6 +162,46 @@ def test_face_varying_uvs_fall_back_to_point_indices_when_vertex_indices_are_mis
     assert [(uv.x, uv.y) for uv in uv_coords] == pytest.approx(
         [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (0.0, 0.0), (0.0, 1.0), (1.0, 0.0)]
     )
+
+
+def test_vertex_color_black_faces_become_leaves_sections_for_prototypes() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    model = normalize_to_canonical(document, inspect_xml(document))
+    prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_1")
+    assert prototype.mesh is not None
+
+    synthetic_mesh = replace(
+        prototype.mesh,
+        face_vertex_counts=(3, 3),
+        face_vertex_indices=(0, 1, 2, 3, 4, 5),
+        vertex_colors=(
+            Color4(0.0, 0.0, 0.0),
+            Color4(0.0, 0.0, 0.0),
+            Color4(0.0, 0.0, 0.0),
+            Color4(1.0, 1.0, 1.0),
+            Color4(1.0, 1.0, 1.0),
+            Color4(1.0, 1.0, 1.0),
+        ),
+        sections=(MeshSection(material_id=1, face_indices=(0, 1)),),
+    )
+
+    sections = _vertex_color_material_sections(synthetic_mesh)
+
+    assert sections == (
+        MeshSection(material_id=1, face_indices=(1,)),
+        MeshSection(material_id=2, face_indices=(0,)),
+    )
+
+
+def test_missing_primary_or_leaves_material_is_validation_error() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    broken_model = replace(model, materials=(MaterialSpec(source_id=1, name="Default_Mat"),))
+
+    diagnostics = validate_model(broken_model)
+
+    assert any(issue.code == "missing_required_material_role" and issue.severity == "error" for issue in diagnostics)
 
 
 def test_speedtree_xml_without_units_uses_meter_source_scale() -> None:
@@ -244,9 +284,9 @@ def test_usda_output_contains_ue_first_structure() -> None:
     assert 'uniform token unreal:naniteAssembly:meshType = "skeletalMesh"' in usda.text
     assert 'rel unreal:naniteAssembly:skeleton = </Tree/BaseTreeSkelRoot/MainSkeleton>' in usda.text
     assert 'def Scope "Materials"' in usda.text
-    assert 'def Material "Material_0_0"' in usda.text
+    assert 'def Material "Material_1_1"' in usda.text
     assert 'def Material "Material_2_2"' in usda.text
-    assert 'token outputs:surface.connect = </Tree/Materials/Material_0_0/Material_0_0_shader.outputs:surface>' in usda.text
+    assert 'token outputs:surface.connect = </Tree/Materials/Material_1_1/Material_1_1_shader.outputs:surface>' in usda.text
     assert 'token outputs:surface.connect = </Tree/Materials/Material_2_2/Material_2_2_shader.outputs:surface>' in usda.text
     assert 'uniform token info:id = "UsdPreviewSurface"' in usda.text
     assert 'color3f inputs:diffuseColor = (0.8, 0.8, 0.8)' in usda.text
@@ -266,8 +306,7 @@ def test_usda_output_contains_ue_first_structure() -> None:
     assert 'uniform matrix4d[] bindTransforms = [' in usda.text
     assert 'uniform matrix4d[] restTransforms = [' in usda.text
     assert 'float3[] restTransforms:translations = [' not in usda.text
-    assert 'rel material:binding = </Tree/Materials/Material_0_0>' in usda.text
-    assert 'rel material:binding = </Tree/Materials/Material_2_2>' in usda.text
+    assert 'rel material:binding = </Tree/Materials/Material_1_1>' in usda.text
     assert 'uniform token orientation = "rightHanded"' in usda.text
     assert 'interpolation = "vertex"' in usda.text
     assert 'texCoord2f[] primvars:st = [' in usda.text
@@ -589,8 +628,8 @@ def test_realistic_multi_material_part_mesh_authors_geom_subsets() -> None:
 
     multi_material_prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_2")
     assert multi_material_prototype.mesh is not None
-    assert {section.material_id for section in multi_material_prototype.mesh.sections} == {0, 2}
-    assert 'def GeomSubset "Material_0_0"' in usda.text
+    assert {section.material_id for section in multi_material_prototype.mesh.sections} == {1, 2}
+    assert 'def GeomSubset "Material_1_1"' in usda.text
     assert 'def GeomSubset "Material_2_2"' in usda.text
     assert 'uniform token subsetFamily:materialBind:familyType = "nonOverlapping"' in usda.text
 
@@ -655,14 +694,14 @@ def test_multi_material_prototype_authors_geom_subsets() -> None:
     synthetic_mesh = replace(
         prototype.mesh,
         sections=(
-            MeshSection(material_id=0, face_indices=(0,)),
+            MeshSection(material_id=1, face_indices=(0,)),
             MeshSection(material_id=2, face_indices=tuple(range(1, len(prototype.mesh.face_vertex_counts)))),
         ),
     )
     synthetic_model = replace(
         model,
         materials=(
-            MaterialSpec(source_id=0, name="Default_Mat"),
+            MaterialSpec(source_id=1, name="Default_Mat"),
             MaterialSpec(source_id=2, name="Twigs_Mat"),
         ),
         prototypes=(replace(prototype, mesh=synthetic_mesh),) + model.prototypes[1:],
@@ -672,7 +711,7 @@ def test_multi_material_prototype_authors_geom_subsets() -> None:
     usda = render_usda(synthetic_model, diagnostics)
 
     assert 'uniform token subsetFamily:materialBind:familyType = "nonOverlapping"' in usda.text
-    assert 'def GeomSubset "Material_0_0"' in usda.text
+    assert 'def GeomSubset "Material_1_1"' in usda.text
     assert 'def GeomSubset "Material_2_2"' in usda.text
     assert 'uniform token familyName = "materialBind"' in usda.text
     assert 'uniform token elementType = "face"' in usda.text
@@ -682,3 +721,4 @@ def _slice_between(text: str, start: str, end: str) -> str:
     start_index = text.index(start)
     end_index = text.index(end, start_index)
     return text[start_index:end_index]
+

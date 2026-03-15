@@ -12,6 +12,7 @@ from .models import (
     Bounds,
     BranchSegment,
     CanonicalTreeModel,
+    Color4,
     ExportMetadata,
     InstanceBinding,
     Joint,
@@ -31,6 +32,10 @@ from .models import (
     Vector3,
 )
 from .source_transform import SourceTransform, build_source_transform
+
+
+PRIMARY_MATERIAL_ID = 1
+LEAVES_MATERIAL_ID = 2
 
 
 def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> CanonicalTreeModel:
@@ -316,7 +321,16 @@ def _build_mesh_data(
         messages,
         allow_point_index_fallback=False,
     )
-    return _build_mesh_from_faces(name, points, face_counts, face_indices, sections, uv_coords, joint_indices, joint_weights)
+    return _build_mesh_from_faces(
+        name,
+        points,
+        face_counts,
+        face_indices,
+        sections,
+        uv_coords,
+        joint_indices=joint_indices,
+        joint_weights=joint_weights,
+    )
 
 
 def _build_library_mesh_data(
@@ -340,7 +354,12 @@ def _build_library_mesh_data(
         messages,
         allow_point_index_fallback=True,
     )
-    return _build_mesh_from_faces(name, points, face_counts, face_indices, sections, uv_coords)
+    vertex_colors = _extract_vertex_colors(
+        points_node,
+        f"{name}.vertices",
+        messages,
+    )
+    return _build_mesh_from_faces(name, points, face_counts, face_indices, sections, uv_coords, vertex_colors=vertex_colors)
 
 
 def _build_mesh_from_faces(
@@ -350,6 +369,7 @@ def _build_mesh_from_faces(
     face_indices: list[int],
     sections: tuple[MeshSection, ...],
     uv_coords: list[Vector2] | None = None,
+    vertex_colors: list[Color4] | None = None,
     joint_indices: list[int] | None = None,
     joint_weights: list[float] | None = None,
 ) -> MeshData:
@@ -359,6 +379,7 @@ def _build_mesh_from_faces(
         face_vertex_counts=tuple(face_counts),
         face_vertex_indices=tuple(face_indices),
         uv_coords=tuple(uv_coords or ()),
+        vertex_colors=tuple(vertex_colors or ()),
         sections=sections,
         skel_joint_indices=tuple(joint_indices or ()),
         skel_joint_weights=tuple(joint_weights or ()),
@@ -614,7 +635,12 @@ def _build_prototypes(
         entry = meshes_by_key.get(identity.source_key)
         mesh = entry.mesh if entry is not None else None
         if mesh is not None:
-            mesh = _apply_fallback_material_sections(mesh, identity.source_key, fallback_materials.get(identity.source_key, set()), messages)
+            mesh = _resolve_prototype_material_sections(
+                mesh,
+                identity.source_key,
+                fallback_materials.get(identity.source_key, set()),
+                messages,
+            )
         prototypes.append(
             Prototype(
                 identity=identity,
@@ -626,6 +652,24 @@ def _build_prototypes(
             )
         )
     return prototypes
+
+
+def _resolve_prototype_material_sections(
+    mesh: MeshData,
+    prototype_key: str,
+    fallback_material_ids: set[int],
+    messages: list[str],
+) -> MeshData:
+    # Preserve explicitly-authored two-material prototype sections when they already match the project baseline.
+    authored_material_ids = {section.material_id for section in mesh.sections}
+    if len(authored_material_ids) > 1 and authored_material_ids == {PRIMARY_MATERIAL_ID, LEAVES_MATERIAL_ID}:
+        return mesh
+
+    vertex_color_sections = _vertex_color_material_sections(mesh)
+    if vertex_color_sections is not None:
+        return replace(mesh, sections=vertex_color_sections)
+
+    return _apply_fallback_material_sections(mesh, prototype_key, fallback_material_ids, messages)
 
 
 def _scale_mesh(mesh: MeshData, factor: float) -> MeshData:
@@ -980,6 +1024,36 @@ def _extract_face_varying_uvs(
     return uv_coords
 
 
+def _extract_vertex_colors(
+    vertices_node: ET.Element | None,
+    context: str,
+    messages: list[str],
+) -> list[Color4]:
+    if vertices_node is None:
+        return []
+    red = _read_float_list(vertices_node.findtext("VertexColorR"))
+    green = _read_float_list(vertices_node.findtext("VertexColorG"))
+    blue = _read_float_list(vertices_node.findtext("VertexColorB"))
+    alpha = _read_float_list(vertices_node.findtext("VertexColorA"))
+    if not red and not green and not blue and not alpha:
+        return []
+    if not red or not green or not blue:
+        messages.append(f"packed_array_error: {context} vertex color payload is incomplete")
+        return []
+    if len({len(red), len(green), len(blue)}) != 1:
+        messages.append(
+            f"packed_array_error: {context} vertex color counts do not match: "
+            f"R={len(red)}, G={len(green)}, B={len(blue)}"
+        )
+    count = min(len(red), len(green), len(blue))
+    if alpha and len(alpha) != count:
+        messages.append(f"packed_array_error: {context} VertexColorA count {len(alpha)} does not match RGB count {count}")
+    return [
+        Color4(red[index], green[index], blue[index], alpha[index] if index < len(alpha) else 1.0)
+        for index in range(count)
+    ]
+
+
 def _extract_lod_vertex_indices(
     node: ET.Element,
     face_indices: list[int],
@@ -1036,6 +1110,29 @@ def _ordered_sections(sections_by_material: dict[int, list[int]]) -> tuple[MeshS
     )
 
 
+def _vertex_color_material_sections(mesh: MeshData) -> tuple[MeshSection, ...] | None:
+    if not mesh.vertex_colors or not mesh.face_vertex_counts or not mesh.face_vertex_indices:
+        return None
+
+    sections_by_material: dict[int, list[int]] = defaultdict(list)
+    offset = 0
+    for face_index, face_count in enumerate(mesh.face_vertex_counts):
+        face_indices = mesh.face_vertex_indices[offset:offset + face_count]
+        offset += face_count
+        if len(face_indices) != face_count:
+            return None
+        if any(point_index < 0 or point_index >= len(mesh.vertex_colors) for point_index in face_indices):
+            return None
+        material_id = (
+            LEAVES_MATERIAL_ID
+            if all(mesh.vertex_colors[point_index].is_exact_black() for point_index in face_indices)
+            else PRIMARY_MATERIAL_ID
+        )
+        sections_by_material[material_id].append(face_index)
+
+    return _ordered_sections(sections_by_material)
+
+
 def _apply_fallback_material_sections(
     mesh: MeshData,
     prototype_key: str,
@@ -1055,7 +1152,7 @@ def _apply_fallback_material_sections(
         messages.append(
             f"material_conflict: prototype {prototype_key} has multiple LeafReferences material ids {sorted(fallback_material_ids)} without mesh-authored sections"
         )
-    chosen_material_id = min(fallback_material_ids)
+    chosen_material_id = LEAVES_MATERIAL_ID if LEAVES_MATERIAL_ID in fallback_material_ids else PRIMARY_MATERIAL_ID
     return replace(mesh, sections=_single_material_sections(chosen_material_id, len(mesh.face_vertex_counts)))
 
 

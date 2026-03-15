@@ -97,6 +97,18 @@ Current conflict policy:
 - `LeafReferences Material` becomes a fallback only when the prototype mesh carries no sections
 - a mismatch is logged as a warning, not treated as a hard failure, if the prototype mesh itself is internally valid
 
+Current material-role baseline:
+
+- material id `1` = primary tree / branch material
+- material id `2` = leaves material
+- legacy `0/2` exports are not the active baseline anymore
+
+Current vertex-color override for instanced part prototypes:
+
+- if the prototype mesh carries exact-black vertex color on all authored vertices of a face, that face is assigned to material id `2`
+- all other prototype faces are assigned to material id `1`
+- this override applies only to `Assembly Parts`, not to the `Base Skeletal Tree`
+
 ## Current part interpretation
 
 For the current project contract:

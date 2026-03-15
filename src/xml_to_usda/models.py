@@ -25,6 +25,17 @@ class Vector2:
 
 
 @dataclass(frozen=True)
+class Color4:
+    r: float
+    g: float
+    b: float
+    a: float = 1.0
+
+    def is_exact_black(self) -> bool:
+        return self.r == 0.0 and self.g == 0.0 and self.b == 0.0
+
+
+@dataclass(frozen=True)
 class Quaternion:
     real: float
     i: float
@@ -74,6 +85,7 @@ class MeshData:
     face_vertex_counts: tuple[int, ...]
     face_vertex_indices: tuple[int, ...]
     uv_coords: tuple[Vector2, ...] = ()
+    vertex_colors: tuple[Color4, ...] = ()
     sections: tuple["MeshSection", ...] = ()
     skel_joint_indices: tuple[int, ...] = ()
     skel_joint_weights: tuple[float, ...] = ()
