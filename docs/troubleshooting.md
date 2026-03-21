@@ -2,6 +2,25 @@
 
 This page collects the fast checks for common importer dead-ends.
 
+## `build_gui_exe.cmd -Package` looks stuck or reuses stale output
+
+Symptom:
+
+- the package build appears to hang in PowerShell
+- `dist\XMLtoUSDAConverter.exe` still looks old after a recent code change
+- PyInstaller seems to spend time in `Analysis` on repeated runs
+
+What to know:
+
+- `.\scripts\build_gui_exe.cmd -Package` now removes `build/` and `dist/` before invoking PyInstaller
+- the package build also passes `--clean` so stale analysis state is not reused
+- the old failure pattern was caused by incremental PyInstaller state, not by the wind-group code
+
+Practical rule:
+
+- if the standalone build ever looks suspicious, rerun `.\scripts\build_gui_exe.cmd -Package`
+- do not trust an older `dist\XMLtoUSDAConverter.exe` timestamp as proof that the current source was packaged
+
 ## External PartMesh override looks ignored
 
 Symptom:
@@ -44,4 +63,3 @@ Checks:
 1. Verify the path starts with `/Game/`.
 2. Verify the generated USDA contains the expected Unreal material connection.
 3. Verify the asset path matches the UE Content Browser object path exactly.
-

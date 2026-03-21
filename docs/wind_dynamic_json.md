@@ -68,16 +68,18 @@ Important implication:
 
 ## Current group-building logic
 
-Wind groups are derived from the normalized skeleton hierarchy.
+Wind groups are derived from explicit `Bones/Bone/@Generator` labels.
 
 Rules:
 
-- `Group 0` covers the root and the trunk chain
-- when a joint has a single child, that child stays in the current group
-- when a joint branches into multiple children, all children advance to the next group
-- sibling stems at the same vertical level stay together
+- `Group_<n>` is the authored wind level contract
+- variants such as `Group_0 2` normalize to the same level as `Group_0`
+- all joints that normalize to the same level share the same wind group
+- wind groups are ordered by sorted unique generator levels, not by object hierarchy shape
+- `Group 0` remains the trunk group unless `Ground Cover` is enabled
 - `Ground Cover` stays a separate UE wind flag and does not change the group count
 - when `Ground Cover` is enabled, no generated group is marked as trunk
+- if a joint is missing `Generator` or the label cannot be normalized to a numeric level, wind generation fails loudly instead of guessing
 
 ## Current UI contract
 
@@ -144,6 +146,7 @@ Contract:
 
 - when `Ground Cover` is enabled, the converter clears `bIsTrunkGroup` on every generated simulation group
 - this keeps Unreal from treating any of the generated layers as a trunk-controlled wind band
+- `Ground Cover` does not change group count and does not reassign generator levels
 
 ## Dual Influence
 
@@ -181,15 +184,15 @@ Current recommended loop:
 
 - wind tuning is currently JSON-only in project output
 - USDA-side Dynamic Wind authoring is not yet used by the converter
-- numeric defaults are based on current local validation and may still require further tuning against more UE reference assets
+- wind authoring currently requires explicit `Group_<n>` generator labels; legacy XML without usable generator levels is rejected by the wind path
 - dual influence is not yet exposed
 
 ## Tests
 
 Wind behavior is currently covered by automated tests for:
 
-- hierarchy-driven group count
-- vertical hierarchy without horizontal splitting
+- explicit generator-level grouping
+- strict failure on missing or malformed `Generator` labels
 - JSON payload generation
 - GUI slider collection and persistence
 

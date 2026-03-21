@@ -1,5 +1,6 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
+    [switch]$Package,
     [switch]$Clean,
     [switch]$OpenOutput,
     [switch]$SkipBootstrap
@@ -41,73 +42,90 @@ function Get-VenvExecutable([string]$RepoRoot) {
 }
 
 $repoRoot = Convert-ToWinPath ([System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')))
-$pythonExe = Get-VenvExecutable -RepoRoot $repoRoot
-$sitePackages = Join-Path $repoRoot '.venv\Lib\site-packages'
 $launcherScript = Join-Path $repoRoot 'scripts\launch_gui.py'
+$venvScripts = Join-Path $repoRoot '.venv\Scripts'
+$launcherExe = Join-Path $venvScripts 'xml-to-usda-gui.exe'
 $distPath = Join-Path $repoRoot 'dist'
 $buildPath = Join-Path $repoRoot 'build'
 $exePath = Join-Path $distPath 'XMLtoUSDAConverter.exe'
-$originalPythonPath = $env:PYTHONPATH
-$resolvedPythonPath = @(
-    $sitePackages,
-    (Join-Path $repoRoot 'src')
-)
-if ($originalPythonPath) {
-    $resolvedPythonPath += $originalPythonPath
-}
-$env:PYTHONPATH = ($resolvedPythonPath -join ';')
 
 Push-Location $repoRoot
 try {
-    if (-not $SkipBootstrap) {
-        & $pythonExe -c "import PyInstaller" 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host 'PyInstaller is missing in .venv. Installing dev dependencies...'
-            & $pythonExe -m pip --python (Join-Path $repoRoot '.venv') install -e '.[dev]'
-            if ($LASTEXITCODE -ne 0) {
-                throw 'Failed to install dev dependencies for exe build.'
-            }
-        }
+    if (-not (Test-Path $launcherExe)) {
+        throw "Missing fast-build launcher: $launcherExe`nRun 'python -m pip install -e .[dev]' inside .venv first."
     }
 
-    if ($Clean) {
+    if ($Package) {
+        $pythonExe = Get-VenvExecutable -RepoRoot $repoRoot
+        if (-not $SkipBootstrap) {
+            & $pythonExe -c "import PyInstaller" 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host 'PyInstaller is missing in .venv. Installing dev dependencies...'
+                & $pythonExe -m pip --python (Join-Path $repoRoot '.venv') install -e '.[dev]'
+                if ($LASTEXITCODE -ne 0) {
+                    throw 'Failed to install dev dependencies for exe build.'
+                }
+            }
+        }
+
         if (Test-Path $buildPath) {
             Remove-Item -Recurse -Force $buildPath
         }
         if (Test-Path $distPath) {
             Remove-Item -Recurse -Force $distPath
         }
+
+        $pyInstallerArgs = @(
+            '-m', 'PyInstaller',
+            '--noconfirm',
+            '--clean',
+            '--onefile',
+            '--windowed',
+            '--name', 'XMLtoUSDAConverter',
+            '--paths', (Join-Path $repoRoot 'src'),
+            '--distpath', $distPath,
+            '--workpath', $buildPath,
+            $launcherScript
+        )
+
+        Write-Host "Building standalone GUI exe with $pythonExe ..."
+        & $pythonExe @pyInstallerArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw 'PyInstaller build failed.'
+        }
+
+        if (-not (Test-Path $exePath)) {
+            throw "Expected exe was not created: $exePath"
+        }
+
+        Write-Host "Built: $exePath"
+        if ($OpenOutput) {
+            Invoke-Item $distPath
+        }
     }
+    else {
+        if ($Clean -and (Test-Path $distPath)) {
+            Remove-Item -Recurse -Force $distPath
+        }
+        if ($Clean -and (Test-Path $buildPath)) {
+            Remove-Item -Recurse -Force $buildPath
+        }
 
-    $pyInstallerArgs = @(
-        '-m', 'PyInstaller',
-        '--noconfirm',
-        '--clean',
-        '--onefile',
-        '--windowed',
-        '--name', 'XMLtoUSDAConverter',
-        '--paths', (Join-Path $repoRoot 'src'),
-        '--distpath', $distPath,
-        '--workpath', $buildPath,
-        $launcherScript
-    )
+        Write-Host "Building fast launcher exe by copying $launcherExe ..."
+        New-Item -ItemType Directory -Force -Path $distPath | Out-Null
+        Copy-Item -Force $launcherExe $exePath
 
-    Write-Host "Building GUI exe with $pythonExe ..."
-    & $pythonExe @pyInstallerArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw 'PyInstaller build failed.'
-    }
+        if (-not (Test-Path $exePath)) {
+            throw "Expected exe was not created: $exePath"
+        }
 
-    if (-not (Test-Path $exePath)) {
-        throw "Expected exe was not created: $exePath"
-    }
-
-    Write-Host "Built: $exePath"
-    if ($OpenOutput) {
-        Invoke-Item $distPath
+        Write-Host "Built: $exePath"
+        if ($OpenOutput) {
+            Invoke-Item $distPath
+        }
     }
 }
 finally {
-    $env:PYTHONPATH = $originalPythonPath
     Pop-Location
 }
+

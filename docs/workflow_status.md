@@ -40,14 +40,21 @@ The project has also passed automated `Phase 1` regression coverage for:
 
 The wind-group contract has also been validated on the attached grass sample:
 
-- `SkeletyalAssemblyTest_Grass.xml` now resolves to a single wind group under the vertical-hierarchy rule
+- `SkeletyalAssemblyTest_Grass.xml` now resolves to a single wind group under the explicit generator-level rule
 - `Ground Cover` remains an explicit wind flag and does not change group count
 - when `Ground Cover` is enabled, every generated simulation group is emitted as non-trunk
+- legacy XML samples that do not provide usable generator levels are rejected by the wind path instead of being inferred
 
 One specific dead-end has been closed:
 
 - external `PartMesh` overrides now author a pure Unreal reference prototype instead of leaving inline low-poly `PartMesh` geometry in the same USDA branch
 - the first debug check for an ignored override is now the generated USDA text, not UE import settings
+
+The standalone package build path has also been stabilized:
+
+- `.\scripts\build_gui_exe.cmd -Package` now clears stale `build/` and `dist/` state before invoking PyInstaller
+- PyInstaller is also run with `--clean` so the package path does not reuse incremental analysis output from older runs
+- the previous "looks stuck" behavior was a stale-package-state problem, not a converter logic regression
 
 The project has not passed the final `Phase 1` quality gate yet:
 

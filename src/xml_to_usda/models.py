@@ -66,6 +66,8 @@ class Joint:
     name: str
     source_id: int | None = None
     parent: str | None = None
+    generator_label: str | None = None
+    generator_level: int | None = None
     bind_transform: "Matrix4d" = field(default_factory=lambda: Matrix4d.identity())
     rest_transform: "Matrix4d" = field(default_factory=lambda: Matrix4d.identity())
 

@@ -7,5 +7,8 @@ src/*.egg-info/
 build/
 dist/
 XMLtoUSDAConverter.spec
+PyI_*.spec
+_pyi_*.py
+_smoke*/
 vault/
 samples/speedtree/simple_tree/variants/*.usda

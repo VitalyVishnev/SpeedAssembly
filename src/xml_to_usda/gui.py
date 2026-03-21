@@ -148,7 +148,7 @@ class ConversionApp:
 
         ttk.Label(
             wind_content,
-            text="Group sliders are built from the normalized skeleton hierarchy. Group 0 is trunk unless Ground Cover is enabled.",
+            text="Group sliders are built from explicit Generator levels. Group 0 is trunk unless Ground Cover is enabled.",
         ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(0, 8))
 
         self.wind_groups_container = ttk.Frame(wind_content)
@@ -218,7 +218,7 @@ class ConversionApp:
 
         self._rebuild_wind_group_controls(dynamic_wind.simulation_groups)
         self.status_var.set(
-            f"Loaded {len(dynamic_wind.simulation_groups)} wind groups from skeleton hierarchy."
+            f"Loaded {len(dynamic_wind.simulation_groups)} wind groups from generator levels."
         )
         self._set_log(format_wind_group_summary(dynamic_wind))
 
@@ -692,7 +692,7 @@ class ConversionApp:
             return
 
         for row_index, group in enumerate(groups):
-            title = f"Group {group.group_index} ({'Trunk' if group.is_trunk_group else f'Branch Level {group.branch_order}'})"
+            title = f"Group {group.group_index} ({'Trunk' if group.is_trunk_group else f'Generator level {group.branch_order}'})"
             ttk.Label(self.wind_groups_container, text=title).grid(row=row_index * 2, column=0, sticky="w", pady=(4, 0))
 
             influence_var = tk.DoubleVar(value=self._persisted_group_value(group.group_index, "influence", group.influence))
@@ -814,7 +814,7 @@ def format_wind_group_summary(dynamic_wind) -> str:
         joint_count = sum(
             1 for assignment in dynamic_wind.joint_assignments if assignment.simulation_group_index == group.group_index
         )
-        label = "Trunk" if group.is_trunk_group else f"Branch level {group.branch_order}"
+        label = "Trunk" if group.is_trunk_group else f"Generator level {group.branch_order}"
         lines.append(
             f"Group {group.group_index}: {label}, branch_order={group.branch_order}, joints={joint_count}"
         )
@@ -833,7 +833,7 @@ def format_wind_json_result(result) -> str:
     ]
     for group in result.dynamic_wind.simulation_groups:
         lines.append(
-            f"Group {group.group_index}: influence={group.influence:.2f}, shiftTop={group.shift_top:.2f}, trunk={group.is_trunk_group}"
+            f"Group {group.group_index}: level={group.branch_order}, influence={group.influence:.2f}, shiftTop={group.shift_top:.2f}, trunk={group.is_trunk_group}"
         )
     return "\n".join(lines)
 

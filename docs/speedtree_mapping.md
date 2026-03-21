@@ -53,8 +53,16 @@ Use it for:
 - joint identity
 - parent chain
 - joint transform derivation
+- explicit wind generator levels through `Bone/@Generator`
 
 Missing required skeleton coordinates are a hard failure for skeletal export.
+
+Wind-specific contract:
+
+- `Generator` is the authored wind-level source, not a cosmetic label
+- `Group_<n>` and variants such as `Group_0 2` normalize to the same level
+- multiple generator fragments that share the same normalized level collapse into one wind group
+- if a bone does not provide a usable `Generator` label, the wind path rejects the XML instead of inferring levels from hierarchy
 
 ### `LeafReferences`
 

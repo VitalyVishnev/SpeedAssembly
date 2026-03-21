@@ -1,4 +1,4 @@
-# XML to USDA Converter
+﻿# XML to USDA Converter
 
 Deterministic converter for SpeedTree Raw XML that emits USDA targeting Unreal Engine 5.7 skeletal Nanite Assembly import.
 
@@ -34,14 +34,39 @@ python -m xml_to_usda gui
 
 ## Build helpers
 
+Fast launcher build:
+
 ```powershell
 .\scripts\build_gui_exe.cmd
+```
+
+Standalone PyInstaller build (cleans stale PyInstaller state by default):
+
+```powershell
+.\scripts\build_gui_exe.cmd -Package
+```
+
+Explicit clean rebuild (same package result):
+
+```powershell
+.\scripts\build_gui_exe.cmd -Package -Clean
+```
+
+Watch mode for repeated rebuilds:
+
+```powershell
 .\scripts\watch_gui_exe.cmd
 ```
 
 Output exe path:
 
 - `dist\XMLtoUSDAConverter.exe`
+
+Notes:
+
+- the default build is a fast launcher copy from `.venv\Scripts\xml-to-usda-gui.exe`
+- the fast build depends on the local `.venv`
+- `-Package` removes stale build/dist state first, then runs PyInstaller with `--clean` to produce the standalone executable
 
 ## Docs
 
@@ -63,3 +88,6 @@ Output exe path:
 - `samples/` holds controlled XML inputs and generated outputs.
 - `docs/` holds the compact project documentation set.
 - `vault/` holds reference USDA, UE schema, importer source, and related research artifacts.
+
+
+

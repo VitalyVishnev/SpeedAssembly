@@ -37,6 +37,21 @@ LEAFREFS_ON_BRANCH_LEVELS = DATA_DIR / "leafrefs_on_branch_levels.xml"
 INVALID_LEAF_BONE = DATA_DIR / "invalid_leaf_bone.xml"
 
 
+def _write_generator_level_sample(tmp_path: Path, generator_labels: tuple[str | None, ...]) -> Path:
+    bone_lines: list[str] = ["<SpeedTreeRaw>", "  <Bones>"]
+    for bone_id, generator_label in enumerate(generator_labels):
+        parent_id = bone_id - 1 if bone_id > 0 else -1
+        generator_attribute = f' Generator="{generator_label}"' if generator_label is not None else ""
+        bone_lines.append(
+            f'    <Bone ID="{bone_id}" ParentID="{parent_id}" StartX="0" StartY="0" StartZ="{bone_id}" '
+            f'EndX="0" EndY="0" EndZ="{bone_id + 1}"{generator_attribute} />'
+        )
+    bone_lines.extend(["  </Bones>", "</SpeedTreeRaw>"])
+    sample_path = tmp_path / "wind_generator_levels.xml"
+    sample_path.write_text("\n".join(bone_lines), encoding="utf-8")
+    return sample_path
+
+
 def test_inspect_report_tracks_structure_without_sample_specific_contracts() -> None:
     report = inspect_source(SIMPLE_TREE_01)
     payload = json.loads(render_inspect_report(report))
@@ -85,7 +100,7 @@ def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
     assert model.mesh_library
     assert model.prototypes
     assert model.skeletal_support_primvars is not None
-    assert model.dynamic_wind is not None
+    assert model.dynamic_wind is None
     assert model.binding_mode == "single_joint"
     assert model.binding_element_size == 1
     assert model.base_mesh.skel_joint_indices
@@ -112,14 +127,70 @@ def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
 
 def test_dynamic_wind_groups_follow_vertical_levels_without_horizontal_bias() -> None:
     skeleton = (
-        Joint(name="root", parent=None, bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-        Joint(name="trunk_1", parent="root", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-        Joint(name="branch_1", parent="root", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-        Joint(name="branch_1_main", parent="branch_1", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-        Joint(name="branch_2", parent="branch_1", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-        Joint(name="branch_2_main", parent="branch_2", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-        Joint(name="branch_3", parent="branch_2", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-        Joint(name="branch_4", parent="branch_3", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(
+            name="root",
+            parent=None,
+            generator_label="Group_0 2",
+            generator_level=0,
+            bind_transform=Matrix4d.identity(),
+            rest_transform=Matrix4d.identity(),
+        ),
+        Joint(
+            name="trunk_1",
+            parent="root",
+            generator_label="Group_0 2",
+            generator_level=0,
+            bind_transform=Matrix4d.identity(),
+            rest_transform=Matrix4d.identity(),
+        ),
+        Joint(
+            name="branch_1",
+            parent="root",
+            generator_label="Group_0",
+            generator_level=0,
+            bind_transform=Matrix4d.identity(),
+            rest_transform=Matrix4d.identity(),
+        ),
+        Joint(
+            name="branch_1_main",
+            parent="branch_1",
+            generator_label="Group_1",
+            generator_level=1,
+            bind_transform=Matrix4d.identity(),
+            rest_transform=Matrix4d.identity(),
+        ),
+        Joint(
+            name="branch_2",
+            parent="branch_1",
+            generator_label="Group_1",
+            generator_level=1,
+            bind_transform=Matrix4d.identity(),
+            rest_transform=Matrix4d.identity(),
+        ),
+        Joint(
+            name="branch_2_main",
+            parent="branch_2",
+            generator_label="Group_2",
+            generator_level=2,
+            bind_transform=Matrix4d.identity(),
+            rest_transform=Matrix4d.identity(),
+        ),
+        Joint(
+            name="branch_3",
+            parent="branch_2",
+            generator_label="Group_2",
+            generator_level=2,
+            bind_transform=Matrix4d.identity(),
+            rest_transform=Matrix4d.identity(),
+        ),
+        Joint(
+            name="branch_4",
+            parent="branch_3",
+            generator_label="Group_2",
+            generator_level=2,
+            bind_transform=Matrix4d.identity(),
+            rest_transform=Matrix4d.identity(),
+        ),
     )
     source_objects = (
         SourceObject(
@@ -222,13 +293,62 @@ def test_dynamic_wind_groups_follow_vertical_levels_without_horizontal_bias() ->
 
 def test_dynamic_wind_grouping_ignores_source_object_depth_hints() -> None:
     skeleton = (
-        Joint(name="root", parent=None, bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-        Joint(name="stem_a", parent="root", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-        Joint(name="stem_b", parent="root", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-        Joint(name="stem_a_tip", parent="stem_a", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-        Joint(name="stem_b_tip", parent="stem_b", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-        Joint(name="branch_a_1", parent="stem_a_tip", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-        Joint(name="branch_a_2", parent="stem_a_tip", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(
+            name="root",
+            parent=None,
+            generator_label="Group_0",
+            generator_level=0,
+            bind_transform=Matrix4d.identity(),
+            rest_transform=Matrix4d.identity(),
+        ),
+        Joint(
+            name="stem_a",
+            parent="root",
+            generator_label="Group_0",
+            generator_level=0,
+            bind_transform=Matrix4d.identity(),
+            rest_transform=Matrix4d.identity(),
+        ),
+        Joint(
+            name="stem_b",
+            parent="root",
+            generator_label="Group_0",
+            generator_level=0,
+            bind_transform=Matrix4d.identity(),
+            rest_transform=Matrix4d.identity(),
+        ),
+        Joint(
+            name="stem_a_tip",
+            parent="stem_a",
+            generator_label="Group_1",
+            generator_level=1,
+            bind_transform=Matrix4d.identity(),
+            rest_transform=Matrix4d.identity(),
+        ),
+        Joint(
+            name="stem_b_tip",
+            parent="stem_b",
+            generator_label="Group_1",
+            generator_level=1,
+            bind_transform=Matrix4d.identity(),
+            rest_transform=Matrix4d.identity(),
+        ),
+        Joint(
+            name="branch_a_1",
+            parent="stem_a_tip",
+            generator_label="Group_2",
+            generator_level=2,
+            bind_transform=Matrix4d.identity(),
+            rest_transform=Matrix4d.identity(),
+        ),
+        Joint(
+            name="branch_a_2",
+            parent="stem_a_tip",
+            generator_label="Group_2",
+            generator_level=2,
+            bind_transform=Matrix4d.identity(),
+            rest_transform=Matrix4d.identity(),
+        ),
     )
     source_object = SourceObject(
         object_id="1",
@@ -255,20 +375,25 @@ def test_dynamic_wind_grouping_ignores_source_object_depth_hints() -> None:
     assert assignments["root"] == 0
     assert assignments["stem_a"] == 0
     assert assignments["stem_b"] == 0
-    assert assignments["stem_a_tip"] == 0
-    assert assignments["stem_b_tip"] == 0
-    assert assignments["branch_a_1"] == 1
-    assert assignments["branch_a_2"] == 1
+    assert assignments["stem_a_tip"] == 1
+    assert assignments["stem_b_tip"] == 1
+    assert assignments["branch_a_1"] == 2
+    assert assignments["branch_a_2"] == 2
 
 
 def test_dynamic_wind_json_generation_writes_groups_and_respects_slider_values(tmp_path: Path) -> None:
-    output_path = tmp_path / "SimpleTree_01_DynamicWind.json"
+    input_path = _write_generator_level_sample(
+        tmp_path,
+        ("Group_0 2", "Group_0", "Group_1", "Group_1", "Group_2"),
+    )
+    output_path = tmp_path / "generator_levels_DynamicWind.json"
     result = generate_wind_json(
-        str(SIMPLE_TREE_01),
+        str(input_path),
         str(output_path),
         group_settings=(
             DynamicWindSimulationGroup(group_index=0, branch_order=0, influence=1.8, shift_top=0.15, is_trunk_group=True),
             DynamicWindSimulationGroup(group_index=1, branch_order=1, influence=1.2, shift_top=0.05),
+            DynamicWindSimulationGroup(group_index=2, branch_order=2, influence=1.05, shift_top=0.01),
         ),
         gust_attenuation=0.6,
         is_ground_cover=True,
@@ -283,28 +408,54 @@ def test_dynamic_wind_json_generation_writes_groups_and_respects_slider_values(t
     assert payload["SimulationGroups"][0]["Influence"] == pytest.approx(1.8)
     assert payload["SimulationGroups"][0]["ShiftTop"] == pytest.approx(0.15)
     assert payload["SimulationGroups"][1]["Influence"] == pytest.approx(1.2)
-    if len(payload["SimulationGroups"]) > 2:
-        assert payload["SimulationGroups"][2]["Influence"] == pytest.approx(1.2)
-        assert payload["SimulationGroups"][2]["ShiftTop"] == pytest.approx(0.05)
+    assert payload["SimulationGroups"][2]["Influence"] == pytest.approx(1.05)
+    assert payload["SimulationGroups"][2]["ShiftTop"] == pytest.approx(0.01)
     assert payload["bIsGroundCover"] is True
     assert all(group["bIsTrunkGroup"] is False for group in payload["SimulationGroups"])
     assert payload["GustAttenuation"] == pytest.approx(0.6)
 
 
-def test_inspect_wind_data_uses_normalized_skeleton_hierarchy() -> None:
-    dynamic_wind = inspect_wind_data(str(LEAFREFS_ON_BRANCH_LEVELS))
+def test_inspect_wind_data_uses_generator_levels(tmp_path: Path) -> None:
+    input_path = _write_generator_level_sample(
+        tmp_path,
+        ("Group_0 2", "Group_0", "Group_1", "Group_1", "Group_2"),
+    )
+    dynamic_wind = inspect_wind_data(str(input_path))
 
-    assert len(dynamic_wind.simulation_groups) == 1
+    assert len(dynamic_wind.simulation_groups) == 3
     assert dynamic_wind.simulation_groups[0].is_trunk_group is True
-    assert [group.branch_order for group in dynamic_wind.simulation_groups] == [0]
+    assert [group.branch_order for group in dynamic_wind.simulation_groups] == [0, 1, 2]
 
 
-def test_inspect_wind_data_clears_trunk_groups_when_ground_cover_is_enabled() -> None:
-    dynamic_wind = inspect_wind_data(str(LEAFREFS_ON_BRANCH_LEVELS), is_ground_cover=True)
+def test_inspect_wind_data_clears_trunk_groups_when_ground_cover_is_enabled(tmp_path: Path) -> None:
+    input_path = _write_generator_level_sample(
+        tmp_path,
+        ("Group_0 2", "Group_0", "Group_1", "Group_1", "Group_2"),
+    )
+    dynamic_wind = inspect_wind_data(str(input_path), is_ground_cover=True)
 
     assert dynamic_wind.is_ground_cover is True
     assert dynamic_wind.simulation_groups
     assert all(group.is_trunk_group is False for group in dynamic_wind.simulation_groups)
+
+
+def test_inspect_wind_data_rejects_missing_generator_levels(tmp_path: Path) -> None:
+    input_path = _write_generator_level_sample(tmp_path, (None, "Group_0"))
+
+    with pytest.raises(ValueError, match="missing_generator_level"):
+        inspect_wind_data(str(input_path))
+
+
+def test_generate_wind_json_rejects_malformed_generator_levels(tmp_path: Path) -> None:
+    input_path = _write_generator_level_sample(tmp_path, ("Trunk", "Group_0"))
+
+    with pytest.raises(ValueError, match="missing_generator_level"):
+        generate_wind_json(str(input_path), str(tmp_path / "invalid_DynamicWind.json"))
+
+
+def test_legacy_wind_samples_without_generator_labels_fail_strictly() -> None:
+    with pytest.raises(ValueError, match="missing_generator_level"):
+        inspect_wind_data(str(LEAFREFS_ON_BRANCH_LEVELS))
 
 
 def test_base_tree_mesh_merges_trunk_and_branch_geometry_in_stage_space() -> None:

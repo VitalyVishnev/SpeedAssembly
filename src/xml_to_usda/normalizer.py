@@ -1,11 +1,11 @@
 ﻿from __future__ import annotations
 
 import math
+import re
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from dataclasses import replace
 
-from .dynamic_wind import build_dynamic_wind_data
 from .naming import build_prototype_identities
 from .models import (
     AssemblyPartInstance,
@@ -37,6 +37,7 @@ from .source_transform import SourceTransform, build_source_transform
 
 PRIMARY_MATERIAL_ID = 1
 LEAVES_MATERIAL_ID = 2
+_GENERATOR_LEVEL_PATTERN = re.compile(r"^Group_(?P<level>\d+)(?:[ _-]\d+)?$")
 
 
 def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> CanonicalTreeModel:
@@ -65,7 +66,6 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
     prototypes = tuple(_build_prototypes(assembly_parts, mesh_library, data_messages))
     skeletal_support_primvars = _build_skeletal_support_primvars(skeleton)
     spines = tuple(source_object.spine for source_object in source_objects if source_object.spine is not None)
-    dynamic_wind = build_dynamic_wind_data(skeleton, source_objects=source_objects)
 
     metadata = ExportMetadata(
         source_path=document.source_path,
@@ -90,7 +90,6 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
         prototype_strategy=PrototypeStrategy.INLINE_SKELETAL_PART,
         skeletal_support_primvars=skeletal_support_primvars,
         spines=spines,
-        dynamic_wind=dynamic_wind,
     )
 
 
@@ -409,7 +408,7 @@ def _extract_skeleton(root: ET.Element, messages: list[str], source_transform: S
     if not bones:
         return []
 
-    raw_bones: list[tuple[int, int | None, Vector3]] = []
+    raw_bones: list[tuple[int, int | None, Vector3, str, int]] = []
     for bone in bones:
         bone_id = bone.attrib.get("ID")
         if bone_id is None or not bone_id.lstrip("-").isdigit():
@@ -426,17 +425,20 @@ def _extract_skeleton(root: ET.Element, messages: list[str], source_transform: S
         parsed_parent_id = None
         if parent_id not in {None, "", "-1"} and parent_id.lstrip("-").isdigit():
             parsed_parent_id = int(parent_id)
+        generator_label, generator_level = _parse_generator_label(bone.attrib.get("Generator"), int(bone_id))
         raw_bones.append(
             (
                 int(bone_id),
                 parsed_parent_id,
                 source_transform.point_to_stage(Vector3(start_x, start_y, start_z)),
+                generator_label,
+                generator_level,
             )
         )
 
-    start_by_id = {bone_id: start for bone_id, _, start in raw_bones}
+    start_by_id = {bone_id: start for bone_id, _, start, _, _ in raw_bones}
     joints: list[Joint] = []
-    for bone_id, parsed_parent_id, start in raw_bones:
+    for bone_id, parsed_parent_id, start, generator_label, generator_level in raw_bones:
         parent = _joint_name_from_bone_id(parsed_parent_id) if parsed_parent_id is not None else None
         if parsed_parent_id is None or parsed_parent_id not in start_by_id:
             rest_translate = start
@@ -452,11 +454,24 @@ def _extract_skeleton(root: ET.Element, messages: list[str], source_transform: S
                 name=_joint_name_from_bone_id(bone_id),
                 source_id=bone_id,
                 parent=parent,
+                generator_label=generator_label,
+                generator_level=generator_level,
                 bind_transform=Matrix4d.from_translation(start),
                 rest_transform=Matrix4d.from_translation(rest_translate),
             )
         )
     return joints
+
+
+def _parse_generator_label(generator_label: str | None, bone_id: int) -> tuple[str | None, int | None]:
+    if generator_label is None or not generator_label.strip():
+        return None, None
+
+    normalized_label = " ".join(generator_label.strip().split())
+    match = _GENERATOR_LEVEL_PATTERN.match(normalized_label)
+    if match is None:
+        return normalized_label, None
+    return normalized_label, int(match.group("level"))
 
 
 def _extract_assembly_parts_from_leaf_references(

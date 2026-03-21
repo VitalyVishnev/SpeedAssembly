@@ -124,7 +124,7 @@ def test_convert_file_applies_baseline_material_overrides(tmp_path: Path) -> Non
     assert 'uniform asset info:unreal:sourceAsset = @/Game/TestMaterials/M_Leaves_Test.M_Leaves_Test@' in result.usda_document.text
 
 
-def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _, root = _build_tk_root_or_skip()
     from xml_to_usda.gui import ConversionApp
 
@@ -161,6 +161,9 @@ def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
 
     try:
+        settings_path = tmp_path / "gui_settings.json"
+        monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+        monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
         app = ConversionApp(root)
         app.input_var.set(str(SIMPLE_TREE_01))
         app.output_var.set(str(Path("out.usda")))
