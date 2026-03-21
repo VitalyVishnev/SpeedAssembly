@@ -10,6 +10,8 @@ The current real reverse-engineering baseline is:
 
 - `samples/speedtree/simple_tree/variants/SimpleTree_01.xml`
 
+The matching authored mesh assets next to that reference XML are treated as the canonical authored size and orientation baseline for part prototypes.
+
 The repository also carries synthetic regression fixtures for `Phase 1` structural coverage:
 
 - `tests/data/leafrefs_on_trunk.xml`
@@ -35,6 +37,11 @@ The project has also passed automated `Phase 1` regression coverage for:
 - multi-material part authoring through `GeomSubset`
 - mixed inline plus external `PartMesh` prototype resolution
 - separate Dynamic Wind JSON generation from the normalized skeleton
+
+One specific dead-end has been closed:
+
+- external `PartMesh` overrides now author a pure Unreal reference prototype instead of leaving inline low-poly `PartMesh` geometry in the same USDA branch
+- the first debug check for an ignored override is now the generated USDA text, not UE import settings
 
 The project has not passed the final `Phase 1` quality gate yet:
 
@@ -90,7 +97,9 @@ Run this checklist for every real `Phase 1` sample:
 5. parts do not drift away from the main skeleton
 6. bark and leaves materials resolve correctly
 7. existing external `PartMesh` references still import through the assembly path when enabled
-8. wind JSON reimport produces sane trunk and branch bending
+8. wind JSON reimport produces sane primary-stem and secondary-branch bending
+9. generated USDA contains `NaniteAssemblyExternalRefAPI` for every intentionally externalized part prototype
+10. externalized part prototypes do not retain inline `PartMesh` mesh payloads in the same USDA branch
 
 ## Current milestone sequence
 
@@ -100,3 +109,12 @@ Run this checklist for every real `Phase 1` sample:
 4. keep optional external `PartMesh` reuse stable
 5. stabilize Dynamic Wind JSON behavior and document the observed UE contract
 6. only then generalize to later features such as UV modification
+
+## Troubleshooting shortcut
+
+When a user says “I entered a UE object path, but the importer still used low-poly branches”:
+
+1. inspect the exported USDA text
+2. search for `NaniteAssemblyExternalRefAPI` and `unreal:naniteAssembly:meshAssetPath`
+3. if the schema is missing, the bug is in the converter, not in UE
+4. if the schema is present, verify that UE used the Interchange importer path and that the asset path matches the Content Browser object path exactly

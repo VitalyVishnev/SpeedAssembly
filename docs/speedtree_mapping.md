@@ -20,6 +20,7 @@ The converter splits the source tree into two major components:
 - `LeafReferences` -> `Assembly Parts`
 
 This split is structural and explicit. It is not based on botanical names.
+Object names are treated as metadata only, not as the basis for structural decisions.
 
 ## Section-to-concept mapping
 
@@ -34,11 +35,12 @@ Use it for:
 - the geometry that becomes the `Base Skeletal Tree`
 - placement of `LeafReferences` on any supported hierarchy level
 
-`Branches_*` style body geometry belongs to the Base Skeletal Tree, not to instanced parts.
-
 Current observed implementation rule:
 
-- `Trunk` and `Branches_*` objects are merged into the `Base Skeletal Tree`
+- mesh-bearing `Objects/Object` entries in the regular hierarchy are merged into the `Base Skeletal Tree`
+- source names are not used to decide whether geometry is base tree geometry; only hierarchy, mesh payloads, and binding data matter
+- the converter preserves the authored branch FBX size and orientation as-is; it does not apply hidden prototype scale rebasing or mesh-space compensation
+- `LeafReferences` rotations are remapped into stage space by axis basis conversion only; the authored rotation sense is preserved, not inverted
 
 Treat this as the current supported rule, not as a formal SpeedTree guarantee. If additional real exports prove the rule too narrow, update the normalizer only after validating the new pattern.
 
@@ -69,7 +71,7 @@ Use it for:
 
 Current supported structural cases:
 
-- `LeafReferences` may appear on `Trunk`
+- `LeafReferences` may appear on any object level that carries repeated part placement data
 - `LeafReferences` may appear on intermediate branch levels
 - `LeafReferences` may appear on deeper branch levels before the final repeated detail
 - `BoneID` may point at trunk or branch joints as long as it resolves into the `Main Skeleton`
@@ -118,6 +120,18 @@ For the current project contract:
 - each inline part has a one-bone local `Part Skeleton`
 - the instance binds back to the `Main Skeleton`
 - an optional external reuse path may map a prototype key such as `Mesh_1` to an existing Unreal skeletal mesh asset
+- when the external reuse path is enabled, the converter must not leave the original inline prototype mesh attached to that same prototype in USDA
+- the XML mesh library still provides the discovery key and fallback geometry for inline mode, but external mode must author a pure reference-only prototype subtree
+- the canonical reference branch assets are expected at their authored/original size and orientation, so the converter must not compensate by baking scale into the prototype mesh
+- SpeedTree `OriginalScale` is carried into `PointInstancer.scales` as an explicit per-instance factor, not baked into prototype geometry
+
+## Common trap
+
+If a part-mesh override looks configured in the UI but the imported USD still contains the low-poly prototype, the first check is whether the generated USDA contains `NaniteAssemblyExternalRefAPI` at all.
+
+- if it does not, the override never reached the exporter
+- if it does, but the stage still imports the low-poly mesh in UE, check whether the import path is the Interchange USD importer rather than legacy USD import
+- if the path is present but UE still ignores it, verify the exact `/Game/.../Asset.Asset` package/object path against the asset in Content Browser
 
 ## Failure conditions
 

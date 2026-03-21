@@ -274,8 +274,28 @@ def _apply_external_part_mesh_overrides(
     if not overrides:
         return model
 
-    unused_keys = sorted(set(overrides) - {prototype.source_key for prototype in model.prototypes})
     metadata = model.metadata
+    used_keys: set[str] = set()
+    prototypes: list[Prototype] = []
+    for prototype in model.prototypes:
+        matching_overrides = [
+            (key, overrides[key])
+            for key in (prototype.source_name, prototype.source_key)
+            if key and key in overrides
+        ]
+        distinct_asset_paths = {asset_path for _, asset_path in matching_overrides}
+        if len(distinct_asset_paths) > 1:
+            raise ValueError(
+                "Conflicting existing PartMesh overrides found for prototype "
+                f"{prototype.source_name or prototype.source_key}."
+            )
+        if matching_overrides:
+            used_keys.update(key for key, _asset_path in matching_overrides)
+            prototypes.append(_apply_external_part_mesh_override(prototype, matching_overrides[0][1]))
+        else:
+            prototypes.append(prototype)
+
+    unused_keys = sorted(set(overrides) - used_keys)
     if unused_keys:
         metadata = replace(
             metadata,
@@ -284,19 +304,16 @@ def _apply_external_part_mesh_overrides(
             ),
         )
 
-    prototypes = tuple(_apply_external_part_mesh_override(prototype, overrides) for prototype in model.prototypes)
-    return replace(model, prototypes=prototypes, metadata=metadata)
+    return replace(model, prototypes=tuple(prototypes), metadata=metadata)
 
 
 def _apply_external_part_mesh_override(
     prototype: Prototype,
-    overrides: dict[str, str],
+    mesh_asset_path: str,
 ) -> Prototype:
-    mesh_asset_path = overrides.get(prototype.source_key)
-    if mesh_asset_path is None:
-        return prototype
     return replace(
         prototype,
+        mesh=None,
         resolution_mode=PrototypeResolutionMode.EXTERNAL_ASSET,
         mesh_asset_path=mesh_asset_path,
     )

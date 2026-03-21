@@ -188,24 +188,34 @@ def _inspect_object_hierarchy(root: ET.Element) -> tuple[dict[str, int], int, in
     objects = root.findall(".//Object")
     class_counts: Counter[str] = Counter()
     parents: dict[str, str | None] = {}
+    children_by_parent: defaultdict[str, list[str]] = defaultdict(list)
     spine_object_count = 0
 
     for obj in objects:
-        name = obj.attrib.get("Name", "")
-        if name == "Trunk":
-            class_counts["trunk"] += 1
-        elif name.startswith("Branches"):
-            class_counts["branch"] += 1
-        elif name.startswith("Twigs"):
-            class_counts["twig"] += 1
+        object_id = obj.attrib.get("ID")
+        if object_id is not None:
+            parent_id = obj.attrib.get("ParentID")
+            parents[object_id] = parent_id
+            if parent_id not in {None, "", "-1"}:
+                children_by_parent[parent_id].append(object_id)
+
+        if obj.find("Points") is not None and obj.find("Triangles") is not None:
+            class_counts["mesh_object"] += 1
+        elif obj.find("LeafReferences") is not None:
+            class_counts["leaf_reference_host"] += 1
         else:
             class_counts["other"] += 1
 
-        object_id = obj.attrib.get("ID")
-        if object_id is not None:
-            parents[object_id] = obj.attrib.get("ParentID")
+        if obj.attrib.get("ParentID") in {None, "", "-1"}:
+            class_counts["root"] += 1
+
         if obj.find("Spine") is not None:
             spine_object_count += 1
+            class_counts["spine_object"] += 1
+
+    for object_id in parents:
+        if children_by_parent.get(object_id):
+            class_counts["internal_object"] += 1
 
     def depth_for(object_id: str) -> int:
         depth = 0
@@ -236,7 +246,7 @@ def _inspect_leaf_bindings(root: ET.Element) -> tuple[dict[str, int], dict[str, 
             continue
         bone_counts.update(_read_tokens(leaf_ref.findtext("BoneID")))
         mesh_counts.update(_read_tokens(leaf_ref.findtext("MeshID")))
-        source_object_counts[obj.attrib.get("Name", obj.attrib.get("ID", "Object"))] += 1
+        source_object_counts[obj.attrib.get("ID", "Object")] += 1
 
     return (
         _sort_numeric_key_dict(bone_counts),

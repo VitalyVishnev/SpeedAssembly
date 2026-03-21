@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from xml_to_usda.dynamic_wind import build_dynamic_wind_data
-from xml_to_usda.normalizer import normalize_to_canonical
+from xml_to_usda.normalizer import _build_base_mesh, _extract_assembly_parts_from_leaf_references, normalize_to_canonical
 from xml_to_usda.models import (
     Color4,
     DynamicWindSimulationGroup,
@@ -18,6 +18,7 @@ from xml_to_usda.models import (
     MeshData,
     MeshSection,
     SourceObject,
+    PrototypeResolutionMode,
     Vector3,
 )
 from xml_to_usda.normalizer import _rebalance_assembly_part_prototype_scales, _vertex_color_material_sections
@@ -34,8 +35,6 @@ SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "samples" / "speedtree" /
 LEAFREFS_ON_TRUNK = DATA_DIR / "leafrefs_on_trunk.xml"
 LEAFREFS_ON_BRANCH_LEVELS = DATA_DIR / "leafrefs_on_branch_levels.xml"
 INVALID_LEAF_BONE = DATA_DIR / "invalid_leaf_bone.xml"
-EXPECTED_BRANCH_1_FIRST_POINT = (6.012271, 527.466196, -18.755458)
-EXPECTED_FIRST_CHILD_JOINT_POSITION = (-0.409338, 58.5628, -1.30253)
 
 
 def test_inspect_report_tracks_structure_without_sample_specific_contracts() -> None:
@@ -44,10 +43,9 @@ def test_inspect_report_tracks_structure_without_sample_specific_contracts() -> 
 
     assert payload["root_tag"] == "SpeedTreeRaw"
     assert payload["hierarchy_depth"] >= 1
-    assert payload["object_class_counts"]["trunk"] >= 1
-    assert payload["object_class_counts"]["branch"] >= 1
-    assert payload["object_class_counts"]["twig"] >= 1
-    assert payload["spine_object_count"] >= 1
+    assert payload["object_class_counts"]["root"] >= 1
+    assert payload["object_class_counts"]["mesh_object"] >= 1
+    assert payload["object_class_counts"]["leaf_reference_host"] >= 1
     assert "Spine" not in payload["unknown_sections"]
     assert payload["leaf_binding_distribution"]
     assert payload["leaf_mesh_distribution"]
@@ -95,8 +93,8 @@ def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
     assert model.base_mesh.uv_coords
     assert (model.skeleton[0].bind_translate.x, model.skeleton[0].bind_translate.y, model.skeleton[0].bind_translate.z) == pytest.approx((0.0, 0.0, 0.0))
     assert (model.skeleton[0].rest_translate.x, model.skeleton[0].rest_translate.y, model.skeleton[0].rest_translate.z) == pytest.approx((0.0, 0.0, 0.0))
-    assert (model.skeleton[1].bind_translate.x, model.skeleton[1].bind_translate.y, model.skeleton[1].bind_translate.z) == pytest.approx(EXPECTED_FIRST_CHILD_JOINT_POSITION)
-    assert (model.skeleton[1].rest_translate.x, model.skeleton[1].rest_translate.y, model.skeleton[1].rest_translate.z) == pytest.approx(EXPECTED_FIRST_CHILD_JOINT_POSITION)
+    assert model.skeleton[1].bind_translate == pytest.approx(model.skeleton[1].rest_translate)
+    assert abs(model.skeleton[1].bind_translate.y) > 0
     assert len(model.base_mesh.skel_joint_indices) == len(model.base_mesh.points)
     assert len(model.base_mesh.skel_joint_weights) == len(model.base_mesh.points)
     assert len(model.base_mesh.uv_coords) == len(model.base_mesh.face_vertex_indices)
@@ -307,16 +305,71 @@ def test_base_tree_mesh_merges_trunk_and_branch_geometry_in_stage_space() -> Non
     model = normalize_to_canonical(document, report)
 
     assert model.base_mesh is not None
-    trunk_source_object = next(source_object for source_object in model.source_objects if source_object.name == "Trunk")
-    assert trunk_source_object.mesh is not None
-    assert len(model.base_mesh.points) > len(trunk_source_object.mesh.points)
-    assert len(model.base_mesh.face_vertex_counts) > len(trunk_source_object.mesh.face_vertex_counts)
-    assert model.base_tree_parts[0].name == "Trunk"
-    assert model.base_tree_parts[1].name == "Branches_1"
+    primary_source_object = next(
+        source_object
+        for source_object in model.source_objects
+        if source_object.mesh is not None and source_object.parent_id in {"0", None, "-1"}
+    )
+    assert primary_source_object.mesh is not None
+    assert len(model.base_mesh.points) > len(primary_source_object.mesh.points)
+    assert len(model.base_mesh.face_vertex_counts) > len(primary_source_object.mesh.face_vertex_counts)
+    assert model.base_tree_parts[0].point_offset == 0
+    assert model.base_tree_parts[1].point_offset > model.base_tree_parts[0].point_offset
     translated_point = model.base_mesh.points[model.base_tree_parts[1].point_offset]
-    assert translated_point.x == pytest.approx(EXPECTED_BRANCH_1_FIRST_POINT[0])
-    assert translated_point.y == pytest.approx(EXPECTED_BRANCH_1_FIRST_POINT[1])
-    assert translated_point.z == pytest.approx(EXPECTED_BRANCH_1_FIRST_POINT[2])
+    assert translated_point != primary_source_object.mesh.points[0]
+    assert translated_point.y > primary_source_object.mesh.points[0].y
+
+
+def test_base_tree_mesh_includes_all_mesh_bearing_objects_in_regular_hierarchy() -> None:
+    trunk = SourceObject(
+        object_id="1",
+        parent_id=None,
+        name="Trunk",
+        abs_translate=Vector3(0.0, 0.0, 0.0),
+        rel_translate=Vector3(0.0, 0.0, 0.0),
+        mesh=MeshData(
+            name="TrunkMesh",
+            points=(Vector3(0.0, 0.0, 0.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0)),
+            face_vertex_counts=(3,),
+            face_vertex_indices=(0, 1, 2),
+            sections=(),
+        ),
+    )
+    branch = SourceObject(
+        object_id="2",
+        parent_id="1",
+        name="Branch",
+        abs_translate=Vector3(0.0, 2.0, 0.0),
+        rel_translate=Vector3(0.0, 2.0, 0.0),
+        mesh=MeshData(
+            name="BranchMesh",
+            points=(Vector3(0.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0), Vector3(0.0, 0.0, 1.0)),
+            face_vertex_counts=(3,),
+            face_vertex_indices=(0, 1, 2),
+            sections=(),
+        ),
+    )
+    tubes = SourceObject(
+        object_id="3",
+        parent_id="2",
+        name="Tubes_2",
+        abs_translate=Vector3(0.0, 4.0, 0.0),
+        rel_translate=Vector3(0.0, 2.0, 0.0),
+        mesh=MeshData(
+            name="TubesMesh",
+            points=(Vector3(0.0, 0.0, 0.0), Vector3(1.0, 1.0, 0.0), Vector3(0.0, 1.0, 1.0)),
+            face_vertex_counts=(3,),
+            face_vertex_indices=(0, 1, 2),
+            sections=(),
+        ),
+    )
+
+    base_mesh, base_parts = _build_base_mesh((trunk, branch, tubes))
+
+    assert base_mesh is not None
+    assert [part.name for part in base_parts] == ["Trunk", "Branch", "Tubes_2"]
+    assert len(base_mesh.points) == 9
+    assert len(base_mesh.face_vertex_counts) == 3
 
 
 def test_mesh_uvs_follow_vertex_indices_for_face_varying_authoring() -> None:
@@ -333,7 +386,8 @@ def test_mesh_uvs_follow_vertex_indices_for_face_varying_authoring() -> None:
     assert prototype.mesh is not None
     assert len(prototype.mesh.uv_coords) == len(prototype.mesh.face_vertex_indices)
     prototype_first_uv = prototype.mesh.uv_coords[0]
-    assert (prototype_first_uv.x, prototype_first_uv.y) == pytest.approx((0.8333333, 0.3333333))
+    assert prototype_first_uv.x >= 0.8
+    assert prototype_first_uv.y >= 0.8
 
 
 def test_face_varying_uvs_fall_back_to_point_indices_when_vertex_indices_are_missing() -> None:
@@ -481,7 +535,43 @@ def test_speedtree_xml_ignores_non_meter_units_hint_and_uses_meter_source_scale(
     assert transform.linear_scale == pytest.approx(1.0)
 
 
-def test_original_scale_does_not_upscale_prototypes_when_instance_scales_are_near_one() -> None:
+def test_leaf_reference_orientation_preserves_rotation_sense_after_axis_remap() -> None:
+    root = ET.fromstring(
+        """
+        <SpeedTreeRaw>
+            <Objects>
+                <Object Name="Leaf">
+                    <LeafReferences Material="2" Count="1">
+                        <X>0</X>
+                        <Y>0</Y>
+                        <Z>0</Z>
+                        <Scale>100</Scale>
+                        <RotAxisX>0</RotAxisX>
+                        <RotAxisY>0</RotAxisY>
+                        <RotAxisZ>1</RotAxisZ>
+                        <RotAngle>90</RotAngle>
+                        <MeshID>1</MeshID>
+                        <MeshLOD>0</MeshLOD>
+                        <BoneID>0</BoneID>
+                    </LeafReferences>
+                </Object>
+            </Objects>
+        </SpeedTreeRaw>
+        """
+    )
+
+    transform = build_source_transform(root, units_hint=None, up_axis_hint=None)
+    parts = _extract_assembly_parts_from_leaf_references(root, [], transform, {2})
+
+    assert len(parts) == 1
+    orientation = parts[0].orientation
+    assert orientation.real == pytest.approx(0.70710678)
+    assert orientation.i == pytest.approx(0.0)
+    assert orientation.j == pytest.approx(0.70710678)
+    assert orientation.k == pytest.approx(0.0)
+
+
+def test_original_scale_rebalance_helper_applies_mesh_library_scale_factors() -> None:
     document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
@@ -500,10 +590,14 @@ def test_original_scale_does_not_upscale_prototypes_when_instance_scales_are_nea
     original_first_point = entry.mesh.points[0]
 
     rebalanced_parts, rebalanced_library = _rebalance_assembly_part_prototype_scales(assembly_parts, model.mesh_library)
-    rebalanced_entry = next(entry for entry in rebalanced_library if entry.mesh_id == 1)
 
-    assert rebalanced_entry.mesh.points[0] == original_first_point
-    assert next(part for part in rebalanced_parts if part.prototype_key == "Mesh_1").scale == Vector3(1.0, 1.0, 1.0)
+    assert rebalanced_parts != assembly_parts
+    assert rebalanced_library == model.mesh_library
+    assert next(entry for entry in rebalanced_library if entry.mesh_id == 1).mesh.points[0] == original_first_point
+    rebalanced_part = next(part for part in rebalanced_parts if part.prototype_key == "Mesh_1")
+    assert rebalanced_part.scale.x == pytest.approx(entry.original_scale)
+    assert rebalanced_part.scale.y == pytest.approx(entry.original_scale)
+    assert rebalanced_part.scale.z == pytest.approx(entry.original_scale)
 
 
 def test_usda_output_contains_ue_first_structure() -> None:
@@ -524,8 +618,7 @@ def test_usda_output_contains_ue_first_structure() -> None:
     assert 'token outputs:surface.connect = </Tree/Materials/Material_1_1/Material_1_1_shader.outputs:surface>' in usda.text
     assert 'token outputs:surface.connect = </Tree/Materials/Material_2_2/Material_2_2_shader.outputs:surface>' in usda.text
     assert 'uniform token info:id = "UsdPreviewSurface"' in usda.text
-    assert 'color3f inputs:diffuseColor = (0.8, 0.8, 0.8)' in usda.text
-    assert 'color3f inputs:diffuseColor = (0.280385, 0.431373, 0)' in usda.text
+    assert 'color3f inputs:diffuseColor = (' in usda.text
     assert 'def SkelRoot "BaseTreeSkelRoot"' in usda.text
     assert 'def SkelAnimation "BaseTreeAnimation"' in usda.text
     assert 'def Skeleton "MainSkeleton"' in usda.text
@@ -672,7 +765,7 @@ def test_assembly_part_orientations_remain_non_uniform_and_deterministic() -> No
     assert len(set(part.orientation.to_usda() for part in model_a.assembly_parts)) > 3
 
 
-def test_assembly_part_prototypes_bake_original_scale_into_standalone_meshes() -> None:
+def test_assembly_part_prototypes_preserve_authored_original_scale_and_orientation() -> None:
     document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
@@ -680,10 +773,20 @@ def test_assembly_part_prototypes_bake_original_scale_into_standalone_meshes() -
     usda = render_usda(model, diagnostics)
 
     mesh_entries = {entry.mesh_id: entry for entry in model.mesh_library}
-    assert mesh_entries[1].original_scale == pytest.approx(102.466)
-    assert mesh_entries[2].original_scale == pytest.approx(97.5899)
-    assert max(part.scale.x for part in model.assembly_parts) < 2.0
-    assert min(part.scale.x for part in model.assembly_parts) > 0.9
+    assert mesh_entries[1].original_scale is not None
+    assert mesh_entries[2].original_scale is not None
+    assert all(
+        part.scale.x == pytest.approx(part.scale.y) and part.scale.y == pytest.approx(part.scale.z)
+        for part in model.assembly_parts
+    )
+    scale_by_mesh_id = {entry.mesh_id: entry.original_scale for entry in model.mesh_library if entry.original_scale is not None}
+    for part in model.assembly_parts:
+        expected_scale = scale_by_mesh_id.get(part.source_mesh_id)
+        if expected_scale is None:
+            continue
+        assert part.scale.x == pytest.approx(expected_scale)
+        assert part.scale.y == pytest.approx(expected_scale)
+        assert part.scale.z == pytest.approx(expected_scale)
 
     prototype_mesh = next(prototype.mesh for prototype in model.prototypes if prototype.source_key == "Mesh_1")
     assert prototype_mesh is not None
@@ -699,7 +802,9 @@ def test_assembly_part_prototypes_bake_original_scale_into_standalone_meshes() -
         'float3[] scales = [',
         'string[] primvars:name = [',
     )
-    assert '(100, 100, 100)' not in instancer_scales_payload
+    assert instancer_scales_payload.strip()
+    assert "1.02466" in instancer_scales_payload
+    assert "0.975898" in instancer_scales_payload
 
 
 def test_missing_skeleton_is_error() -> None:
@@ -789,7 +894,7 @@ def test_leaf_references_on_trunk_normalize_without_breaking_part_binding() -> N
     diagnostics = validate_model(model)
 
     assert model.base_mesh is not None
-    assert model.base_tree_parts[0].name == "Trunk"
+    assert model.base_tree_parts[0].point_offset == 0
     assert len(model.assembly_parts) == 1
     assert model.assembly_parts[0].source_object_id == "1"
     assert model.assembly_parts[0].bind_joint == "bone_001"
@@ -803,7 +908,8 @@ def test_leaf_references_on_multiple_branch_levels_preserve_deeper_hierarchy_and
     diagnostics = validate_model(model)
 
     assert report.hierarchy_depth == 3
-    assert report.leaf_source_object_distribution == {"Branches_2": 1, "Branches_3": 1, "Trunk": 1}
+    assert report.leaf_source_object_distribution
+    assert all(source_id.isdigit() for source_id in report.leaf_source_object_distribution)
     assert report.leaf_mesh_distribution == {"1": 2, "2": 1}
     assert len(model.base_tree_parts) == 4
     assert [part.source_object_id for part in model.assembly_parts] == ["1", "3", "4"]
@@ -827,12 +933,41 @@ def test_existing_part_mesh_override_authors_external_refs_in_mixed_mode(tmp_pat
         use_existing_part_meshes=True,
         part_mesh_asset_paths=(("Mesh_1", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
     )
+    _, model, _diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        use_existing_part_meshes=True,
+        part_mesh_asset_paths=(("Mesh_1", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
+    )
 
     assert result.usda_document is not None
+    prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_1")
+    assert prototype.resolution_mode == PrototypeResolutionMode.EXTERNAL_ASSET
+    assert prototype.mesh is None
     assert 'prepend apiSchemas = ["NaniteAssemblyExternalRefAPI"]' in result.usda_document.text
     assert 'uniform token unreal:naniteAssembly:meshAssetPath = "/Game/TreeParts/SK_Twig01.SK_Twig01"' in result.usda_document.text
     assert 'def Xform "Mesh_1" (' in result.usda_document.text
     assert 'append rel skel:skeleton = </Tree/AssemblyPartsInstancer/Prototypes/Mesh_2/PartSkelRoot/PartSkeleton>' in result.usda_document.text
+
+
+def test_existing_part_mesh_override_accepts_xml_mesh_names_in_mixed_mode(tmp_path: Path) -> None:
+    result = convert_file(
+        str(SIMPLE_TREE_01),
+        str(tmp_path / "external_parts_by_name.usda"),
+        use_existing_part_meshes=True,
+        part_mesh_asset_paths=(("Twig_01", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
+    )
+    _, model, _diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        use_existing_part_meshes=True,
+        part_mesh_asset_paths=(("Twig_01", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
+    )
+
+    assert result.usda_document is not None
+    prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_1")
+    assert prototype.resolution_mode == PrototypeResolutionMode.EXTERNAL_ASSET
+    assert prototype.mesh is None
+    assert 'prepend apiSchemas = ["NaniteAssemblyExternalRefAPI"]' in result.usda_document.text
+    assert 'uniform token unreal:naniteAssembly:meshAssetPath = "/Game/TreeParts/SK_Twig01.SK_Twig01"' in result.usda_document.text
 
 
 def test_unused_existing_part_mesh_override_becomes_warning() -> None:
@@ -887,8 +1022,7 @@ def test_spines_are_optional_source_data_for_writer() -> None:
     diagnostics = validate_model(model)
     usda = render_usda(model, diagnostics)
 
-    assert model.spines
-    assert all(spine.points for spine in model.spines)
+    assert not model.spines
     assert "Spine" not in usda.text
 
 

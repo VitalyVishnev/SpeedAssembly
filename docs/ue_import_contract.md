@@ -33,6 +33,9 @@ The current validated structure is:
 - prototype prims under `PointInstancer/Prototypes`
 - inline prototypes authored as skeletal part subtrees, not as bare meshes
 - external reused prototypes authored as `Xform` prims with `NaniteAssemblyExternalRefAPI`
+- when external reuse is enabled, the prototype must be authored as a pure external ref subtree
+  - do not keep an inline `Mesh` payload for the same prototype
+  - the USDA should show `NaniteAssemblyExternalRefAPI` and `unreal:naniteAssembly:meshAssetPath`, but not a fallback `PartMesh` geometry subtree for that prototype
 
 Conceptually:
 
@@ -61,6 +64,14 @@ At minimum, current validated notes require:
 - a descendant root-to-skeleton relationship for the assembly
 - valid `Skeleton` data for the `Main Skeleton`
 - valid skeletal binding data for the Base Skeletal Tree
+
+## External reuse debugging rule
+
+When an external `PartMesh` override appears to be ignored, check the generated USDA first:
+
+1. if `NaniteAssemblyExternalRefAPI` is missing, the bug is in the exporter path before UE import
+2. if `meshAssetPath` is present but UE still imports the low-poly mesh, verify that UE is using the Interchange USD importer path
+3. if the path is present in USDA but not in UE, confirm the package/object path exactly matches the asset in Content Browser
 
 Do not simplify away importer-relevant fields just because the USDA remains syntactically valid.
 

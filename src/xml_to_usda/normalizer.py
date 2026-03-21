@@ -132,12 +132,9 @@ def _extract_materials(root: ET.Element) -> list[MaterialSpec]:
 
 
 def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData | None, tuple[BaseTreePart, ...]]:
-    candidates = [
-        source_object
-        for source_object in source_objects
-        if source_object.mesh is not None
-        if source_object.name == "Trunk" or source_object.name.startswith("Branches")
-    ]
+    # Base Skeletal Tree coverage is driven by mesh-bearing objects in the regular hierarchy.
+    # The source naming varies across SpeedTree exports, so we do not gate this on a narrow prefix list.
+    candidates = [source_object for source_object in source_objects if source_object.mesh is not None]
     if not candidates:
         return None, ()
 
@@ -516,15 +513,14 @@ def _extract_assembly_parts_from_leaf_references(
                     name=f"AssemblyPart_{len(assembly_parts):04d}",
                     prototype_key=prototype_key,
                     position=source_transform.point_to_stage(Vector3(xs[index], ys[index], zs[index])),
-                    orientation=_quaternion_from_axis_angle(
-                        source_transform.axis_to_stage(
-                            Vector3(
-                                axis_x[index] if index < len(axis_x) else 0.0,
-                                axis_y[index] if index < len(axis_y) else 0.0,
-                                axis_z[index] if index < len(axis_z) else 1.0,
-                            )
+                    orientation=_leaf_reference_orientation_to_stage(
+                        source_transform,
+                        Vector3(
+                            axis_x[index] if index < len(axis_x) else 0.0,
+                            axis_y[index] if index < len(axis_y) else 0.0,
+                            axis_z[index] if index < len(axis_z) else 1.0,
                         ),
-                        -(angles[index] if index < len(angles) else 0.0),
+                        angles[index] if index < len(angles) else 0.0,
                     ),
                     scale=Vector3(uniform_scale, uniform_scale, uniform_scale),
                     binding=binding,
@@ -539,17 +535,11 @@ def _extract_assembly_parts_from_leaf_references(
 
 
 def _extract_branch_segments(source_objects: tuple[SourceObject, ...], skeleton: tuple[Joint, ...]) -> list[BranchSegment]:
-    joint_names = {joint.name for joint in skeleton}
     segments: list[BranchSegment] = []
     for source_object in source_objects:
-        if not source_object.name.startswith("Branches") or source_object.mesh is None:
+        if source_object.mesh is None:
             continue
-        candidate_joint = None
-        if source_object.object_id.isdigit():
-            numeric_id = int(source_object.object_id)
-            branch_joint_name = _joint_name_from_bone_id(numeric_id)
-            if branch_joint_name in joint_names:
-                candidate_joint = branch_joint_name
+        candidate_joint = _resolve_source_object_joint_name(source_object, skeleton)
         segments.append(
             BranchSegment(
                 object_id=source_object.object_id,
@@ -559,64 +549,61 @@ def _extract_branch_segments(source_objects: tuple[SourceObject, ...], skeleton:
                 spine=source_object.spine,
                 source_joint=candidate_joint,
             )
-        )
+    )
     return segments
+
+
+def _resolve_source_object_joint_name(source_object: SourceObject, skeleton: tuple[Joint, ...]) -> str | None:
+    joint_names = {joint.name for joint in skeleton}
+    if source_object.object_id.isdigit():
+        numeric_id = int(source_object.object_id)
+        candidate_joint = _joint_name_from_bone_id(numeric_id)
+        if candidate_joint in joint_names:
+            return candidate_joint
+    return None
 
 
 def _rebalance_assembly_part_prototype_scales(
     assembly_parts: tuple[AssemblyPartInstance, ...],
     mesh_library: tuple[MeshLibraryEntry, ...],
 ) -> tuple[tuple[AssemblyPartInstance, ...], tuple[MeshLibraryEntry, ...]]:
-    if not assembly_parts or not mesh_library:
-        return assembly_parts, mesh_library
-
-    observed_scale_by_key = _assembly_part_scale_medians(assembly_parts)
-    compensation_by_key: dict[str, float] = {}
-    for entry in mesh_library:
-        prototype_key = f"Mesh_{entry.mesh_id}"
-        compensation = None
-        fallback_scale = observed_scale_by_key.get(prototype_key)
-        if fallback_scale is not None and math.isfinite(fallback_scale) and fallback_scale > 4.0:
-            compensation = fallback_scale
-        if compensation is not None and math.isfinite(compensation) and compensation > 1.0:
-            compensation_by_key[prototype_key] = compensation
-
-    if not compensation_by_key:
-        return assembly_parts, mesh_library
-
-    # SpeedTree often stores part meshes at tiny library scale and restores size with LeafReferences instance scale.
-    # Baking the stable prototype scale into the mesh keeps standalone skeletal part assets readable for UE/Nanite.
-    rebalanced_mesh_library = tuple(
-        replace(entry, mesh=_scale_mesh(entry.mesh, compensation_by_key[f"Mesh_{entry.mesh_id}"]))
-        if f"Mesh_{entry.mesh_id}" in compensation_by_key
-        else entry
+    # Preserve prototype geometry as authored, but fold mesh-library OriginalScale into the instance scale.
+    # This keeps the instance contract explicit while still honoring the source part size reported by SpeedTree.
+    original_scale_by_mesh_id = {
+        entry.mesh_id: entry.original_scale
         for entry in mesh_library
-    )
-    rebalanced_assembly_parts = tuple(
-        replace(part, scale=_scale_vector(part.scale, 1.0 / compensation_by_key[part.prototype_key]))
-        if part.prototype_key in compensation_by_key
-        else part
-        for part in assembly_parts
-    )
-    return rebalanced_assembly_parts, rebalanced_mesh_library
+        if entry.original_scale is not None and entry.original_scale > 0.0
+    }
+    if not original_scale_by_mesh_id:
+        return assembly_parts, mesh_library
 
-
-def _assembly_part_scale_medians(assembly_parts: tuple[AssemblyPartInstance, ...]) -> dict[str, float]:
-    scales_by_key: dict[str, list[float]] = {}
+    rebased_parts: list[AssemblyPartInstance] = []
     for part in assembly_parts:
-        if not math.isclose(part.scale.x, part.scale.y) or not math.isclose(part.scale.y, part.scale.z):
+        scale_factor = original_scale_by_mesh_id.get(part.source_mesh_id)
+        if scale_factor is None:
+            rebased_parts.append(part)
             continue
-        scales_by_key.setdefault(part.prototype_key, []).append(part.scale.x)
+        rebased_parts.append(
+            replace(
+                part,
+                scale=Vector3(
+                    part.scale.x * scale_factor,
+                    part.scale.y * scale_factor,
+                    part.scale.z * scale_factor,
+                ),
+            )
+        )
+    return tuple(rebased_parts), mesh_library
 
-    medians: dict[str, float] = {}
-    for prototype_key, scales in scales_by_key.items():
-        ordered = sorted(scales)
-        midpoint = len(ordered) // 2
-        if len(ordered) % 2 == 0:
-            medians[prototype_key] = (ordered[midpoint - 1] + ordered[midpoint]) * 0.5
-        else:
-            medians[prototype_key] = ordered[midpoint]
-    return medians
+
+def _leaf_reference_orientation_to_stage(
+    source_transform: SourceTransform,
+    axis: Vector3,
+    angle_degrees: float,
+) -> Quaternion:
+    # Axis remaps into stage space, but the authored rotation sense stays the same.
+    stage_axis = source_transform.axis_to_stage(axis)
+    return _quaternion_from_axis_angle(stage_axis, angle_degrees)
 
 
 def _build_prototypes(
@@ -675,17 +662,6 @@ def _resolve_prototype_material_sections(
         return replace(mesh, sections=vertex_color_sections)
 
     return _apply_fallback_material_sections(mesh, prototype_key, fallback_material_ids, messages)
-
-
-def _scale_mesh(mesh: MeshData, factor: float) -> MeshData:
-    return replace(
-        mesh,
-        points=tuple(_scale_vector(point, factor) for point in mesh.points),
-    )
-
-
-def _scale_vector(vector: Vector3, factor: float) -> Vector3:
-    return Vector3(vector.x * factor, vector.y * factor, vector.z * factor)
 
 
 def _build_skeletal_support_primvars(skeleton: tuple[Joint, ...]) -> SkeletalSupportPrimvars | None:

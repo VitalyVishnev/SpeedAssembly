@@ -6,7 +6,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .models import DynamicWindSimulationGroup
-from .pipeline import convert_file, generate_wind_json, inspect_wind_data
+from .pipeline import convert_file, generate_wind_json, inspect_wind_data, load_canonical_model
 
 
 class ConversionApp:
@@ -30,69 +30,111 @@ class ConversionApp:
         self.status_var = tk.StringVar(
             value="Single-file mode. Convert and Dynamic Wind JSON generation are available."
         )
+        self._sections: dict[str, dict[str, object]] = {}
+        self._part_mesh_rows: list[dict[str, object]] = []
         self._wind_group_rows: list[dict[str, object]] = []
         self._persisted_wind_group_settings: dict[str, dict[str, float]] = {}
+        self._persisted_part_mesh_settings_by_input_path: dict[str, list[dict[str, object]]] = {}
+        self._current_part_mesh_settings_key: str | None = None
+        self._suspend_settings_save = False
         self._load_settings()
 
         self._build_layout()
         self._install_persistence_hooks()
 
     def _build_layout(self) -> None:
-        frame = ttk.Frame(self.root, padding=16)
-        frame.grid(sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(11, weight=1)
 
-        ttk.Label(frame, text="Source XML").grid(row=0, column=0, sticky="w", pady=(0, 8))
-        ttk.Entry(frame, textvariable=self.input_var).grid(row=0, column=1, sticky="ew", padx=(12, 12), pady=(0, 8))
-        ttk.Button(frame, text="Browse...", command=self.browse_input).grid(row=0, column=2, sticky="ew", pady=(0, 8))
+        outer = ttk.Frame(self.root)
+        outer.grid(row=0, column=0, sticky="nsew")
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(0, weight=1)
 
-        ttk.Label(frame, text="Output USDA").grid(row=1, column=0, sticky="w", pady=(0, 8))
-        ttk.Entry(frame, textvariable=self.output_var).grid(row=1, column=1, sticky="ew", padx=(12, 12), pady=(0, 8))
-        ttk.Button(frame, text="Save As...", command=self.browse_output).grid(row=1, column=2, sticky="ew", pady=(0, 8))
+        self.scroll_canvas = tk.Canvas(outer, highlightthickness=0, borderwidth=0)
+        self.scroll_canvas.grid(row=0, column=0, sticky="nsew")
+        self.scrollbar = ttk.Scrollbar(outer, orient="vertical", command=self.scroll_canvas.yview)
+        self.scrollbar.grid(row=0, column=1, sticky="ns")
+        self.scroll_canvas.configure(yscrollcommand=self.scrollbar.set)
 
-        ttk.Label(frame, text="Bark Material Path").grid(row=2, column=0, sticky="w", pady=(0, 8))
-        ttk.Entry(frame, textvariable=self.bark_material_var).grid(row=2, column=1, sticky="ew", padx=(12, 12), pady=(0, 8))
+        self.content_frame = ttk.Frame(self.scroll_canvas, padding=16)
+        self.content_window = self.scroll_canvas.create_window((0, 0), window=self.content_frame, anchor="nw")
+        self.content_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(frame, text="Leaves Material Path").grid(row=3, column=0, sticky="w", pady=(0, 8))
-        ttk.Entry(frame, textvariable=self.leaves_material_var).grid(row=3, column=1, sticky="ew", padx=(12, 12), pady=(0, 8))
+        self.scroll_canvas.bind("<Configure>", self._handle_canvas_resize)
+        self.content_frame.bind("<Configure>", self._handle_content_resize)
+        self.root.bind_all("<MouseWheel>", self._handle_mousewheel, add="+")
+        self.root.bind_all("<Button-4>", self._handle_mousewheel, add="+")
+        self.root.bind_all("<Button-5>", self._handle_mousewheel, add="+")
 
-        ttk.Checkbutton(
-            frame,
-            text="Use Existing PartMeshes",
-            variable=self.use_existing_part_meshes_var,
-            command=self._toggle_part_mesh_mapping_state,
-        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        row = 0
+        ttk.Label(self.content_frame, text="Source XML").grid(row=row, column=0, sticky="w", pady=(0, 8))
+        ttk.Entry(self.content_frame, textvariable=self.input_var).grid(
+            row=row, column=1, sticky="ew", padx=(12, 12), pady=(0, 8)
+        )
+        ttk.Button(self.content_frame, text="Browse...", command=self.browse_input).grid(
+            row=row, column=2, sticky="ew", pady=(0, 8)
+        )
 
-        ttk.Label(frame, text="PartMesh Asset Mappings").grid(row=5, column=0, sticky="nw", pady=(0, 8))
-        self.part_mesh_mapping_widget = tk.Text(frame, wrap="word", height=4)
-        self.part_mesh_mapping_widget.grid(row=5, column=1, columnspan=2, sticky="ew", padx=(12, 0), pady=(0, 8))
+        row += 1
+        ttk.Label(self.content_frame, text="Output USDA").grid(row=row, column=0, sticky="w", pady=(0, 8))
+        ttk.Entry(self.content_frame, textvariable=self.output_var).grid(
+            row=row, column=1, sticky="ew", padx=(12, 12), pady=(0, 8)
+        )
+        ttk.Button(self.content_frame, text="Save As...", command=self.browse_output).grid(
+            row=row, column=2, sticky="ew", pady=(0, 8)
+        )
 
-        ttk.Label(
-            frame,
-            text="One mapping per line. Supported keys: Mesh_1, 1, meshid:1.",
-        ).grid(row=6, column=1, columnspan=2, sticky="w", pady=(0, 8))
+        row += 1
+        materials_content = self._create_collapsible_section(self.content_frame, row, "Materials", "materials")
+        self.materials_frame = materials_content
+        materials_content.columnconfigure(1, weight=1)
+        ttk.Label(materials_content, text="Bark Material Path").grid(row=0, column=0, sticky="w", pady=(0, 8))
+        ttk.Entry(materials_content, textvariable=self.bark_material_var).grid(
+            row=0, column=1, sticky="ew", padx=(12, 12), pady=(0, 8)
+        )
 
-        self.wind_frame = ttk.LabelFrame(frame, text="Wind Profile", padding=12)
-        self.wind_frame.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(4, 12))
-        self.wind_frame.columnconfigure(1, weight=1)
-        self.wind_frame.columnconfigure(3, weight=1)
+        ttk.Label(materials_content, text="Leaves Material Path").grid(row=1, column=0, sticky="w", pady=(0, 8))
+        ttk.Entry(materials_content, textvariable=self.leaves_material_var).grid(
+            row=1, column=1, sticky="ew", padx=(12, 12), pady=(0, 8)
+        )
 
-        ttk.Button(self.wind_frame, text="Refresh Wind Groups", command=self.refresh_wind_groups).grid(
+        row += 1
+        part_mesh_content = self._create_collapsible_section(self.content_frame, row, "Part Mesh Reuse", "part_mesh")
+        self.part_mesh_frame = part_mesh_content
+        part_mesh_content.columnconfigure(0, weight=1)
+        part_mesh_intro = ttk.Label(
+            part_mesh_content,
+            text="Rows are discovered from the XML leaf-reference mesh library. Enable Unreal reference to reuse an existing asset.",
+        )
+        part_mesh_intro.grid(row=0, column=0, sticky="w", pady=(0, 8))
+
+        self.part_mesh_rows_container = ttk.Frame(part_mesh_content)
+        self.part_mesh_rows_container.grid(row=1, column=0, sticky="ew")
+        self.part_mesh_rows_container.columnconfigure(0, weight=1)
+
+        self._part_mesh_rows_placeholder = ttk.Label(self.part_mesh_rows_container, text="Select an XML file to load part meshes.")
+        self._part_mesh_rows_placeholder.grid(row=0, column=0, sticky="w")
+
+        row += 1
+        wind_content = self._create_collapsible_section(self.content_frame, row, "Wind Profile", "wind")
+        self.wind_frame = wind_content
+        wind_content.columnconfigure(1, weight=1)
+        wind_content.columnconfigure(3, weight=1)
+
+        ttk.Button(wind_content, text="Refresh Wind Groups", command=self.refresh_wind_groups).grid(
             row=0, column=0, sticky="w", pady=(0, 8)
         )
         ttk.Checkbutton(
-            self.wind_frame,
+            wind_content,
             text="Ground Cover",
             variable=self.is_ground_cover_var,
         ).grid(row=0, column=1, sticky="w", padx=(12, 0), pady=(0, 8))
 
-        ttk.Label(self.wind_frame, text="Gust Attenuation").grid(row=1, column=0, sticky="w", pady=(0, 8))
+        ttk.Label(wind_content, text="Gust Attenuation").grid(row=1, column=0, sticky="w", pady=(0, 8))
         self.gust_value_var = tk.StringVar(value=f"{self.gust_attenuation_var.get():.2f}")
         tk.Scale(
-            self.wind_frame,
+            wind_content,
             from_=0.0,
             to=5.0,
             resolution=0.05,
@@ -100,34 +142,43 @@ class ConversionApp:
             variable=self.gust_attenuation_var,
             command=lambda value: self._handle_gust_change(float(value)),
         ).grid(row=1, column=1, columnspan=2, sticky="ew", padx=(12, 12), pady=(0, 8))
-        ttk.Label(self.wind_frame, textvariable=self.gust_value_var, width=6).grid(row=1, column=3, sticky="e", pady=(0, 8))
+        ttk.Label(wind_content, textvariable=self.gust_value_var, width=6).grid(
+            row=1, column=3, sticky="e", pady=(0, 8)
+        )
 
         ttk.Label(
-            self.wind_frame,
+            wind_content,
             text="Group sliders are built from the normalized skeleton hierarchy. Trunk = Group 0.",
         ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(0, 8))
 
-        self.wind_groups_container = ttk.Frame(self.wind_frame)
+        self.wind_groups_container = ttk.Frame(wind_content)
         self.wind_groups_container.grid(row=3, column=0, columnspan=4, sticky="ew")
         self.wind_groups_container.columnconfigure(1, weight=1)
         self.wind_groups_container.columnconfigure(3, weight=1)
 
-        ttk.Label(frame, textvariable=self.status_var).grid(row=8, column=0, columnspan=2, sticky="w", pady=(0, 12))
-        action_row = ttk.Frame(frame)
-        action_row.grid(row=8, column=2, sticky="e", pady=(0, 12))
+        row += 1
+        footer = ttk.Frame(self.content_frame)
+        footer.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(0, 12))
+        footer.columnconfigure(0, weight=1)
+        ttk.Label(footer, textvariable=self.status_var).grid(row=0, column=0, sticky="w")
+        action_row = ttk.Frame(footer)
+        action_row.grid(row=0, column=1, sticky="e")
         ttk.Button(action_row, text="Generate Wind JSON", command=self.run_generate_wind_json).pack(side="right")
         ttk.Button(action_row, text="Convert", command=self.run_conversion).pack(side="right", padx=(0, 8))
 
-        button_row = ttk.Frame(frame)
-        button_row.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(0, 8))
-        ttk.Button(button_row, text="Copy Log", command=self.copy_log).pack(side="right")
+        row += 1
+        log_content = self._create_collapsible_section(self.content_frame, row, "Log", "log")
+        self.log_frame = log_content
+        log_content.columnconfigure(0, weight=1)
+        ttk.Button(log_content, text="Copy Log", command=self.copy_log).grid(row=0, column=0, sticky="e", pady=(0, 8))
 
-        self.log_widget = tk.Text(frame, wrap="word", height=18)
-        self.log_widget.grid(row=11, column=0, columnspan=3, sticky="nsew")
+        self.log_widget = tk.Text(log_content, wrap="word", height=18)
+        self.log_widget.grid(row=1, column=0, sticky="nsew")
         self.log_widget.configure(state="disabled")
         self.log_widget.bind("<Control-c>", self._handle_copy_shortcut)
         self.log_widget.bind("<Control-C>", self._handle_copy_shortcut)
-        self._toggle_part_mesh_mapping_state()
+
+        self._refresh_scroll_region()
 
     def browse_input(self) -> None:
         selected = filedialog.askopenfilename(
@@ -176,7 +227,6 @@ class ConversionApp:
         output_path = self.output_var.get().strip()
         bark_material_path = self.bark_material_var.get().strip()
         leaves_material_path = self.leaves_material_var.get().strip()
-        use_existing_part_meshes = bool(self.use_existing_part_meshes_var.get())
         if not input_path:
             messagebox.showerror("Missing input", "Select a source XML file.")
             return
@@ -188,7 +238,7 @@ class ConversionApp:
             messagebox.showerror("Invalid material path", validation_error)
             return
         try:
-            part_mesh_asset_paths = self._parse_part_mesh_asset_paths(use_existing_part_meshes)
+            use_existing_part_meshes, part_mesh_asset_paths = self._collect_part_mesh_overrides()
         except ValueError as exc:
             messagebox.showerror("Invalid PartMesh mapping", str(exc))
             return
@@ -282,31 +332,225 @@ class ConversionApp:
                 return f"{label} material path must start with /Game/."
         return None
 
-    def _parse_part_mesh_asset_paths(self, use_existing_part_meshes: bool) -> tuple[tuple[str, str], ...]:
-        if not use_existing_part_meshes:
-            return ()
+    def _collect_part_mesh_overrides(self) -> tuple[bool, tuple[tuple[str, str], ...]]:
+        if not self._part_mesh_rows:
+            return False, ()
 
         mappings: list[tuple[str, str]] = []
-        raw_text = self.part_mesh_mapping_widget.get("1.0", "end-1c")
-        for line_number, raw_line in enumerate(raw_text.splitlines(), start=1):
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
+        use_existing_part_meshes = False
+        for row in self._part_mesh_rows:
+            if not bool(row["use_unreal_var"].get()):
                 continue
-            if "=" not in line:
-                raise ValueError(f"PartMesh mapping line {line_number} must use KEY=/Game/... format.")
-            source_key, asset_path = (segment.strip() for segment in line.split("=", 1))
-            if not source_key:
-                raise ValueError(f"PartMesh mapping line {line_number} is missing a prototype key.")
+            use_existing_part_meshes = True
+            asset_path = str(row["asset_var"].get()).strip()
+            if not asset_path:
+                continue
             if not _is_valid_unreal_asset_path(asset_path):
-                raise ValueError(f"PartMesh asset path on line {line_number} must start with /Game/.")
-            mappings.append((source_key, asset_path))
-        return tuple(mappings)
+                label = str(row["source_name"])
+                raise ValueError(f"PartMesh asset path for {label} must start with /Game/.")
+            mappings.append((str(row["source_name"]), asset_path))
+        return use_existing_part_meshes, tuple(mappings)
 
-    def _toggle_part_mesh_mapping_state(self) -> None:
-        state = "normal" if self.use_existing_part_meshes_var.get() else "disabled"
-        self.part_mesh_mapping_widget.configure(state=state)
+    def _handle_source_path_change(self, *_args) -> None:
+        if self._suspend_settings_save:
+            return
+        input_path = self.input_var.get().strip()
+        if not input_path:
+            self._clear_part_mesh_rows()
+            return
+        path = Path(input_path)
+        if not path.exists():
+            return
+        try:
+            self._refresh_part_mesh_rows(input_path)
+        except Exception as exc:
+            self.status_var.set("Part mesh discovery failed.")
+            self._set_log(str(exc))
+            messagebox.showerror("Part mesh discovery failed", str(exc))
+
+    def _clear_part_mesh_rows(self) -> None:
+        self._current_part_mesh_settings_key = None
+        self._part_mesh_rows.clear()
+        for child in self.part_mesh_rows_container.winfo_children():
+            child.destroy()
+        self._part_mesh_rows_placeholder = ttk.Label(
+            self.part_mesh_rows_container,
+            text="Select an XML file to load part meshes.",
+        )
+        self._part_mesh_rows_placeholder.grid(row=0, column=0, sticky="w")
+        self._refresh_scroll_region()
+
+    def _refresh_part_mesh_rows(self, input_path: str) -> None:
+        if self._suspend_settings_save:
+            return
+        self._suspend_settings_save = True
+        try:
+            _, model, _diagnostics = load_canonical_model(input_path)
+            resolved_key = self._resolve_input_settings_key(input_path)
+            self._current_part_mesh_settings_key = resolved_key
+            persisted_rows = self._persisted_part_mesh_settings_by_input_path.get(resolved_key, [])
+            self._rebuild_part_mesh_rows(model.prototypes, persisted_rows)
+        finally:
+            self._suspend_settings_save = False
+        self._save_settings()
+
+    def _resolve_input_settings_key(self, input_path: str) -> str:
+        return str(Path(input_path).expanduser().resolve())
+
+    def _rebuild_part_mesh_rows(
+        self,
+        prototypes,
+        persisted_rows: list[dict[str, object]] | tuple[dict[str, object], ...] = (),
+    ) -> None:
+        for child in self.part_mesh_rows_container.winfo_children():
+            child.destroy()
+        self._part_mesh_rows.clear()
+
+        if not prototypes:
+            ttk.Label(self.part_mesh_rows_container, text="No repeated part meshes found in this XML.").grid(
+                row=0, column=0, sticky="w"
+            )
+            self._refresh_scroll_region()
+            return
+
+        self.part_mesh_rows_container.columnconfigure(0, weight=1)
+        header = ttk.Frame(self.part_mesh_rows_container)
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        header.columnconfigure(0, weight=3)
+        header.columnconfigure(1, weight=0)
+        header.columnconfigure(2, weight=0)
+        header.columnconfigure(3, weight=5)
+        ttk.Label(header, text="XML Mesh").grid(row=0, column=0, sticky="w")
+        ttk.Label(header, text="Mesh ID").grid(row=0, column=1, sticky="w", padx=(12, 12))
+        ttk.Label(header, text="Use Unreal reference").grid(row=0, column=2, sticky="w", padx=(0, 12))
+        ttk.Label(header, text="Unreal Object Path").grid(row=0, column=3, sticky="w")
+
+        persisted_by_name = {
+            str(record.get("source_name", "")): record
+            for record in persisted_rows
+            if isinstance(record, dict) and record.get("source_name")
+        }
+        persisted_by_key = {
+            str(record.get("source_key", "")): record
+            for record in persisted_rows
+            if isinstance(record, dict) and record.get("source_key")
+        }
+
+        self._part_mesh_rows_placeholder = ttk.Label(self.part_mesh_rows_container, text="")
+        row_index = 1
+        for prototype in prototypes:
+            row_frame = ttk.Frame(self.part_mesh_rows_container)
+            row_frame.grid(row=row_index, column=0, sticky="ew", pady=(0, 6))
+            row_frame.columnconfigure(0, weight=3)
+            row_frame.columnconfigure(3, weight=5)
+
+            mesh_id_text = f"Mesh_{prototype.source_mesh_id}" if prototype.source_mesh_id is not None else "<none>"
+            display_name = prototype.source_name or prototype.source_key
+            ttk.Label(row_frame, text=display_name).grid(row=0, column=0, sticky="w")
+            ttk.Label(row_frame, text=mesh_id_text).grid(row=0, column=1, sticky="w", padx=(12, 12))
+
+            use_unreal_var = tk.BooleanVar(value=False)
+            asset_var = tk.StringVar(value="")
+            asset_entry = ttk.Entry(row_frame, textvariable=asset_var)
+            checkbox = ttk.Checkbutton(
+                row_frame,
+                variable=use_unreal_var,
+                command=lambda entry=asset_entry, var=use_unreal_var: self._handle_part_mesh_toggle(entry, var),
+            )
+            checkbox.grid(row=0, column=2, sticky="w", padx=(0, 12))
+            asset_entry.grid(row=0, column=3, sticky="ew")
+
+            record = persisted_by_name.get(display_name) or persisted_by_key.get(str(prototype.source_key))
+            if record is not None:
+                use_unreal_var.set(bool(record.get("use_unreal_reference", False)))
+                asset_var.set(str(record.get("unreal_asset_path", "")))
+
+            self._handle_part_mesh_toggle(asset_entry, use_unreal_var)
+            asset_var.trace_add("write", self._handle_persisted_field_change)
+            use_unreal_var.trace_add("write", self._handle_persisted_field_change)
+
+            self._part_mesh_rows.append(
+                {
+                    "source_key": prototype.source_key,
+                    "source_name": display_name,
+                    "mesh_id": prototype.source_mesh_id,
+                    "use_unreal_var": use_unreal_var,
+                    "asset_var": asset_var,
+                    "asset_entry": asset_entry,
+                    "checkbox": checkbox,
+                }
+            )
+            row_index += 1
+
+        self._refresh_scroll_region()
+
+    def _handle_part_mesh_toggle(self, asset_entry: ttk.Entry, use_unreal_var: tk.BooleanVar) -> None:
+        asset_entry.configure(state="normal" if bool(use_unreal_var.get()) else "disabled")
+
+    def _create_collapsible_section(self, parent: ttk.Frame, row: int, title: str, key: str) -> ttk.Frame:
+        container = ttk.Frame(parent)
+        container.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(0, 12))
+        container.columnconfigure(0, weight=1)
+
+        header = ttk.Frame(container)
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(0, weight=1)
+
+        button_text = tk.StringVar(value=f"[-] {title}")
+        button = ttk.Button(header, textvariable=button_text, command=lambda: self._toggle_section(key))
+        button.grid(row=0, column=0, sticky="w")
+
+        content = ttk.Frame(container, padding=(12, 8, 0, 0))
+        content.grid(row=1, column=0, sticky="ew")
+
+        self._sections[key] = {
+            "container": container,
+            "content": content,
+            "button_text": button_text,
+            "title": title,
+            "expanded": tk.BooleanVar(value=True),
+        }
+        return content
+
+    def _toggle_section(self, key: str) -> None:
+        section = self._sections[key]
+        content = section["content"]
+        expanded_var = section["expanded"]
+        button_text = section["button_text"]
+        title = section["title"]
+        expanded = not bool(expanded_var.get())
+        expanded_var.set(expanded)
+        if expanded:
+            content.grid()
+            button_text.set(f"[-] {title}")
+        else:
+            content.grid_remove()
+            button_text.set(f"[+] {title}")
+        self._refresh_scroll_region()
+
+    def _handle_canvas_resize(self, event) -> None:
+        self.scroll_canvas.itemconfigure(self.content_window, width=event.width)
+        self._refresh_scroll_region()
+
+    def _handle_content_resize(self, _event=None) -> None:
+        self._refresh_scroll_region()
+
+    def _refresh_scroll_region(self) -> None:
+        self.scroll_canvas.configure(scrollregion=self.scroll_canvas.bbox("all"))
+
+    def _handle_mousewheel(self, event) -> None:
+        if getattr(event, "num", None) == 4:
+            delta = -1
+        elif getattr(event, "num", None) == 5:
+            delta = 1
+        else:
+            delta = -1 if event.delta > 0 else 1
+            if event.delta == 0:
+                return
+        self.scroll_canvas.yview_scroll(delta, "units")
 
     def _install_persistence_hooks(self) -> None:
+        self.input_var.trace_add("write", self._handle_source_path_change)
         self.bark_material_var.trace_add("write", self._handle_persisted_field_change)
         self.leaves_material_var.trace_add("write", self._handle_persisted_field_change)
         self.gust_attenuation_var.trace_add("write", self._handle_persisted_field_change)
@@ -314,6 +558,8 @@ class ConversionApp:
         self.root.protocol("WM_DELETE_WINDOW", self._handle_window_close)
 
     def _handle_persisted_field_change(self, *_args) -> None:
+        if self._suspend_settings_save:
+            return
         self._save_settings()
 
     def _handle_window_close(self) -> None:
@@ -327,6 +573,9 @@ class ConversionApp:
         self.gust_attenuation_var.set(float(settings.get("gust_attenuation", 0.0)))
         self.is_ground_cover_var.set(bool(settings.get("is_ground_cover", False)))
         self._persisted_wind_group_settings = dict(settings.get("wind_group_settings", {}))
+        self._persisted_part_mesh_settings_by_input_path = dict(
+            settings.get("part_mesh_settings_by_input_path", {})
+        )
 
     def _read_settings(self) -> dict:
         if not self.SETTINGS_PATH.exists():
@@ -340,6 +589,9 @@ class ConversionApp:
         wind_group_settings = payload.get("wind_group_settings", {})
         if not isinstance(wind_group_settings, dict):
             wind_group_settings = {}
+        part_mesh_settings = payload.get("part_mesh_settings_by_input_path", {})
+        if not isinstance(part_mesh_settings, dict):
+            part_mesh_settings = {}
         return {
             "bark_material_path": payload.get("bark_material_path", ""),
             "leaves_material_path": payload.get("leaves_material_path", ""),
@@ -350,11 +602,23 @@ class ConversionApp:
                 for key, value in wind_group_settings.items()
                 if isinstance(value, dict)
             },
+            "part_mesh_settings_by_input_path": {
+                str(key): value
+                for key, value in part_mesh_settings.items()
+                if isinstance(value, list)
+            },
         }
 
     def _save_settings(self) -> None:
         try:
             self.SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+            part_mesh_settings_by_input_path = dict(self._persisted_part_mesh_settings_by_input_path)
+            current_part_mesh_settings = self._serialize_part_mesh_settings()
+            if self._current_part_mesh_settings_key is not None:
+                if current_part_mesh_settings:
+                    part_mesh_settings_by_input_path[self._current_part_mesh_settings_key] = current_part_mesh_settings
+                else:
+                    part_mesh_settings_by_input_path.pop(self._current_part_mesh_settings_key, None)
             payload = {
                 "bark_material_path": self.bark_material_var.get().strip(),
                 "leaves_material_path": self.leaves_material_var.get().strip(),
@@ -362,9 +626,32 @@ class ConversionApp:
                 "is_ground_cover": bool(self.is_ground_cover_var.get()),
                 "wind_group_settings": self._serialize_wind_group_settings(),
             }
+            if part_mesh_settings_by_input_path:
+                payload["part_mesh_settings_by_input_path"] = part_mesh_settings_by_input_path
             self.SETTINGS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            self._persisted_part_mesh_settings_by_input_path = part_mesh_settings_by_input_path
         except OSError:
             return
+
+    def _serialize_part_mesh_settings(self) -> list[dict[str, object]]:
+        if not self._part_mesh_rows:
+            return []
+
+        serialized: list[dict[str, object]] = []
+        for row in self._part_mesh_rows:
+            use_unreal_reference = bool(row["use_unreal_var"].get())
+            asset_path = str(row["asset_var"].get()).strip()
+            if not use_unreal_reference and not asset_path:
+                continue
+            serialized.append(
+                {
+                    "source_name": str(row["source_name"]),
+                    "source_key": str(row["source_key"]),
+                    "use_unreal_reference": use_unreal_reference,
+                    "unreal_asset_path": asset_path,
+                }
+            )
+        return serialized
 
     def _serialize_wind_group_settings(self) -> dict[str, dict[str, float]]:
         if not self._wind_group_rows:

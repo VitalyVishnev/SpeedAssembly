@@ -53,6 +53,8 @@ Output exe path:
   SpeedTree XML to project-concept mapping.
 - `docs/workflow_status.md`
   Baseline sample, current status, and workflow.
+- `docs/troubleshooting.md`
+  Fast checks for common exporter and UE importer dead-ends.
 - `docs/local-python-environment.md`
   Local environment setup.
 
