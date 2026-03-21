@@ -148,7 +148,7 @@ class ConversionApp:
 
         ttk.Label(
             wind_content,
-            text="Group sliders are built from the normalized skeleton hierarchy. Trunk = Group 0.",
+            text="Group sliders are built from the normalized skeleton hierarchy. Group 0 is trunk unless Ground Cover is enabled.",
         ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(0, 8))
 
         self.wind_groups_container = ttk.Frame(wind_content)
@@ -209,7 +209,7 @@ class ConversionApp:
             messagebox.showerror("Missing input", "Select a source XML file before loading wind groups.")
             return
         try:
-            dynamic_wind = inspect_wind_data(input_path)
+            dynamic_wind = inspect_wind_data(input_path, is_ground_cover=bool(self.is_ground_cover_var.get()))
         except Exception as exc:
             self.status_var.set("Wind group inspection failed.")
             self._set_log(str(exc))
@@ -555,12 +555,19 @@ class ConversionApp:
         self.leaves_material_var.trace_add("write", self._handle_persisted_field_change)
         self.gust_attenuation_var.trace_add("write", self._handle_persisted_field_change)
         self.is_ground_cover_var.trace_add("write", self._handle_persisted_field_change)
+        self.is_ground_cover_var.trace_add("write", self._handle_ground_cover_change)
         self.root.protocol("WM_DELETE_WINDOW", self._handle_window_close)
 
     def _handle_persisted_field_change(self, *_args) -> None:
         if self._suspend_settings_save:
             return
         self._save_settings()
+
+    def _handle_ground_cover_change(self, *_args) -> None:
+        if self._suspend_settings_save:
+            return
+        if self.input_var.get().strip():
+            self.refresh_wind_groups()
 
     def _handle_window_close(self) -> None:
         self._save_settings()

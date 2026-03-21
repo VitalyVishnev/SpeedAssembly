@@ -139,13 +139,26 @@ def convert_request(request: ConversionRequest) -> tuple[ConversionResult, ...]:
     return tuple(results)
 
 
-def inspect_wind_data(input_path: str) -> DynamicWindData:
+def inspect_wind_data(input_path: str, is_ground_cover: bool = False) -> DynamicWindData:
     document = read_source_xml(input_path)
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
     if model.dynamic_wind is None:
-        return build_dynamic_wind_data(model.skeleton, source_objects=model.source_objects)
-    return model.dynamic_wind
+        return build_dynamic_wind_data(
+            model.skeleton,
+            source_objects=model.source_objects,
+            is_ground_cover=is_ground_cover,
+        )
+    if not is_ground_cover:
+        return model.dynamic_wind
+
+    return build_dynamic_wind_data(
+        model.skeleton,
+        source_objects=model.source_objects,
+        group_settings=model.dynamic_wind.simulation_groups,
+        gust_attenuation=model.dynamic_wind.gust_attenuation,
+        is_ground_cover=True,
+    )
 
 
 def generate_wind_json(

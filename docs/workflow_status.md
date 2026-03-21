@@ -38,6 +38,12 @@ The project has also passed automated `Phase 1` regression coverage for:
 - mixed inline plus external `PartMesh` prototype resolution
 - separate Dynamic Wind JSON generation from the normalized skeleton
 
+The wind-group contract has also been validated on the attached grass sample:
+
+- `SkeletyalAssemblyTest_Grass.xml` now resolves to a single wind group under the vertical-hierarchy rule
+- `Ground Cover` remains an explicit wind flag and does not change group count
+- when `Ground Cover` is enabled, every generated simulation group is emitted as non-trunk
+
 One specific dead-end has been closed:
 
 - external `PartMesh` overrides now author a pure Unreal reference prototype instead of leaving inline low-poly `PartMesh` geometry in the same USDA branch

@@ -265,7 +265,7 @@ def test_gui_refresh_wind_groups_builds_slider_rows(monkeypatch: pytest.MonkeyPa
         ),
     )
 
-    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda _input_path: dynamic_wind)
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda _input_path, is_ground_cover=False: dynamic_wind)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
 
     try:
@@ -313,7 +313,7 @@ def test_gui_generate_wind_json_uses_slider_values(monkeypatch: pytest.MonkeyPat
             ),
         )
 
-    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda _input_path: dynamic_wind)
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda _input_path, is_ground_cover=False: dynamic_wind)
     monkeypatch.setattr("xml_to_usda.gui.generate_wind_json", fake_generate_wind_json)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)

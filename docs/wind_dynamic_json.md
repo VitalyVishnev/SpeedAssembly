@@ -68,30 +68,16 @@ Important implication:
 
 ## Current group-building logic
 
-Wind groups are derived from the normalized skeleton, with a controlled fallback from the source object hierarchy.
+Wind groups are derived from the normalized skeleton hierarchy.
 
 Rules:
 
-- trunk is always `Simulation Group 0`
-- additional groups are created from branching depth and hierarchical branch levels
-- if the tree has `1 trunk + 1 branch level`, the result should be `2` groups
-- if the tree has `1 trunk + 4 branch levels`, the result should be `5` groups
-
-### Important correction
-
-During UE validation, a failure mode was found where the trunk bent only at the base while the upper trunk behaved like branch groups.
-
-Cause:
-
-- the original fallback logic applied source object logical depth to every skinned joint referenced by an object mesh
-- this could incorrectly promote upper trunk joints into higher branch groups
-
-Current fix:
-
-- source object depth hints are now applied only to one anchor joint per object
-- the anchor joint is chosen from the object skinning data by dominant joint usage, with deeper joints preferred on ties
-
-This keeps the fallback useful for chain-like SpeedTree exports, but avoids pulling large portions of the trunk out of `Group 0`.
+- `Group 0` covers the root and the trunk chain
+- when a joint has a single child, that child stays in the current group
+- when a joint branches into multiple children, all children advance to the next group
+- sibling stems at the same vertical level stay together
+- `Ground Cover` stays a separate UE wind flag and does not change the group count
+- when `Ground Cover` is enabled, no generated group is marked as trunk
 
 ## Current UI contract
 
@@ -154,6 +140,11 @@ Typical use:
 - `false` for trees
 - potentially `true` for grass or very low shrubs
 
+Contract:
+
+- when `Ground Cover` is enabled, the converter clears `bIsTrunkGroup` on every generated simulation group
+- this keeps Unreal from treating any of the generated layers as a trunk-controlled wind band
+
 ## Dual Influence
 
 Unreal Dynamic Wind supports two group modes:
@@ -198,7 +189,7 @@ Current recommended loop:
 Wind behavior is currently covered by automated tests for:
 
 - hierarchy-driven group count
-- chain-like fallback using source object hierarchy
+- vertical hierarchy without horizontal splitting
 - JSON payload generation
 - GUI slider collection and persistence
 

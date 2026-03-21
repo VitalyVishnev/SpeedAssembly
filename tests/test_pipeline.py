@@ -110,7 +110,7 @@ def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
     assert {prototype.source_key for prototype in model.prototypes} == {part.prototype_key for part in model.assembly_parts}
 
 
-def test_dynamic_wind_groups_follow_skeleton_branch_orders_without_fixed_cap() -> None:
+def test_dynamic_wind_groups_follow_vertical_levels_without_horizontal_bias() -> None:
     skeleton = (
         Joint(name="root", parent=None, bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
         Joint(name="trunk_1", parent="root", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
@@ -205,61 +205,60 @@ def test_dynamic_wind_groups_follow_skeleton_branch_orders_without_fixed_cap() -
     )
 
     dynamic_wind = build_dynamic_wind_data(skeleton, source_objects=source_objects)
-
-    assert len(dynamic_wind.simulation_groups) == 5
-    assert dynamic_wind.simulation_groups[0].is_trunk_group is True
-    assert [group.branch_order for group in dynamic_wind.simulation_groups] == [0, 1, 2, 3, 4]
-
-
-def test_dynamic_wind_logical_depth_hints_use_object_anchor_joint_only() -> None:
-    skeleton = (
-        Joint(name="root", parent=None, bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-        Joint(name="trunk_mid", parent="root", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-        Joint(name="branch_start", parent="trunk_mid", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-        Joint(name="branch_tip", parent="branch_start", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
-    )
-    source_objects = (
-        SourceObject(
-            object_id="1",
-            parent_id=None,
-            name="Trunk",
-            abs_translate=Vector3(0.0, 0.0, 0.0),
-            rel_translate=Vector3(0.0, 0.0, 0.0),
-            mesh=MeshData(
-                name="Trunk",
-                points=(Vector3(0.0, 0.0, 0.0),),
-                face_vertex_counts=(),
-                face_vertex_indices=(),
-                skel_joint_indices=(0, 1, 1),
-                skel_joint_weights=(1.0, 1.0, 1.0),
-                skel_element_size=1,
-            ),
-        ),
-        SourceObject(
-            object_id="2",
-            parent_id="1",
-            name="Branches_1",
-            abs_translate=Vector3(0.0, 0.0, 0.0),
-            rel_translate=Vector3(0.0, 0.0, 0.0),
-            mesh=MeshData(
-                name="Branches_1",
-                points=(Vector3(0.0, 0.0, 0.0),),
-                face_vertex_counts=(),
-                face_vertex_indices=(),
-                skel_joint_indices=(1, 1, 2, 2, 2, 3),
-                skel_joint_weights=(1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
-                skel_element_size=1,
-            ),
-        ),
-    )
-
-    dynamic_wind = build_dynamic_wind_data(skeleton, source_objects=source_objects)
     assignments = {assignment.joint_name: assignment.simulation_group_index for assignment in dynamic_wind.joint_assignments}
 
+    assert len(dynamic_wind.simulation_groups) == 3
+    assert dynamic_wind.simulation_groups[0].is_trunk_group is True
+    assert [group.branch_order for group in dynamic_wind.simulation_groups] == [0, 1, 2]
     assert assignments["root"] == 0
-    assert assignments["trunk_mid"] == 0
-    assert assignments["branch_start"] == 1
-    assert assignments["branch_tip"] == 0
+    assert assignments["trunk_1"] == 0
+    assert assignments["branch_1"] == 0
+    assert assignments["branch_1_main"] == 1
+    assert assignments["branch_2"] == 1
+    assert assignments["branch_2_main"] == 2
+    assert assignments["branch_3"] == 2
+    assert assignments["branch_4"] == 2
+
+
+def test_dynamic_wind_grouping_ignores_source_object_depth_hints() -> None:
+    skeleton = (
+        Joint(name="root", parent=None, bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(name="stem_a", parent="root", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(name="stem_b", parent="root", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(name="stem_a_tip", parent="stem_a", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(name="stem_b_tip", parent="stem_b", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(name="branch_a_1", parent="stem_a_tip", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        Joint(name="branch_a_2", parent="stem_a_tip", bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+    )
+    source_object = SourceObject(
+        object_id="1",
+        parent_id=None,
+        name="Trunk",
+        abs_translate=Vector3(0.0, 0.0, 0.0),
+        rel_translate=Vector3(0.0, 0.0, 0.0),
+        mesh=MeshData(
+            name="Trunk",
+            points=(Vector3(0.0, 0.0, 0.0),),
+            face_vertex_counts=(),
+            face_vertex_indices=(),
+            skel_joint_indices=(5, 5, 6, 6),
+            skel_joint_weights=(1.0, 1.0, 1.0, 1.0),
+            skel_element_size=1,
+        ),
+    )
+
+    without_hints = build_dynamic_wind_data(skeleton)
+    with_hints = build_dynamic_wind_data(skeleton, source_objects=(source_object,))
+
+    assert with_hints == without_hints
+    assignments = {assignment.joint_name: assignment.simulation_group_index for assignment in with_hints.joint_assignments}
+    assert assignments["root"] == 0
+    assert assignments["stem_a"] == 0
+    assert assignments["stem_b"] == 0
+    assert assignments["stem_a_tip"] == 0
+    assert assignments["stem_b_tip"] == 0
+    assert assignments["branch_a_1"] == 1
+    assert assignments["branch_a_2"] == 1
 
 
 def test_dynamic_wind_json_generation_writes_groups_and_respects_slider_values(tmp_path: Path) -> None:
@@ -280,7 +279,7 @@ def test_dynamic_wind_json_generation_writes_groups_and_respects_slider_values(t
     assert result.output_path == str(output_path)
     assert payload["Joints"]
     assert payload["SimulationGroups"]
-    assert payload["SimulationGroups"][0]["bIsTrunkGroup"] is True
+    assert payload["SimulationGroups"][0]["bIsTrunkGroup"] is False
     assert payload["SimulationGroups"][0]["Influence"] == pytest.approx(1.8)
     assert payload["SimulationGroups"][0]["ShiftTop"] == pytest.approx(0.15)
     assert payload["SimulationGroups"][1]["Influence"] == pytest.approx(1.2)
@@ -288,15 +287,24 @@ def test_dynamic_wind_json_generation_writes_groups_and_respects_slider_values(t
         assert payload["SimulationGroups"][2]["Influence"] == pytest.approx(1.2)
         assert payload["SimulationGroups"][2]["ShiftTop"] == pytest.approx(0.05)
     assert payload["bIsGroundCover"] is True
+    assert all(group["bIsTrunkGroup"] is False for group in payload["SimulationGroups"])
     assert payload["GustAttenuation"] == pytest.approx(0.6)
 
 
 def test_inspect_wind_data_uses_normalized_skeleton_hierarchy() -> None:
     dynamic_wind = inspect_wind_data(str(LEAFREFS_ON_BRANCH_LEVELS))
 
-    assert len(dynamic_wind.simulation_groups) == 4
+    assert len(dynamic_wind.simulation_groups) == 1
     assert dynamic_wind.simulation_groups[0].is_trunk_group is True
-    assert [group.branch_order for group in dynamic_wind.simulation_groups] == [0, 1, 2, 3]
+    assert [group.branch_order for group in dynamic_wind.simulation_groups] == [0]
+
+
+def test_inspect_wind_data_clears_trunk_groups_when_ground_cover_is_enabled() -> None:
+    dynamic_wind = inspect_wind_data(str(LEAFREFS_ON_BRANCH_LEVELS), is_ground_cover=True)
+
+    assert dynamic_wind.is_ground_cover is True
+    assert dynamic_wind.simulation_groups
+    assert all(group.is_trunk_group is False for group in dynamic_wind.simulation_groups)
 
 
 def test_base_tree_mesh_merges_trunk_and_branch_geometry_in_stage_space() -> None:
