@@ -22,7 +22,7 @@ The active baseline sample is:
 Current status:
 
 - UE accepts the generated baseline USDA as skeletal Nanite Assembly input
-- transform and visual fidelity still need refinement
+- the remaining v1 work is broader validation across multiple real tree, shrub, palm, and grass structures
 
 ## Commands
 

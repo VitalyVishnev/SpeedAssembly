@@ -54,10 +54,21 @@ The wind-group contract has also been validated on the attached grass sample:
 - when `Ground Cover` is enabled, every generated simulation group is emitted as non-trunk
 - legacy XML samples that do not provide usable generator levels are rejected by the wind path instead of being inferred
 
-One specific dead-end has been closed:
+The only remaining open item before `Phase 1` can be considered complete is broader validation on multiple real SpeedTree structures with different tree and grass shapes:
 
-- external `PartMesh` overrides now author a pure Unreal reference prototype instead of leaving inline low-poly `PartMesh` geometry in the same USDA branch
-- the first debug check for an ignored override is now the generated USDA text, not UE import settings
+- small shrub with one trunk
+- small shrub with multiple trunks
+- tree with multiple trunks growing directly from the ground
+- tree that starts as one trunk and later splits into two trunks
+- palm-like form with a long trunk and a crown of large leaves
+- tall branching grass
+- short grass
+- grass made from separate blades
+
+Grass should be checked in more than one authoring style:
+
+- clustered or bundled blades, with one bone per bundle if that is how the source is authored
+- a more detailed blade-level variant, if a real source export exists for that shape
 
 The standalone package build path has also been stabilized:
 
@@ -65,12 +76,16 @@ The standalone package build path has also been stabilized:
 - PyInstaller is also run with `--clean` so the package path does not reuse incremental analysis output from older runs
 - the previous "looks stuck" behavior was a stale-package-state problem, not a converter logic regression
 
-The project has not passed the final `Phase 1` quality gate yet:
+At this point, the earlier importer-facing concerns are treated as closed by the current validation set:
 
-- only one real SpeedTree XML sample is currently checked into the repository
-- transform fidelity still requires manual UE validation across more than one real export
-- texture/material fidelity still requires manual UE validation with real bark and leaf shaders
-- wind tuning still requires broader manual UE comparison against more than one reference tree
+- skeletal import path
+- naming contract
+- materials
+- wind JSON
+- external `PartMesh` reuse
+- transform and instance placement sanity on the currently tested samples
+
+The remaining acceptance criterion is breadth, not a known functional blocker.
 
 ## Phase 1 Definition Of Done
 
@@ -84,6 +99,7 @@ The project has not passed the final `Phase 1` quality gate yet:
 - automated regression fixtures cover the supported structural cases
 - optional reuse of existing Unreal `PartMesh` skeletal assets is available
 - mapping rules and importer-facing contract are documented
+- the converter has been validated on multiple real SpeedTree structures with meaningfully different tree, shrub, palm, and grass forms
 
 ## Expected workflow
 
@@ -126,11 +142,8 @@ Run this checklist for every real `Phase 1` sample:
 ## Current milestone sequence
 
 1. keep the baseline skeletal assembly path stable
-2. validate transform and rig fidelity across more real exports
-3. validate texture and material fidelity in UE
-4. keep optional external `PartMesh` reuse stable
-5. stabilize Dynamic Wind JSON behavior and document the observed UE contract
-6. only then generalize to later features such as UV modification
+2. validate the current contract on multiple real structural variants
+3. only then generalize to later features such as UV modification
 
 ## Troubleshooting shortcut
 
