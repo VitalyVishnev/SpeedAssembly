@@ -38,6 +38,15 @@ The project has also passed automated `Phase 1` regression coverage for:
 - mixed inline plus external `PartMesh` prototype resolution
 - separate Dynamic Wind JSON generation from the normalized skeleton
 
+The current naming contract used by the checked exports is:
+
+- output USDA files are named `<stem>.usda`
+- the base mesh prim uses the same `<stem>`
+- the base `SkelRoot` uses `<stem>_Geo`
+- the shared `Skeleton` uses `<stem>_Skeleton`
+- the skeleton name is not inferred from the first bone name
+- the XML source filename is not used to derive the main skeleton name
+
 The wind-group contract has also been validated on the attached grass sample:
 
 - `SkeletyalAssemblyTest_Grass.xml` now resolves to a single wind group under the explicit generator-level rule

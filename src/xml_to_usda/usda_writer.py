@@ -31,9 +31,35 @@ def render_usda(
         )
 
     resolved_base_mesh_name = make_stable_prim_name(base_mesh_name or contract.base_mesh_name, fallback=contract.base_mesh_name)
-    base_animation = _render_base_animation(model, contract)
-    base_mesh = _render_base_mesh(model, contract, resolved_base_mesh_name)
-    main_skeleton = _render_main_skeleton(model, contract)
+    resolved_base_skel_root_name = (
+        make_stable_prim_name(f"{resolved_base_mesh_name}_Geo", fallback=contract.base_skel_root_name)
+        if base_mesh_name
+        else contract.base_skel_root_name
+    )
+    resolved_skeleton_name = (
+        make_stable_prim_name(f"{resolved_base_mesh_name}_Skeleton", fallback=contract.skeleton_name)
+        if base_mesh_name
+        else contract.skeleton_name
+    )
+    resolved_base_animation_name = "animation" if base_mesh_name else contract.base_animation_name
+    resolved_base_joint_root_name = resolved_base_mesh_name if base_mesh_name else None
+    base_animation = _render_base_animation(model, resolved_base_animation_name, resolved_base_joint_root_name)
+    base_mesh = _render_base_mesh(
+        model,
+        contract,
+        resolved_base_mesh_name,
+        resolved_base_skel_root_name,
+        resolved_skeleton_name,
+        resolved_base_joint_root_name,
+    )
+    main_skeleton = _render_main_skeleton(
+        model,
+        contract,
+        resolved_base_skel_root_name,
+        resolved_base_animation_name,
+        resolved_skeleton_name,
+        resolved_base_joint_root_name,
+    )
     point_instancer = _render_point_instancer(model, contract)
     materials = _render_materials_scope(model.materials, contract.root_prim_name)
     prototype_library = (
@@ -48,19 +74,19 @@ def render_usda(
     upAxis = "{contract.stage_up_axis}"
 )
 
-def Xform "{contract.root_prim_name}" (
-    prepend apiSchemas = ["{contract.root_api}"]
-    kind = "{contract.root_kind}"
+    def Xform "{contract.root_prim_name}" (
+        prepend apiSchemas = ["{contract.root_api}"]
+        kind = "{contract.root_kind}"
 )
 {{
     uniform token {contract.mesh_type_attr} = "{contract.mesh_type_value}"
-    {contract.skeleton_relationship_attr}
+    {('custom rel' if base_mesh_name else 'rel')} unreal:naniteAssembly:skeleton = </{contract.root_prim_name}/{resolved_base_skel_root_name}/{resolved_skeleton_name}>
 
 {_indent(materials, 1)}
 
 {_indent(prototype_library, 1)}
 
-    def SkelRoot "{contract.base_skel_root_name}" (
+    def SkelRoot "{resolved_base_skel_root_name}" (
         kind = "component"
     )
     {{
@@ -136,12 +162,19 @@ def _render_geom_subset(section: MeshSection) -> str:
 }}'''
 
 
-def _render_base_mesh(model: CanonicalTreeModel, contract: UeSchemaContract, base_mesh_name: str) -> str:
+def _render_base_mesh(
+    model: CanonicalTreeModel,
+    contract: UeSchemaContract,
+    base_mesh_name: str,
+    base_skel_root_name: str,
+    skeleton_name: str,
+    base_joint_root_name: str | None,
+) -> str:
     if model.base_mesh is None:
         raise ValueError("Base skeletal tree mesh is required before USDA authoring.")
 
     mesh = model.base_mesh
-    joint_paths = _render_joint_paths(model)
+    joint_paths = _render_joint_paths(model, root_joint_name=base_joint_root_name)
     joint_indices = ", ".join(str(index) for index in mesh.skel_joint_indices)
     joint_weights = ", ".join(f"{weight:g}" for weight in mesh.skel_joint_weights)
     skinning = ""
@@ -164,34 +197,41 @@ def _render_base_mesh(model: CanonicalTreeModel, contract: UeSchemaContract, bas
 {{
     uniform token[] skel:joints = [{joint_paths}]
     uniform matrix4d primvars:skel:geomBindTransform = {_identity_matrix()}
-    append rel skel:skeleton = {contract.main_skeleton_path}
+    append rel skel:skeleton = </{contract.root_prim_name}/{base_skel_root_name}/{skeleton_name}>
     uniform token subdivisionScheme = "none"
 {_indent(material_binding, 1)}
     {_render_mesh_payload(mesh, contract.mesh_orientation)}{skinning}
 }}'''
 
 
-def _render_main_skeleton(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
-    return f'''def Skeleton "{contract.skeleton_name}" (
+def _render_main_skeleton(
+    model: CanonicalTreeModel,
+    contract: UeSchemaContract,
+    base_skel_root_name: str,
+    base_animation_name: str,
+    skeleton_name: str,
+    base_joint_root_name: str | None,
+) -> str:
+    return f'''def Skeleton "{skeleton_name}" (
     prepend apiSchemas = ["{contract.skel_binding_api}"]
 )
 {{
     uniform matrix4d[] bindTransforms = [{_render_bind_transforms(model)}]
-    uniform token[] jointNames = [{_render_joint_basenames(model)}]
-    uniform token[] joints = [{_render_joint_paths(model)}]
+    uniform token[] jointNames = [{_render_joint_basenames(model, root_joint_name=base_joint_root_name)}]
+    uniform token[] joints = [{_render_joint_paths(model, root_joint_name=base_joint_root_name)}]
     uniform token purpose = "guide"
     uniform matrix4d[] restTransforms = [{_render_rest_transforms(model)}]
-    append rel skel:animationSource = {contract.base_animation_path}
+    append rel skel:animationSource = </{contract.root_prim_name}/{base_skel_root_name}/{base_animation_name}>
     uniform token visibility = "invisible"
 }}'''
 
 
-def _render_base_animation(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
-    joints = _render_joint_paths(model)
+def _render_base_animation(model: CanonicalTreeModel, animation_name: str, root_joint_name: str | None) -> str:
+    joints = _render_joint_paths(model, root_joint_name=root_joint_name)
     rotations = ", ".join(_identity_quaternion() for _ in model.skeleton)
     scales = ", ".join("(1, 1, 1)" for _ in model.skeleton)
     translations = _render_joint_rest_translations(model)
-    return f'''def SkelAnimation "{contract.base_animation_name}"
+    return f'''def SkelAnimation "{animation_name}"
 {{
     uniform token[] joints = [{joints}]
     quath[] rotations = [{rotations}]
@@ -215,12 +255,13 @@ def _render_library_prototype(prototype: Prototype, contract: UeSchemaContract) 
         raise ValueError(f"Prototype {prototype.identity.prim_name} is missing mesh payload.")
 
     material_binding = _render_material_binding(prototype.mesh)
+    part_mesh_name = make_stable_prim_name(prototype.identity.prim_name, fallback=contract.part_mesh_name)
     return f'''    def Xform "{prototype.identity.prim_name}" (
         kind = "component"
     )
     {{
         token visibility = "invisible"
-        def Mesh "{contract.base_mesh_name}"
+        def Mesh "{part_mesh_name}"
         {{
             uniform token subdivisionScheme = "none"
 {_indent(material_binding, 3)}
@@ -344,6 +385,7 @@ def _render_inline_instancer_prototype(prototype: Prototype, contract: UeSchemaC
         raise ValueError(f"Prototype {prototype.identity.prim_name} is missing mesh payload.")
 
     name = prototype.identity.prim_name
+    part_mesh_name = make_stable_prim_name(name, fallback=contract.part_mesh_name)
     skinning = _render_single_joint_skinning(prototype.mesh, contract)
     material_binding = _render_material_binding(prototype.mesh)
     return f'''        def Xform "{name}"
@@ -360,7 +402,7 @@ def _render_inline_instancer_prototype(prototype: Prototype, contract: UeSchemaC
                     float3[] translations = [(0, 0, 0)]
                 }}
 
-                def Mesh "{contract.part_mesh_name}" (
+                def Mesh "{part_mesh_name}" (
                     prepend apiSchemas = ["{contract.skel_binding_api}"]
                 )
                 {{
@@ -525,13 +567,13 @@ def _clamp_material_channel(value: str | None) -> float:
     return max(0.0, min(1.0, numeric))
 
 
-def _render_joint_paths(model: CanonicalTreeModel) -> str:
-    path_map = _build_joint_path_map(model)
+def _render_joint_paths(model: CanonicalTreeModel, root_joint_name: str | None = None) -> str:
+    path_map = _build_joint_path_map(model, root_joint_name=root_joint_name)
     return ", ".join(f'"{path_map[joint.name]}"' for joint in model.skeleton)
 
 
-def _render_joint_basenames(model: CanonicalTreeModel) -> str:
-    return ", ".join(f'"{joint.name}"' for joint in model.skeleton)
+def _render_joint_basenames(model: CanonicalTreeModel, root_joint_name: str | None = None) -> str:
+    return ", ".join(f'"{_joint_render_name(joint, root_joint_name)}"' for joint in model.skeleton)
 
 
 def _render_joint_rest_translations(model: CanonicalTreeModel) -> str:
@@ -579,7 +621,7 @@ def _indent(value: str, level: int) -> str:
     return "\n".join(f"{prefix}{line}" if line else "" for line in value.splitlines())
 
 
-def _build_joint_path_map(model: CanonicalTreeModel) -> dict[str, str]:
+def _build_joint_path_map(model: CanonicalTreeModel, root_joint_name: str | None = None) -> dict[str, str]:
     joints_by_name = {joint.name: joint for joint in model.skeleton}
     path_map: dict[str, str] = {}
 
@@ -588,14 +630,20 @@ def _build_joint_path_map(model: CanonicalTreeModel) -> dict[str, str]:
             return path_map[name]
         joint = joints_by_name[name]
         if joint.parent is None:
-            path_map[name] = joint.name
+            path_map[name] = _joint_render_name(joint, root_joint_name)
         else:
-            path_map[name] = f"{resolve(joint.parent)}/{joint.name}"
+            path_map[name] = f"{resolve(joint.parent)}/{_joint_render_name(joint, root_joint_name)}"
         return path_map[name]
 
     for joint in model.skeleton:
         resolve(joint.name)
     return path_map
+
+
+def _joint_render_name(joint, root_joint_name: str | None) -> str:
+    if root_joint_name and joint.parent is None:
+        return root_joint_name
+    return joint.name
 
 
 def _identity_matrix() -> str:

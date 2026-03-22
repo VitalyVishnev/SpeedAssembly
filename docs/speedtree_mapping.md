@@ -121,7 +121,11 @@ Current vertex-color override for instanced part prototypes:
 
 Naming policy:
 
-- base mesh prim names come from the chosen output USDA file stem
+- the generated USDA filename is the canonical authored asset name for the base skeletal tree
+- the base mesh prim name comes from the chosen output USDA file stem
+- the main skeleton prim name comes from the same output USDA file stem with `_Skeleton` appended
+- the base `SkelRoot` comes from the same output USDA file stem with `_Geo` appended
+- the XML source filename is not used to derive the skeleton name
 - part prototype prim names come from `Meshes/Mesh/@Name`
 - when two prototype names collide after USD-safe sanitization, deterministic suffixes are appended in input order
 

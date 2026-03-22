@@ -137,6 +137,22 @@ def test_convert_file_uses_output_path_stem_for_base_mesh_name(tmp_path: Path) -
     assert result.output_path == str(output_path)
     assert result.usda_document is not None
     assert 'def Mesh "SkeletalAssemblyTest_03_14mil_namedGroups"' in result.usda_document.text
+    assert 'def Skeleton "SkeletalAssemblyTest_03_14mil_namedGroups_Skeleton"' in result.usda_document.text
+    assert 'uniform token[] jointNames = ["SkeletalAssemblyTest_03_14mil_namedGroups"' in result.usda_document.text
+    assert 'uniform token[] joints = ["SkeletalAssemblyTest_03_14mil_namedGroups"' in result.usda_document.text
+    assert (
+        'custom rel unreal:naniteAssembly:skeleton = '
+        '</Tree/SkeletalAssemblyTest_03_14mil_namedGroups_Geo/SkeletalAssemblyTest_03_14mil_namedGroups_Skeleton>'
+        in result.usda_document.text
+    )
+    assert 'def SkelRoot "SkeletalAssemblyTest_03_14mil_namedGroups_Geo"' in result.usda_document.text
+    assert 'def SkelAnimation "animation"' in result.usda_document.text
+    assert 'uniform token[] joints = ["SkeletalAssemblyTest_03_14mil_namedGroups"' in result.usda_document.text
+    assert (
+        'append rel skel:animationSource = '
+        '</Tree/SkeletalAssemblyTest_03_14mil_namedGroups_Geo/animation>'
+        in result.usda_document.text
+    )
 
 
 def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

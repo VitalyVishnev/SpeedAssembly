@@ -884,7 +884,8 @@ def test_usda_output_contains_ue_first_structure() -> None:
     assert 'def Xform "Twig_01"' in usda.text
     assert 'def Xform "Twig_02"' in usda.text
     assert 'def SkelRoot "PartSkelRoot"' in usda.text
-    assert 'def Mesh "PartMesh"' in usda.text
+    assert 'def Mesh "Twig_01"' in usda.text
+    assert 'def Mesh "Twig_02"' in usda.text
     assert 'def Skeleton "PartSkeleton"' in usda.text
     bind_joints_payload = _slice_between(
         usda.text,
@@ -1085,7 +1086,7 @@ def test_generated_usda_tracks_reference_contract_without_houdini_only_fields() 
     assert 'string primvars:pCaptSkelRoot' not in usda.text
     assert 'NaniteAssemblyExternalRefAPI' not in usda.text
     assert 'def SkelRoot "PartSkelRoot"' in usda.text
-    assert 'def Mesh "PartMesh"' in usda.text
+    assert 'def Mesh "Twig_01"' in usda.text
     assert 'def Skeleton "PartSkeleton"' in usda.text
 
 

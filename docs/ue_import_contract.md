@@ -39,6 +39,29 @@ The current validated structure is:
   - do not keep an inline `Mesh` payload for the same prototype
   - the USDA should show `NaniteAssemblyExternalRefAPI` and `unreal:naniteAssembly:meshAssetPath`, but not a fallback `PartMesh` geometry subtree for that prototype
 
+## File And Prim Naming
+
+Generated filenames and the base skeletal prim names are intentionally linked.
+
+For exported USDA files:
+
+- the generated file name is `<stem>.usda`
+- the `stem` of the output USDA file is the canonical authored name for the base skeletal tree
+- the base mesh prim name uses that stem directly
+- the base `SkelRoot` uses `<stem>_Geo`
+- the shared `Skeleton` uses `<stem>_Skeleton`
+- the base `SkelAnimation` remains `animation`
+- the assembly root prim stays contract-driven, usually `Tree`, and is not derived from the output filename
+
+This is the naming rule used by the converter when an explicit output path is provided.
+It is not derived from the first bone name, and it is not derived from the XML source filename.
+
+For example, if the output file is `SkeletyalAssemblyTest_Spruce_Big_low_twoTrunkGenerators.usda`, the base skeletal prims are authored as:
+
+- `def Mesh "SkeletyalAssemblyTest_Spruce_Big_low_twoTrunkGenerators"`
+- `def SkelRoot "SkeletyalAssemblyTest_Spruce_Big_low_twoTrunkGenerators_Geo"`
+- `def Skeleton "SkeletyalAssemblyTest_Spruce_Big_low_twoTrunkGenerators_Skeleton"`
+
 Conceptually:
 
 - `Base Skeletal Tree` = all unique tree geometry
