@@ -12,3 +12,4 @@ _pyi_*.py
 _smoke*/
 vault/
 samples/speedtree/simple_tree/variants/*.usda
+samples/speedtree/BigSpruce/

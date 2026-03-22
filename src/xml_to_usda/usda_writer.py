@@ -14,6 +14,7 @@ from .models import (
     UsdAssemblyDocument,
     ValidationIssue,
 )
+from .naming import make_stable_prim_name
 from .ue_schema import DEFAULT_UE_SCHEMA_CONTRACT, UeSchemaContract
 
 
@@ -21,6 +22,7 @@ def render_usda(
     model: CanonicalTreeModel,
     diagnostics: tuple[ValidationIssue, ...],
     contract: UeSchemaContract = DEFAULT_UE_SCHEMA_CONTRACT,
+    base_mesh_name: str | None = None,
 ) -> UsdAssemblyDocument:
     error_codes = [issue.code for issue in diagnostics if issue.severity == "error"]
     if error_codes:
@@ -28,8 +30,9 @@ def render_usda(
             "Cannot author USDA while validation errors are present: " + ", ".join(sorted(dict.fromkeys(error_codes)))
         )
 
+    resolved_base_mesh_name = make_stable_prim_name(base_mesh_name or contract.base_mesh_name, fallback=contract.base_mesh_name)
     base_animation = _render_base_animation(model, contract)
-    base_mesh = _render_base_mesh(model, contract)
+    base_mesh = _render_base_mesh(model, contract, resolved_base_mesh_name)
     main_skeleton = _render_main_skeleton(model, contract)
     point_instancer = _render_point_instancer(model, contract)
     materials = _render_materials_scope(model.materials, contract.root_prim_name)
@@ -133,7 +136,7 @@ def _render_geom_subset(section: MeshSection) -> str:
 }}'''
 
 
-def _render_base_mesh(model: CanonicalTreeModel, contract: UeSchemaContract) -> str:
+def _render_base_mesh(model: CanonicalTreeModel, contract: UeSchemaContract, base_mesh_name: str) -> str:
     if model.base_mesh is None:
         raise ValueError("Base skeletal tree mesh is required before USDA authoring.")
 
@@ -155,7 +158,7 @@ def _render_base_mesh(model: CanonicalTreeModel, contract: UeSchemaContract) -> 
     {contract.skinning_method_attr} = "{contract.skinning_method_value}"'''
     material_binding = _render_material_binding(mesh)
 
-    return f'''def Mesh "{contract.base_mesh_name}" (
+    return f'''def Mesh "{base_mesh_name}" (
     prepend apiSchemas = ["{contract.skel_binding_api}"]
 )
 {{

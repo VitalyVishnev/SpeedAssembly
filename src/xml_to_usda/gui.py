@@ -33,9 +33,10 @@ class ConversionApp:
         self._sections: dict[str, dict[str, object]] = {}
         self._part_mesh_rows: list[dict[str, object]] = []
         self._wind_group_rows: list[dict[str, object]] = []
-        self._persisted_wind_group_settings: dict[str, dict[str, float]] = {}
+        self._persisted_wind_group_settings: dict[str, dict[str, object]] = {}
         self._persisted_part_mesh_settings_by_input_path: dict[str, list[dict[str, object]]] = {}
         self._current_part_mesh_settings_key: str | None = None
+        self._pending_settings_save_job: str | None = None
         self._suspend_settings_save = False
         self._load_settings()
 
@@ -570,6 +571,12 @@ class ConversionApp:
             self.refresh_wind_groups()
 
     def _handle_window_close(self) -> None:
+        if self._pending_settings_save_job is not None:
+            try:
+                self.root.after_cancel(self._pending_settings_save_job)
+            except tk.TclError:
+                pass
+            self._pending_settings_save_job = None
         self._save_settings()
         self.root.destroy()
 
@@ -618,6 +625,12 @@ class ConversionApp:
 
     def _save_settings(self) -> None:
         try:
+            if self._pending_settings_save_job is not None:
+                try:
+                    self.root.after_cancel(self._pending_settings_save_job)
+                except tk.TclError:
+                    pass
+                self._pending_settings_save_job = None
             self.SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
             part_mesh_settings_by_input_path = dict(self._persisted_part_mesh_settings_by_input_path)
             current_part_mesh_settings = self._serialize_part_mesh_settings()
@@ -660,16 +673,22 @@ class ConversionApp:
             )
         return serialized
 
-    def _serialize_wind_group_settings(self) -> dict[str, dict[str, float]]:
+    def _serialize_wind_group_settings(self) -> dict[str, dict[str, object]]:
         if not self._wind_group_rows:
             return dict(self._persisted_wind_group_settings)
-        serialized: dict[str, dict[str, float]] = {}
+        serialized: dict[str, dict[str, object]] = {}
         for row in self._wind_group_rows:
             group_index = int(row["group_index"])
+            dual_influence_var = row["dual_influence_var"]
             influence_var = row["influence_var"]
+            min_influence_var = row["min_influence_var"]
+            max_influence_var = row["max_influence_var"]
             shift_var = row["shift_var"]
             serialized[str(group_index)] = {
+                "use_dual_influence": bool(dual_influence_var.get()),
                 "influence": round(float(influence_var.get()), 4),
+                "min_influence": round(float(min_influence_var.get()), 4),
+                "max_influence": round(float(max_influence_var.get()), 4),
                 "shift_top": round(float(shift_var.get()), 4),
             }
         self._persisted_wind_group_settings = serialized
@@ -692,49 +711,115 @@ class ConversionApp:
             return
 
         for row_index, group in enumerate(groups):
-            title = f"Group {group.group_index} ({'Trunk' if group.is_trunk_group else f'Generator level {group.branch_order}'})"
-            ttk.Label(self.wind_groups_container, text=title).grid(row=row_index * 2, column=0, sticky="w", pady=(4, 0))
+            group_frame = ttk.Frame(self.wind_groups_container, padding=(0, 6, 0, 10))
+            group_frame.grid(row=row_index, column=0, sticky="ew")
+            group_frame.columnconfigure(0, weight=1)
+            group_frame.columnconfigure(1, weight=1)
 
-            influence_var = tk.DoubleVar(value=self._persisted_group_value(group.group_index, "influence", group.influence))
+            header = ttk.Frame(group_frame)
+            header.grid(row=0, column=0, columnspan=2, sticky="ew")
+            header.columnconfigure(0, weight=1)
+
+            title = f"Group {group.group_index} ({'Trunk' if group.is_trunk_group else f'Generator level {group.branch_order}'})"
+            ttk.Label(header, text=title).grid(row=0, column=0, sticky="w")
+
+            persisted_dual_influence = self._persisted_group_bool(
+                group.group_index, "use_dual_influence", group.use_dual_influence
+            )
+            dual_influence_var = tk.BooleanVar(value=persisted_dual_influence)
+            dual_check = ttk.Checkbutton(header, text="Dual Influence", variable=dual_influence_var)
+            dual_check.grid(row=0, column=1, sticky="e")
+
+            single_frame = ttk.Frame(group_frame)
+            single_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+            single_frame.columnconfigure(1, weight=1)
+            influence_default = self._persisted_group_value(group.group_index, "influence", group.influence)
+            influence_var = tk.DoubleVar(value=influence_default)
             influence_value_var = tk.StringVar(value=f"{influence_var.get():.2f}")
-            tk.Scale(
-                self.wind_groups_container,
+            influence_scale = tk.Scale(
+                single_frame,
                 from_=0.0,
                 to=self.MAX_WIND_INFLUENCE,
                 resolution=0.05,
                 orient="horizontal",
                 variable=influence_var,
                 command=lambda value, value_var=influence_value_var: self._handle_scale_change(value, value_var),
-            ).grid(row=row_index * 2, column=1, sticky="ew", padx=(12, 12), pady=(4, 0))
-            ttk.Label(self.wind_groups_container, textvariable=influence_value_var, width=6).grid(
-                row=row_index * 2, column=2, sticky="e", pady=(4, 0)
+            )
+            ttk.Label(single_frame, text="Influence").grid(row=0, column=0, sticky="w")
+            influence_scale.grid(row=0, column=1, sticky="ew", padx=(12, 12))
+            ttk.Label(single_frame, textvariable=influence_value_var, width=6).grid(row=0, column=2, sticky="e")
+
+            dual_frame = ttk.Frame(group_frame)
+            dual_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+            dual_frame.columnconfigure(1, weight=1)
+            min_influence_default = self._persisted_group_value(group.group_index, "min_influence", group.min_influence)
+            max_influence_default = self._persisted_group_value(
+                group.group_index, "max_influence", group.max_influence if group.max_influence else influence_default
+            )
+            min_influence_var = tk.DoubleVar(value=min_influence_default)
+            min_influence_value_var = tk.StringVar(value=f"{min_influence_var.get():.2f}")
+            min_influence_scale = tk.Scale(
+                dual_frame,
+                from_=0.0,
+                to=self.MAX_WIND_INFLUENCE,
+                resolution=0.01,
+                orient="horizontal",
+                variable=min_influence_var,
+                command=lambda value, value_var=min_influence_value_var: self._handle_scale_change(value, value_var),
+            )
+            ttk.Label(dual_frame, text="Min Influence").grid(row=0, column=0, sticky="w")
+            min_influence_scale.grid(row=0, column=1, sticky="ew", padx=(12, 12))
+            ttk.Label(dual_frame, textvariable=min_influence_value_var, width=6).grid(row=0, column=2, sticky="e")
+
+            max_influence_var = tk.DoubleVar(value=max_influence_default)
+            max_influence_value_var = tk.StringVar(value=f"{max_influence_var.get():.2f}")
+            max_influence_scale = tk.Scale(
+                dual_frame,
+                from_=0.0,
+                to=self.MAX_WIND_INFLUENCE,
+                resolution=0.01,
+                orient="horizontal",
+                variable=max_influence_var,
+                command=lambda value, value_var=max_influence_value_var: self._handle_scale_change(value, value_var),
+            )
+            ttk.Label(dual_frame, text="Max Influence").grid(row=1, column=0, sticky="w")
+            max_influence_scale.grid(row=1, column=1, sticky="ew", padx=(12, 12), pady=(6, 0))
+            ttk.Label(dual_frame, textvariable=max_influence_value_var, width=6).grid(
+                row=1, column=2, sticky="e", pady=(6, 0)
             )
 
             shift_var = tk.DoubleVar(value=self._persisted_group_value(group.group_index, "shift_top", group.shift_top))
             shift_value_var = tk.StringVar(value=f"{shift_var.get():.2f}")
-            ttk.Label(self.wind_groups_container, text="Shift Top").grid(row=row_index * 2 + 1, column=0, sticky="w")
-            tk.Scale(
-                self.wind_groups_container,
+            shift_scale = tk.Scale(
+                dual_frame,
                 from_=0.0,
                 to=self.MAX_SHIFT_TOP,
                 resolution=0.01,
                 orient="horizontal",
                 variable=shift_var,
                 command=lambda value, value_var=shift_value_var: self._handle_scale_change(value, value_var),
-            ).grid(row=row_index * 2 + 1, column=1, sticky="ew", padx=(12, 12), pady=(0, 4))
-            ttk.Label(self.wind_groups_container, textvariable=shift_value_var, width=6).grid(
-                row=row_index * 2 + 1, column=2, sticky="e", pady=(0, 4)
+            )
+            ttk.Label(dual_frame, text="Shift Top").grid(row=2, column=0, sticky="w")
+            shift_scale.grid(row=2, column=1, sticky="ew", padx=(12, 12), pady=(6, 0))
+            ttk.Label(dual_frame, textvariable=shift_value_var, width=6).grid(
+                row=2, column=2, sticky="e", pady=(6, 0)
             )
 
-            self._wind_group_rows.append(
-                {
-                    "group_index": group.group_index,
-                    "branch_order": group.branch_order,
-                    "is_trunk_group": group.is_trunk_group,
-                    "influence_var": influence_var,
-                    "shift_var": shift_var,
-                }
-            )
+            row_data = {
+                "group_index": group.group_index,
+                "branch_order": group.branch_order,
+                "is_trunk_group": group.is_trunk_group,
+                "influence_var": influence_var,
+                "shift_var": shift_var,
+                "dual_influence_var": dual_influence_var,
+                "min_influence_var": min_influence_var,
+                "max_influence_var": max_influence_var,
+                "single_frame": single_frame,
+                "dual_frame": dual_frame,
+            }
+            self._wind_group_rows.append(row_data)
+            dual_influence_var.trace_add("write", lambda *_args, row=row_data: self._handle_wind_group_mode_change(row))
+            self._apply_wind_group_mode(row_data)
 
         self._save_settings()
 
@@ -748,6 +833,34 @@ class ConversionApp:
         maximum = self.MAX_SHIFT_TOP if field_name == "shift_top" else self.MAX_WIND_INFLUENCE
         return max(0.0, min(numeric_value, maximum))
 
+    def _persisted_group_bool(self, group_index: int, field_name: str, default: bool) -> bool:
+        persisted = self._persisted_wind_group_settings.get(str(group_index), {})
+        value = persisted.get(field_name, default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "on"}:
+                return True
+            if normalized in {"false", "0", "no", "off"}:
+                return False
+        return bool(value)
+
+    def _handle_wind_group_mode_change(self, row: dict[str, object]) -> None:
+        self._apply_wind_group_mode(row)
+        self._schedule_settings_save()
+
+    def _apply_wind_group_mode(self, row: dict[str, object]) -> None:
+        dual_influence = bool(row["dual_influence_var"].get())
+        self._set_frame_visible(row["single_frame"], not dual_influence)
+        self._set_frame_visible(row["dual_frame"], dual_influence)
+
+    def _set_frame_visible(self, frame: ttk.Frame, visible: bool) -> None:
+        if visible:
+            frame.grid()
+        else:
+            frame.grid_remove()
+
     def _collect_wind_group_settings(self) -> tuple[DynamicWindSimulationGroup, ...]:
         return tuple(
             DynamicWindSimulationGroup(
@@ -756,16 +869,33 @@ class ConversionApp:
                 influence=float(row["influence_var"].get()),
                 shift_top=float(row["shift_var"].get()),
                 is_trunk_group=bool(row["is_trunk_group"]),
+                use_dual_influence=bool(row["dual_influence_var"].get()),
+                min_influence=float(row["min_influence_var"].get()),
+                max_influence=float(row["max_influence_var"].get()),
             )
             for row in self._wind_group_rows
         )
 
     def _handle_gust_change(self, value: float) -> None:
         self.gust_value_var.set(f"{value:.2f}")
-        self._save_settings()
+        self._schedule_settings_save()
 
     def _handle_scale_change(self, value: str, value_var: tk.StringVar) -> None:
         value_var.set(f"{float(value):.2f}")
+        self._schedule_settings_save()
+
+    def _schedule_settings_save(self) -> None:
+        if self._suspend_settings_save:
+            return
+        if self._pending_settings_save_job is not None:
+            try:
+                self.root.after_cancel(self._pending_settings_save_job)
+            except tk.TclError:
+                pass
+        self._pending_settings_save_job = self.root.after(150, self._flush_scheduled_settings_save)
+
+    def _flush_scheduled_settings_save(self) -> None:
+        self._pending_settings_save_job = None
         self._save_settings()
 
 
@@ -815,8 +945,9 @@ def format_wind_group_summary(dynamic_wind) -> str:
             1 for assignment in dynamic_wind.joint_assignments if assignment.simulation_group_index == group.group_index
         )
         label = "Trunk" if group.is_trunk_group else f"Generator level {group.branch_order}"
+        mode = "Dual" if group.use_dual_influence else "Single"
         lines.append(
-            f"Group {group.group_index}: {label}, branch_order={group.branch_order}, joints={joint_count}"
+            f"Group {group.group_index}: {label}, branch_order={group.branch_order}, joints={joint_count}, mode={mode}"
         )
     return "\n".join(lines)
 
@@ -832,8 +963,15 @@ def format_wind_json_result(result) -> str:
         "",
     ]
     for group in result.dynamic_wind.simulation_groups:
+        mode = "dual" if group.use_dual_influence else "single"
+        influence_info = (
+            f"min={group.min_influence:.2f}, max={group.max_influence:.2f}"
+            if group.use_dual_influence
+            else f"influence={group.influence:.2f}"
+        )
+        shift_top = group.shift_top if group.use_dual_influence else 0.0
         lines.append(
-            f"Group {group.group_index}: level={group.branch_order}, influence={group.influence:.2f}, shiftTop={group.shift_top:.2f}, trunk={group.is_trunk_group}"
+            f"Group {group.group_index}: mode={mode}, level={group.branch_order}, {influence_info}, shiftTop={shift_top:.2f}, trunk={group.is_trunk_group}"
         )
     return "\n".join(lines)
 

@@ -36,6 +36,12 @@ def test_prototype_identities_are_deterministic_and_unique() -> None:
     assert [identity.prim_name for identity in identities] == ["Leaf_A", "Leaf_A_2", "Leaf_A_3"]
 
 
+def test_prototype_identities_use_display_names_and_suffix_collisions() -> None:
+    identities = build_prototype_identities(("Mesh_1", "Mesh_2", "Mesh_3"), ("Aspen Twig", "Aspen Twig", "Aspen_Twig"))
+
+    assert [identity.prim_name for identity in identities] == ["Aspen_Twig", "Aspen_Twig_2", "Aspen_Twig_3"]
+
+
 def test_generated_outputs_cannot_be_written_into_vault() -> None:
     output_path = REPO_ROOT / "vault" / "notes" / "illegal_output.usda"
 
@@ -122,6 +128,15 @@ def test_convert_file_applies_baseline_material_overrides(tmp_path: Path) -> Non
     assert 'token outputs:unreal:surface.connect = </Tree/Materials/Material_2_2/Material_2_2_unreal_shader.outputs:out>' in result.usda_document.text
     assert 'uniform asset info:unreal:sourceAsset = @/Game/TestMaterials/M_Bark_Test.M_Bark_Test@' in result.usda_document.text
     assert 'uniform asset info:unreal:sourceAsset = @/Game/TestMaterials/M_Leaves_Test.M_Leaves_Test@' in result.usda_document.text
+
+
+def test_convert_file_uses_output_path_stem_for_base_mesh_name(tmp_path: Path) -> None:
+    output_path = tmp_path / "SkeletalAssemblyTest_03_14mil_namedGroups.usda"
+    result = convert_file(str(SIMPLE_TREE_01), str(output_path))
+
+    assert result.output_path == str(output_path)
+    assert result.usda_document is not None
+    assert 'def Mesh "SkeletalAssemblyTest_03_14mil_namedGroups"' in result.usda_document.text
 
 
 def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -251,7 +266,7 @@ def test_gui_run_conversion_passes_part_mesh_xml_names(
         root.destroy()
 
 
-def test_gui_refresh_wind_groups_builds_slider_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gui_refresh_wind_groups_builds_slider_rows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _, root = _build_tk_root_or_skip()
     from xml_to_usda.gui import ConversionApp
 
@@ -270,6 +285,8 @@ def test_gui_refresh_wind_groups_builds_slider_rows(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda _input_path, is_ground_cover=False: dynamic_wind)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
 
     try:
         app = ConversionApp(root)
@@ -280,6 +297,9 @@ def test_gui_refresh_wind_groups_builds_slider_rows(monkeypatch: pytest.MonkeyPa
         assert len(app._wind_group_rows) == 3
         assert app._wind_group_rows[0]["group_index"] == 0
         assert app._wind_group_rows[1]["group_index"] == 1
+        assert app._wind_group_rows[0]["dual_influence_var"].get()
+        assert app._wind_group_rows[0]["single_frame"].winfo_manager() == ""
+        assert app._wind_group_rows[0]["dual_frame"].winfo_manager() == "grid"
     finally:
         root.destroy()
 
@@ -326,9 +346,14 @@ def test_gui_generate_wind_json_uses_slider_values(monkeypatch: pytest.MonkeyPat
         app.input_var.set(str(SIMPLE_TREE_01))
         app.output_var.set("out.usda")
         app.refresh_wind_groups()
+        app._wind_group_rows[0]["dual_influence_var"].set(False)
+        assert app._wind_group_rows[0]["single_frame"].winfo_manager() == "grid"
+        assert app._wind_group_rows[0]["dual_frame"].winfo_manager() == ""
         app._wind_group_rows[0]["influence_var"].set(0.7)
         app._wind_group_rows[0]["shift_var"].set(0.2)
-        app._wind_group_rows[1]["influence_var"].set(0.55)
+        app._wind_group_rows[1]["dual_influence_var"].set(True)
+        app._wind_group_rows[1]["min_influence_var"].set(0.25)
+        app._wind_group_rows[1]["max_influence_var"].set(0.55)
         app._wind_group_rows[1]["shift_var"].set(0.05)
         app.gust_attenuation_var.set(0.6)
         app.is_ground_cover_var.set(True)
@@ -338,9 +363,12 @@ def test_gui_generate_wind_json_uses_slider_values(monkeypatch: pytest.MonkeyPat
         assert calls
         assert calls[0][0] == str(SIMPLE_TREE_01)
         assert calls[0][1] == "out_DynamicWind.json"
+        assert calls[0][2][0].use_dual_influence is False
         assert calls[0][2][0].influence == pytest.approx(0.7)
         assert calls[0][2][0].shift_top == pytest.approx(0.2)
-        assert calls[0][2][1].influence == pytest.approx(0.55)
+        assert calls[0][2][1].use_dual_influence is True
+        assert calls[0][2][1].min_influence == pytest.approx(0.25)
+        assert calls[0][2][1].max_influence == pytest.approx(0.55)
         assert calls[0][3] == pytest.approx(0.6)
         assert calls[0][4] is True
     finally:
@@ -443,14 +471,15 @@ def test_gui_part_mesh_settings_do_not_cross_contaminate_between_xml_files(
     _, root = _build_tk_root_or_skip()
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
     monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
-    other_xml = Path(__file__).resolve().parents[1] / "references" / "speedtree" / "xml" / "SkeletyalAssemblyTest_01.xml"
+    other_xml = Path(__file__).parent / "data" / "leafrefs_on_branch_levels.xml"
 
     try:
         app = ConversionApp(root)
         app.input_var.set(str(other_xml))
+        app._handle_source_path_change()
 
-        assert len(app._part_mesh_rows) == 1
-        assert app._part_mesh_rows[0]["source_name"] == "Suzanne_Leaf"
+        assert len(app._part_mesh_rows) >= 1
+        assert all(row["asset_var"].get() == "" for row in app._part_mesh_rows)
         assert app._part_mesh_rows[0]["use_unreal_var"].get() is False
         assert app._part_mesh_rows[0]["asset_var"].get() == ""
     finally:

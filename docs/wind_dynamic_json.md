@@ -87,8 +87,9 @@ The GUI exposes:
 
 - `Refresh Wind Groups`
 - `Generate Wind JSON`
-- one `Influence` slider per group
-- one `Shift Top` slider per group
+- a `Dual Influence` checkbox per group, enabled by default
+- `Influence` for single mode
+- `Min Influence`, `Max Influence`, and `Shift Top` for dual mode
 - `Gust Attenuation`
 - `Ground Cover`
 
@@ -103,7 +104,7 @@ Persisted settings from older runs that exceed the current slider range are clam
 
 ### Influence
 
-The overall wind strength applied to a simulation group.
+The overall wind strength applied to a simulation group when `Dual Influence` is disabled.
 
 Practical interpretation:
 
@@ -114,6 +115,17 @@ Current default:
 
 - trunk default is `0.2`
 - branch groups currently default to `1.0`
+
+### Dual Influence
+
+Controls whether the group is authored as a dual-influence group.
+
+Practical interpretation:
+
+- enabled by default in the GUI
+- when enabled, the group exports `bUseDualInfluence = true`
+- when enabled, `Min Influence`, `Max Influence`, and `Shift Top` are used
+- when disabled, only `Influence` is exported and dual-specific values are ignored
 
 ### Shift Top
 
@@ -166,8 +178,8 @@ Dual influence:
 
 Current project status:
 
-- only single influence is implemented in the UI and JSON export path
-- dual influence is documented but not exposed yet
+- dual influence is exposed in the GUI and enabled by default
+- single influence remains available through the per-group checkbox
 
 ## Practical UE workflow
 
@@ -185,7 +197,7 @@ Current recommended loop:
 - wind tuning is currently JSON-only in project output
 - USDA-side Dynamic Wind authoring is not yet used by the converter
 - wind authoring currently requires explicit `Group_<n>` generator labels; legacy XML without usable generator levels is rejected by the wind path
-- dual influence is not yet exposed
+- dual influence is exposed in the GUI, but the JSON still remains separate from USDA authoring
 
 ## Tests
 

@@ -72,7 +72,7 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                     message="Base skeletal mesh skel elementSize must be greater than zero when skinning arrays are present.",
                 )
             )
-        issues.extend(_validate_mesh_materials(model.base_mesh, material_ids, "BaseTreeMesh"))
+        issues.extend(_validate_mesh_materials(model.base_mesh, material_ids, "Base Skeletal Tree"))
 
     if model.materials:
         for prototype in model.prototypes:

@@ -119,6 +119,12 @@ Current vertex-color override for instanced part prototypes:
 - all other prototype faces are assigned to material id `1`
 - this override applies only to `Assembly Parts`, not to the `Base Skeletal Tree`
 
+Naming policy:
+
+- base mesh prim names come from the chosen output USDA file stem
+- part prototype prim names come from `Meshes/Mesh/@Name`
+- when two prototype names collide after USD-safe sanitization, deterministic suffixes are appended in input order
+
 ## Current part interpretation
 
 For the current project contract:

@@ -391,9 +391,28 @@ def test_dynamic_wind_json_generation_writes_groups_and_respects_slider_values(t
         str(input_path),
         str(output_path),
         group_settings=(
-            DynamicWindSimulationGroup(group_index=0, branch_order=0, influence=1.8, shift_top=0.15, is_trunk_group=True),
-            DynamicWindSimulationGroup(group_index=1, branch_order=1, influence=1.2, shift_top=0.05),
-            DynamicWindSimulationGroup(group_index=2, branch_order=2, influence=1.05, shift_top=0.01),
+            DynamicWindSimulationGroup(
+                group_index=0,
+                branch_order=0,
+                influence=1.8,
+                shift_top=0.15,
+                is_trunk_group=True,
+                use_dual_influence=False,
+            ),
+            DynamicWindSimulationGroup(
+                group_index=1,
+                branch_order=1,
+                influence=1.2,
+                shift_top=0.05,
+                use_dual_influence=False,
+            ),
+            DynamicWindSimulationGroup(
+                group_index=2,
+                branch_order=2,
+                influence=1.05,
+                shift_top=0.01,
+                use_dual_influence=False,
+            ),
         ),
         gust_attenuation=0.6,
         is_ground_cover=True,
@@ -405,14 +424,65 @@ def test_dynamic_wind_json_generation_writes_groups_and_respects_slider_values(t
     assert payload["Joints"]
     assert payload["SimulationGroups"]
     assert payload["SimulationGroups"][0]["bIsTrunkGroup"] is False
+    assert payload["SimulationGroups"][0]["bUseDualInfluence"] is False
     assert payload["SimulationGroups"][0]["Influence"] == pytest.approx(1.8)
-    assert payload["SimulationGroups"][0]["ShiftTop"] == pytest.approx(0.15)
+    assert payload["SimulationGroups"][0]["MinInfluence"] == pytest.approx(0.0)
+    assert payload["SimulationGroups"][0]["MaxInfluence"] == pytest.approx(0.0)
+    assert payload["SimulationGroups"][0]["ShiftTop"] == pytest.approx(0.0)
+    assert payload["SimulationGroups"][1]["bUseDualInfluence"] is False
     assert payload["SimulationGroups"][1]["Influence"] == pytest.approx(1.2)
+    assert payload["SimulationGroups"][2]["bUseDualInfluence"] is False
     assert payload["SimulationGroups"][2]["Influence"] == pytest.approx(1.05)
-    assert payload["SimulationGroups"][2]["ShiftTop"] == pytest.approx(0.01)
+    assert payload["SimulationGroups"][2]["ShiftTop"] == pytest.approx(0.0)
     assert payload["bIsGroundCover"] is True
     assert all(group["bIsTrunkGroup"] is False for group in payload["SimulationGroups"])
     assert payload["GustAttenuation"] == pytest.approx(0.6)
+
+
+def test_dynamic_wind_json_generation_serializes_dual_influence_groups(tmp_path: Path) -> None:
+    input_path = _write_generator_level_sample(
+        tmp_path,
+        ("Group_0 2", "Group_0", "Group_1", "Group_1"),
+    )
+    output_path = tmp_path / "generator_levels_dual_DynamicWind.json"
+    generate_wind_json(
+        str(input_path),
+        str(output_path),
+        group_settings=(
+            DynamicWindSimulationGroup(
+                group_index=0,
+                branch_order=0,
+                influence=1.8,
+                shift_top=0.15,
+                is_trunk_group=True,
+                use_dual_influence=True,
+                min_influence=0.2,
+                max_influence=0.9,
+            ),
+            DynamicWindSimulationGroup(
+                group_index=1,
+                branch_order=1,
+                influence=1.2,
+                shift_top=0.05,
+                use_dual_influence=True,
+                min_influence=0.15,
+                max_influence=0.75,
+            ),
+        ),
+        gust_attenuation=0.6,
+        is_ground_cover=False,
+    )
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert payload["SimulationGroups"][0]["bUseDualInfluence"] is True
+    assert payload["SimulationGroups"][0]["Influence"] == pytest.approx(0.0)
+    assert payload["SimulationGroups"][0]["MinInfluence"] == pytest.approx(0.2)
+    assert payload["SimulationGroups"][0]["MaxInfluence"] == pytest.approx(0.9)
+    assert payload["SimulationGroups"][1]["bUseDualInfluence"] is True
+    assert payload["SimulationGroups"][1]["Influence"] == pytest.approx(0.0)
+    assert payload["SimulationGroups"][1]["MinInfluence"] == pytest.approx(0.15)
+    assert payload["SimulationGroups"][1]["MaxInfluence"] == pytest.approx(0.75)
 
 
 def test_inspect_wind_data_uses_generator_levels(tmp_path: Path) -> None:
@@ -781,6 +851,7 @@ def test_usda_output_contains_ue_first_structure() -> None:
     assert 'def SkelRoot "BaseTreeSkelRoot"' in usda.text
     assert 'def SkelAnimation "BaseTreeAnimation"' in usda.text
     assert 'def Skeleton "MainSkeleton"' in usda.text
+    assert 'def Mesh "BaseTreeMesh"' in usda.text
     assert 'append rel skel:animationSource = </Tree/BaseTreeSkelRoot/BaseTreeAnimation>' in usda.text
     assert 'prepend apiSchemas = ["SkelBindingAPI"]' in usda.text
     assert 'uniform token purpose = "guide"' in usda.text
@@ -810,7 +881,8 @@ def test_usda_output_contains_ue_first_structure() -> None:
     assert 'elementSize = 2' in usda.text
     assert 'quath[] orientations = [' in usda.text
     assert 'def Scope "Prototypes"' in usda.text
-    assert 'def Xform "Mesh_1"' in usda.text
+    assert 'def Xform "Twig_01"' in usda.text
+    assert 'def Xform "Twig_02"' in usda.text
     assert 'def SkelRoot "PartSkelRoot"' in usda.text
     assert 'def Mesh "PartMesh"' in usda.text
     assert 'def Skeleton "PartSkeleton"' in usda.text
@@ -854,9 +926,9 @@ def test_inline_prototypes_are_authored_under_instancer_scope() -> None:
     assert 'def Xform "PrototypeLibrary"' not in usda.text
     assert 'append references = </Tree/PrototypeLibrary/Mesh_1>' not in usda.text
     assert 'append references = </Tree/PrototypeLibrary/Mesh_2>' not in usda.text
-    assert 'rel prototypes = [</Tree/AssemblyPartsInstancer/Prototypes/Mesh_1>, </Tree/AssemblyPartsInstancer/Prototypes/Mesh_2>]' in usda.text
-    assert usda.text.index('def Scope "Prototypes"') < usda.text.index('def Xform "Mesh_1"')
-    assert usda.text.index('def Xform "Mesh_1"') < usda.text.index('def SkelRoot "PartSkelRoot"')
+    assert 'rel prototypes = [</Tree/AssemblyPartsInstancer/Prototypes/Twig_01>, </Tree/AssemblyPartsInstancer/Prototypes/Twig_02>]' in usda.text
+    assert usda.text.index('def Scope "Prototypes"') < usda.text.index('def Xform "Twig_01"')
+    assert usda.text.index('def Xform "Twig_01"') < usda.text.index('def SkelRoot "PartSkelRoot"')
 
 
 def test_ue_schema_contract_matches_current_writer_contract() -> None:
@@ -1024,8 +1096,8 @@ def test_assembly_part_prototypes_are_authored_as_single_joint_skeletal_meshes()
     diagnostics = validate_model(model)
     usda = render_usda(model, diagnostics)
 
-    assert 'append rel skel:skeleton = </Tree/AssemblyPartsInstancer/Prototypes/Mesh_1/PartSkelRoot/PartSkeleton>' in usda.text
-    assert 'append rel skel:animationSource = </Tree/AssemblyPartsInstancer/Prototypes/Mesh_1/PartSkelRoot/PartAnimation>' in usda.text
+    assert 'append rel skel:skeleton = </Tree/AssemblyPartsInstancer/Prototypes/Twig_01/PartSkelRoot/PartSkeleton>' in usda.text
+    assert 'append rel skel:animationSource = </Tree/AssemblyPartsInstancer/Prototypes/Twig_01/PartSkelRoot/PartAnimation>' in usda.text
     assert 'uniform token[] joints = ["root"]' in usda.text
     assert 'uniform token[] jointNames = ["root"]' in usda.text
     assert 'uniform matrix4d[] bindTransforms = [( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )]' in usda.text
@@ -1104,8 +1176,8 @@ def test_existing_part_mesh_override_authors_external_refs_in_mixed_mode(tmp_pat
     assert prototype.mesh is None
     assert 'prepend apiSchemas = ["NaniteAssemblyExternalRefAPI"]' in result.usda_document.text
     assert 'uniform token unreal:naniteAssembly:meshAssetPath = "/Game/TreeParts/SK_Twig01.SK_Twig01"' in result.usda_document.text
-    assert 'def Xform "Mesh_1" (' in result.usda_document.text
-    assert 'append rel skel:skeleton = </Tree/AssemblyPartsInstancer/Prototypes/Mesh_2/PartSkelRoot/PartSkeleton>' in result.usda_document.text
+    assert 'def Xform "Twig_01" (' in result.usda_document.text
+    assert 'append rel skel:skeleton = </Tree/AssemblyPartsInstancer/Prototypes/Twig_02/PartSkelRoot/PartSkeleton>' in result.usda_document.text
 
 
 def test_existing_part_mesh_override_accepts_xml_mesh_names_in_mixed_mode(tmp_path: Path) -> None:

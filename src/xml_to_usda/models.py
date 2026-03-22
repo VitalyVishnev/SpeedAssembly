@@ -430,7 +430,7 @@ class DynamicWindSimulationGroup:
     influence: float = 1.0
     shift_top: float = 0.0
     is_trunk_group: bool = False
-    use_dual_influence: bool = False
+    use_dual_influence: bool = True
     min_influence: float = 0.0
     max_influence: float = 0.0
 

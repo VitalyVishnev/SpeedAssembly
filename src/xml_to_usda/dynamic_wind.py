@@ -69,10 +69,10 @@ def render_dynamic_wind_payload(dynamic_wind: DynamicWindData) -> dict:
         "SimulationGroups": [
             {
                 "bUseDualInfluence": group.use_dual_influence,
-                "Influence": group.influence,
-                "MinInfluence": group.min_influence,
-                "MaxInfluence": group.max_influence,
-                "ShiftTop": group.shift_top,
+                "Influence": 0.0 if group.use_dual_influence else group.influence,
+                "MinInfluence": group.min_influence if group.use_dual_influence else 0.0,
+                "MaxInfluence": group.max_influence if group.use_dual_influence else 0.0,
+                "ShiftTop": group.shift_top if group.use_dual_influence else 0.0,
                 "bIsTrunkGroup": group.is_trunk_group,
             }
             for group in dynamic_wind.simulation_groups
@@ -90,6 +90,9 @@ def default_group_settings(branch_orders: tuple[int, ...]) -> tuple[DynamicWindS
             influence=DEFAULT_TRUNK_INFLUENCE if index == 0 else DEFAULT_BRANCH_INFLUENCE,
             shift_top=DEFAULT_TRUNK_SHIFT_TOP if index == 0 else DEFAULT_BRANCH_SHIFT_TOP,
             is_trunk_group=index == 0,
+            use_dual_influence=True,
+            min_influence=0.0,
+            max_influence=DEFAULT_TRUNK_INFLUENCE if index == 0 else DEFAULT_BRANCH_INFLUENCE,
         )
         for index, branch_order in enumerate(branch_orders)
     )

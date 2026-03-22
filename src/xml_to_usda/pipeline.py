@@ -123,7 +123,11 @@ def convert_request(request: ConversionRequest) -> tuple[ConversionResult, ...]:
             )
             continue
 
-        usda_document = render_usda(model, diagnostics)
+        usda_document = render_usda(
+            model,
+            diagnostics,
+            base_mesh_name=resolved_output.stem if resolved_output is not None else None,
+        )
         if resolved_output is not None:
             resolved_output.parent.mkdir(parents=True, exist_ok=True)
             resolved_output.write_text(usda_document.text, encoding="utf-8")

@@ -28,9 +28,11 @@ The current validated structure is:
 - root `unreal:naniteAssembly:meshType = "skeletalMesh"`
 - root relationship to the descendant `Main Skeleton`
 - base `SkelRoot` containing real unique tree geometry
+- base mesh prim name comes from the output USDA file stem
 - base `Skeleton` and skeletal base mesh binding contract
 - `PointInstancer` carrying skeletal assembly binding data
 - prototype prims under `PointInstancer/Prototypes`
+- prototype prim names come from SpeedTree XML mesh names, sanitized only as needed for USD validity
 - inline prototypes authored as skeletal part subtrees, not as bare meshes
 - external reused prototypes authored as `Xform` prims with `NaniteAssemblyExternalRefAPI`
 - when external reuse is enabled, the prototype must be authored as a pure external ref subtree

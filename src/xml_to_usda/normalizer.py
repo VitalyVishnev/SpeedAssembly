@@ -629,8 +629,9 @@ def _build_prototypes(
     if not assembly_parts:
         return []
     source_keys = tuple(dict.fromkeys(part.prototype_key for part in assembly_parts))
-    identities = build_prototype_identities(list(source_keys))
     meshes_by_key = {f"Mesh_{entry.mesh_id}": entry for entry in mesh_library}
+    display_names = [meshes_by_key[key].name if key in meshes_by_key else key for key in source_keys]
+    identities = build_prototype_identities(list(source_keys), display_names)
     fallback_materials: dict[str, set[int]] = defaultdict(set)
     for part in assembly_parts:
         if part.source_material_id is not None:

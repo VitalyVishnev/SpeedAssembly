@@ -18,11 +18,17 @@ def make_stable_prim_name(raw_name: str, fallback: str = "Prototype") -> str:
     return ascii_name
 
 
-def build_prototype_identities(keys: list[str] | tuple[str, ...]) -> tuple[PrototypeIdentity, ...]:
+def build_prototype_identities(
+    keys: list[str] | tuple[str, ...],
+    display_names: list[str] | tuple[str, ...] | None = None,
+) -> tuple[PrototypeIdentity, ...]:
     seen: dict[str, int] = {}
     identities: list[PrototypeIdentity] = []
-    for key in keys:
-        base = make_stable_prim_name(key, fallback="Prototype")
+    for index, key in enumerate(keys):
+        display_name = key
+        if display_names is not None and index < len(display_names) and display_names[index]:
+            display_name = display_names[index]
+        base = make_stable_prim_name(display_name, fallback="Prototype")
         count = seen.get(base, 0) + 1
         seen[base] = count
         prim_name = base if count == 1 else f"{base}_{count}"
