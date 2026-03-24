@@ -12,10 +12,12 @@ from xml_to_usda.models import (
     DynamicWindData,
     DynamicWindJointAssignment,
     DynamicWindSimulationGroup,
+    MaterialPolicy,
     OutputMode,
     ValidationIssue,
     WindJsonResult,
 )
+from xml_to_usda.cli import build_parser
 from xml_to_usda.naming import build_prototype_identities, make_stable_prim_name
 from xml_to_usda.pipeline import REPO_ROOT, convert_file, convert_request
 
@@ -82,8 +84,10 @@ def test_gui_smoke_builds_window() -> None:
     try:
         app = ConversionApp(root)
         assert app.root.title() == "Convert XML -> USDA"
+        assert hasattr(app, "material_policy_var")
         assert hasattr(app, "bark_material_var")
         assert hasattr(app, "leaves_material_var")
+        assert hasattr(app, "single_material_var")
         assert hasattr(app, "use_existing_part_meshes_var")
         assert hasattr(app, "gust_attenuation_var")
         assert hasattr(app, "wind_frame")
@@ -110,9 +114,31 @@ def test_gui_formatter_renders_diagnostics() -> None:
 
     rendered = format_conversion_results((result,))
 
+    assert "Material policy: legacy_role_ids" in rendered
     assert "Input: input.xml" in rendered
     assert "[warning] demo: demo warning" in rendered
     assert "Status: failed" in rendered
+
+
+def test_cli_parser_accepts_material_policy_flags() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "convert",
+            "input.xml",
+            "output.usda",
+            "--material-policy",
+            "single_material",
+            "--single-material-path",
+            "/Game/Assembly/Fern/M_Fern.M_Fern",
+        ]
+    )
+
+    assert args.material_policy == "single_material"
+    assert args.single_material_path == "/Game/Assembly/Fern/M_Fern.M_Fern"
+    assert args.bark_material_path is None
+    assert args.leaves_material_path is None
 
 
 def test_convert_file_applies_baseline_material_overrides(tmp_path: Path) -> None:
@@ -159,14 +185,16 @@ def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatc
     _, root = _build_tk_root_or_skip()
     from xml_to_usda.gui import ConversionApp
 
-    calls: list[tuple[str, str, str | None, str | None, bool, tuple[tuple[str, str], ...]]] = []
+    calls: list[tuple[str, str, MaterialPolicy, str | None, str | None, str | None, bool, tuple[tuple[str, str], ...]]] = []
 
     def fake_convert_file(
         input_path,
         output_path,
         output_mode=OutputMode.SELF_CONTAINED,
+        material_policy=MaterialPolicy.LEGACY_ROLE_IDS,
         bark_material_path=None,
         leaves_material_path=None,
+        single_material_path=None,
         use_existing_part_meshes=False,
         part_mesh_asset_paths=(),
     ):
@@ -174,8 +202,10 @@ def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatc
             (
                 input_path,
                 output_path,
+                material_policy,
                 bark_material_path,
                 leaves_material_path,
+                single_material_path,
                 use_existing_part_meshes,
                 part_mesh_asset_paths,
             )
@@ -207,13 +237,82 @@ def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatc
             (
                 str(SIMPLE_TREE_01),
                 "out.usda",
+                MaterialPolicy.LEGACY_ROLE_IDS,
                 "/Game/TestMaterials/M_Bark_Test",
                 "/Game/TestMaterials/M_Leaves_Test",
+                None,
                 False,
                 (),
             )
         ]
+        assert "Material policy: legacy_role_ids" in app.log_widget.get("1.0", "end-1c")
         assert "Material overrides:" in app.log_widget.get("1.0", "end-1c")
+    finally:
+        root.destroy()
+
+
+def test_gui_run_conversion_passes_single_material_policy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    calls: list[tuple[str, str, MaterialPolicy, str | None, str | None, str | None]] = []
+
+    def fake_convert_file(
+        input_path,
+        output_path,
+        output_mode=OutputMode.SELF_CONTAINED,
+        material_policy=MaterialPolicy.LEGACY_ROLE_IDS,
+        bark_material_path=None,
+        leaves_material_path=None,
+        single_material_path=None,
+        use_existing_part_meshes=False,
+        part_mesh_asset_paths=(),
+    ):
+        calls.append(
+            (
+                input_path,
+                output_path,
+                material_policy,
+                bark_material_path,
+                leaves_material_path,
+                single_material_path,
+            )
+        )
+        return ConversionResult(
+            input_path=input_path,
+            output_path=output_path,
+            diagnostics=(),
+            usda_document=Mock(),
+        )
+
+    monkeypatch.setattr("xml_to_usda.gui.convert_file", fake_convert_file)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
+
+    try:
+        monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+        monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        app.output_var.set("out.usda")
+        app.material_policy_var.set(MaterialPolicy.SINGLE_MATERIAL.value)
+        app.bark_material_var.set("Not/Game/Path")
+        app.single_material_var.set("/Game/Assembly/Fern/M_Fern.M_Fern")
+
+        app.run_conversion()
+
+        assert calls == [
+            (
+                str(SIMPLE_TREE_01),
+                "out.usda",
+                MaterialPolicy.SINGLE_MATERIAL,
+                None,
+                None,
+                "/Game/Assembly/Fern/M_Fern.M_Fern",
+            )
+        ]
+        assert "Material policy: single_material" in app.log_widget.get("1.0", "end-1c")
+        assert "Single material path: /Game/Assembly/Fern/M_Fern.M_Fern" in app.log_widget.get("1.0", "end-1c")
     finally:
         root.destroy()
 
@@ -224,14 +323,16 @@ def test_gui_run_conversion_passes_part_mesh_xml_names(
     _, root = _build_tk_root_or_skip()
     from xml_to_usda.gui import ConversionApp
 
-    calls: list[tuple[str, str, str | None, str | None, bool, tuple[tuple[str, str], ...]]] = []
+    calls: list[tuple[str, str, MaterialPolicy, str | None, str | None, str | None, bool, tuple[tuple[str, str], ...]]] = []
 
     def fake_convert_file(
         input_path,
         output_path,
         output_mode=OutputMode.SELF_CONTAINED,
+        material_policy=MaterialPolicy.LEGACY_ROLE_IDS,
         bark_material_path=None,
         leaves_material_path=None,
+        single_material_path=None,
         use_existing_part_meshes=False,
         part_mesh_asset_paths=(),
     ):
@@ -239,8 +340,10 @@ def test_gui_run_conversion_passes_part_mesh_xml_names(
             (
                 input_path,
                 output_path,
+                material_policy,
                 bark_material_path,
                 leaves_material_path,
+                single_material_path,
                 use_existing_part_meshes,
                 part_mesh_asset_paths,
             )
@@ -272,6 +375,8 @@ def test_gui_run_conversion_passes_part_mesh_xml_names(
             (
                 str(SIMPLE_TREE_01),
                 "out.usda",
+                MaterialPolicy.LEGACY_ROLE_IDS,
+                None,
                 None,
                 None,
                 True,
@@ -547,7 +652,7 @@ def test_gui_loads_persisted_material_paths(monkeypatch: pytest.MonkeyPatch, tmp
 
     settings_path = tmp_path / "gui_settings.json"
     settings_path.write_text(
-        '{"bark_material_path": "/Game/TestMaterials/M_Bark_Test", "leaves_material_path": "/Game/TestMaterials/M_Leaves_Test", "gust_attenuation": 0.25, "is_ground_cover": true, "wind_group_settings": {"0": {"influence": 1.4, "shift_top": 0.1}}}',
+        '{"material_policy": "legacy_role_ids", "bark_material_path": "/Game/TestMaterials/M_Bark_Test", "leaves_material_path": "/Game/TestMaterials/M_Leaves_Test", "single_material_path": "", "gust_attenuation": 0.25, "is_ground_cover": true, "wind_group_settings": {"0": {"influence": 1.4, "shift_top": 0.1}}}',
         encoding="utf-8",
     )
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
@@ -555,8 +660,10 @@ def test_gui_loads_persisted_material_paths(monkeypatch: pytest.MonkeyPatch, tmp
 
     try:
         app = ConversionApp(root)
+        assert app.material_policy_var.get() == MaterialPolicy.LEGACY_ROLE_IDS.value
         assert app.bark_material_var.get() == "/Game/TestMaterials/M_Bark_Test"
         assert app.leaves_material_var.get() == "/Game/TestMaterials/M_Leaves_Test"
+        assert app.single_material_var.get() == ""
         assert app.gust_attenuation_var.get() == pytest.approx(0.25)
         assert app.is_ground_cover_var.get() is True
     finally:
@@ -579,8 +686,10 @@ def test_gui_persists_material_paths_after_successful_conversion(
         input_path,
         output_path,
         output_mode=OutputMode.SELF_CONTAINED,
+        material_policy=MaterialPolicy.LEGACY_ROLE_IDS,
         bark_material_path=None,
         leaves_material_path=None,
+        single_material_path=None,
         use_existing_part_meshes=False,
         part_mesh_asset_paths=(),
     ):
@@ -605,8 +714,10 @@ def test_gui_persists_material_paths_after_successful_conversion(
         assert settings_path.exists()
         assert settings_path.read_text(encoding="utf-8") == (
             '{\n'
+            '  "material_policy": "legacy_role_ids",\n'
             '  "bark_material_path": "/Game/TestMaterials/M_Bark_Test",\n'
             '  "leaves_material_path": "/Game/TestMaterials/M_Leaves_Test",\n'
+            '  "single_material_path": "",\n'
             '  "gust_attenuation": 0.0,\n'
             '  "is_ground_cover": false,\n'
             '  "wind_group_settings": {}\n'
@@ -634,13 +745,48 @@ def test_gui_persists_material_paths_without_running_conversion(
     assert settings_path.exists()
     assert settings_path.read_text(encoding="utf-8") == (
         '{\n'
+        '  "material_policy": "legacy_role_ids",\n'
         '  "bark_material_path": "/Game/Assembly/Custom/Bark_A.Bark_A",\n'
         '  "leaves_material_path": "/Game/Assembly/Custom/Leaves_A.Leaves_A",\n'
+        '  "single_material_path": "",\n'
         '  "gust_attenuation": 0.0,\n'
         '  "is_ground_cover": false,\n'
         '  "wind_group_settings": {}\n'
         '}'
     )
+
+
+def test_gui_persists_single_material_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    settings_path = tmp_path / "gui_settings.json"
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
+
+    try:
+        app = ConversionApp(root)
+        app.material_policy_var.set(MaterialPolicy.SINGLE_MATERIAL.value)
+        app.single_material_var.set("/Game/Assembly/Fern/M_Fern.M_Fern")
+        app._handle_window_close()
+
+        assert settings_path.exists()
+        assert settings_path.read_text(encoding="utf-8") == (
+            '{\n'
+            '  "material_policy": "single_material",\n'
+            '  "bark_material_path": "",\n'
+            '  "leaves_material_path": "",\n'
+            '  "single_material_path": "/Game/Assembly/Fern/M_Fern.M_Fern",\n'
+            '  "gust_attenuation": 0.0,\n'
+            '  "is_ground_cover": false,\n'
+            '  "wind_group_settings": {}\n'
+            '}'
+        )
+    finally:
+        try:
+            root.destroy()
+        except Exception:
+            pass
 
 
 def test_gui_persists_latest_field_edits_immediately(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -659,8 +805,10 @@ def test_gui_persists_latest_field_edits_immediately(monkeypatch: pytest.MonkeyP
         assert settings_path.exists()
         assert settings_path.read_text(encoding="utf-8") == (
             '{\n'
+            '  "material_policy": "legacy_role_ids",\n'
             '  "bark_material_path": "/Game/Assembly/Latest/Bark_Final.Bark_Final",\n'
             '  "leaves_material_path": "/Game/Assembly/Latest/Leaves_Final.Leaves_Final",\n'
+            '  "single_material_path": "",\n'
             '  "gust_attenuation": 0.0,\n'
             '  "is_ground_cover": false,\n'
             '  "wind_group_settings": {}\n'
@@ -693,6 +841,34 @@ def test_gui_invalid_material_path_blocks_conversion(monkeypatch: pytest.MonkeyP
 
         convert_mock.assert_not_called()
         assert error_messages == ["Bark material path must start with /Game/."]
+    finally:
+        root.destroy()
+
+
+def test_gui_invalid_single_material_path_blocks_conversion(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    convert_mock = Mock()
+    error_messages: list[str] = []
+
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+    monkeypatch.setattr("xml_to_usda.gui.convert_file", convert_mock)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda _title, message: error_messages.append(message))
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        app.output_var.set("out.usda")
+        app.material_policy_var.set(MaterialPolicy.SINGLE_MATERIAL.value)
+        app.single_material_var.set("Not/Game/Path")
+
+        app.run_conversion()
+
+        convert_mock.assert_not_called()
+        assert error_messages == ["Single material path must start with /Game/."]
     finally:
         root.destroy()
 

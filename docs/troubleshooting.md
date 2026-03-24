@@ -55,11 +55,73 @@ Practical rule:
 
 Symptom:
 
-- bark or leaves paths are entered in the GUI
+- a material path is entered in the GUI
 - the output still uses the default inline material setup
 
 Checks:
 
-1. Verify the path starts with `/Game/`.
-2. Verify the generated USDA contains the expected Unreal material connection.
-3. Verify the asset path matches the UE Content Browser object path exactly.
+1. Verify the selected material policy matches the intended behavior.
+2. Verify the path starts with `/Game/`.
+3. Verify the generated USDA contains the expected Unreal material connection.
+4. Verify the asset path matches the UE Content Browser object path exactly.
+
+Material-policy interpretation:
+
+- `legacy_role_ids`
+  - expects the old primary/leaves semantic split
+  - raw XML ids are still interpreted as semantic roles in this mode only
+- `single_material`
+  - ignores XML ids and vertex colors
+  - the base mesh and all part prototypes should bind to one material
+- `vertex_color_split`
+  - ignores XML ids
+  - exact-white faces go to bucket `1`
+  - gray and other non-white faces go to bucket `2`
+
+Practical rule:
+
+- if a fern or shrub uses source ids like `3/4`, do not debug it as a missing `1/2` material-role error unless the export intentionally used `legacy_role_ids`
+
+## Only Part Meshes import, but the base mesh is missing
+
+Symptom:
+
+- UE imports the `Assembly Parts`
+- the `Base Skeletal Tree` is missing or appears to have been skipped
+- this often shows up first on fern-like or other multi-root plants
+
+What to check first:
+
+1. Open the generated USDA text.
+2. Verify the base mesh `def Mesh "<stem>"` exists at all.
+3. Inspect the base `SkelAnimation`, base mesh `skel:joints`, and main `Skeleton` joint arrays.
+
+Interpretation:
+
+- if the base mesh prim is missing, the bug is in normalization or material-policy remapping before USDA writing
+- if the base mesh prim exists but the main skeleton collapses multiple root joints to one alias, the bug is in USDA joint naming and UE may skip the base skeletal tree
+
+Known regression pattern:
+
+- a multi-root plant must not alias every root joint to the output file stem
+- only single-root skeletons may use the output stem as the root-joint alias
+
+Practical rule:
+
+- when parts import but the base mesh does not, inspect joint arrays before debugging materials
+
+## Imported part skeleton is named `Root_Skeleton`
+
+Symptom:
+
+- one imported part skeleton asset gets a generic `Root_Skeleton`-style name
+- another part imports with a prototype-derived skeleton name
+
+Likely cause:
+
+- the inline one-bone part skeleton was authored with a hardcoded local joint name such as `root`
+
+Practical rule:
+
+- the local one-bone joint name should come from the prototype prim name
+- if USDA still shows `uniform token[] joints = ["root"]` inside inline prototypes, the exporter is on the old path

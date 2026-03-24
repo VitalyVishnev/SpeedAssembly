@@ -107,17 +107,30 @@ Current conflict policy:
 - `LeafReferences Material` becomes a fallback only when the prototype mesh carries no sections
 - a mismatch is logged as a warning, not treated as a hard failure, if the prototype mesh itself is internally valid
 
-Current material-role baseline:
+Current material-policy baseline:
 
-- material id `1` = primary tree / branch material
-- material id `2` = leaves material
-- legacy `0/2` exports are not the active baseline anymore
+- raw XML `Material ID` values are opaque source ids, not semantic roles
+- the converter must not assume that XML ids like `3` and `4` mean invalid bark/leaves assignment
+- semantic bark/leaves interpretation now exists only in explicit `legacy_role_ids` mode
 
-Current vertex-color override for instanced part prototypes:
+Supported exporter material policies:
 
-- if the prototype mesh carries exact-black vertex color on all authored vertices of a face, that face is assigned to material id `2`
-- all other prototype faces are assigned to material id `1`
-- this override applies only to `Assembly Parts`, not to the `Base Skeletal Tree`
+- `legacy_role_ids`
+  - compatibility mode only
+  - keeps the old semantic expectation that material id `1` is primary and id `2` is leaves
+  - keeps the old missing-role validation only in this mode
+- `single_material`
+  - ignores XML material ids and vertex colors
+  - remaps the `Base Skeletal Tree` and all `Assembly Parts` to one canonical USD material
+  - collapses each mesh to a single full-face section so USDA authors one direct material binding
+- `vertex_color_split`
+  - ignores XML material ids
+  - applies to both the `Base Skeletal Tree` and `Assembly Parts`
+  - if every vertex on a face is exact white `(1,1,1)`, that face is assigned to material id `1`
+  - any gray or other non-white value is assigned to material id `2`
+  - if usable vertex colors are missing, the exporter warns and assigns the mesh to material id `1`
+
+Outside `legacy_role_ids`, authored XML material ids are preserved only as source metadata on canonical materials and instances.
 
 Naming policy:
 
@@ -128,6 +141,7 @@ Naming policy:
 - the XML source filename is not used to derive the skeleton name
 - part prototype prim names come from `Meshes/Mesh/@Name`
 - when two prototype names collide after USD-safe sanitization, deterministic suffixes are appended in input order
+- inline one-bone part skeleton joint names come from the sanitized prototype prim name, not from a hardcoded `root`
 
 ## Current part interpretation
 
@@ -136,12 +150,19 @@ For the current project contract:
 - repeated parts are emitted as `Assembly Parts`
 - each inline part is authored as a skeletal part
 - each inline part has a one-bone local `Part Skeleton`
+- each inline part uses the prototype-derived one-bone joint name for its local `SkelAnimation`, `Mesh skel:joints`, and `Part Skeleton`
 - the instance binds back to the `Main Skeleton`
 - an optional external reuse path may map a prototype key such as `Mesh_1` to an existing Unreal skeletal mesh asset
 - when the external reuse path is enabled, the converter must not leave the original inline prototype mesh attached to that same prototype in USDA
 - the XML mesh library still provides the discovery key and fallback geometry for inline mode, but external mode must author a pure reference-only prototype subtree
 - the canonical reference branch assets are expected at their authored/original size and orientation, so the converter must not compensate by baking scale into the prototype mesh
 - SpeedTree `OriginalScale` is carried into `PointInstancer.scales` as an explicit per-instance factor, not baked into prototype geometry
+
+Main skeleton naming rule:
+
+- when the `Main Skeleton` has exactly one root joint, the converter may alias that root joint name to the output USDA stem for the base skeletal naming contract
+- when the `Main Skeleton` has multiple root joints, the converter must preserve distinct root-joint names
+- multi-root skeletons must not collapse all roots to the same output-stem alias, because that corrupts base-mesh joint-path authoring
 
 ## Common trap
 

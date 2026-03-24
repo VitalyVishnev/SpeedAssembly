@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .models import CanonicalTreeModel, PrototypeResolutionMode, PrototypeStrategy, ValidationIssue
+from .models import CanonicalTreeModel, MaterialPolicy, PrototypeResolutionMode, PrototypeStrategy, ValidationIssue
 
 
 PRIMARY_MATERIAL_ID = 1
@@ -16,15 +16,17 @@ ERROR_MARKERS = {
     "missing_leaf_binding:": "missing_leaf_binding",
     "missing_skeleton_transform:": "missing_skeleton_transform",
     "skeleton_object_mismatch:": "skeleton_object_mismatch",
+    "material_policy_warning:": "material_policy_warning",
 }
-WARNING_MARKER_CODES = {"material_conflict", "skeleton_object_mismatch"}
+WARNING_MARKER_CODES = {"material_conflict", "material_policy_warning", "skeleton_object_mismatch"}
 
 
 def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
     issues: list[ValidationIssue] = []
     material_ids = {material.source_id for material in model.materials}
+    material_policy = model.metadata.material_policy
 
-    if model.materials:
+    if material_policy == MaterialPolicy.LEGACY_ROLE_IDS and model.materials:
         missing_baseline_ids = [material_id for material_id in (PRIMARY_MATERIAL_ID, LEAVES_MATERIAL_ID) if material_id not in material_ids]
         if missing_baseline_ids:
             issues.append(
@@ -74,7 +76,7 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
             )
         issues.extend(_validate_mesh_materials(model.base_mesh, material_ids, "Base Skeletal Tree"))
 
-    if model.materials:
+    if model.materials and model.base_mesh is not None:
         for prototype in model.prototypes:
             if prototype.mesh is not None:
                 issues.extend(_validate_mesh_materials(prototype.mesh, material_ids, f"Prototype {prototype.identity.prim_name}"))

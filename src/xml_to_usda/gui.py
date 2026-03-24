@@ -5,7 +5,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from .models import DynamicWindSimulationGroup
+from .models import DynamicWindSimulationGroup, MaterialPolicy
 from .pipeline import convert_file, generate_wind_json, inspect_wind_data, load_canonical_model
 
 
@@ -22,8 +22,10 @@ class ConversionApp:
 
         self.input_var = tk.StringVar()
         self.output_var = tk.StringVar()
+        self.material_policy_var = tk.StringVar(value=MaterialPolicy.LEGACY_ROLE_IDS.value)
         self.bark_material_var = tk.StringVar()
         self.leaves_material_var = tk.StringVar()
+        self.single_material_var = tk.StringVar()
         self.use_existing_part_meshes_var = tk.BooleanVar(value=False)
         self.gust_attenuation_var = tk.DoubleVar(value=0.0)
         self.is_ground_cover_var = tk.BooleanVar(value=False)
@@ -90,15 +92,39 @@ class ConversionApp:
         materials_content = self._create_collapsible_section(self.content_frame, row, "Materials", "materials")
         self.materials_frame = materials_content
         materials_content.columnconfigure(1, weight=1)
-        ttk.Label(materials_content, text="Bark Material Path").grid(row=0, column=0, sticky="w", pady=(0, 8))
-        ttk.Entry(materials_content, textvariable=self.bark_material_var).grid(
+        ttk.Label(materials_content, text="Material Policy").grid(row=0, column=0, sticky="w", pady=(0, 8))
+        self.material_policy_combo = ttk.Combobox(
+            materials_content,
+            textvariable=self.material_policy_var,
+            state="readonly",
+            values=tuple(policy.value for policy in MaterialPolicy),
+        )
+        self.material_policy_combo.grid(row=0, column=1, sticky="ew", padx=(12, 12), pady=(0, 8))
+
+        self.bark_material_row = ttk.Frame(materials_content)
+        self.bark_material_row.grid(row=1, column=0, columnspan=2, sticky="ew")
+        self.bark_material_row.columnconfigure(1, weight=1)
+        ttk.Label(self.bark_material_row, text="Bark Material Path").grid(row=0, column=0, sticky="w", pady=(0, 8))
+        ttk.Entry(self.bark_material_row, textvariable=self.bark_material_var).grid(
             row=0, column=1, sticky="ew", padx=(12, 12), pady=(0, 8)
         )
 
-        ttk.Label(materials_content, text="Leaves Material Path").grid(row=1, column=0, sticky="w", pady=(0, 8))
-        ttk.Entry(materials_content, textvariable=self.leaves_material_var).grid(
-            row=1, column=1, sticky="ew", padx=(12, 12), pady=(0, 8)
+        self.leaves_material_row = ttk.Frame(materials_content)
+        self.leaves_material_row.grid(row=2, column=0, columnspan=2, sticky="ew")
+        self.leaves_material_row.columnconfigure(1, weight=1)
+        ttk.Label(self.leaves_material_row, text="Leaves Material Path").grid(row=0, column=0, sticky="w", pady=(0, 8))
+        ttk.Entry(self.leaves_material_row, textvariable=self.leaves_material_var).grid(
+            row=0, column=1, sticky="ew", padx=(12, 12), pady=(0, 8)
         )
+
+        self.single_material_row = ttk.Frame(materials_content)
+        self.single_material_row.grid(row=3, column=0, columnspan=2, sticky="ew")
+        self.single_material_row.columnconfigure(1, weight=1)
+        ttk.Label(self.single_material_row, text="Single Material Path").grid(row=0, column=0, sticky="w", pady=(0, 8))
+        ttk.Entry(self.single_material_row, textvariable=self.single_material_var).grid(
+            row=0, column=1, sticky="ew", padx=(12, 12), pady=(0, 8)
+        )
+        self._apply_material_policy_visibility()
 
         row += 1
         part_mesh_content = self._create_collapsible_section(self.content_frame, row, "Part Mesh Reuse", "part_mesh")
@@ -226,15 +252,30 @@ class ConversionApp:
     def run_conversion(self) -> None:
         input_path = self.input_var.get().strip()
         output_path = self.output_var.get().strip()
+        material_policy = self._current_material_policy()
         bark_material_path = self.bark_material_var.get().strip()
         leaves_material_path = self.leaves_material_var.get().strip()
+        single_material_path = self.single_material_var.get().strip()
+        effective_bark_material_path = bark_material_path or None
+        effective_leaves_material_path = leaves_material_path or None
+        effective_single_material_path = single_material_path or None
+        if material_policy == MaterialPolicy.SINGLE_MATERIAL:
+            effective_bark_material_path = None
+            effective_leaves_material_path = None
+        else:
+            effective_single_material_path = None
         if not input_path:
             messagebox.showerror("Missing input", "Select a source XML file.")
             return
         if not output_path:
             messagebox.showerror("Missing output", "Select an output USDA path.")
             return
-        validation_error = self._validate_material_paths(bark_material_path, leaves_material_path)
+        validation_error = self._validate_material_paths(
+            material_policy,
+            bark_material_path,
+            leaves_material_path,
+            single_material_path,
+        )
         if validation_error is not None:
             messagebox.showerror("Invalid material path", validation_error)
             return
@@ -248,8 +289,10 @@ class ConversionApp:
             result = convert_file(
                 input_path,
                 output_path,
-                bark_material_path=bark_material_path or None,
-                leaves_material_path=leaves_material_path or None,
+                material_policy=material_policy,
+                bark_material_path=effective_bark_material_path,
+                leaves_material_path=effective_leaves_material_path,
+                single_material_path=effective_single_material_path,
                 use_existing_part_meshes=use_existing_part_meshes,
                 part_mesh_asset_paths=part_mesh_asset_paths,
             )
@@ -263,8 +306,10 @@ class ConversionApp:
         self._set_log(
             format_conversion_results(
                 (result,),
-                bark_material_path=bark_material_path or None,
-                leaves_material_path=leaves_material_path or None,
+                material_policy=material_policy,
+                bark_material_path=effective_bark_material_path,
+                leaves_material_path=effective_leaves_material_path,
+                single_material_path=effective_single_material_path,
                 use_existing_part_meshes=use_existing_part_meshes,
                 part_mesh_asset_paths=part_mesh_asset_paths,
             )
@@ -327,8 +372,19 @@ class ConversionApp:
         self.log_widget.insert("1.0", text)
         self.log_widget.configure(state="disabled")
 
-    def _validate_material_paths(self, bark_material_path: str, leaves_material_path: str) -> str | None:
-        for label, path in (("Bark", bark_material_path), ("Leaves", leaves_material_path)):
+    def _validate_material_paths(
+        self,
+        material_policy: MaterialPolicy,
+        bark_material_path: str,
+        leaves_material_path: str,
+        single_material_path: str,
+    ) -> str | None:
+        checks: list[tuple[str, str]] = []
+        if material_policy == MaterialPolicy.SINGLE_MATERIAL:
+            checks.append(("Single", single_material_path))
+        else:
+            checks.extend((("Bark", bark_material_path), ("Leaves", leaves_material_path)))
+        for label, path in checks:
             if path and not _is_valid_unreal_asset_path(path):
                 return f"{label} material path must start with /Game/."
         return None
@@ -552,8 +608,10 @@ class ConversionApp:
 
     def _install_persistence_hooks(self) -> None:
         self.input_var.trace_add("write", self._handle_source_path_change)
+        self.material_policy_var.trace_add("write", self._handle_material_policy_change)
         self.bark_material_var.trace_add("write", self._handle_persisted_field_change)
         self.leaves_material_var.trace_add("write", self._handle_persisted_field_change)
+        self.single_material_var.trace_add("write", self._handle_persisted_field_change)
         self.gust_attenuation_var.trace_add("write", self._handle_persisted_field_change)
         self.is_ground_cover_var.trace_add("write", self._handle_persisted_field_change)
         self.is_ground_cover_var.trace_add("write", self._handle_ground_cover_change)
@@ -564,11 +622,30 @@ class ConversionApp:
             return
         self._save_settings()
 
+    def _handle_material_policy_change(self, *_args) -> None:
+        self._apply_material_policy_visibility()
+        self._handle_persisted_field_change()
+
     def _handle_ground_cover_change(self, *_args) -> None:
         if self._suspend_settings_save:
             return
         if self.input_var.get().strip():
             self.refresh_wind_groups()
+
+    def _current_material_policy(self) -> MaterialPolicy:
+        try:
+            return MaterialPolicy(self.material_policy_var.get())
+        except ValueError:
+            return MaterialPolicy.LEGACY_ROLE_IDS
+
+    def _apply_material_policy_visibility(self) -> None:
+        if not hasattr(self, "bark_material_row"):
+            return
+        material_policy = self._current_material_policy()
+        show_single = material_policy == MaterialPolicy.SINGLE_MATERIAL
+        self._set_frame_visible(self.single_material_row, show_single)
+        self._set_frame_visible(self.bark_material_row, not show_single)
+        self._set_frame_visible(self.leaves_material_row, not show_single)
 
     def _handle_window_close(self) -> None:
         if self._pending_settings_save_job is not None:
@@ -582,8 +659,10 @@ class ConversionApp:
 
     def _load_settings(self) -> None:
         settings = self._read_settings()
+        self.material_policy_var.set(str(settings.get("material_policy", MaterialPolicy.LEGACY_ROLE_IDS.value)))
         self.bark_material_var.set(str(settings.get("bark_material_path", "")))
         self.leaves_material_var.set(str(settings.get("leaves_material_path", "")))
+        self.single_material_var.set(str(settings.get("single_material_path", "")))
         self.gust_attenuation_var.set(float(settings.get("gust_attenuation", 0.0)))
         self.is_ground_cover_var.set(bool(settings.get("is_ground_cover", False)))
         self._persisted_wind_group_settings = dict(settings.get("wind_group_settings", {}))
@@ -607,8 +686,10 @@ class ConversionApp:
         if not isinstance(part_mesh_settings, dict):
             part_mesh_settings = {}
         return {
+            "material_policy": payload.get("material_policy", MaterialPolicy.LEGACY_ROLE_IDS.value),
             "bark_material_path": payload.get("bark_material_path", ""),
             "leaves_material_path": payload.get("leaves_material_path", ""),
+            "single_material_path": payload.get("single_material_path", ""),
             "gust_attenuation": payload.get("gust_attenuation", 0.0),
             "is_ground_cover": payload.get("is_ground_cover", False),
             "wind_group_settings": {
@@ -640,8 +721,10 @@ class ConversionApp:
                 else:
                     part_mesh_settings_by_input_path.pop(self._current_part_mesh_settings_key, None)
             payload = {
+                "material_policy": self._current_material_policy().value,
                 "bark_material_path": self.bark_material_var.get().strip(),
                 "leaves_material_path": self.leaves_material_var.get().strip(),
+                "single_material_path": self.single_material_var.get().strip(),
                 "gust_attenuation": round(float(self.gust_attenuation_var.get()), 4),
                 "is_ground_cover": bool(self.is_ground_cover_var.get()),
                 "wind_group_settings": self._serialize_wind_group_settings(),
@@ -901,13 +984,18 @@ class ConversionApp:
 
 def format_conversion_results(
     results,
+    material_policy: MaterialPolicy = MaterialPolicy.LEGACY_ROLE_IDS,
     bark_material_path: str | None = None,
     leaves_material_path: str | None = None,
+    single_material_path: str | None = None,
     use_existing_part_meshes: bool = False,
     part_mesh_asset_paths: tuple[tuple[str, str], ...] = (),
 ) -> str:
-    lines: list[str] = []
-    if bark_material_path or leaves_material_path:
+    lines: list[str] = [f"Material policy: {material_policy.value}"]
+    if material_policy == MaterialPolicy.SINGLE_MATERIAL and single_material_path:
+        lines.append(f"Single material path: {single_material_path}")
+        lines.append("")
+    elif bark_material_path or leaves_material_path:
         lines.append("Material overrides:")
         lines.append(f"  - bark: {bark_material_path or '<none>'}")
         lines.append(f"  - leaves: {leaves_material_path or '<none>'}")

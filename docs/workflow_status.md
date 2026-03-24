@@ -27,7 +27,7 @@ The project has passed the baseline importer gate:
 - UE accepts the generated baseline USDA as skeletal Nanite Assembly input
 - the baseline keeps a real `Base Skeletal Tree`
 - repeated parts are authored through `PointInstancer`
-- UE-backed bark/leaves material assignment works on the current baseline workflow
+- UE-backed material overrides work on the current baseline workflow
 
 The project has also passed automated `Phase 1` regression coverage for:
 
@@ -35,7 +35,12 @@ The project has also passed automated `Phase 1` regression coverage for:
 - deeper branch hierarchy before repeated parts
 - invalid leaf binding rejection
 - multi-material part authoring through `GeomSubset`
+- explicit material-policy remapping for shifted source material ids
+- single-material remapping for base mesh and part prototypes
+- vertex-color split remapping for base mesh and part prototypes
 - mixed inline plus external `PartMesh` prototype resolution
+- multi-root main skeleton USDA naming without duplicate root aliases
+- prototype-derived one-bone part skeleton naming
 - separate Dynamic Wind JSON generation from the normalized skeleton
 
 The current naming contract used by the checked exports is:
@@ -53,6 +58,18 @@ The wind-group contract has also been validated on the attached grass sample:
 - `Ground Cover` remains an explicit wind flag and does not change group count
 - when `Ground Cover` is enabled, every generated simulation group is emitted as non-trunk
 - legacy XML samples that do not provide usable generator levels are rejected by the wind path instead of being inferred
+
+Current operator-facing material controls:
+
+- the GUI exposes `Material Policy`
+- `single_material` uses a dedicated `Single Material Path` field
+- `legacy_role_ids` and `vertex_color_split` continue to use the bark/leaves override fields
+- GUI settings persist the selected material policy and single-material path
+- the CLI exposes:
+  - `--material-policy`
+  - `--single-material-path`
+  - `--bark-material-path`
+  - `--leaves-material-path`
 
 The only remaining open item before `Phase 1` can be considered complete is broader validation on multiple real SpeedTree structures with different tree and grass shapes:
 
@@ -85,6 +102,12 @@ At this point, the earlier importer-facing concerns are treated as closed by the
 - external `PartMesh` reuse
 - transform and instance placement sanity on the currently tested samples
 
+Recent exporter fixes that must remain stable:
+
+- the fern-style `single_material` path no longer depends on XML material ids being `1/2`
+- multi-root plants must keep a real `Base Skeletal Tree`; they must not regress into `Assembly Parts`-only imports because of collapsed root-joint aliases
+- inline part skeletons must not fall back to a generic `Root_Skeleton` naming pattern caused by a hardcoded local joint name
+
 The remaining acceptance criterion is breadth, not a known functional blocker.
 
 ## Phase 1 Definition Of Done
@@ -95,6 +118,7 @@ The remaining acceptance criterion is breadth, not a known functional blocker.
 - unique geometry survives as the `Base Skeletal Tree`
 - repeated geometry imports through `PointInstancer`
 - materials work for the baseline import path, including UE-backed material overrides
+- material-policy behavior is documented and regression-tested for `legacy_role_ids`, `single_material`, and `vertex_color_split`
 - transforms and skeletal bindings are visually sane in UE
 - automated regression fixtures cover the supported structural cases
 - optional reuse of existing Unreal `PartMesh` skeletal assets is available
@@ -119,9 +143,11 @@ The stable `Phase 1` path must preserve:
 
 - one `Base Skeletal Tree` for all unique tree geometry
 - one `Main Skeleton`
+- distinct root-joint naming for multi-root main skeletons
 - repeated `Assembly Parts` sourced from `LeafReferences`
 - `PointInstancer`-based part instancing
 - skeletal parts with one-bone local part skeletons for inline prototypes
+  - the one-bone local joint name comes from the prototype name, not a hardcoded `root`
 - optional external `PartMesh` references for reused project assets
 
 ## Manual UE Checklist
@@ -134,10 +160,12 @@ Run this checklist for every real `Phase 1` sample:
 4. part placement matches expected attachment points
 5. parts do not drift away from the main skeleton
 6. bark and leaves materials resolve correctly
-7. existing external `PartMesh` references still import through the assembly path when enabled
-8. wind JSON reimport produces sane primary-stem and secondary-branch bending
-9. generated USDA contains `NaniteAssemblyExternalRefAPI` for every intentionally externalized part prototype
-10. externalized part prototypes do not retain inline `PartMesh` mesh payloads in the same USDA branch
+7. in `single_material` mode, both base mesh and parts resolve to the one forced material
+8. on multi-root plants, the base mesh still imports and does not disappear while parts continue to import
+9. existing external `PartMesh` references still import through the assembly path when enabled
+10. wind JSON reimport produces sane primary-stem and secondary-branch bending
+11. generated USDA contains `NaniteAssemblyExternalRefAPI` for every intentionally externalized part prototype
+12. externalized part prototypes do not retain inline `PartMesh` mesh payloads in the same USDA branch
 
 ## Current milestone sequence
 

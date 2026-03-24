@@ -34,10 +34,13 @@ The current validated structure is:
 - prototype prims under `PointInstancer/Prototypes`
 - prototype prim names come from SpeedTree XML mesh names, sanitized only as needed for USD validity
 - inline prototypes authored as skeletal part subtrees, not as bare meshes
+- inline prototype single-joint names come from the prototype prim name, sanitized only as needed for USD validity
 - external reused prototypes authored as `Xform` prims with `NaniteAssemblyExternalRefAPI`
 - when external reuse is enabled, the prototype must be authored as a pure external ref subtree
   - do not keep an inline `Mesh` payload for the same prototype
   - the USDA should show `NaniteAssemblyExternalRefAPI` and `unreal:naniteAssembly:meshAssetPath`, but not a fallback `PartMesh` geometry subtree for that prototype
+- base skeleton root-joint aliasing to the output stem is valid only when the `Main Skeleton` has exactly one root joint
+  - multi-root skeletons must preserve distinct root-joint names in `jointNames`, `joints`, `skel:joints`, and base animation paths
 
 ## File And Prim Naming
 
@@ -76,6 +79,7 @@ The converter must preserve the UE-facing contract that importer behavior depend
 - required USD attributes
 - required relationships
 - required skeletal arrays with matching counts where applicable
+- stable root-joint naming across base animation, base mesh binding arrays, and `Main Skeleton`
 
 At minimum, current validated notes require:
 
@@ -128,6 +132,26 @@ For the current contract:
 - single-material meshes use direct mesh-level binding
 - multi-material meshes use `GeomSubset` with `familyName = "materialBind"`
 - external reused `PartMesh` assets are expected to carry their own material setup inside the referenced Unreal asset
+
+The exporter now has explicit material-policy modes:
+
+- `legacy_role_ids`
+  - compatibility mode only
+  - raw XML material ids `1` and `2` are still interpreted as primary/leaves semantic slots
+  - the old missing-role validation remains active only in this mode
+- `single_material`
+  - ignore XML material ids and vertex colors
+  - synthesize one canonical USD material
+  - collapse each base mesh / prototype mesh to one direct material binding
+- `vertex_color_split`
+  - ignore XML material ids
+  - synthesize two canonical USD materials
+  - assign a face to bucket `1` only if every vertex on that face is exact white `(1,1,1)`
+  - assign all non-white and gray faces to bucket `2`
+  - if usable vertex colors are missing, warn and fall back to bucket `1`
+
+Raw SpeedTree XML material ids must be treated as opaque source metadata outside `legacy_role_ids`.
+They are not semantic bark/leaves roles for the generic pipeline contract.
 
 ## Current validated defaults
 

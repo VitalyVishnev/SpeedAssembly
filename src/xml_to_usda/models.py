@@ -34,6 +34,9 @@ class Color4:
     def is_exact_black(self) -> bool:
         return self.r == 0.0 and self.g == 0.0 and self.b == 0.0
 
+    def is_exact_white(self) -> bool:
+        return self.r == 1.0 and self.g == 1.0 and self.b == 1.0
+
 
 @dataclass(frozen=True)
 class Quaternion:
@@ -49,6 +52,12 @@ class Quaternion:
 class OutputMode(StrEnum):
     SELF_CONTAINED = "self_contained"
     EXTERNAL_REFS = "external_refs"
+
+
+class MaterialPolicy(StrEnum):
+    LEGACY_ROLE_IDS = "legacy_role_ids"
+    SINGLE_MATERIAL = "single_material"
+    VERTEX_COLOR_SPLIT = "vertex_color_split"
 
 
 class PrototypeStrategy(StrEnum):
@@ -101,6 +110,7 @@ class MaterialSpec:
     two_sided: bool = False
     maps: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
     ue_asset_path: str | None = None
+    source_material_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -301,6 +311,7 @@ class ExportMetadata:
     warnings: tuple[str, ...] = ()
     unknown_sections: tuple[str, ...] = ()
     output_mode: OutputMode = OutputMode.SELF_CONTAINED
+    material_policy: MaterialPolicy = MaterialPolicy.LEGACY_ROLE_IDS
 
 
 @dataclass(frozen=True)
@@ -402,8 +413,10 @@ class ConversionRequest:
     output_directory: str | None = None
     output_naming_template: str | None = None
     output_mode: OutputMode = OutputMode.SELF_CONTAINED
+    material_policy: MaterialPolicy = MaterialPolicy.LEGACY_ROLE_IDS
     bark_material_path: str | None = None
     leaves_material_path: str | None = None
+    single_material_path: str | None = None
     use_existing_part_meshes: bool = False
     part_mesh_asset_paths: tuple[tuple[str, str], ...] = ()
 

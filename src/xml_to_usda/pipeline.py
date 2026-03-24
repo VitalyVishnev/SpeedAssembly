@@ -10,7 +10,10 @@ from .models import (
     ConversionResult,
     DynamicWindData,
     DynamicWindSimulationGroup,
+    MaterialPolicy,
     MaterialSpec,
+    MeshData,
+    MeshSection,
     ObservedXmlSchemaReport,
     OutputMode,
     Prototype,
@@ -52,18 +55,28 @@ def inspect_source(input_path: str) -> ObservedXmlSchemaReport:
 def load_canonical_model(
     input_path: str,
     output_mode: OutputMode = OutputMode.SELF_CONTAINED,
+    material_policy: MaterialPolicy = MaterialPolicy.LEGACY_ROLE_IDS,
     bark_material_path: str | None = None,
     leaves_material_path: str | None = None,
+    single_material_path: str | None = None,
     use_existing_part_meshes: bool = False,
     part_mesh_asset_paths: tuple[tuple[str, str], ...] = (),
 ) -> tuple[ObservedXmlSchemaReport, CanonicalTreeModel, tuple]:
     document = read_source_xml(input_path)
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
-    model = _apply_material_role_overrides(model, bark_material_path, leaves_material_path)
     model = _apply_external_part_mesh_overrides(model, use_existing_part_meshes, part_mesh_asset_paths)
-    metadata = replace(model.metadata, output_mode=output_mode)
-    model = replace(model, metadata=metadata)
+    model = _apply_material_policy(
+        model,
+        material_policy=material_policy,
+        bark_material_path=bark_material_path,
+        leaves_material_path=leaves_material_path,
+        single_material_path=single_material_path,
+    )
+    model = replace(
+        model,
+        metadata=replace(model.metadata, output_mode=output_mode, material_policy=material_policy),
+    )
     diagnostics = validate_model(model)
     return report, model, diagnostics
 
@@ -72,8 +85,10 @@ def convert_file(
     input_path: str,
     output_path: str | None,
     output_mode: OutputMode = OutputMode.SELF_CONTAINED,
+    material_policy: MaterialPolicy = MaterialPolicy.LEGACY_ROLE_IDS,
     bark_material_path: str | None = None,
     leaves_material_path: str | None = None,
+    single_material_path: str | None = None,
     use_existing_part_meshes: bool = False,
     part_mesh_asset_paths: tuple[tuple[str, str], ...] = (),
 ) -> ConversionResult:
@@ -81,8 +96,10 @@ def convert_file(
         input_paths=(input_path,),
         output_path=output_path,
         output_mode=output_mode,
+        material_policy=material_policy,
         bark_material_path=bark_material_path,
         leaves_material_path=leaves_material_path,
+        single_material_path=single_material_path,
         use_existing_part_meshes=use_existing_part_meshes,
         part_mesh_asset_paths=part_mesh_asset_paths,
     )
@@ -96,6 +113,7 @@ def convert_request(request: ConversionRequest) -> tuple[ConversionResult, ...]:
         raise ValueError("Explicit output_path is only valid for single-file conversion.")
     if request.part_mesh_asset_paths and not request.use_existing_part_meshes:
         raise ValueError("part_mesh_asset_paths require use_existing_part_meshes=True.")
+    _validate_material_request(request)
 
     results: list[ConversionResult] = []
     for input_path in request.input_paths:
@@ -106,8 +124,10 @@ def convert_request(request: ConversionRequest) -> tuple[ConversionResult, ...]:
         _, model, diagnostics = load_canonical_model(
             input_path,
             request.output_mode,
+            material_policy=request.material_policy,
             bark_material_path=request.bark_material_path,
             leaves_material_path=request.leaves_material_path,
+            single_material_path=request.single_material_path,
             use_existing_part_meshes=request.use_existing_part_meshes,
             part_mesh_asset_paths=request.part_mesh_asset_paths,
         )
@@ -244,14 +264,29 @@ def _prototype_material_distribution(model: CanonicalTreeModel) -> dict[str, int
     return dict(sorted(distribution.items(), key=lambda item: int(item[0]) if item[0].lstrip("-").isdigit() else item[0]))
 
 
-def _apply_material_role_overrides(
+def _apply_material_policy(
+    model: CanonicalTreeModel,
+    material_policy: MaterialPolicy,
+    bark_material_path: str | None,
+    leaves_material_path: str | None,
+    single_material_path: str | None,
+) -> CanonicalTreeModel:
+    if material_policy == MaterialPolicy.LEGACY_ROLE_IDS:
+        return _apply_legacy_material_policy(model, bark_material_path, leaves_material_path)
+    if material_policy == MaterialPolicy.SINGLE_MATERIAL:
+        return _apply_single_material_policy(model, single_material_path)
+    if material_policy == MaterialPolicy.VERTEX_COLOR_SPLIT:
+        return _apply_vertex_color_split_policy(model, bark_material_path, leaves_material_path)
+    raise ValueError(f"Unsupported material policy: {material_policy}")
+
+
+def _apply_legacy_material_policy(
     model: CanonicalTreeModel,
     bark_material_path: str | None,
     leaves_material_path: str | None,
 ) -> CanonicalTreeModel:
     if not bark_material_path and not leaves_material_path:
         return model
-
     overrides = {
         BASELINE_BARK_MATERIAL_ID: bark_material_path,
         BASELINE_LEAVES_MATERIAL_ID: leaves_material_path,
@@ -265,6 +300,158 @@ def _apply_material_override(material: MaterialSpec, overrides: dict[int, str | 
     if not ue_asset_path:
         return material
     return replace(material, ue_asset_path=_normalize_unreal_asset_path(ue_asset_path))
+
+
+def _apply_single_material_policy(
+    model: CanonicalTreeModel,
+    single_material_path: str | None,
+) -> CanonicalTreeModel:
+    source_material_ids = tuple(sorted(set(_source_material_ids(model))))
+    single_material = MaterialSpec(
+        source_id=BASELINE_BARK_MATERIAL_ID,
+        name="SingleMaterial",
+        ue_asset_path=_normalize_unreal_asset_path(single_material_path) if single_material_path else None,
+        source_material_ids=source_material_ids,
+    )
+    base_mesh = _remap_mesh_to_single_material(model.base_mesh, BASELINE_BARK_MATERIAL_ID)
+    prototypes = tuple(
+        replace(prototype, mesh=_remap_mesh_to_single_material(prototype.mesh, BASELINE_BARK_MATERIAL_ID))
+        if prototype.mesh is not None
+        else prototype
+        for prototype in model.prototypes
+    )
+    return replace(model, materials=(single_material,), base_mesh=base_mesh, prototypes=prototypes)
+
+
+def _apply_vertex_color_split_policy(
+    model: CanonicalTreeModel,
+    bark_material_path: str | None,
+    leaves_material_path: str | None,
+) -> CanonicalTreeModel:
+    warnings: list[str] = []
+    source_material_ids = tuple(sorted(set(_source_material_ids(model))))
+    materials = (
+        MaterialSpec(
+            source_id=BASELINE_BARK_MATERIAL_ID,
+            name="PrimaryMaterial",
+            ue_asset_path=_normalize_unreal_asset_path(bark_material_path) if bark_material_path else None,
+            source_material_ids=source_material_ids,
+        ),
+        MaterialSpec(
+            source_id=BASELINE_LEAVES_MATERIAL_ID,
+            name="SecondaryMaterial",
+            ue_asset_path=_normalize_unreal_asset_path(leaves_material_path) if leaves_material_path else None,
+            source_material_ids=source_material_ids,
+        ),
+    )
+    base_mesh = _remap_mesh_by_vertex_color(model.base_mesh, "Base Skeletal Tree", warnings)
+    prototypes = tuple(
+        replace(
+            prototype,
+            mesh=_remap_mesh_by_vertex_color(
+                prototype.mesh,
+                f"Prototype {prototype.identity.prim_name}",
+                warnings,
+            ),
+        )
+        if prototype.mesh is not None
+        else prototype
+        for prototype in model.prototypes
+    )
+    metadata = model.metadata
+    if warnings:
+        metadata = replace(metadata, warnings=metadata.warnings + tuple(warnings))
+    return replace(model, materials=materials, base_mesh=base_mesh, prototypes=prototypes, metadata=metadata)
+
+
+def _source_material_ids(model: CanonicalTreeModel) -> tuple[int, ...]:
+    if model.materials:
+        return tuple(
+            material_id
+            for material in model.materials
+            for material_id in (material.source_material_ids or (material.source_id,))
+        )
+    return tuple(
+        material_id
+        for material_id in (
+            [section.material_id for section in model.base_mesh.sections] if model.base_mesh is not None else []
+        )
+    )
+
+
+def _remap_mesh_to_single_material(mesh: MeshData | None, material_id: int) -> MeshData | None:
+    if mesh is None:
+        return None
+    return replace(mesh, sections=_single_material_sections(material_id, len(mesh.face_vertex_counts)))
+
+
+def _single_material_sections(material_id: int, face_count: int) -> tuple[MeshSection, ...]:
+    if face_count <= 0:
+        return ()
+    return (MeshSection(material_id=material_id, face_indices=tuple(range(face_count))),)
+
+
+def _remap_mesh_by_vertex_color(
+    mesh: MeshData | None,
+    label: str,
+    warnings: list[str],
+) -> MeshData | None:
+    if mesh is None:
+        return None
+    sections = _vertex_color_split_sections(mesh)
+    if sections is None:
+        if mesh.face_vertex_counts:
+            warnings.append(
+                f"material_policy_warning: vertex_color_split fell back to primary material for {label} because usable vertex colors are missing"
+            )
+        sections = _single_material_sections(BASELINE_BARK_MATERIAL_ID, len(mesh.face_vertex_counts))
+    return replace(mesh, sections=sections)
+
+
+def _vertex_color_split_sections(mesh: MeshData) -> tuple[MeshSection, ...] | None:
+    if not mesh.vertex_colors or not mesh.face_vertex_counts or not mesh.face_vertex_indices:
+        return None
+
+    sections_by_material: dict[int, list[int]] = {
+        BASELINE_BARK_MATERIAL_ID: [],
+        BASELINE_LEAVES_MATERIAL_ID: [],
+    }
+    offset = 0
+    for face_index, face_count in enumerate(mesh.face_vertex_counts):
+        face_indices = mesh.face_vertex_indices[offset:offset + face_count]
+        offset += face_count
+        if len(face_indices) != face_count:
+            return None
+        if any(point_index < 0 or point_index >= len(mesh.vertex_colors) for point_index in face_indices):
+            return None
+        material_id = (
+            BASELINE_BARK_MATERIAL_ID
+            if all(mesh.vertex_colors[point_index].is_exact_white() for point_index in face_indices)
+            else BASELINE_LEAVES_MATERIAL_ID
+        )
+        sections_by_material[material_id].append(face_index)
+    return tuple(
+        MeshSection(material_id=material_id, face_indices=tuple(face_indices))
+        for material_id, face_indices in sections_by_material.items()
+        if face_indices
+    )
+
+
+def _validate_material_request(request: ConversionRequest) -> None:
+    checks: list[tuple[str, str | None]]
+    if request.material_policy == MaterialPolicy.SINGLE_MATERIAL:
+        checks = [("Single", request.single_material_path)]
+    else:
+        checks = [
+            ("Bark", request.bark_material_path),
+            ("Leaves", request.leaves_material_path),
+        ]
+    for label, path in checks:
+        if not path:
+            continue
+        normalized = _normalize_unreal_asset_path(path)
+        if not _is_valid_unreal_asset_path(normalized):
+            raise ValueError(f"{label} material path must start with /Game/.")
 
 
 def _apply_external_part_mesh_overrides(

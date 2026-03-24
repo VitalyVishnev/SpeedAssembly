@@ -13,6 +13,7 @@ from xml_to_usda.models import (
     Color4,
     DynamicWindSimulationGroup,
     Joint,
+    MaterialPolicy,
     MaterialSpec,
     Matrix4d,
     MeshData,
@@ -22,7 +23,14 @@ from xml_to_usda.models import (
     Vector3,
 )
 from xml_to_usda.normalizer import _rebalance_assembly_part_prototype_scales, _vertex_color_material_sections
-from xml_to_usda.pipeline import convert_file, generate_wind_json, inspect_source, inspect_wind_data, load_canonical_model
+from xml_to_usda.pipeline import (
+    _apply_material_policy,
+    convert_file,
+    generate_wind_json,
+    inspect_source,
+    inspect_wind_data,
+    load_canonical_model,
+)
 from xml_to_usda.source_transform import build_source_transform
 from xml_to_usda.ue_schema import DEFAULT_UE_SCHEMA_CONTRACT
 from xml_to_usda.usda_writer import render_usda
@@ -49,6 +57,31 @@ def _write_generator_level_sample(tmp_path: Path, generator_labels: tuple[str | 
     bone_lines.extend(["  </Bones>", "</SpeedTreeRaw>"])
     sample_path = tmp_path / "wind_generator_levels.xml"
     sample_path.write_text("\n".join(bone_lines), encoding="utf-8")
+    return sample_path
+
+
+def _write_shifted_material_sample(tmp_path: Path, material_id_map: dict[int, int]) -> Path:
+    tree = ET.parse(SIMPLE_TREE_01)
+    root = tree.getroot()
+
+    for material_node in root.findall(".//Materials/Material"):
+        raw_id = material_node.attrib.get("ID")
+        if raw_id is None or not raw_id.isdigit():
+            continue
+        mapped_id = material_id_map.get(int(raw_id))
+        if mapped_id is not None:
+            material_node.set("ID", str(mapped_id))
+
+    for node in root.iter():
+        raw_id = node.attrib.get("Material")
+        if raw_id is None or not raw_id.lstrip("-").isdigit():
+            continue
+        mapped_id = material_id_map.get(int(raw_id))
+        if mapped_id is not None:
+            node.set("Material", str(mapped_id))
+
+    sample_path = tmp_path / "shifted_material_ids.xml"
+    tree.write(sample_path, encoding="utf-8", xml_declaration=True)
     return sample_path
 
 
@@ -715,11 +748,150 @@ def test_missing_primary_or_leaves_material_is_validation_error() -> None:
     document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
-    broken_model = replace(model, materials=(MaterialSpec(source_id=1, name="Default_Mat"),))
+    broken_model = replace(
+        model,
+        materials=(MaterialSpec(source_id=1, name="Default_Mat", source_material_ids=(1,)),),
+        metadata=replace(model.metadata, material_policy=MaterialPolicy.LEGACY_ROLE_IDS),
+    )
 
     diagnostics = validate_model(broken_model)
 
     assert any(issue.code == "missing_required_material_role" and issue.severity == "error" for issue in diagnostics)
+
+    remapped_policy_model = replace(
+        broken_model,
+        metadata=replace(broken_model.metadata, material_policy=MaterialPolicy.SINGLE_MATERIAL),
+    )
+
+    diagnostics = validate_model(remapped_policy_model)
+
+    assert not any(issue.code == "missing_required_material_role" for issue in diagnostics)
+
+
+def test_single_material_policy_succeeds_on_shifted_source_material_ids(tmp_path: Path) -> None:
+    shifted_sample = _write_shifted_material_sample(tmp_path, {1: 3, 2: 4})
+
+    result = convert_file(
+        str(shifted_sample),
+        str(tmp_path / "single_material.usda"),
+        material_policy=MaterialPolicy.SINGLE_MATERIAL,
+        single_material_path="/Game/Assembly/SimpleTree/Leaves1.Leaves1",
+    )
+    _, model, diagnostics = load_canonical_model(
+        str(shifted_sample),
+        material_policy=MaterialPolicy.SINGLE_MATERIAL,
+        single_material_path="/Game/Assembly/SimpleTree/Leaves1.Leaves1",
+    )
+
+    assert result.usda_document is not None
+    assert len(model.materials) == 1
+    assert model.materials[0].source_id == 1
+    assert model.materials[0].ue_asset_path == "/Game/Assembly/SimpleTree/Leaves1.Leaves1"
+    assert model.base_mesh is not None
+    assert {section.material_id for section in model.base_mesh.sections} == {1}
+    assert all(
+        prototype.mesh is None or {section.material_id for section in prototype.mesh.sections} == {1}
+        for prototype in model.prototypes
+    )
+    assert not any(
+        issue.severity == "error" and issue.code in {"missing_required_material_role", "missing_material_definition"}
+        for issue in diagnostics
+    )
+    assert 'uniform asset info:unreal:sourceAsset = @/Game/Assembly/SimpleTree/Leaves1.Leaves1@' in result.usda_document.text
+
+
+def test_vertex_color_split_policy_maps_white_and_nonwhite_for_base_and_prototypes() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    synthetic_mesh = MeshData(
+        name="SyntheticMaterialSplit",
+        points=(
+            Vector3(0.0, 0.0, 0.0),
+            Vector3(1.0, 0.0, 0.0),
+            Vector3(0.0, 1.0, 0.0),
+            Vector3(1.0, 1.0, 0.0),
+            Vector3(2.0, 1.0, 0.0),
+            Vector3(1.0, 2.0, 0.0),
+        ),
+        face_vertex_counts=(3, 3),
+        face_vertex_indices=(0, 1, 2, 3, 4, 5),
+        vertex_colors=(
+            Color4(1.0, 1.0, 1.0),
+            Color4(1.0, 1.0, 1.0),
+            Color4(1.0, 1.0, 1.0),
+            Color4(0.5, 0.5, 0.5),
+            Color4(0.5, 0.5, 0.5),
+            Color4(0.5, 0.5, 0.5),
+        ),
+        sections=(MeshSection(material_id=9, face_indices=(0, 1)),),
+        skel_joint_indices=(0, 0, 0, 0, 0, 0),
+        skel_joint_weights=(1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
+        skel_element_size=1,
+    )
+    prototype_mesh = replace(
+        synthetic_mesh,
+        name="SyntheticPrototypeSplit",
+        skel_joint_indices=(),
+        skel_joint_weights=(),
+        skel_element_size=0,
+    )
+    first_prototype = model.prototypes[0]
+    remapped_model = _apply_material_policy(
+        replace(
+            model,
+            base_mesh=synthetic_mesh,
+            prototypes=(
+                replace(first_prototype, mesh=prototype_mesh),
+                *model.prototypes[1:],
+            ),
+        ),
+        material_policy=MaterialPolicy.VERTEX_COLOR_SPLIT,
+        bark_material_path=None,
+        leaves_material_path=None,
+        single_material_path=None,
+    )
+
+    assert remapped_model.base_mesh is not None
+    assert remapped_model.base_mesh.sections == (
+        MeshSection(material_id=1, face_indices=(0,)),
+        MeshSection(material_id=2, face_indices=(1,)),
+    )
+    assert remapped_model.prototypes[0].mesh is not None
+    assert remapped_model.prototypes[0].mesh.sections == (
+        MeshSection(material_id=1, face_indices=(0,)),
+        MeshSection(material_id=2, face_indices=(1,)),
+    )
+
+
+def test_vertex_color_split_policy_warns_and_falls_back_to_primary_without_vertex_colors() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    base_mesh_without_colors = replace(model.base_mesh, vertex_colors=()) if model.base_mesh is not None else None
+    first_prototype = model.prototypes[0]
+    prototype_mesh_without_colors = replace(first_prototype.mesh, vertex_colors=()) if first_prototype.mesh is not None else None
+    remapped_model = _apply_material_policy(
+        replace(
+            model,
+            base_mesh=base_mesh_without_colors,
+            prototypes=(
+                replace(first_prototype, mesh=prototype_mesh_without_colors),
+                *model.prototypes[1:],
+            ),
+        ),
+        material_policy=MaterialPolicy.VERTEX_COLOR_SPLIT,
+        bark_material_path=None,
+        leaves_material_path=None,
+        single_material_path=None,
+    )
+    diagnostics = validate_model(remapped_model)
+
+    assert remapped_model.base_mesh is not None
+    assert {section.material_id for section in remapped_model.base_mesh.sections} == {1}
+    assert remapped_model.prototypes[0].mesh is not None
+    assert {section.material_id for section in remapped_model.prototypes[0].mesh.sections} == {1}
+    assert any(issue.code == "material_policy_warning" and issue.severity == "warning" for issue in diagnostics)
 
 
 def test_speedtree_xml_without_units_uses_meter_source_scale() -> None:
@@ -1099,8 +1271,8 @@ def test_assembly_part_prototypes_are_authored_as_single_joint_skeletal_meshes()
 
     assert 'append rel skel:skeleton = </Tree/AssemblyPartsInstancer/Prototypes/Twig_01/PartSkelRoot/PartSkeleton>' in usda.text
     assert 'append rel skel:animationSource = </Tree/AssemblyPartsInstancer/Prototypes/Twig_01/PartSkelRoot/PartAnimation>' in usda.text
-    assert 'uniform token[] joints = ["root"]' in usda.text
-    assert 'uniform token[] jointNames = ["root"]' in usda.text
+    assert 'uniform token[] joints = ["Twig_01"]' in usda.text
+    assert 'uniform token[] jointNames = ["Twig_01"]' in usda.text
     assert 'uniform matrix4d[] bindTransforms = [( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )]' in usda.text
     assert 'uniform matrix4d[] restTransforms = [( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )]' in usda.text
     assert 'elementSize = 1' in usda.text
@@ -1234,6 +1406,49 @@ def test_realistic_multi_material_part_mesh_authors_geom_subsets() -> None:
     assert 'def GeomSubset "Material_1_1"' in usda.text
     assert 'def GeomSubset "Material_2_2"' in usda.text
     assert 'uniform token subsetFamily:materialBind:familyType = "nonOverlapping"' in usda.text
+
+
+def test_multi_root_skeleton_keeps_unique_root_joint_names_in_usda() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    report = inspect_xml(document)
+    model = normalize_to_canonical(document, report)
+    assert model.base_mesh is not None
+    base_mesh = replace(
+        model.base_mesh,
+        skel_joint_indices=(0,) * len(model.base_mesh.points),
+        skel_joint_weights=(1.0,) * len(model.base_mesh.points),
+        skel_element_size=1,
+    )
+    multi_root_model = replace(
+        model,
+        materials=(
+            MaterialSpec(source_id=1, name="Default_Mat", source_material_ids=(1,)),
+            MaterialSpec(source_id=2, name="Secondary_Mat", source_material_ids=(2,)),
+        ),
+        base_mesh=base_mesh,
+        skeleton=(
+            Joint(name="root_a", parent=None, bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+            Joint(name="root_b", parent=None, bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity()),
+        ),
+        skeletal_support_primvars=None,
+        assembly_parts=(),
+        prototypes=(),
+    )
+    diagnostics = validate_model(multi_root_model)
+    usda = render_usda(multi_root_model, diagnostics, base_mesh_name="MultiRootFern")
+
+    assert 'uniform token[] jointNames = ["root_a", "root_b"]' in usda.text
+    assert 'uniform token[] joints = ["root_a", "root_b"]' in usda.text
+    assert 'uniform token[] jointNames = ["MultiRootFern", "MultiRootFern"]' not in usda.text
+
+
+def test_inline_part_skeleton_uses_prototype_name_for_single_joint() -> None:
+    result = convert_file(str(SIMPLE_TREE_01), output_path=None)
+
+    assert result.usda_document is not None
+    assert 'def Xform "Twig_01"' in result.usda_document.text
+    assert 'uniform token[] joints = ["Twig_01"]' in result.usda_document.text
+    assert 'uniform token[] jointNames = ["Twig_01"]' in result.usda_document.text
 
 
 def test_leaf_binding_distribution_maps_to_mesh_library_without_hardcoded_counts() -> None:

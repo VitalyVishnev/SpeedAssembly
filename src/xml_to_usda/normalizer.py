@@ -125,6 +125,7 @@ def _extract_materials(root: ET.Element) -> list[MaterialSpec]:
                 name=material_node.attrib.get("Name", f"Material_{source_id}"),
                 two_sided=material_node.attrib.get("TwoSided") == "1",
                 maps=tuple(maps),
+                source_material_ids=(int(source_id),),
             )
         )
     return materials
@@ -141,10 +142,12 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
     merged_face_counts: list[int] = []
     merged_face_indices: list[int] = []
     merged_uv_coords: list[Vector2] = []
+    merged_vertex_colors: list[Color4] = []
     merged_joint_indices: list[int] = []
     merged_joint_weights: list[float] = []
     merged_sections: dict[int, list[int]] = defaultdict(list)
     merged_parts: list[BaseTreePart] = []
+    preserve_vertex_colors = True
 
     for source_object in candidates:
         mesh = source_object.mesh
@@ -157,6 +160,12 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
         merged_face_counts.extend(mesh.face_vertex_counts)
         merged_face_indices.extend(index + point_offset for index in mesh.face_vertex_indices)
         merged_uv_coords.extend(mesh.uv_coords)
+        if preserve_vertex_colors:
+            if len(mesh.vertex_colors) == len(mesh.points):
+                merged_vertex_colors.extend(mesh.vertex_colors)
+            else:
+                preserve_vertex_colors = False
+                merged_vertex_colors.clear()
         merged_joint_indices.extend(mesh.skel_joint_indices)
         merged_joint_weights.extend(mesh.skel_joint_weights)
         for section in mesh.sections:
@@ -181,6 +190,7 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
             face_vertex_counts=tuple(merged_face_counts),
             face_vertex_indices=tuple(merged_face_indices),
             uv_coords=tuple(merged_uv_coords),
+            vertex_colors=tuple(merged_vertex_colors if preserve_vertex_colors else ()),
             sections=_ordered_sections(merged_sections),
             skel_joint_indices=tuple(merged_joint_indices),
             skel_joint_weights=tuple(merged_joint_weights),

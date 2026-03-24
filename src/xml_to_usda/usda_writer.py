@@ -42,7 +42,11 @@ def render_usda(
         else contract.skeleton_name
     )
     resolved_base_animation_name = "animation" if base_mesh_name else contract.base_animation_name
-    resolved_base_joint_root_name = resolved_base_mesh_name if base_mesh_name else None
+    resolved_base_joint_root_name = (
+        _resolved_root_joint_alias(model, resolved_base_mesh_name)
+        if base_mesh_name
+        else None
+    )
     base_animation = _render_base_animation(model, resolved_base_animation_name, resolved_base_joint_root_name)
     base_mesh = _render_base_mesh(
         model,
@@ -386,6 +390,7 @@ def _render_inline_instancer_prototype(prototype: Prototype, contract: UeSchemaC
 
     name = prototype.identity.prim_name
     part_mesh_name = make_stable_prim_name(name, fallback=contract.part_mesh_name)
+    part_joint_name = make_stable_prim_name(name, fallback="root")
     skinning = _render_single_joint_skinning(prototype.mesh, contract)
     material_binding = _render_material_binding(prototype.mesh)
     return f'''        def Xform "{name}"
@@ -396,7 +401,7 @@ def _render_inline_instancer_prototype(prototype: Prototype, contract: UeSchemaC
             {{
                 def SkelAnimation "{contract.part_animation_name}"
                 {{
-                    uniform token[] joints = ["root"]
+                    uniform token[] joints = ["{part_joint_name}"]
                     quath[] rotations = [{_identity_quaternion()}]
                     half3[] scales = [(1, 1, 1)]
                     float3[] translations = [(0, 0, 0)]
@@ -406,7 +411,7 @@ def _render_inline_instancer_prototype(prototype: Prototype, contract: UeSchemaC
                     prepend apiSchemas = ["{contract.skel_binding_api}"]
                 )
                 {{
-                    uniform token[] skel:joints = ["root"]
+                    uniform token[] skel:joints = ["{part_joint_name}"]
                     uniform matrix4d primvars:skel:geomBindTransform = {_identity_matrix()}
                     append rel skel:skeleton = {contract.part_skeleton_path(name)}
                     uniform token subdivisionScheme = "none"
@@ -420,8 +425,8 @@ def _render_inline_instancer_prototype(prototype: Prototype, contract: UeSchemaC
                 )
                 {{
                     uniform matrix4d[] bindTransforms = [{_identity_matrix()}]
-                    uniform token[] jointNames = ["root"]
-                    uniform token[] joints = ["root"]
+                    uniform token[] jointNames = ["{part_joint_name}"]
+                    uniform token[] joints = ["{part_joint_name}"]
                     uniform token purpose = "guide"
                     uniform matrix4d[] restTransforms = [{_identity_matrix()}]
                     append rel skel:animationSource = {contract.part_animation_path(name)}
@@ -644,6 +649,13 @@ def _joint_render_name(joint, root_joint_name: str | None) -> str:
     if root_joint_name and joint.parent is None:
         return root_joint_name
     return joint.name
+
+
+def _resolved_root_joint_alias(model: CanonicalTreeModel, default_name: str) -> str | None:
+    root_joint_count = sum(1 for joint in model.skeleton if joint.parent is None)
+    if root_joint_count == 1:
+        return default_name
+    return None
 
 
 def _identity_matrix() -> str:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from .models import MaterialPolicy
 from .pipeline import convert_file, generate_wind_json, inspect_source
 from .xml_reader import render_inspect_report
 
@@ -17,6 +18,15 @@ def build_parser() -> argparse.ArgumentParser:
     convert_parser = subparsers.add_parser("convert", help="Convert XML to USDA.")
     convert_parser.add_argument("input", help="Path to the source XML file.")
     convert_parser.add_argument("output", help="Path to the output USDA file.")
+    convert_parser.add_argument(
+        "--material-policy",
+        choices=[policy.value for policy in MaterialPolicy],
+        default=MaterialPolicy.LEGACY_ROLE_IDS.value,
+        help="Material authoring mode.",
+    )
+    convert_parser.add_argument("--bark-material-path", help="Unreal material path for the primary material bucket.")
+    convert_parser.add_argument("--leaves-material-path", help="Unreal material path for the secondary material bucket.")
+    convert_parser.add_argument("--single-material-path", help="Unreal material path used by single_material mode.")
 
     wind_parser = subparsers.add_parser("generate-wind-json", help="Generate Dynamic Wind JSON from XML.")
     wind_parser.add_argument("input", help="Path to the source XML file.")
@@ -34,7 +44,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "inspect":
             return _run_inspect(args.input)
         if args.command == "convert":
-            return _run_convert(args.input, args.output)
+            return _run_convert(
+                args.input,
+                args.output,
+                MaterialPolicy(args.material_policy),
+                bark_material_path=args.bark_material_path,
+                leaves_material_path=args.leaves_material_path,
+                single_material_path=args.single_material_path,
+            )
         if args.command == "generate-wind-json":
             return _run_generate_wind_json(args.input, args.output)
         if args.command == "gui":
@@ -55,8 +72,22 @@ def _run_inspect(input_path: str) -> int:
     return 0
 
 
-def _run_convert(input_path: str, output_path: str) -> int:
-    result = convert_file(input_path, output_path)
+def _run_convert(
+    input_path: str,
+    output_path: str,
+    material_policy: MaterialPolicy,
+    bark_material_path: str | None = None,
+    leaves_material_path: str | None = None,
+    single_material_path: str | None = None,
+) -> int:
+    result = convert_file(
+        input_path,
+        output_path,
+        material_policy=material_policy,
+        bark_material_path=bark_material_path,
+        leaves_material_path=leaves_material_path,
+        single_material_path=single_material_path,
+    )
     for issue in result.diagnostics:
         _print_issue(issue)
     if result.usda_document is None:
