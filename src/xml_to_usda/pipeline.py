@@ -1,28 +1,37 @@
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from pathlib import Path
 
 from .dynamic_wind import build_dynamic_wind_data, write_dynamic_wind_json
+from .job_control import ConversionCancelledError, emit_telemetry, throw_if_cancelled
+from .material_resolver import apply_material_policy as resolve_material_policy, resolve_prototype_materials
 from .models import (
     CanonicalTreeModel,
+    CleanupPolicy,
     ConversionRequest,
     ConversionResult,
+    ConversionPhase,
+    CpuProfile,
     DynamicWindData,
     DynamicWindSimulationGroup,
     MaterialPolicy,
-    MaterialSpec,
-    MeshData,
-    MeshSection,
     ObservedXmlSchemaReport,
     OutputMode,
-    Prototype,
-    PrototypeResolutionMode,
+    PrototypeSourceConfig,
+    ValidationIssue,
     WindJsonResult,
 )
 from .normalizer import normalize_to_canonical
-from .usda_writer import render_usda
+from .prototype_sources import (
+    apply_prototype_source_configs,
+    merge_legacy_part_mesh_configs,
+    normalize_prototype_override_key as normalize_prototype_source_key,
+)
+from .usda_writer import render_usda, write_usda_document
 from .validator import validate_model
+from .runtime_paths import JobWorkspace, RuntimePaths, resolve_runtime_paths
 from .xml_reader import inspect_xml, read_source_xml
 
 
@@ -59,19 +68,58 @@ def load_canonical_model(
     bark_material_path: str | None = None,
     leaves_material_path: str | None = None,
     single_material_path: str | None = None,
+    cpu_profile: CpuProfile = CpuProfile.BALANCED,
+    prototype_source_configs: tuple[PrototypeSourceConfig, ...] = (),
     use_existing_part_meshes: bool = False,
     part_mesh_asset_paths: tuple[tuple[str, str], ...] = (),
+    telemetry_callback=None,
+    cancel_event=None,
 ) -> tuple[ObservedXmlSchemaReport, CanonicalTreeModel, tuple]:
+    started_at = time.perf_counter()
+    emit_telemetry(
+        telemetry_callback,
+        ConversionPhase.XML_NORMALIZATION,
+        message="Reading and normalizing XML source.",
+        started_at=started_at,
+    )
+    throw_if_cancelled(cancel_event)
     document = read_source_xml(input_path)
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
-    model = _apply_external_part_mesh_overrides(model, use_existing_part_meshes, part_mesh_asset_paths)
-    model = _apply_material_policy(
+    source_configs = merge_legacy_part_mesh_configs(
+        prototype_source_configs,
+        use_existing_part_meshes,
+        part_mesh_asset_paths,
+    )
+    model = apply_prototype_source_configs(
+        model,
+        source_configs,
+        normalize_asset_path=_normalize_unreal_asset_path,
+        is_valid_unreal_asset_path=_is_valid_unreal_asset_path,
+        cpu_profile=cpu_profile,
+        telemetry_callback=telemetry_callback,
+        cancel_event=cancel_event,
+        started_at=started_at,
+    )
+    model = resolve_prototype_materials(
+        model,
+        cpu_profile=cpu_profile,
+        cancel_event=cancel_event,
+    )
+    emit_telemetry(
+        telemetry_callback,
+        ConversionPhase.MATERIAL_RESOLUTION,
+        message="Applying material policy.",
+        started_at=started_at,
+    )
+    throw_if_cancelled(cancel_event)
+    model = resolve_material_policy(
         model,
         material_policy=material_policy,
         bark_material_path=bark_material_path,
         leaves_material_path=leaves_material_path,
         single_material_path=single_material_path,
+        normalize_asset_path=_normalize_unreal_asset_path,
     )
     model = replace(
         model,
@@ -89,8 +137,14 @@ def convert_file(
     bark_material_path: str | None = None,
     leaves_material_path: str | None = None,
     single_material_path: str | None = None,
+    cpu_profile: CpuProfile = CpuProfile.BALANCED,
+    cleanup_policy: CleanupPolicy = CleanupPolicy.EPHEMERAL,
+    prototype_source_configs: tuple[PrototypeSourceConfig, ...] = (),
     use_existing_part_meshes: bool = False,
     part_mesh_asset_paths: tuple[tuple[str, str], ...] = (),
+    telemetry_callback=None,
+    cancel_event=None,
+    runtime_paths: RuntimePaths | None = None,
 ) -> ConversionResult:
     request = ConversionRequest(
         input_paths=(input_path,),
@@ -100,64 +154,118 @@ def convert_file(
         bark_material_path=bark_material_path,
         leaves_material_path=leaves_material_path,
         single_material_path=single_material_path,
+        cpu_profile=cpu_profile,
+        cleanup_policy=cleanup_policy,
+        prototype_source_configs=prototype_source_configs,
         use_existing_part_meshes=use_existing_part_meshes,
         part_mesh_asset_paths=part_mesh_asset_paths,
     )
-    return convert_request(request)[0]
+    return convert_request(
+        request,
+        telemetry_callback=telemetry_callback,
+        cancel_event=cancel_event,
+        runtime_paths=runtime_paths,
+    )[0]
 
 
-def convert_request(request: ConversionRequest) -> tuple[ConversionResult, ...]:
+def convert_request(
+    request: ConversionRequest,
+    telemetry_callback=None,
+    cancel_event=None,
+    runtime_paths: RuntimePaths | None = None,
+) -> tuple[ConversionResult, ...]:
     if not request.input_paths:
         raise ValueError("ConversionRequest requires at least one input path.")
     if request.output_path and len(request.input_paths) != 1:
         raise ValueError("Explicit output_path is only valid for single-file conversion.")
-    if request.part_mesh_asset_paths and not request.use_existing_part_meshes:
+    if request.part_mesh_asset_paths and not request.use_existing_part_meshes and not request.prototype_source_configs:
         raise ValueError("part_mesh_asset_paths require use_existing_part_meshes=True.")
     _validate_material_request(request)
 
     results: list[ConversionResult] = []
+    resolved_runtime_paths = runtime_paths or resolve_runtime_paths()
     for input_path in request.input_paths:
+        throw_if_cancelled(cancel_event)
         resolved_output = _resolve_output_path(request, input_path)
         if resolved_output is not None:
             _ensure_output_path_allowed(resolved_output)
 
-        _, model, diagnostics = load_canonical_model(
-            input_path,
-            request.output_mode,
-            material_policy=request.material_policy,
-            bark_material_path=request.bark_material_path,
-            leaves_material_path=request.leaves_material_path,
-            single_material_path=request.single_material_path,
-            use_existing_part_meshes=request.use_existing_part_meshes,
-            part_mesh_asset_paths=request.part_mesh_asset_paths,
+        job_workspace = JobWorkspace.create(
+            resolved_runtime_paths,
+            input_path=input_path,
+            output_path=str(resolved_output) if resolved_output is not None else None,
+            cleanup_policy=request.cleanup_policy,
         )
-        errors = [issue for issue in diagnostics if issue.severity == "error"]
-        if errors:
+        runtime_telemetry = _wrap_runtime_telemetry_callback(telemetry_callback, job_workspace)
+        try:
+            _, model, diagnostics = load_canonical_model(
+                input_path,
+                request.output_mode,
+                material_policy=request.material_policy,
+                bark_material_path=request.bark_material_path,
+                leaves_material_path=request.leaves_material_path,
+                single_material_path=request.single_material_path,
+                cpu_profile=request.cpu_profile,
+                prototype_source_configs=request.prototype_source_configs,
+                use_existing_part_meshes=request.use_existing_part_meshes,
+                part_mesh_asset_paths=request.part_mesh_asset_paths,
+                telemetry_callback=runtime_telemetry,
+                cancel_event=cancel_event,
+            )
+            errors = [issue for issue in diagnostics if issue.severity == "error"]
+            if errors:
+                diagnostics = _append_cleanup_warning(
+                    diagnostics,
+                    job_workspace.finalize(status="failed"),
+                )
+                results.append(
+                    ConversionResult(
+                        input_path=input_path,
+                        output_path=str(resolved_output) if resolved_output is not None else None,
+                        diagnostics=diagnostics,
+                        usda_document=None,
+                        telemetry=(),
+                        runtime_job_dir=str(job_workspace.job_dir) if job_workspace.debug_preserve else None,
+                    )
+                )
+                continue
+
+            usda_document = write_usda_document(
+                model,
+                diagnostics,
+                output_path=resolved_output,
+                base_mesh_name=resolved_output.stem if resolved_output is not None else None,
+                telemetry_callback=runtime_telemetry,
+                cancel_event=cancel_event,
+            )
+        except ConversionCancelledError:
+            diagnostics = _append_cleanup_warning((), job_workspace.finalize(status="cancelled"))
             results.append(
                 ConversionResult(
                     input_path=input_path,
                     output_path=str(resolved_output) if resolved_output is not None else None,
                     diagnostics=diagnostics,
                     usda_document=None,
+                    telemetry=(),
+                    runtime_job_dir=str(job_workspace.job_dir) if job_workspace.debug_preserve else None,
                 )
             )
             continue
+        except Exception as exc:
+            cleanup_warning = job_workspace.finalize(status="failed", error_message=str(exc))
+            if cleanup_warning:
+                raise RuntimeError(f"{exc}\nRuntime cleanup warning: {cleanup_warning}") from exc
+            raise
 
-        usda_document = render_usda(
-            model,
-            diagnostics,
-            base_mesh_name=resolved_output.stem if resolved_output is not None else None,
-        )
-        if resolved_output is not None:
-            resolved_output.parent.mkdir(parents=True, exist_ok=True)
-            resolved_output.write_text(usda_document.text, encoding="utf-8")
-
+        diagnostics = _append_cleanup_warning(diagnostics, job_workspace.finalize(status="succeeded"))
         results.append(
             ConversionResult(
                 input_path=input_path,
                 output_path=str(resolved_output) if resolved_output is not None else None,
                 diagnostics=diagnostics,
                 usda_document=usda_document,
+                telemetry=(),
+                runtime_job_dir=str(job_workspace.job_dir) if job_workspace.debug_preserve else None,
             )
         )
     return tuple(results)
@@ -256,9 +364,10 @@ def _mesh_material_distribution(mesh) -> dict[str, int]:
 def _prototype_material_distribution(model: CanonicalTreeModel) -> dict[str, int]:
     distribution: dict[str, int] = {}
     for prototype in model.prototypes:
-        if prototype.mesh is None:
-            continue
-        for section in prototype.mesh.sections:
+        section_source = prototype.geometry_payload.sections if prototype.geometry_payload is not None else (
+            prototype.mesh.sections if prototype.mesh is not None else ()
+        )
+        for section in section_source:
             key = str(section.material_id)
             distribution[key] = distribution.get(key, 0) + len(section.face_indices)
     return dict(sorted(distribution.items(), key=lambda item: int(item[0]) if item[0].lstrip("-").isdigit() else item[0]))
@@ -271,169 +380,13 @@ def _apply_material_policy(
     leaves_material_path: str | None,
     single_material_path: str | None,
 ) -> CanonicalTreeModel:
-    if material_policy == MaterialPolicy.LEGACY_ROLE_IDS:
-        return _apply_legacy_material_policy(model, bark_material_path, leaves_material_path)
-    if material_policy == MaterialPolicy.SINGLE_MATERIAL:
-        return _apply_single_material_policy(model, single_material_path)
-    if material_policy == MaterialPolicy.VERTEX_COLOR_SPLIT:
-        return _apply_vertex_color_split_policy(model, bark_material_path, leaves_material_path)
-    raise ValueError(f"Unsupported material policy: {material_policy}")
-
-
-def _apply_legacy_material_policy(
-    model: CanonicalTreeModel,
-    bark_material_path: str | None,
-    leaves_material_path: str | None,
-) -> CanonicalTreeModel:
-    if not bark_material_path and not leaves_material_path:
-        return model
-    overrides = {
-        BASELINE_BARK_MATERIAL_ID: bark_material_path,
-        BASELINE_LEAVES_MATERIAL_ID: leaves_material_path,
-    }
-    materials = tuple(_apply_material_override(material, overrides) for material in model.materials)
-    return replace(model, materials=materials)
-
-
-def _apply_material_override(material: MaterialSpec, overrides: dict[int, str | None]) -> MaterialSpec:
-    ue_asset_path = overrides.get(material.source_id)
-    if not ue_asset_path:
-        return material
-    return replace(material, ue_asset_path=_normalize_unreal_asset_path(ue_asset_path))
-
-
-def _apply_single_material_policy(
-    model: CanonicalTreeModel,
-    single_material_path: str | None,
-) -> CanonicalTreeModel:
-    source_material_ids = tuple(sorted(set(_source_material_ids(model))))
-    single_material = MaterialSpec(
-        source_id=BASELINE_BARK_MATERIAL_ID,
-        name="SingleMaterial",
-        ue_asset_path=_normalize_unreal_asset_path(single_material_path) if single_material_path else None,
-        source_material_ids=source_material_ids,
-    )
-    base_mesh = _remap_mesh_to_single_material(model.base_mesh, BASELINE_BARK_MATERIAL_ID)
-    prototypes = tuple(
-        replace(prototype, mesh=_remap_mesh_to_single_material(prototype.mesh, BASELINE_BARK_MATERIAL_ID))
-        if prototype.mesh is not None
-        else prototype
-        for prototype in model.prototypes
-    )
-    return replace(model, materials=(single_material,), base_mesh=base_mesh, prototypes=prototypes)
-
-
-def _apply_vertex_color_split_policy(
-    model: CanonicalTreeModel,
-    bark_material_path: str | None,
-    leaves_material_path: str | None,
-) -> CanonicalTreeModel:
-    warnings: list[str] = []
-    source_material_ids = tuple(sorted(set(_source_material_ids(model))))
-    materials = (
-        MaterialSpec(
-            source_id=BASELINE_BARK_MATERIAL_ID,
-            name="PrimaryMaterial",
-            ue_asset_path=_normalize_unreal_asset_path(bark_material_path) if bark_material_path else None,
-            source_material_ids=source_material_ids,
-        ),
-        MaterialSpec(
-            source_id=BASELINE_LEAVES_MATERIAL_ID,
-            name="SecondaryMaterial",
-            ue_asset_path=_normalize_unreal_asset_path(leaves_material_path) if leaves_material_path else None,
-            source_material_ids=source_material_ids,
-        ),
-    )
-    base_mesh = _remap_mesh_by_vertex_color(model.base_mesh, "Base Skeletal Tree", warnings)
-    prototypes = tuple(
-        replace(
-            prototype,
-            mesh=_remap_mesh_by_vertex_color(
-                prototype.mesh,
-                f"Prototype {prototype.identity.prim_name}",
-                warnings,
-            ),
-        )
-        if prototype.mesh is not None
-        else prototype
-        for prototype in model.prototypes
-    )
-    metadata = model.metadata
-    if warnings:
-        metadata = replace(metadata, warnings=metadata.warnings + tuple(warnings))
-    return replace(model, materials=materials, base_mesh=base_mesh, prototypes=prototypes, metadata=metadata)
-
-
-def _source_material_ids(model: CanonicalTreeModel) -> tuple[int, ...]:
-    if model.materials:
-        return tuple(
-            material_id
-            for material in model.materials
-            for material_id in (material.source_material_ids or (material.source_id,))
-        )
-    return tuple(
-        material_id
-        for material_id in (
-            [section.material_id for section in model.base_mesh.sections] if model.base_mesh is not None else []
-        )
-    )
-
-
-def _remap_mesh_to_single_material(mesh: MeshData | None, material_id: int) -> MeshData | None:
-    if mesh is None:
-        return None
-    return replace(mesh, sections=_single_material_sections(material_id, len(mesh.face_vertex_counts)))
-
-
-def _single_material_sections(material_id: int, face_count: int) -> tuple[MeshSection, ...]:
-    if face_count <= 0:
-        return ()
-    return (MeshSection(material_id=material_id, face_indices=tuple(range(face_count))),)
-
-
-def _remap_mesh_by_vertex_color(
-    mesh: MeshData | None,
-    label: str,
-    warnings: list[str],
-) -> MeshData | None:
-    if mesh is None:
-        return None
-    sections = _vertex_color_split_sections(mesh)
-    if sections is None:
-        if mesh.face_vertex_counts:
-            warnings.append(
-                f"material_policy_warning: vertex_color_split fell back to primary material for {label} because usable vertex colors are missing"
-            )
-        sections = _single_material_sections(BASELINE_BARK_MATERIAL_ID, len(mesh.face_vertex_counts))
-    return replace(mesh, sections=sections)
-
-
-def _vertex_color_split_sections(mesh: MeshData) -> tuple[MeshSection, ...] | None:
-    if not mesh.vertex_colors or not mesh.face_vertex_counts or not mesh.face_vertex_indices:
-        return None
-
-    sections_by_material: dict[int, list[int]] = {
-        BASELINE_BARK_MATERIAL_ID: [],
-        BASELINE_LEAVES_MATERIAL_ID: [],
-    }
-    offset = 0
-    for face_index, face_count in enumerate(mesh.face_vertex_counts):
-        face_indices = mesh.face_vertex_indices[offset:offset + face_count]
-        offset += face_count
-        if len(face_indices) != face_count:
-            return None
-        if any(point_index < 0 or point_index >= len(mesh.vertex_colors) for point_index in face_indices):
-            return None
-        material_id = (
-            BASELINE_BARK_MATERIAL_ID
-            if all(mesh.vertex_colors[point_index].is_exact_white() for point_index in face_indices)
-            else BASELINE_LEAVES_MATERIAL_ID
-        )
-        sections_by_material[material_id].append(face_index)
-    return tuple(
-        MeshSection(material_id=material_id, face_indices=tuple(face_indices))
-        for material_id, face_indices in sections_by_material.items()
-        if face_indices
+    return resolve_material_policy(
+        model,
+        material_policy=material_policy,
+        bark_material_path=bark_material_path,
+        leaves_material_path=leaves_material_path,
+        single_material_path=single_material_path,
+        normalize_asset_path=_normalize_unreal_asset_path,
     )
 
 
@@ -454,92 +407,8 @@ def _validate_material_request(request: ConversionRequest) -> None:
             raise ValueError(f"{label} material path must start with /Game/.")
 
 
-def _apply_external_part_mesh_overrides(
-    model: CanonicalTreeModel,
-    use_existing_part_meshes: bool,
-    part_mesh_asset_paths: tuple[tuple[str, str], ...],
-) -> CanonicalTreeModel:
-    if not use_existing_part_meshes:
-        return model
-
-    overrides = _normalize_part_mesh_asset_paths(part_mesh_asset_paths)
-    if not overrides:
-        return model
-
-    metadata = model.metadata
-    used_keys: set[str] = set()
-    prototypes: list[Prototype] = []
-    for prototype in model.prototypes:
-        matching_overrides = [
-            (key, overrides[key])
-            for key in (prototype.source_name, prototype.source_key)
-            if key and key in overrides
-        ]
-        distinct_asset_paths = {asset_path for _, asset_path in matching_overrides}
-        if len(distinct_asset_paths) > 1:
-            raise ValueError(
-                "Conflicting existing PartMesh overrides found for prototype "
-                f"{prototype.source_name or prototype.source_key}."
-            )
-        if matching_overrides:
-            used_keys.update(key for key, _asset_path in matching_overrides)
-            prototypes.append(_apply_external_part_mesh_override(prototype, matching_overrides[0][1]))
-        else:
-            prototypes.append(prototype)
-
-    unused_keys = sorted(set(overrides) - used_keys)
-    if unused_keys:
-        metadata = replace(
-            metadata,
-            warnings=metadata.warnings + tuple(
-                f"Unused existing PartMesh override ignored: {source_key}" for source_key in unused_keys
-            ),
-        )
-
-    return replace(model, prototypes=tuple(prototypes), metadata=metadata)
-
-
-def _apply_external_part_mesh_override(
-    prototype: Prototype,
-    mesh_asset_path: str,
-) -> Prototype:
-    return replace(
-        prototype,
-        mesh=None,
-        resolution_mode=PrototypeResolutionMode.EXTERNAL_ASSET,
-        mesh_asset_path=mesh_asset_path,
-    )
-
-
-def _normalize_part_mesh_asset_paths(
-    part_mesh_asset_paths: tuple[tuple[str, str], ...],
-) -> dict[str, str]:
-    overrides: dict[str, str] = {}
-    for raw_key, raw_asset_path in part_mesh_asset_paths:
-        source_key = _normalize_prototype_override_key(raw_key)
-        if not source_key:
-            raise ValueError("PartMesh override keys must not be empty.")
-        asset_path = _normalize_unreal_asset_path(raw_asset_path)
-        if not _is_valid_unreal_asset_path(asset_path):
-            raise ValueError(f"PartMesh asset path for {source_key} must start with /Game/.")
-        existing = overrides.get(source_key)
-        if existing is not None and existing != asset_path:
-            raise ValueError(f"Duplicate PartMesh override for {source_key} uses conflicting asset paths.")
-        overrides[source_key] = asset_path
-    return overrides
-
-
 def _normalize_prototype_override_key(raw_key: str) -> str:
-    key = raw_key.strip()
-    if not key:
-        return ""
-    lower_key = key.lower()
-    for prefix in ("mesh_", "meshid:", "mesh_id:"):
-        if lower_key.startswith(prefix) and key[len(prefix):].strip().isdigit():
-            return f"Mesh_{int(key[len(prefix):].strip())}"
-    if key.isdigit():
-        return f"Mesh_{int(key)}"
-    return key
+    return normalize_prototype_source_key(raw_key)
 
 
 def _is_valid_unreal_asset_path(path: str) -> bool:
@@ -554,3 +423,27 @@ def _normalize_unreal_asset_path(path: str) -> str:
     if "." in package_path:
         return normalized
     return f"{normalized}.{package_path}"
+
+
+def _wrap_runtime_telemetry_callback(callback, job_workspace: JobWorkspace):
+    def _wrapped(telemetry) -> None:
+        job_workspace.update_phase(telemetry.phase)
+        if callback is not None:
+            callback(telemetry)
+
+    return _wrapped
+
+
+def _append_cleanup_warning(
+    diagnostics: tuple[ValidationIssue, ...],
+    cleanup_warning: str | None,
+) -> tuple[ValidationIssue, ...]:
+    if not cleanup_warning:
+        return diagnostics
+    return diagnostics + (
+        ValidationIssue(
+            severity="warning",
+            code="runtime_cleanup_warning",
+            message=cleanup_warning,
+        ),
+    )

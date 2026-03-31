@@ -19,23 +19,9 @@ function Convert-ToWinPath([string]$PathValue) {
 }
 
 function Get-VenvExecutable([string]$RepoRoot) {
-    $cfgPath = Join-Path $RepoRoot '.venv\pyvenv.cfg'
-    if (-not (Test-Path $cfgPath)) {
-        throw "Missing virtual environment config: $cfgPath`nRun 'python -m venv .venv' first."
-    }
-
-    $cfg = @{}
-    foreach ($line in Get-Content $cfgPath) {
-        if ($line -notmatch '=') {
-            continue
-        }
-        $parts = $line.Split('=', 2)
-        $cfg[$parts[0].Trim()] = $parts[1].Trim()
-    }
-
-    $pythonExe = Convert-ToWinPath $cfg['executable']
-    if ([string]::IsNullOrWhiteSpace($pythonExe) -or -not (Test-Path $pythonExe)) {
-        throw "Could not resolve base python executable from $cfgPath"
+    $pythonExe = Join-Path $RepoRoot '.venv310\Scripts\python.exe'
+    if (-not (Test-Path $pythonExe)) {
+        throw "Missing virtual environment python: $pythonExe`nRun 'py -3.10 -m venv .venv310' first."
     }
 
     return $pythonExe
@@ -43,7 +29,7 @@ function Get-VenvExecutable([string]$RepoRoot) {
 
 $repoRoot = Convert-ToWinPath ([System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')))
 $launcherScript = Join-Path $repoRoot 'scripts\launch_gui.py'
-$venvScripts = Join-Path $repoRoot '.venv\Scripts'
+$venvScripts = Join-Path $repoRoot '.venv310\Scripts'
 $launcherExe = Join-Path $venvScripts 'xml-to-usda-gui.exe'
 $distPath = Join-Path $repoRoot 'dist'
 $buildPath = Join-Path $repoRoot 'build'
@@ -52,7 +38,7 @@ $exePath = Join-Path $distPath 'XMLtoUSDAConverter.exe'
 Push-Location $repoRoot
 try {
     if (-not (Test-Path $launcherExe)) {
-        throw "Missing fast-build launcher: $launcherExe`nRun 'python -m pip install -e .[dev]' inside .venv first."
+        throw "Missing fast-build launcher: $launcherExe`nRun 'python -m pip install -e .[dev]' inside .venv310 first."
     }
 
     if ($Package) {
@@ -60,8 +46,8 @@ try {
         if (-not $SkipBootstrap) {
             & $pythonExe -c "import PyInstaller" 2>$null
             if ($LASTEXITCODE -ne 0) {
-                Write-Host 'PyInstaller is missing in .venv. Installing dev dependencies...'
-                & $pythonExe -m pip --python (Join-Path $repoRoot '.venv') install -e '.[dev]'
+                Write-Host 'PyInstaller is missing in .venv310. Installing dev dependencies...'
+                & $pythonExe -m pip --python (Join-Path $repoRoot '.venv310') install -e '.[dev]'
                 if ($LASTEXITCODE -ne 0) {
                     throw 'Failed to install dev dependencies for exe build.'
                 }
@@ -128,4 +114,8 @@ try {
 finally {
     Pop-Location
 }
+
+
+
+
 

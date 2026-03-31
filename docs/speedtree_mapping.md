@@ -153,10 +153,25 @@ For the current project contract:
 - each inline part uses the prototype-derived one-bone joint name for its local `SkelAnimation`, `Mesh skel:joints`, and `Part Skeleton`
 - the instance binds back to the `Main Skeleton`
 - an optional external reuse path may map a prototype key such as `Mesh_1` to an existing Unreal skeletal mesh asset
+- an optional explicit FBX path may replace one repeated prototype with a rigid high-poly disk mesh payload
 - when the external reuse path is enabled, the converter must not leave the original inline prototype mesh attached to that same prototype in USDA
+- when the explicit FBX path is enabled, the converter must keep the original `LeafReferences` instance transforms and main-skeleton bindings, and replace only the prototype mesh payload
 - the XML mesh library still provides the discovery key and fallback geometry for inline mode, but external mode must author a pure reference-only prototype subtree
-- the canonical reference branch assets are expected at their authored/original size and orientation, so the converter must not compensate by baking scale into the prototype mesh
-- SpeedTree `OriginalScale` is carried into `PointInstancer.scales` as an explicit per-instance factor, not baked into prototype geometry
+- the XML mesh library is also still the prototype-discovery source for explicit FBX replacement; XML `LOD/@Filename` is not used to auto-discover replacement FBX files
+- canonical inline XML prototypes are authored at their original branch size by applying SpeedTree `LOD/@OriginalScale` to the prototype mesh payload
+- `LeafReferences/Scale` stays a pure per-instance multiplier on top of that prototype size in `PointInstancer.scales`
+- explicit FBX replacement keeps the authored FBX prototype size as-is and still uses `LeafReferences/Scale` as the per-instance multiplier
+
+Explicit FBX replacement rules:
+
+- the chosen FBX file must provide rigid polygon mesh data only
+- the FBX origin is treated as the attachment pivot
+- the converter merges all FBX mesh nodes into one prototype-local payload before USDA authoring
+- embedded FBX materials are ignored in v1
+- vertex colors drive the initial material buckets for FBX mode:
+  - exact black face -> leaves bucket
+  - every non-black face -> bark bucket
+- missing vertex colors are a hard failure for FBX mode
 
 Main skeleton naming rule:
 

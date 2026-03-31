@@ -6,32 +6,11 @@ name = "XMLtoUSDAconverter"
 script = ""
 
 [[actions]]
-name = "build"
-icon = "run"
-command = ".\\scripts\\build_gui_exe.cmd"
-
-[[actions]]
-name = "билд"
-icon = "test"
-command = ".\\scripts\\build_gui_exe.cmd"
-
-[[actions]]
-name = "фыв"
-icon = "debug"
-command = '''
-Set-Location -LiteralPath 'D:\3D Personal\VibeCode\XMLtoUSDAconverter'
-.\scripts\build_gui_exe.cmd -Clean
-'''
-
-[[actions]]
-name = "new build"
-icon = "run"
-command = '''
-cd "D:\3D Personal\VibeCode\XMLtoUSDAconverter"
-.\scripts\build_gui_exe.cmd
-'''
-
-[[actions]]
 name = "new build"
 icon = "tool"
 command = ".\\scripts\\build_gui_exe.cmd -Package"
+
+[[actions]]
+name = "quick build"
+icon = "run"
+command = ".\\scripts\\build_gui_exe.cmd"

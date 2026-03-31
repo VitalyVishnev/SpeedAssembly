@@ -16,6 +16,7 @@ It consists of:
 - one or more `PointInstancer` prims for repeated `Assembly Parts`
 - skeletal part prototypes, each resolved either as:
   - an inline skeletal part subtree with a one-bone `Part Skeleton`
+  - an inline skeletal part subtree whose mesh payload was replaced from an explicit disk FBX file
   - an external referenced Unreal skeletal asset
 
 Static assemblies exist in UE, but this project targets the skeletal tree path only.
@@ -36,6 +37,9 @@ The current validated structure is:
 - inline prototypes authored as skeletal part subtrees, not as bare meshes
 - inline prototype single-joint names come from the prototype prim name, sanitized only as needed for USD validity
 - external reused prototypes authored as `Xform` prims with `NaniteAssemblyExternalRefAPI`
+- explicit FBX prototype replacement keeps the same inline skeletal part subtree shape as XML-inline mode
+  - only the prototype mesh payload changes
+  - `LeafReferences` instance transforms and main-skeleton bindings do not change
 - when external reuse is enabled, the prototype must be authored as a pure external ref subtree
   - do not keep an inline `Mesh` payload for the same prototype
   - the USDA should show `NaniteAssemblyExternalRefAPI` and `unreal:naniteAssembly:meshAssetPath`, but not a fallback `PartMesh` geometry subtree for that prototype
@@ -59,11 +63,11 @@ For exported USDA files:
 This is the naming rule used by the converter when an explicit output path is provided.
 It is not derived from the first bone name, and it is not derived from the XML source filename.
 
-For example, if the output file is `SkeletyalAssemblyTest_Spruce_Big_low_twoTrunkGenerators.usda`, the base skeletal prims are authored as:
+For example, if the output file is `SkeletalAssemblyTest_Spruce_Big_low_twoTrunkGenerators.usda`, the base skeletal prims are authored as:
 
-- `def Mesh "SkeletyalAssemblyTest_Spruce_Big_low_twoTrunkGenerators"`
-- `def SkelRoot "SkeletyalAssemblyTest_Spruce_Big_low_twoTrunkGenerators_Geo"`
-- `def Skeleton "SkeletyalAssemblyTest_Spruce_Big_low_twoTrunkGenerators_Skeleton"`
+- `def Mesh "SkeletalAssemblyTest_Spruce_Big_low_twoTrunkGenerators"`
+- `def SkelRoot "SkeletalAssemblyTest_Spruce_Big_low_twoTrunkGenerators_Geo"`
+- `def Skeleton "SkeletalAssemblyTest_Spruce_Big_low_twoTrunkGenerators_Skeleton"`
 
 Conceptually:
 
@@ -132,6 +136,7 @@ For the current contract:
 - single-material meshes use direct mesh-level binding
 - multi-material meshes use `GeomSubset` with `familyName = "materialBind"`
 - external reused `PartMesh` assets are expected to carry their own material setup inside the referenced Unreal asset
+- explicit FBX-replaced inline prototypes still author material binding in USDA from resolved face buckets
 
 The exporter now has explicit material-policy modes:
 
@@ -149,6 +154,13 @@ The exporter now has explicit material-policy modes:
   - assign a face to bucket `1` only if every vertex on that face is exact white `(1,1,1)`
   - assign all non-white and gray faces to bucket `2`
   - if usable vertex colors are missing, warn and fall back to bucket `1`
+
+Explicit FBX prototype material baseline:
+
+- embedded FBX materials are ignored in v1
+- exact-black faces are assigned to the leaves bucket
+- every non-black face is assigned to the bark bucket
+- missing vertex colors are a hard failure for FBX mode
 
 Raw SpeedTree XML material ids must be treated as opaque source metadata outside `legacy_role_ids`.
 They are not semantic bark/leaves roles for the generic pipeline contract.
@@ -169,4 +181,5 @@ Current verified state:
 - the baseline sample imports as assembly input instead of failing as empty or invalid
 - the importer accepts the current skeletal assembly structure
 - mixed inline and external prototype resolution is covered by automated regression tests
+- explicit inline FBX prototype replacement is covered by automated streaming-writer regression tests
 - visual fidelity is still incomplete and requires later transform and rig refinement

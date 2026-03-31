@@ -1,4 +1,4 @@
-# Workflow And Status
+﻿# Workflow And Status
 
 ## Role
 
@@ -39,9 +39,19 @@ The project has also passed automated `Phase 1` regression coverage for:
 - single-material remapping for base mesh and part prototypes
 - vertex-color split remapping for base mesh and part prototypes
 - mixed inline plus external `PartMesh` prototype resolution
+- mixed inline, external Unreal asset, and explicit disk-FBX prototype resolution
 - multi-root main skeleton USDA naming without duplicate root aliases
 - prototype-derived one-bone part skeleton naming
 - separate Dynamic Wind JSON generation from the normalized skeleton
+- streamed USDA writing for explicit FBX prototype payloads without returning a full in-memory USDA text blob
+
+Current Python runtime contract:
+
+- `.venv310` is the primary development and validation environment
+- real Autodesk FBX import is expected to run from `.venv310`
+- the known-good FBX package is Autodesk `FBX Python SDK 2020.3.4` for CPython `3.10`
+- GUI build helpers are expected to run from `.venv310`
+- future chats should assume `.venv310` first when running the converter or debugging FBX import
 
 The current naming contract used by the checked exports is:
 
@@ -54,7 +64,7 @@ The current naming contract used by the checked exports is:
 
 The wind-group contract has also been validated on the attached grass sample:
 
-- `SkeletyalAssemblyTest_Grass.xml` now resolves to a single wind group under the explicit generator-level rule
+- `SkeletalAssemblyTest_Grass.xml` now resolves to a single wind group under the explicit generator-level rule
 - `Ground Cover` remains an explicit wind flag and does not change group count
 - when `Ground Cover` is enabled, every generated simulation group is emitted as non-trunk
 - legacy XML samples that do not provide usable generator levels are rejected by the wind path instead of being inferred
@@ -70,6 +80,36 @@ Current operator-facing material controls:
   - `--single-material-path`
   - `--bark-material-path`
   - `--leaves-material-path`
+
+Current operator-facing part-source controls:
+
+- the GUI exposes a per-prototype `Source Mode` for each repeated part prototype discovered from `LeafReferences`
+- each row can keep the XML mesh, point at an existing Unreal skeletal asset, or load a disk FBX file
+- GUI settings persist the per-prototype choice per input XML
+- the GUI also exposes `CPU Profile`:
+  - `balanced`
+  - `max_speed`
+  - `quiet`
+- the CLI exposes:
+  - `--part-source-config`
+  - `--cpu-profile`
+
+Current huge-FBX contract:
+
+- XML `LOD/@Filename` is ignored for this workflow
+- FBX mode is explicit only through GUI/CLI prototype source config
+- v1 accepts rigid polygon payloads only
+- animated or skinned FBX payloads are rejected
+- FBX-origin pivot is treated as the attachment pivot
+- FBX prototype source config supports `fbx_material_mode`:
+  - `auto`
+  - `vertex_color_split`
+  - `single_material`
+- FBX prototype material sections are derived from vertex colors when useful:
+  - exact black face -> leaves
+  - every non-black face -> bark
+- if FBX vertex colors are missing, incomplete, or all collapse to one bucket, the prototype falls back to one primary material section
+- huge FBX prototype payloads are written through the streaming USDA path using a temp file plus atomic replace on success
 
 The only remaining open item before `Phase 1` can be considered complete is broader validation on multiple real SpeedTree structures with different tree and grass shapes:
 
@@ -175,9 +215,11 @@ Run this checklist for every real `Phase 1` sample:
 
 ## Troubleshooting shortcut
 
-When a user says “I entered a UE object path, but the importer still used low-poly branches”:
+When a user says вЂњI entered a UE object path, but the importer still used low-poly branchesвЂќ:
 
 1. inspect the exported USDA text
 2. search for `NaniteAssemblyExternalRefAPI` and `unreal:naniteAssembly:meshAssetPath`
 3. if the schema is missing, the bug is in the converter, not in UE
 4. if the schema is present, verify that UE used the Interchange importer path and that the asset path matches the Content Browser object path exactly
+
+

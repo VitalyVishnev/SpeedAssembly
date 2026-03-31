@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import xml.etree.ElementTree as ET
 from dataclasses import replace
 from pathlib import Path
@@ -8,21 +9,33 @@ from pathlib import Path
 import pytest
 
 from xml_to_usda.dynamic_wind import build_dynamic_wind_data
-from xml_to_usda.normalizer import _build_base_mesh, _extract_assembly_parts_from_leaf_references, normalize_to_canonical
+from xml_to_usda.normalizer import (
+    _build_base_mesh,
+    _extract_assembly_parts_from_leaf_references,
+    _extract_bounds,
+    _read_float_list,
+    _read_positive_float,
+    normalize_to_canonical,
+)
 from xml_to_usda.models import (
     Color4,
+    CpuProfile,
     DynamicWindSimulationGroup,
+    FbxMaterialMode,
     Joint,
     MaterialPolicy,
     MaterialSpec,
     Matrix4d,
     MeshData,
     MeshSection,
+    PrototypeSourceConfig,
+    PrototypeSourceMode,
     SourceObject,
     PrototypeResolutionMode,
     Vector3,
 )
-from xml_to_usda.normalizer import _rebalance_assembly_part_prototype_scales, _vertex_color_material_sections
+from xml_to_usda.job_control import ConversionCancelledError, cpu_worker_count, reserved_cpu_count
+from xml_to_usda.normalizer import _vertex_color_material_sections
 from xml_to_usda.pipeline import (
     _apply_material_policy,
     convert_file,
@@ -31,9 +44,10 @@ from xml_to_usda.pipeline import (
     inspect_wind_data,
     load_canonical_model,
 )
+from xml_to_usda.prototype_sources import load_prototype_source_configs_from_json
 from xml_to_usda.source_transform import build_source_transform
 from xml_to_usda.ue_schema import DEFAULT_UE_SCHEMA_CONTRACT
-from xml_to_usda.usda_writer import render_usda
+from xml_to_usda.usda_writer import render_usda, write_usda_document
 from xml_to_usda.validator import validate_model
 from xml_to_usda.xml_reader import inspect_xml, read_source_xml, render_inspect_report
 
@@ -43,6 +57,48 @@ SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "samples" / "speedtree" /
 LEAFREFS_ON_TRUNK = DATA_DIR / "leafrefs_on_trunk.xml"
 LEAFREFS_ON_BRANCH_LEVELS = DATA_DIR / "leafrefs_on_branch_levels.xml"
 INVALID_LEAF_BONE = DATA_DIR / "invalid_leaf_bone.xml"
+
+
+def _write_fbx_json_payload(
+    tmp_path: Path,
+    *,
+    include_vertex_colors: bool = True,
+    color_components: list[float] | None = None,
+) -> Path:
+    payload = {
+        "point_components": [
+            0.0, 0.0, 0.0,
+            1.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, 1.0,
+            1.0, 0.0, 1.0,
+            0.0, 1.0, 1.0,
+        ],
+        "face_vertex_counts": [3, 3],
+        "face_vertex_indices": [0, 1, 2, 3, 4, 5],
+        "uv_components": [
+            0.0, 0.0,
+            1.0, 0.0,
+            0.0, 1.0,
+            0.0, 0.0,
+            1.0, 0.0,
+            0.0, 1.0,
+        ],
+    }
+    if color_components is not None:
+        payload["vertex_color_components"] = color_components
+    elif include_vertex_colors:
+        payload["vertex_color_components"] = [
+            0.0, 0.0, 0.0, 1.0,
+            0.0, 0.0, 0.0, 1.0,
+            0.0, 0.0, 0.0, 1.0,
+            1.0, 1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0, 1.0,
+        ]
+    payload_path = tmp_path / "prototype_payload.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+    return payload_path
 
 
 def _write_generator_level_sample(tmp_path: Path, generator_labels: tuple[str | None, ...]) -> Path:
@@ -83,6 +139,54 @@ def _write_shifted_material_sample(tmp_path: Path, material_id_map: dict[int, in
     sample_path = tmp_path / "shifted_material_ids.xml"
     tree.write(sample_path, encoding="utf-8", xml_declaration=True)
     return sample_path
+
+
+def test_load_prototype_source_configs_from_json_reads_fbx_and_unreal_modes(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(tmp_path)
+    config_path = tmp_path / "part_sources.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "Twig_01": {
+                    "mode": "fbx_file",
+                    "fbx_path": str(payload_path),
+                    "fbx_material_mode": "single_material",
+                },
+                "Mesh_2": {"mode": "unreal_asset", "asset_path": "/Game/TreeParts/SK_Twig02.SK_Twig02"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    configs = load_prototype_source_configs_from_json(str(config_path))
+
+    assert configs == (
+        PrototypeSourceConfig(
+            source_key="Twig_01",
+            source_name="",
+            mode=PrototypeSourceMode.FBX_FILE,
+            fbx_material_mode=FbxMaterialMode.SINGLE_MATERIAL,
+            asset_path=None,
+            fbx_path=str(payload_path),
+        ),
+        PrototypeSourceConfig(
+            source_key="Mesh_2",
+            source_name="",
+            mode=PrototypeSourceMode.UNREAL_ASSET,
+            fbx_material_mode=FbxMaterialMode.AUTO,
+            asset_path="/Game/TreeParts/SK_Twig02.SK_Twig02",
+            fbx_path=None,
+        ),
+    )
+
+
+def test_cpu_profile_worker_count_math() -> None:
+    assert reserved_cpu_count(CpuProfile.BALANCED, cpu_count=8) == 2
+    assert cpu_worker_count(CpuProfile.BALANCED, cpu_count=8) == 6
+    assert reserved_cpu_count(CpuProfile.MAX_SPEED, cpu_count=8) == 1
+    assert cpu_worker_count(CpuProfile.MAX_SPEED, cpu_count=8) == 7
+    assert reserved_cpu_count(CpuProfile.QUIET, cpu_count=8) == 4
+    assert cpu_worker_count(CpuProfile.QUIET, cpu_count=8) == 4
 
 
 def test_inspect_report_tracks_structure_without_sample_specific_contracts() -> None:
@@ -972,33 +1076,52 @@ def test_leaf_reference_orientation_preserves_rotation_sense_after_axis_remap() 
     assert orientation.k == pytest.approx(0.0)
 
 
-def test_original_scale_rebalance_helper_applies_mesh_library_scale_factors() -> None:
+def test_normalize_to_canonical_keeps_leaf_reference_scale_as_instance_multiplier() -> None:
     document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
     assert model.mesh_library
     assert model.assembly_parts
 
-    near_one_parts = tuple(
-        replace(part, scale=Vector3(1.0, 1.0, 1.0))
-        for part in model.assembly_parts
-        if part.prototype_key == "Mesh_1"
+    mesh_1_parts = [part for part in model.assembly_parts if part.prototype_key == "Mesh_1"]
+    mesh_2_parts = [part for part in model.assembly_parts if part.prototype_key == "Mesh_2"]
+
+    assert mesh_1_parts
+    assert mesh_2_parts
+    assert all(part.scale == Vector3(1.0, 1.0, 1.0) for part in mesh_1_parts)
+    assert all(part.scale == Vector3(1.0, 1.0, 1.0) for part in mesh_2_parts)
+
+
+def test_locale_decimal_parsing_accepts_comma_floats_for_lists_and_bounds() -> None:
+    source_transform = build_source_transform(ET.fromstring("<SpeedTreeRaw><Meshes><Mesh Orient='xyzZ' /></Meshes></SpeedTreeRaw>"), None, None)
+    obj = ET.fromstring(
+        "<Object BoundsMinX='-0,490294' BoundsMinY='-0,125' BoundsMinZ='0,25' "
+        "BoundsMaxX='1,5' BoundsMaxY='2,75' BoundsMaxZ='3,125' />"
     )
-    untouched_parts = tuple(part for part in model.assembly_parts if part.prototype_key != "Mesh_1")
-    assembly_parts = near_one_parts + untouched_parts
 
-    entry = next(entry for entry in model.mesh_library if entry.mesh_id == 1)
-    original_first_point = entry.mesh.points[0]
+    assert _read_float_list("0,3048 -0,490294 1,25") == pytest.approx([0.3048, -0.490294, 1.25])
+    assert _read_positive_float("15,8194") == pytest.approx(15.8194)
 
-    rebalanced_parts, rebalanced_library = _rebalance_assembly_part_prototype_scales(assembly_parts, model.mesh_library)
+    bounds = _extract_bounds(obj, source_transform)
 
-    assert rebalanced_parts != assembly_parts
-    assert rebalanced_library == model.mesh_library
-    assert next(entry for entry in rebalanced_library if entry.mesh_id == 1).mesh.points[0] == original_first_point
-    rebalanced_part = next(part for part in rebalanced_parts if part.prototype_key == "Mesh_1")
-    assert rebalanced_part.scale.x == pytest.approx(entry.original_scale)
-    assert rebalanced_part.scale.y == pytest.approx(entry.original_scale)
-    assert rebalanced_part.scale.z == pytest.approx(entry.original_scale)
+    assert bounds is not None
+    assert bounds.minimum.x == pytest.approx(-0.490294)
+    assert bounds.maximum.y == pytest.approx(3.125)
+    assert bounds.maximum.z == pytest.approx(0.125)
+
+
+def test_load_canonical_model_bakes_shared_prototype_scale_into_inline_meshes() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    raw_model = normalize_to_canonical(document, inspect_xml(document))
+    _, loaded_model, _ = load_canonical_model(str(SIMPLE_TREE_01))
+
+    raw_prototype = next(prototype for prototype in raw_model.prototypes if prototype.source_key == "Mesh_1")
+    loaded_prototype = next(prototype for prototype in loaded_model.prototypes if prototype.source_key == "Mesh_1")
+
+    assert raw_prototype.mesh is not None
+    assert loaded_prototype.mesh is not None
+    assert all(part.scale == Vector3(1.0, 1.0, 1.0) for part in loaded_model.assembly_parts if part.prototype_key == "Mesh_1")
+    assert loaded_prototype.mesh.points == raw_prototype.mesh.points
 
 
 def test_usda_output_contains_ue_first_structure() -> None:
@@ -1183,17 +1306,20 @@ def test_assembly_part_prototypes_preserve_authored_original_scale_and_orientati
         part.scale.x == pytest.approx(part.scale.y) and part.scale.y == pytest.approx(part.scale.z)
         for part in model.assembly_parts
     )
-    scale_by_mesh_id = {entry.mesh_id: entry.original_scale for entry in model.mesh_library if entry.original_scale is not None}
+    scale_by_mesh_id = {
+        entry.mesh_id: entry.original_scale for entry in model.mesh_library if entry.original_scale is not None
+    }
     for part in model.assembly_parts:
-        expected_scale = scale_by_mesh_id.get(part.source_mesh_id)
-        if expected_scale is None:
-            continue
-        assert part.scale.x == pytest.approx(expected_scale)
-        assert part.scale.y == pytest.approx(expected_scale)
-        assert part.scale.z == pytest.approx(expected_scale)
+        assert part.scale.x == pytest.approx(1.0)
+        assert part.scale.y == pytest.approx(1.0)
+        assert part.scale.z == pytest.approx(1.0)
 
     prototype_mesh = next(prototype.mesh for prototype in model.prototypes if prototype.source_key == "Mesh_1")
     assert prototype_mesh is not None
+    raw_library_mesh = mesh_entries[1].mesh
+    assert prototype_mesh.points[1].x == pytest.approx(raw_library_mesh.points[1].x * scale_by_mesh_id[1])
+    assert prototype_mesh.points[1].y == pytest.approx(raw_library_mesh.points[1].y * scale_by_mesh_id[1])
+    assert prototype_mesh.points[1].z == pytest.approx(raw_library_mesh.points[1].z * scale_by_mesh_id[1])
     max_extent = max(
         max(point.x for point in prototype_mesh.points) - min(point.x for point in prototype_mesh.points),
         max(point.y for point in prototype_mesh.points) - min(point.y for point in prototype_mesh.points),
@@ -1207,8 +1333,9 @@ def test_assembly_part_prototypes_preserve_authored_original_scale_and_orientati
         'string[] primvars:name = [',
     )
     assert instancer_scales_payload.strip()
-    assert "1.02466" in instancer_scales_payload
-    assert "0.975898" in instancer_scales_payload
+    assert "1.02466" not in instancer_scales_payload
+    assert "0.975898" not in instancer_scales_payload
+    assert "(1, 1, 1)" in instancer_scales_payload
 
 
 def test_missing_skeleton_is_error() -> None:
@@ -1372,6 +1499,266 @@ def test_existing_part_mesh_override_accepts_xml_mesh_names_in_mixed_mode(tmp_pa
     assert prototype.mesh is None
     assert 'prepend apiSchemas = ["NaniteAssemblyExternalRefAPI"]' in result.usda_document.text
     assert 'uniform token unreal:naniteAssembly:meshAssetPath = "/Game/TreeParts/SK_Twig01.SK_Twig01"' in result.usda_document.text
+
+
+def test_fbx_part_source_config_replaces_inline_prototype_with_geometry_payload(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(tmp_path)
+    _, model, diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_path=str(payload_path),
+            ),
+        ),
+    )
+
+    prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_1")
+
+    assert not any(issue.severity == "error" for issue in diagnostics)
+    assert prototype.source_mode == PrototypeSourceMode.FBX_FILE
+    assert prototype.fbx_material_mode == FbxMaterialMode.AUTO
+    assert prototype.mesh is None
+    assert prototype.geometry_payload is not None
+    assert prototype.fbx_source_path == str(payload_path)
+    assert {section.material_id: list(section.face_indices) for section in prototype.geometry_payload.sections} == {
+        1: [1],
+        2: [0],
+    }
+
+
+def test_fbx_part_source_restores_authored_instance_scale_without_xml_original_scale_multiplier(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(tmp_path)
+    _, baseline_model, _ = load_canonical_model(str(SIMPLE_TREE_01))
+    _, fbx_model, _ = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_path=str(payload_path),
+            ),
+        ),
+    )
+
+    baseline_mesh_1_parts = [part for part in baseline_model.assembly_parts if part.prototype_key == "Mesh_1"]
+    fbx_mesh_1_parts = [part for part in fbx_model.assembly_parts if part.prototype_key == "Mesh_1"]
+    baseline_mesh_2_parts = [part for part in baseline_model.assembly_parts if part.prototype_key == "Mesh_2"]
+    fbx_mesh_2_parts = [part for part in fbx_model.assembly_parts if part.prototype_key == "Mesh_2"]
+
+    assert baseline_mesh_1_parts
+    assert len(baseline_mesh_1_parts) == len(fbx_mesh_1_parts)
+    assert baseline_mesh_2_parts
+    assert len(baseline_mesh_2_parts) == len(fbx_mesh_2_parts)
+
+    assert all(part.scale == Vector3(1.0, 1.0, 1.0) for part in baseline_mesh_1_parts)
+    assert all(part.scale == Vector3(1.0, 1.0, 1.0) for part in fbx_mesh_1_parts)
+
+    for baseline_part, fbx_part in zip(baseline_mesh_2_parts, fbx_mesh_2_parts, strict=True):
+        assert fbx_part.scale == baseline_part.scale
+
+
+def test_fbx_part_source_without_vertex_colors_falls_back_to_single_material(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(tmp_path, include_vertex_colors=False)
+
+    _, model, diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_path=str(payload_path),
+            ),
+        ),
+    )
+
+    prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_1")
+
+    assert prototype.geometry_payload is not None
+    assert {section.material_id: list(section.face_indices) for section in prototype.geometry_payload.sections} == {
+        1: [0, 1],
+    }
+    assert any(
+        issue.code == "material_policy_warning" and "uses single material because vertex colors are missing" in issue.message
+        for issue in diagnostics
+    )
+
+
+def test_fbx_part_source_with_uniform_vertex_colors_falls_back_to_single_material(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(
+        tmp_path,
+        color_components=[
+            0.0, 0.0, 0.0, 1.0,
+            0.0, 0.0, 0.0, 1.0,
+            0.0, 0.0, 0.0, 1.0,
+            0.0, 0.0, 0.0, 1.0,
+            0.0, 0.0, 0.0, 1.0,
+            0.0, 0.0, 0.0, 1.0,
+        ],
+    )
+
+    _, model, diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_path=str(payload_path),
+            ),
+        ),
+    )
+
+    prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_1")
+
+    assert prototype.geometry_payload is not None
+    assert {section.material_id: list(section.face_indices) for section in prototype.geometry_payload.sections} == {
+        1: [0, 1],
+    }
+    assert any(
+        issue.code == "material_policy_warning"
+        and "do not create more than one material bucket" in issue.message
+        for issue in diagnostics
+    )
+
+
+def test_fbx_part_source_force_single_material_ignores_useful_vertex_color_split(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(tmp_path)
+
+    _, model, diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_material_mode=FbxMaterialMode.SINGLE_MATERIAL,
+                fbx_path=str(payload_path),
+            ),
+        ),
+    )
+
+    prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_1")
+
+    assert not any(issue.severity == "error" for issue in diagnostics)
+    assert prototype.geometry_payload is not None
+    assert {section.material_id: list(section.face_indices) for section in prototype.geometry_payload.sections} == {
+        1: [0, 1],
+    }
+
+
+def test_fbx_part_source_explicit_vertex_color_split_keeps_split_when_useful(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(tmp_path)
+
+    _, model, diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_material_mode=FbxMaterialMode.VERTEX_COLOR_SPLIT,
+                fbx_path=str(payload_path),
+            ),
+        ),
+    )
+
+    prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_1")
+
+    assert not any(issue.severity == "error" for issue in diagnostics)
+    assert prototype.geometry_payload is not None
+    assert {section.material_id: list(section.face_indices) for section in prototype.geometry_payload.sections} == {
+        1: [1],
+        2: [0],
+    }
+
+
+def test_conflicting_fbx_material_modes_for_same_prototype_are_rejected(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(tmp_path)
+
+    with pytest.raises(ValueError, match="Twig_01"):
+        load_canonical_model(
+            str(SIMPLE_TREE_01),
+            prototype_source_configs=(
+                PrototypeSourceConfig(
+                    source_key="Mesh_1",
+                    source_name="Twig_01",
+                    mode=PrototypeSourceMode.FBX_FILE,
+                    fbx_material_mode=FbxMaterialMode.SINGLE_MATERIAL,
+                    fbx_path=str(payload_path),
+                ),
+                PrototypeSourceConfig(
+                    source_key="Twig_01",
+                    mode=PrototypeSourceMode.FBX_FILE,
+                    fbx_material_mode=FbxMaterialMode.VERTEX_COLOR_SPLIT,
+                    fbx_path=str(payload_path),
+                ),
+            ),
+        )
+
+
+def test_fbx_part_source_streams_usda_to_disk(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(tmp_path)
+    output_path = tmp_path / "fbx_streamed.usda"
+
+    result = convert_file(
+        str(SIMPLE_TREE_01),
+        str(output_path),
+        cpu_profile=CpuProfile.QUIET,
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_path=str(payload_path),
+            ),
+        ),
+    )
+
+    assert result.usda_document is not None
+    assert result.usda_document.text is None
+    assert result.usda_document.stats.streamed is True
+    assert result.usda_document.stats.bytes_written > 0
+    assert output_path.exists()
+    assert not output_path.with_name("fbx_streamed.usda.partial").exists()
+    usda_text = output_path.read_text(encoding="utf-8")
+    assert 'def Xform "Twig_01"' in usda_text
+    assert 'def Mesh "Twig_01"' in usda_text
+    assert 'def GeomSubset "Material_1_1"' in usda_text
+    assert 'def GeomSubset "Material_2_2"' in usda_text
+
+
+def test_streaming_writer_cleans_partial_file_on_cancel(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(tmp_path)
+    output_path = tmp_path / "cancelled_stream.usda"
+    _, model, diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_path=str(payload_path),
+            ),
+        ),
+    )
+    cancel_event = threading.Event()
+    cancel_event.set()
+
+    with pytest.raises(ConversionCancelledError, match="cancelled"):
+        write_usda_document(
+            model,
+            diagnostics,
+            output_path=output_path,
+            cancel_event=cancel_event,
+        )
+
+    assert not output_path.exists()
+    assert not output_path.with_name("cancelled_stream.usda.partial").exists()
 
 
 def test_unused_existing_part_mesh_override_becomes_warning() -> None:

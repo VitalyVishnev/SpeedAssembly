@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from .models import CanonicalTreeModel, MaterialPolicy, PrototypeResolutionMode, PrototypeStrategy, ValidationIssue
+from .geometry_buffers import payload_face_count, payload_has_face_topology, payload_point_count, payload_sections
+from .models import (
+    CanonicalTreeModel,
+    MaterialPolicy,
+    PrototypeResolutionMode,
+    PrototypeStrategy,
+    ValidationIssue,
+)
 
 
 PRIMARY_MATERIAL_ID = 1
@@ -78,8 +85,15 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
 
     if model.materials and model.base_mesh is not None:
         for prototype in model.prototypes:
-            if prototype.mesh is not None:
-                issues.extend(_validate_mesh_materials(prototype.mesh, material_ids, f"Prototype {prototype.identity.prim_name}"))
+            if prototype.mesh is not None or prototype.geometry_payload is not None:
+                issues.extend(
+                    _validate_payload_materials(
+                        prototype.mesh,
+                        prototype.geometry_payload,
+                        material_ids,
+                        f"Prototype {prototype.identity.prim_name}",
+                    )
+                )
         if len(model.base_mesh.skel_joint_indices) != len(model.base_mesh.points):
             issues.append(
                 ValidationIssue(
@@ -196,15 +210,28 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                     )
                 continue
             if prototype.mesh is None:
+                if prototype.geometry_payload is None:
+                    issues.append(
+                        ValidationIssue(
+                            severity="error",
+                            code="missing_prototype_mesh",
+                            message=f"Prototype {prototype.identity.prim_name} has no resolved mesh payload.",
+                        )
+                    )
+                    continue
+            if not payload_has_face_topology(prototype.mesh, prototype.geometry_payload):
                 issues.append(
                     ValidationIssue(
                         severity="error",
-                        code="missing_prototype_mesh",
-                        message=f"Prototype {prototype.identity.prim_name} has no resolved mesh payload.",
+                        code="invalid_prototype_mesh",
+                        message=(
+                            f"Prototype {prototype.identity.prim_name} must contain point and face topology payloads "
+                            "before skeletal Assembly Part authoring."
+                        ),
                     )
                 )
                 continue
-            if not prototype.mesh.points or not prototype.mesh.face_vertex_counts or not prototype.mesh.face_vertex_indices:
+            if payload_point_count(prototype.mesh, prototype.geometry_payload) <= 0 or payload_face_count(prototype.mesh, prototype.geometry_payload) <= 0:
                 issues.append(
                     ValidationIssue(
                         severity="error",
@@ -278,12 +305,17 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
 
 
 def _validate_mesh_materials(mesh, material_ids: set[int], label: str) -> list[ValidationIssue]:
+    return _validate_payload_materials(mesh, None, material_ids, label)
+
+
+def _validate_payload_materials(mesh, geometry_payload, material_ids: set[int], label: str) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
-    if not mesh.sections:
+    sections = payload_sections(mesh, geometry_payload)
+    if not sections:
         return issues
     seen_faces: set[int] = set()
-    face_count = len(mesh.face_vertex_counts)
-    for section in mesh.sections:
+    face_count = payload_face_count(mesh, geometry_payload)
+    for section in sections:
         if section.material_id not in material_ids:
             issues.append(
                 ValidationIssue(

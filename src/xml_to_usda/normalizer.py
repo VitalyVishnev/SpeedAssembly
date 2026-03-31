@@ -61,7 +61,6 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
     assembly_parts = tuple(
         _extract_assembly_parts_from_leaf_references(root, data_messages, source_transform, material_ids)
     )
-    assembly_parts, mesh_library = _rebalance_assembly_part_prototype_scales(assembly_parts, mesh_library)
     branch_segments = tuple(_extract_branch_segments(source_objects, skeleton))
     prototypes = tuple(_build_prototypes(assembly_parts, mesh_library, data_messages))
     skeletal_support_primvars = _build_skeletal_support_primvars(skeleton)
@@ -588,39 +587,6 @@ def _resolve_source_object_joint_name(source_object: SourceObject, skeleton: tup
     return None
 
 
-def _rebalance_assembly_part_prototype_scales(
-    assembly_parts: tuple[AssemblyPartInstance, ...],
-    mesh_library: tuple[MeshLibraryEntry, ...],
-) -> tuple[tuple[AssemblyPartInstance, ...], tuple[MeshLibraryEntry, ...]]:
-    # Preserve prototype geometry as authored, but fold mesh-library OriginalScale into the instance scale.
-    # This keeps the instance contract explicit while still honoring the source part size reported by SpeedTree.
-    original_scale_by_mesh_id = {
-        entry.mesh_id: entry.original_scale
-        for entry in mesh_library
-        if entry.original_scale is not None and entry.original_scale > 0.0
-    }
-    if not original_scale_by_mesh_id:
-        return assembly_parts, mesh_library
-
-    rebased_parts: list[AssemblyPartInstance] = []
-    for part in assembly_parts:
-        scale_factor = original_scale_by_mesh_id.get(part.source_mesh_id)
-        if scale_factor is None:
-            rebased_parts.append(part)
-            continue
-        rebased_parts.append(
-            replace(
-                part,
-                scale=Vector3(
-                    part.scale.x * scale_factor,
-                    part.scale.y * scale_factor,
-                    part.scale.z * scale_factor,
-                ),
-            )
-        )
-    return tuple(rebased_parts), mesh_library
-
-
 def _leaf_reference_orientation_to_stage(
     source_transform: SourceTransform,
     axis: Vector3,
@@ -649,7 +615,7 @@ def _build_prototypes(
     prototypes: list[Prototype] = []
     for identity in identities:
         entry = meshes_by_key.get(identity.source_key)
-        mesh = entry.mesh if entry is not None else None
+        mesh = _mesh_with_original_scale(entry) if entry is not None else None
         if mesh is not None:
             mesh = _resolve_prototype_material_sections(
                 mesh,
@@ -668,6 +634,23 @@ def _build_prototypes(
             )
         )
     return prototypes
+
+
+def _mesh_with_original_scale(entry: MeshLibraryEntry) -> MeshData:
+    if entry.original_scale is None or entry.original_scale == 1.0:
+        return entry.mesh
+    scale_factor = entry.original_scale
+    return replace(
+        entry.mesh,
+        points=tuple(
+            Vector3(
+                point.x * scale_factor,
+                point.y * scale_factor,
+                point.z * scale_factor,
+            )
+            for point in entry.mesh.points
+        ),
+    )
 
 
 def _resolve_prototype_material_sections(
@@ -738,9 +721,13 @@ def _extract_bounds(obj: ET.Element, source_transform: SourceTransform) -> Bound
     max_components = (obj.attrib.get("BoundsMaxX"), obj.attrib.get("BoundsMaxY"), obj.attrib.get("BoundsMaxZ"))
     if any(component is None for component in min_components + max_components):
         return None
+    minimum = tuple(_parse_float_value(component) for component in min_components)
+    maximum = tuple(_parse_float_value(component) for component in max_components)
+    if any(component is None for component in minimum + maximum):
+        return None
     return source_transform.bounds_to_stage(Bounds(
-        minimum=Vector3(float(min_components[0]), float(min_components[1]), float(min_components[2])),
-        maximum=Vector3(float(max_components[0]), float(max_components[1]), float(max_components[2])),
+        minimum=Vector3(minimum[0], minimum[1], minimum[2]),
+        maximum=Vector3(maximum[0], maximum[1], maximum[2]),
     ))
 
 
@@ -799,10 +786,8 @@ def _joint_hierarchy_depths(skeleton: tuple[Joint, ...]) -> dict[str, int]:
 def _find_float(elem: ET.Element, names: tuple[str, ...], default: float | None = None) -> float | None:
     for name in names:
         if name in elem.attrib:
-            try:
-                return float(elem.attrib[name])
-            except ValueError:
-                return default
+            value = _parse_float_value(elem.attrib[name])
+            return value if value is not None else default
     return default
 
 
@@ -1195,11 +1180,8 @@ def _read_float_list(raw: str | None) -> list[float]:
     if not raw:
         return []
     values: list[float] = []
-    for token in raw.replace(",", " ").split():
-        try:
-            values.append(float(token))
-        except ValueError:
-            continue
+    for token in raw.split():
+        values.extend(_parse_float_token(token))
     return values
 
 
@@ -1218,11 +1200,39 @@ def _read_int_list(raw: str | None) -> list[int]:
 def _read_positive_float(raw: str | None) -> float | None:
     if raw is None:
         return None
-    try:
-        value = float(raw)
-    except ValueError:
+    value = _parse_float_value(raw)
+    if value is None:
         return None
     return value if math.isfinite(value) and value > 0.0 else None
+
+
+def _parse_float_token(token: str) -> list[float]:
+    normalized = token.strip()
+    if not normalized:
+        return []
+    if normalized.count(",") > 1 and "." not in normalized and "e" not in normalized.lower():
+        values: list[float] = []
+        for chunk in normalized.split(","):
+            parsed = _parse_float_value(chunk)
+            if parsed is not None:
+                values.append(parsed)
+        return values
+    parsed = _parse_float_value(normalized)
+    return [parsed] if parsed is not None else []
+
+
+def _parse_float_value(raw: str | None) -> float | None:
+    if raw is None:
+        return None
+    normalized = raw.strip()
+    if not normalized:
+        return None
+    if "," in normalized and "." not in normalized:
+        normalized = normalized.replace(",", ".")
+    try:
+        return float(normalized)
+    except ValueError:
+        return None
 
 
 def _quaternion_from_axis_angle(axis: Vector3, angle_degrees: float) -> Quaternion:

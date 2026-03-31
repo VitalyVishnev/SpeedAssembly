@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+from array import array
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import Enum
 from typing import Any
+
+try:
+    from enum import StrEnum
+except ImportError:
+    class StrEnum(str, Enum):
+        pass
 
 
 @dataclass(frozen=True)
@@ -70,6 +77,40 @@ class PrototypeResolutionMode(StrEnum):
     EXTERNAL_ASSET = "external_asset"
 
 
+class PrototypeSourceMode(StrEnum):
+    XML_MESH = "xml_mesh"
+    UNREAL_ASSET = "unreal_asset"
+    FBX_FILE = "fbx_file"
+
+
+class FbxMaterialMode(StrEnum):
+    AUTO = "auto"
+    VERTEX_COLOR_SPLIT = "vertex_color_split"
+    SINGLE_MATERIAL = "single_material"
+
+
+class CpuProfile(StrEnum):
+    BALANCED = "balanced"
+    MAX_SPEED = "max_speed"
+    QUIET = "quiet"
+
+
+class CleanupPolicy(StrEnum):
+    EPHEMERAL = "ephemeral"
+    PRESERVE_FOR_DEBUGGING = "preserve_for_debugging"
+
+
+class ConversionPhase(StrEnum):
+    PREPARING = "preparing"
+    XML_NORMALIZATION = "xml_normalization"
+    PROTOTYPE_RESOLUTION = "prototype_resolution"
+    FBX_IMPORT = "fbx_import"
+    MATERIAL_RESOLUTION = "material_resolution"
+    USDA_WRITING = "usda_writing"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
 @dataclass(frozen=True)
 class Joint:
     name: str
@@ -117,6 +158,16 @@ class MaterialSpec:
 class MeshSection:
     material_id: int
     face_indices: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class CompactMeshSection:
+    material_id: int
+    face_indices: array = field(default_factory=lambda: array("i"))
+
+    @property
+    def face_count(self) -> int:
+        return len(self.face_indices)
 
 
 @dataclass(frozen=True)
@@ -190,7 +241,80 @@ class Prototype:
     source_name: str
     prototype_type: str = "assembly_part"
     resolution_mode: PrototypeResolutionMode = PrototypeResolutionMode.INLINE_MESH
+    source_mode: PrototypeSourceMode = PrototypeSourceMode.XML_MESH
+    fbx_material_mode: FbxMaterialMode = FbxMaterialMode.AUTO
     mesh_asset_path: str | None = None
+    fbx_source_path: str | None = None
+    geometry_payload: "GeometryBuffer | None" = None
+
+
+@dataclass(frozen=True)
+class GeometryBuffer:
+    name: str
+    point_components: array
+    face_vertex_counts: array
+    face_vertex_indices: array
+    uv_components: array = field(default_factory=lambda: array("f"))
+    vertex_color_components: array = field(default_factory=lambda: array("f"))
+    sections: tuple[CompactMeshSection, ...] = ()
+    skel_joint_indices: array = field(default_factory=lambda: array("i"))
+    skel_joint_weights: array = field(default_factory=lambda: array("f"))
+    skel_element_size: int = 0
+
+    @property
+    def point_count(self) -> int:
+        return len(self.point_components) // 3
+
+    @property
+    def face_count(self) -> int:
+        return len(self.face_vertex_counts)
+
+    @property
+    def uv_count(self) -> int:
+        return len(self.uv_components) // 2
+
+    @property
+    def vertex_color_count(self) -> int:
+        return len(self.vertex_color_components) // 4
+
+    @property
+    def has_vertex_colors(self) -> bool:
+        return self.vertex_color_count > 0
+
+
+@dataclass(frozen=True)
+class PrototypeSourceConfig:
+    source_key: str
+    source_name: str = ""
+    mode: PrototypeSourceMode = PrototypeSourceMode.XML_MESH
+    fbx_material_mode: FbxMaterialMode = FbxMaterialMode.AUTO
+    asset_path: str | None = None
+    fbx_path: str | None = None
+
+
+@dataclass(frozen=True)
+class ConversionTelemetry:
+    phase: ConversionPhase
+    completed_units: int = 0
+    total_units: int = 0
+    message: str = ""
+    output_bytes_written: int = 0
+    elapsed_seconds: float = 0.0
+
+
+@dataclass(frozen=True)
+class ExportStats:
+    bytes_written: int = 0
+    duration_seconds: float = 0.0
+    streamed: bool = False
+
+
+@dataclass(frozen=True)
+class ConversionJobResult:
+    result: "ConversionResult | None" = None
+    telemetry: ConversionTelemetry | None = None
+    cancelled: bool = False
+    error_message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -402,8 +526,9 @@ class ValidationIssue:
 
 @dataclass(frozen=True)
 class UsdAssemblyDocument:
-    text: str
+    text: str | None
     diagnostics: tuple[ValidationIssue, ...]
+    stats: ExportStats = field(default_factory=ExportStats)
 
 
 @dataclass(frozen=True)
@@ -417,6 +542,9 @@ class ConversionRequest:
     bark_material_path: str | None = None
     leaves_material_path: str | None = None
     single_material_path: str | None = None
+    cpu_profile: CpuProfile = CpuProfile.BALANCED
+    cleanup_policy: CleanupPolicy = CleanupPolicy.EPHEMERAL
+    prototype_source_configs: tuple[PrototypeSourceConfig, ...] = ()
     use_existing_part_meshes: bool = False
     part_mesh_asset_paths: tuple[tuple[str, str], ...] = ()
 
@@ -427,6 +555,8 @@ class ConversionResult:
     output_path: str | None
     diagnostics: tuple[ValidationIssue, ...]
     usda_document: UsdAssemblyDocument | None = None
+    telemetry: tuple[ConversionTelemetry, ...] = ()
+    runtime_job_dir: str | None = None
 
 
 @dataclass(frozen=True)

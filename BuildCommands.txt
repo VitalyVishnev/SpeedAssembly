@@ -1,4 +1,4 @@
 ﻿cd "D:\3D Personal\VibeCode\XMLtoUSDAconverter"
+.\.venv310\Scripts\Activate.ps1
 .\scripts\build_gui_exe.cmd
 .\scripts\build_gui_exe.cmd -Package  # clean standalone rebuild by default
-

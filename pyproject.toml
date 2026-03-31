@@ -7,7 +7,7 @@ name = "xml-to-usda-converter"
 version = "0.1.0"
 description = "Observed-schema SpeedTree Raw XML to USDA converter scaffold for UE 5.7 skeletal nanite assemblies."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 authors = [
   { name = "OpenAI Codex" }
 ]
@@ -28,3 +28,4 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--basetemp=.pytest_tmp"

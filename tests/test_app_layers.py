@@ -7,13 +7,17 @@ from unittest.mock import Mock
 import pytest
 
 from xml_to_usda.models import (
+    CleanupPolicy,
     ConversionRequest,
     ConversionResult,
+    CpuProfile,
     DynamicWindData,
     DynamicWindJointAssignment,
     DynamicWindSimulationGroup,
+    FbxMaterialMode,
     MaterialPolicy,
     OutputMode,
+    PrototypeSourceMode,
     ValidationIssue,
     WindJsonResult,
 )
@@ -114,6 +118,7 @@ def test_gui_formatter_renders_diagnostics() -> None:
 
     rendered = format_conversion_results((result,))
 
+    assert "Cleanup policy: ephemeral" in rendered
     assert "Material policy: legacy_role_ids" in rendered
     assert "Input: input.xml" in rendered
     assert "[warning] demo: demo warning" in rendered
@@ -139,6 +144,27 @@ def test_cli_parser_accepts_material_policy_flags() -> None:
     assert args.single_material_path == "/Game/Assembly/Fern/M_Fern.M_Fern"
     assert args.bark_material_path is None
     assert args.leaves_material_path is None
+
+
+def test_cli_parser_accepts_part_source_config_and_cpu_profile() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "convert",
+            "input.xml",
+            "output.usda",
+            "--part-source-config",
+            "part_sources.json",
+            "--cpu-profile",
+            "quiet",
+            "--preserve-temp-files",
+        ]
+    )
+
+    assert args.part_source_config == "part_sources.json"
+    assert args.cpu_profile == "quiet"
+    assert args.preserve_temp_files is True
 
 
 def test_convert_file_applies_baseline_material_overrides(tmp_path: Path) -> None:
@@ -195,8 +221,10 @@ def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatc
         bark_material_path=None,
         leaves_material_path=None,
         single_material_path=None,
+        cleanup_policy=None,
         use_existing_part_meshes=False,
         part_mesh_asset_paths=(),
+        runtime_paths=None,
     ):
         calls.append(
             (
@@ -265,8 +293,10 @@ def test_gui_run_conversion_passes_single_material_policy(monkeypatch: pytest.Mo
         bark_material_path=None,
         leaves_material_path=None,
         single_material_path=None,
+        cleanup_policy=None,
         use_existing_part_meshes=False,
         part_mesh_asset_paths=(),
+        runtime_paths=None,
     ):
         calls.append(
             (
@@ -333,8 +363,10 @@ def test_gui_run_conversion_passes_part_mesh_xml_names(
         bark_material_path=None,
         leaves_material_path=None,
         single_material_path=None,
+        cleanup_policy=None,
         use_existing_part_meshes=False,
         part_mesh_asset_paths=(),
+        runtime_paths=None,
     ):
         calls.append(
             (
@@ -567,6 +599,70 @@ def test_gui_part_mesh_reuse_persists_per_xml_and_restores_on_reload(
             pass
 
 
+def test_gui_persists_fbx_source_mode_and_cpu_profile(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    settings_path = tmp_path / "gui_settings.json"
+    fake_fbx_path = tmp_path / "prototype_branch.fbx"
+    fake_fbx_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        app.cpu_profile_var.set(CpuProfile.QUIET.value)
+        app.preserve_temp_files_var.set(True)
+        row = app._part_mesh_rows[0]
+        row["source_mode_var"].set(PrototypeSourceMode.FBX_FILE.value)
+        row["fbx_var"].set(str(fake_fbx_path))
+        row["fbx_material_mode_var"].set(FbxMaterialMode.SINGLE_MATERIAL.value)
+        app._handle_window_close()
+
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        key = str(SIMPLE_TREE_01.resolve())
+        assert payload["cpu_profile"] == "quiet"
+        assert payload["preserve_temp_files"] is True
+        assert payload["part_mesh_settings_by_input_path"][key][0] == {
+            "source_name": "Twig_01",
+            "source_key": "Mesh_1",
+            "source_mode": "fbx_file",
+            "fbx_path": str(fake_fbx_path),
+            "fbx_material_mode": "single_material",
+        }
+    finally:
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+    _, root = _build_tk_root_or_skip()
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        restored_row = app._part_mesh_rows[0]
+
+        assert app.cpu_profile_var.get() == CpuProfile.QUIET.value
+        assert app.preserve_temp_files_var.get() is True
+        assert restored_row["source_mode_var"].get() == PrototypeSourceMode.FBX_FILE.value
+        assert restored_row["fbx_var"].get() == str(fake_fbx_path)
+        assert restored_row["fbx_material_mode_var"].get() == FbxMaterialMode.SINGLE_MATERIAL.value
+        assert str(restored_row["fbx_entry"].cget("state")) == "normal"
+        assert str(restored_row["fbx_material_mode_combo"].cget("state")) == "readonly"
+        assert str(restored_row["asset_entry"].cget("state")) == "disabled"
+    finally:
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+
 def test_gui_part_mesh_settings_do_not_cross_contaminate_between_xml_files(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -690,8 +786,10 @@ def test_gui_persists_material_paths_after_successful_conversion(
         bark_material_path=None,
         leaves_material_path=None,
         single_material_path=None,
+        cleanup_policy=None,
         use_existing_part_meshes=False,
         part_mesh_asset_paths=(),
+        runtime_paths=None,
     ):
         return ConversionResult(
             input_path=input_path,

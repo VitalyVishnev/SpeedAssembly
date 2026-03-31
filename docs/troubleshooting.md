@@ -21,6 +21,25 @@ Practical rule:
 - if the standalone build ever looks suspicious, rerun `.\scripts\build_gui_exe.cmd -Package`
 - do not trust an older `dist\XMLtoUSDAConverter.exe` timestamp as proof that the current source was packaged
 
+## Runtime temp files seem to accumulate
+
+Symptoms:
+
+- `%LOCALAPPDATA%/XMLtoUSDAConverter/cache/jobs` keeps growing
+- you see old job manifests or abandoned temp folders after interrupted sessions
+
+Checks:
+
+- normal conversion runs should clean runtime job dirs automatically
+- `.partial` output files should not remain after success, cancel, or failure
+- stale job dirs older than 24 hours are removed during startup sweep
+
+Expected behavior:
+
+- only UI settings persist by default
+- runtime temp dirs are removed unless `Preserve temp files for debugging` or `--preserve-temp-files` is enabled
+- build folders such as `build/` and `dist/` are unrelated to runtime cache cleanup
+
 ## External PartMesh override looks ignored
 
 Symptom:
@@ -50,6 +69,51 @@ Practical rule:
 
 - when debugging this feature, inspect the USDA first
 - do not assume the UI failed until the USDA confirms it
+
+## FBX prototype replacement fails before export
+
+Symptom:
+
+- a repeated part row is switched to `FBX file`
+- conversion fails before USDA is written
+
+What to check first:
+
+1. Verify the selected file is the explicit FBX replacement file you intended, not an XML-authored `LOD/@Filename`.
+2. Verify the file exists on disk.
+3. Verify the FBX is rigid-only for this workflow.
+4. Verify the mesh provides vertex colors on the imported points.
+
+Common causes:
+
+- Autodesk FBX SDK Python bindings are not installed, so `fbx` / `FbxCommon` cannot be imported
+- the chosen FBX contains animation or skin deformers
+- the chosen FBX has no readable polygon mesh nodes
+- the chosen FBX has no usable vertex colors
+
+Practical rule:
+
+- FBX mode is explicit, rigid-only, and vertex-color-driven in v1
+- if the error mentions missing SDK bindings, fix the local FBX SDK install before debugging the XML or USDA path
+
+## Huge FBX export appears busy for a long time
+
+Symptom:
+
+- the GUI stays responsive, but the conversion takes a long time
+- the output file may not appear until late in the job
+
+What to know:
+
+- huge FBX prototype payloads now stream USDA through a temporary `.partial` file and atomically replace the final target on success
+- `balanced` leaves logical CPUs free for the rest of the system
+- `max_speed` uses more of the machine but may feel less responsive during the job
+
+Practical rule:
+
+- use `balanced` when you want the machine to stay comfortable for background use
+- use `max_speed` when throughput matters more than responsiveness
+- if conversion is cancelled or fails, a leftover `.partial` file is treated as a bug
 
 ## Material override looks ignored
 
