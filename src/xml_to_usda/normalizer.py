@@ -37,7 +37,8 @@ from .source_transform import SourceTransform, build_source_transform
 
 PRIMARY_MATERIAL_ID = 1
 LEAVES_MATERIAL_ID = 2
-_GENERATOR_LEVEL_PATTERN = re.compile(r"^Group_(?P<level>\d+)(?:[ _-]\d+)?$")
+_GENERATOR_LEVEL_PATTERN = re.compile(r"^Group_(?P<level>\d+)(?:[ _-]\d+)?$", re.IGNORECASE)
+_GENERATOR_SUFFIX_LEVEL_PATTERN = re.compile(r"^(?P<label>.+?)[ _-](?P<level>\d+)$", re.IGNORECASE)
 
 
 def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> CanonicalTreeModel:
@@ -62,7 +63,7 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
         _extract_assembly_parts_from_leaf_references(root, data_messages, source_transform, material_ids)
     )
     branch_segments = tuple(_extract_branch_segments(source_objects, skeleton))
-    prototypes = tuple(_build_prototypes(assembly_parts, mesh_library, data_messages))
+    prototypes = tuple(_build_prototypes(assembly_parts, mesh_library, material_ids, data_messages))
     skeletal_support_primvars = _build_skeletal_support_primvars(skeleton)
     spines = tuple(source_object.spine for source_object in source_objects if source_object.spine is not None)
 
@@ -477,10 +478,16 @@ def _parse_generator_label(generator_label: str | None, bone_id: int) -> tuple[s
         return None, None
 
     normalized_label = " ".join(generator_label.strip().split())
+    lower_label = normalized_label.lower()
+    if lower_label in {"trunk", "root"}:
+        return normalized_label, 0
     match = _GENERATOR_LEVEL_PATTERN.match(normalized_label)
-    if match is None:
-        return normalized_label, None
-    return normalized_label, int(match.group("level"))
+    if match is not None:
+        return normalized_label, int(match.group("level"))
+    suffix_match = _GENERATOR_SUFFIX_LEVEL_PATTERN.match(normalized_label)
+    if suffix_match is not None:
+        return normalized_label, int(suffix_match.group("level"))
+    return normalized_label, None
 
 
 def _extract_assembly_parts_from_leaf_references(
@@ -600,6 +607,7 @@ def _leaf_reference_orientation_to_stage(
 def _build_prototypes(
     assembly_parts: tuple[AssemblyPartInstance, ...],
     mesh_library: tuple[MeshLibraryEntry, ...],
+    material_ids: set[int],
     messages: list[str],
 ) -> list[Prototype]:
     if not assembly_parts:
@@ -608,10 +616,10 @@ def _build_prototypes(
     meshes_by_key = {f"Mesh_{entry.mesh_id}": entry for entry in mesh_library}
     display_names = [meshes_by_key[key].name if key in meshes_by_key else key for key in source_keys]
     identities = build_prototype_identities(list(source_keys), display_names)
-    fallback_materials: dict[str, set[int]] = defaultdict(set)
+    fallback_material_counts: dict[str, dict[int, int]] = defaultdict(lambda: defaultdict(int))
     for part in assembly_parts:
         if part.source_material_id is not None:
-            fallback_materials[part.prototype_key].add(part.source_material_id)
+            fallback_material_counts[part.prototype_key][part.source_material_id] += 1
     prototypes: list[Prototype] = []
     for identity in identities:
         entry = meshes_by_key.get(identity.source_key)
@@ -620,7 +628,8 @@ def _build_prototypes(
             mesh = _resolve_prototype_material_sections(
                 mesh,
                 identity.source_key,
-                fallback_materials.get(identity.source_key, set()),
+                fallback_material_counts.get(identity.source_key, {}),
+                material_ids,
                 messages,
             )
         prototypes.append(
@@ -640,26 +649,52 @@ def _mesh_with_original_scale(entry: MeshLibraryEntry) -> MeshData:
     if entry.original_scale is None or entry.original_scale == 1.0:
         return entry.mesh
     scale_factor = entry.original_scale
+    if not isinstance(scale_factor, (int, float)):
+        raise TypeError(
+            f"MeshLibraryEntry {entry.name} (mesh_id={entry.mesh_id}) has invalid original_scale "
+            f"{scale_factor!r} of type {type(scale_factor).__name__}."
+        )
     return replace(
         entry.mesh,
         points=tuple(
             Vector3(
-                point.x * scale_factor,
-                point.y * scale_factor,
-                point.z * scale_factor,
+                _scaled_point_component(point, "x", scale_factor, entry),
+                _scaled_point_component(point, "y", scale_factor, entry),
+                _scaled_point_component(point, "z", scale_factor, entry),
             )
             for point in entry.mesh.points
         ),
     )
 
 
+def _scaled_point_component(point, axis_name: str, scale_factor: float, entry: MeshLibraryEntry) -> float:
+    if not isinstance(point, Vector3):
+        raise TypeError(
+            f"MeshLibraryEntry {entry.name} (mesh_id={entry.mesh_id}) contains invalid point payload "
+            f"{point!r} of type {type(point).__name__}; expected Vector3 before applying original_scale."
+        )
+    value = getattr(point, axis_name)
+    if not isinstance(value, (int, float)):
+        raise TypeError(
+            f"MeshLibraryEntry {entry.name} (mesh_id={entry.mesh_id}) contains invalid point.{axis_name} "
+            f"{value!r} of type {type(value).__name__}; expected numeric coordinate before applying original_scale."
+        )
+    return value * scale_factor
+
+
 def _resolve_prototype_material_sections(
     mesh: MeshData,
     prototype_key: str,
-    fallback_material_ids: set[int],
+    fallback_material_counts: dict[int, int],
+    material_ids: set[int],
     messages: list[str],
 ) -> MeshData:
-    vertex_color_sections = _vertex_color_material_sections(mesh)
+    primary_material_id, leaves_material_id = _resolve_role_material_ids(fallback_material_counts, material_ids)
+    vertex_color_sections = _vertex_color_material_sections(
+        mesh,
+        primary_material_id=primary_material_id,
+        leaves_material_id=leaves_material_id,
+    )
     if vertex_color_sections is not None:
         authored_material_ids = {section.material_id for section in mesh.sections}
         resolved_material_ids = {section.material_id for section in vertex_color_sections}
@@ -670,7 +705,7 @@ def _resolve_prototype_material_sections(
             )
         return replace(mesh, sections=vertex_color_sections)
 
-    return _apply_fallback_material_sections(mesh, prototype_key, fallback_material_ids, messages)
+    return _apply_fallback_material_sections(mesh, prototype_key, fallback_material_counts, messages)
 
 
 def _build_skeletal_support_primvars(skeleton: tuple[Joint, ...]) -> SkeletalSupportPrimvars | None:
@@ -1102,7 +1137,12 @@ def _ordered_sections(sections_by_material: dict[int, list[int]]) -> tuple[MeshS
     )
 
 
-def _vertex_color_material_sections(mesh: MeshData) -> tuple[MeshSection, ...] | None:
+def _vertex_color_material_sections(
+    mesh: MeshData,
+    *,
+    primary_material_id: int = PRIMARY_MATERIAL_ID,
+    leaves_material_id: int = LEAVES_MATERIAL_ID,
+) -> tuple[MeshSection, ...] | None:
     if not mesh.vertex_colors or not mesh.face_vertex_counts or not mesh.face_vertex_indices:
         return None
 
@@ -1116,35 +1156,62 @@ def _vertex_color_material_sections(mesh: MeshData) -> tuple[MeshSection, ...] |
         if any(point_index < 0 or point_index >= len(mesh.vertex_colors) for point_index in face_indices):
             return None
         material_id = (
-            LEAVES_MATERIAL_ID
+            leaves_material_id
             if all(mesh.vertex_colors[point_index].is_exact_black() for point_index in face_indices)
-            else PRIMARY_MATERIAL_ID
+            else primary_material_id
         )
         sections_by_material[material_id].append(face_index)
 
     return _ordered_sections(sections_by_material)
 
 
+def _resolve_role_material_ids(
+    fallback_material_counts: dict[int, int],
+    material_ids: set[int],
+) -> tuple[int, int]:
+    if not material_ids:
+        return PRIMARY_MATERIAL_ID, LEAVES_MATERIAL_ID
+
+    ordered_material_ids = sorted(material_ids)
+    leaves_material_id = None
+    if fallback_material_counts:
+        leaves_material_id = min(
+            fallback_material_counts,
+            key=lambda material_id: (-fallback_material_counts[material_id], material_id),
+        )
+    if leaves_material_id is None:
+        leaves_material_id = ordered_material_ids[-1]
+
+    primary_candidates = [material_id for material_id in ordered_material_ids if material_id != leaves_material_id]
+    primary_material_id = primary_candidates[0] if primary_candidates else leaves_material_id
+    return primary_material_id, leaves_material_id
+
+
 def _apply_fallback_material_sections(
     mesh: MeshData,
     prototype_key: str,
-    fallback_material_ids: set[int],
+    fallback_material_counts: dict[int, int],
     messages: list[str],
 ) -> MeshData:
     if mesh.sections:
+        fallback_material_ids = set(fallback_material_counts)
         if fallback_material_ids and {section.material_id for section in mesh.sections} != fallback_material_ids:
             messages.append(
                 f"material_conflict: prototype {prototype_key} uses mesh-authored material ids "
                 f"{sorted(section.material_id for section in mesh.sections)} over LeafReferences ids {sorted(fallback_material_ids)}"
             )
         return mesh
-    if not fallback_material_ids:
+    if not fallback_material_counts:
         return mesh
+    fallback_material_ids = set(fallback_material_counts)
     if len(fallback_material_ids) > 1:
         messages.append(
             f"material_conflict: prototype {prototype_key} has multiple LeafReferences material ids {sorted(fallback_material_ids)} without mesh-authored sections"
         )
-    chosen_material_id = LEAVES_MATERIAL_ID if LEAVES_MATERIAL_ID in fallback_material_ids else PRIMARY_MATERIAL_ID
+    chosen_material_id = min(
+        fallback_material_counts,
+        key=lambda material_id: (-fallback_material_counts[material_id], material_id),
+    )
     return replace(mesh, sections=_single_material_sections(chosen_material_id, len(mesh.face_vertex_counts)))
 
 

@@ -13,6 +13,7 @@ from xml_to_usda.normalizer import (
     _build_base_mesh,
     _extract_assembly_parts_from_leaf_references,
     _extract_bounds,
+    _mesh_with_original_scale,
     _read_float_list,
     _read_positive_float,
     normalize_to_canonical,
@@ -27,6 +28,7 @@ from xml_to_usda.models import (
     MaterialSpec,
     Matrix4d,
     MeshData,
+    MeshLibraryEntry,
     MeshSection,
     PrototypeSourceConfig,
     PrototypeSourceMode,
@@ -39,12 +41,14 @@ from xml_to_usda.normalizer import _vertex_color_material_sections
 from xml_to_usda.pipeline import (
     _apply_material_policy,
     convert_file,
+    discover_part_prototypes,
     generate_wind_json,
     inspect_source,
     inspect_wind_data,
     load_canonical_model,
 )
 from xml_to_usda.prototype_sources import load_prototype_source_configs_from_json
+from xml_to_usda.runtime_paths import resolve_runtime_paths
 from xml_to_usda.source_transform import build_source_transform
 from xml_to_usda.ue_schema import DEFAULT_UE_SCHEMA_CONTRACT
 from xml_to_usda.usda_writer import render_usda, write_usda_document
@@ -59,11 +63,20 @@ LEAFREFS_ON_BRANCH_LEVELS = DATA_DIR / "leafrefs_on_branch_levels.xml"
 INVALID_LEAF_BONE = DATA_DIR / "invalid_leaf_bone.xml"
 
 
+def _test_runtime_paths(tmp_path: Path):
+    return resolve_runtime_paths(
+        settings_dir=tmp_path / "settings",
+        settings_path=tmp_path / "settings" / "gui_settings.json",
+        cache_root=tmp_path / "runtime_cache",
+    )
+
+
 def _write_fbx_json_payload(
     tmp_path: Path,
     *,
     include_vertex_colors: bool = True,
     color_components: list[float] | None = None,
+    file_name: str = "prototype_payload.json",
 ) -> Path:
     payload = {
         "point_components": [
@@ -96,12 +109,13 @@ def _write_fbx_json_payload(
             1.0, 1.0, 1.0, 1.0,
             1.0, 1.0, 1.0, 1.0,
         ]
-    payload_path = tmp_path / "prototype_payload.json"
+    payload_path = tmp_path / file_name
     payload_path.write_text(json.dumps(payload), encoding="utf-8")
     return payload_path
 
 
 def _write_generator_level_sample(tmp_path: Path, generator_labels: tuple[str | None, ...]) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     bone_lines: list[str] = ["<SpeedTreeRaw>", "  <Bones>"]
     for bone_id, generator_label in enumerate(generator_labels):
         parent_id = bone_id - 1 if bone_id > 0 else -1
@@ -220,6 +234,22 @@ def test_inspect_report_tracks_structure_without_sample_specific_contracts() -> 
         "ueJointNames",
     }
     assert len(payload["orientation_sample"]) == 3
+
+
+def test_discover_part_prototypes_matches_canonical_prototype_identity_for_gui_loading() -> None:
+    discovered = discover_part_prototypes(str(SIMPLE_TREE_01))
+    _, model, _ = load_canonical_model(str(SIMPLE_TREE_01))
+    instance_counts_by_key: dict[str, int] = {}
+    for part in model.assembly_parts:
+        instance_counts_by_key[part.prototype_key] = instance_counts_by_key.get(part.prototype_key, 0) + 1
+
+    assert [
+        (prototype.source_key, prototype.source_name, prototype.source_mesh_id, prototype.instance_count)
+        for prototype in discovered
+    ] == [
+        (prototype.source_key, prototype.source_name, prototype.source_mesh_id, instance_counts_by_key[prototype.source_key])
+        for prototype in model.prototypes
+    ]
 
 
 def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
@@ -647,17 +677,40 @@ def test_inspect_wind_data_clears_trunk_groups_when_ground_cover_is_enabled(tmp_
 
 
 def test_inspect_wind_data_rejects_missing_generator_levels(tmp_path: Path) -> None:
-    input_path = _write_generator_level_sample(tmp_path, (None, "Group_0"))
+    input_path = _write_generator_level_sample(tmp_path, (None, None))
 
     with pytest.raises(ValueError, match="missing_generator_level"):
         inspect_wind_data(str(input_path))
 
 
 def test_generate_wind_json_rejects_malformed_generator_levels(tmp_path: Path) -> None:
-    input_path = _write_generator_level_sample(tmp_path, ("Trunk", "Group_0"))
+    input_path = _write_generator_level_sample(tmp_path, ("Branches", "Branches"))
 
     with pytest.raises(ValueError, match="missing_generator_level"):
         generate_wind_json(str(input_path), str(tmp_path / "invalid_DynamicWind.json"))
+
+
+def test_inspect_wind_data_accepts_legacy_speedtree_generator_labels(tmp_path: Path) -> None:
+    input_path = _write_generator_level_sample(tmp_path, ("Trunk", "Trunk", "Branches_1", "Branches_2"))
+
+    dynamic_wind = inspect_wind_data(str(input_path))
+
+    assert [group.branch_order for group in dynamic_wind.simulation_groups] == [0, 1, 2]
+    assert dynamic_wind.simulation_groups[0].is_trunk_group is True
+
+
+def test_inspect_wind_data_infers_missing_upper_generator_levels_from_children(tmp_path: Path) -> None:
+    input_path = _write_generator_level_sample(tmp_path, (None, None, None, "Branches_1", "Branches_2"))
+
+    dynamic_wind = inspect_wind_data(str(input_path))
+
+    assert [group.branch_order for group in dynamic_wind.simulation_groups] == [0, 1, 2]
+    assignments = {assignment.joint_name: assignment.branch_order for assignment in dynamic_wind.joint_assignments}
+    assert assignments["root"] == 0
+    assert assignments["bone_001"] == 0
+    assert assignments["bone_002"] == 0
+    assert assignments["bone_003"] == 1
+    assert assignments["bone_004"] == 2
 
 
 def test_legacy_wind_samples_without_generator_labels_fail_strictly() -> None:
@@ -840,7 +893,7 @@ def test_vertex_colors_override_authored_prototype_sections_when_present() -> No
 
     from xml_to_usda.normalizer import _resolve_prototype_material_sections
 
-    resolved = _resolve_prototype_material_sections(synthetic_mesh, "Mesh_1", {2}, [])
+    resolved = _resolve_prototype_material_sections(synthetic_mesh, "Mesh_1", {2: 1}, {1, 2}, [])
 
     assert resolved.sections == (
         MeshSection(material_id=1, face_indices=(1,)),
@@ -848,38 +901,31 @@ def test_vertex_colors_override_authored_prototype_sections_when_present() -> No
     )
 
 
-def test_missing_primary_or_leaves_material_is_validation_error() -> None:
+def test_source_role_policy_does_not_require_fixed_material_ids() -> None:
     document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
     broken_model = replace(
         model,
         materials=(MaterialSpec(source_id=1, name="Default_Mat", source_material_ids=(1,)),),
-        metadata=replace(model.metadata, material_policy=MaterialPolicy.LEGACY_ROLE_IDS),
+        metadata=replace(model.metadata, material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES),
     )
 
     diagnostics = validate_model(broken_model)
-
-    assert any(issue.code == "missing_required_material_role" and issue.severity == "error" for issue in diagnostics)
-
-    remapped_policy_model = replace(
-        broken_model,
-        metadata=replace(broken_model.metadata, material_policy=MaterialPolicy.SINGLE_MATERIAL),
-    )
-
-    diagnostics = validate_model(remapped_policy_model)
 
     assert not any(issue.code == "missing_required_material_role" for issue in diagnostics)
 
 
 def test_single_material_policy_succeeds_on_shifted_source_material_ids(tmp_path: Path) -> None:
     shifted_sample = _write_shifted_material_sample(tmp_path, {1: 3, 2: 4})
+    runtime_paths = _test_runtime_paths(tmp_path)
 
     result = convert_file(
         str(shifted_sample),
         str(tmp_path / "single_material.usda"),
         material_policy=MaterialPolicy.SINGLE_MATERIAL,
         single_material_path="/Game/Assembly/SimpleTree/Leaves1.Leaves1",
+        runtime_paths=runtime_paths,
     )
     _, model, diagnostics = load_canonical_model(
         str(shifted_sample),
@@ -902,6 +948,58 @@ def test_single_material_policy_succeeds_on_shifted_source_material_ids(tmp_path
         for issue in diagnostics
     )
     assert 'uniform asset info:unreal:sourceAsset = @/Game/Assembly/SimpleTree/Leaves1.Leaves1@' in result.usda_document.text
+
+
+def test_source_role_policy_remaps_shifted_source_material_ids_to_role_materials(tmp_path: Path) -> None:
+    shifted_sample = _write_shifted_material_sample(tmp_path, {1: 5, 2: 6})
+    runtime_paths = _test_runtime_paths(tmp_path)
+
+    result = convert_file(str(shifted_sample), str(tmp_path / "legacy_shifted.usda"), runtime_paths=runtime_paths)
+    _, model, diagnostics = load_canonical_model(str(shifted_sample))
+
+    assert result.usda_document is not None
+    assert {material.source_id for material in model.materials} == {1, 2}
+    assert {material.source_material_ids for material in model.materials} == {(5,), (6,)}
+    assert model.base_mesh is not None
+    assert {section.material_id for section in model.base_mesh.sections} == {1}
+    assert all(
+        prototype.mesh is None or {section.material_id for section in prototype.mesh.sections} <= {1, 2}
+        for prototype in model.prototypes
+    )
+    assert not any(
+        issue.severity == "error" and issue.code == "missing_material_definition"
+        for issue in diagnostics
+    )
+
+
+def test_source_role_policy_succeeds_with_fbx_single_material_on_shifted_source_material_ids(tmp_path: Path) -> None:
+    shifted_sample = _write_shifted_material_sample(tmp_path, {1: 5, 2: 6})
+    payload_path = _write_fbx_json_payload(tmp_path, include_vertex_colors=False)
+
+    _, model, diagnostics = load_canonical_model(
+        str(shifted_sample),
+        material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_material_mode=FbxMaterialMode.SINGLE_MATERIAL,
+                fbx_path=str(payload_path),
+            ),
+        ),
+    )
+
+    prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_1")
+
+    assert {material.source_id for material in model.materials} == {1, 2}
+    assert {material.source_material_ids for material in model.materials} == {(5,), (6,)}
+    assert prototype.geometry_payload is not None
+    assert {section.material_id for section in prototype.geometry_payload.sections} == {1}
+    assert not any(
+        issue.severity == "error" and issue.code == "missing_material_definition"
+        for issue in diagnostics
+    )
 
 
 def test_vertex_color_split_policy_maps_white_and_nonwhite_for_base_and_prototypes() -> None:
@@ -1502,7 +1600,7 @@ def test_existing_part_mesh_override_accepts_xml_mesh_names_in_mixed_mode(tmp_pa
 
 
 def test_fbx_part_source_config_replaces_inline_prototype_with_geometry_payload(tmp_path: Path) -> None:
-    payload_path = _write_fbx_json_payload(tmp_path)
+    payload_path = _write_fbx_json_payload(tmp_path, file_name="SM_BigBranch_01_HIGH.json")
     _, model, diagnostics = load_canonical_model(
         str(SIMPLE_TREE_01),
         prototype_source_configs=(
@@ -1523,6 +1621,8 @@ def test_fbx_part_source_config_replaces_inline_prototype_with_geometry_payload(
     assert prototype.mesh is None
     assert prototype.geometry_payload is not None
     assert prototype.fbx_source_path == str(payload_path)
+    assert prototype.source_name == "SM_BigBranch_01_HIGH"
+    assert prototype.identity.prim_name == "SM_BigBranch_01_HIGH"
     assert {section.material_id: list(section.face_indices) for section in prototype.geometry_payload.sections} == {
         1: [1],
         2: [0],
@@ -1702,7 +1802,7 @@ def test_conflicting_fbx_material_modes_for_same_prototype_are_rejected(tmp_path
 
 
 def test_fbx_part_source_streams_usda_to_disk(tmp_path: Path) -> None:
-    payload_path = _write_fbx_json_payload(tmp_path)
+    payload_path = _write_fbx_json_payload(tmp_path, file_name="SM_BigBranch_01_HIGH.json")
     output_path = tmp_path / "fbx_streamed.usda"
 
     result = convert_file(
@@ -1726,10 +1826,35 @@ def test_fbx_part_source_streams_usda_to_disk(tmp_path: Path) -> None:
     assert output_path.exists()
     assert not output_path.with_name("fbx_streamed.usda.partial").exists()
     usda_text = output_path.read_text(encoding="utf-8")
-    assert 'def Xform "Twig_01"' in usda_text
-    assert 'def Mesh "Twig_01"' in usda_text
+    assert 'def Xform "SM_BigBranch_01_HIGH"' in usda_text
+    assert 'def Mesh "SM_BigBranch_01_HIGH"' in usda_text
+    assert 'def Skeleton "SM_BigBranch_01_HIGH_Skeleton"' in usda_text
+    assert (
+        'append rel skel:skeleton = '
+        '</Tree/AssemblyPartsInstancer/Prototypes/SM_BigBranch_01_HIGH/PartSkelRoot/SM_BigBranch_01_HIGH_Skeleton>'
+        in usda_text
+    )
     assert 'def GeomSubset "Material_1_1"' in usda_text
     assert 'def GeomSubset "Material_2_2"' in usda_text
+
+
+def test_mesh_with_original_scale_reports_invalid_point_payloads() -> None:
+    entry = replace(
+        MeshLibraryEntry(
+            mesh_id=7,
+            name="BrokenPrototype",
+            mesh=MeshData(
+                name="BrokenPrototype",
+                points=(Vector3,),
+                face_vertex_counts=(),
+                face_vertex_indices=(),
+            ),
+            original_scale=2.0,
+        ),
+    )
+
+    with pytest.raises(TypeError, match="BrokenPrototype"):
+        _mesh_with_original_scale(entry)
 
 
 def test_streaming_writer_cleans_partial_file_on_cancel(tmp_path: Path) -> None:

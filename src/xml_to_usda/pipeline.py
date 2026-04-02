@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import replace
 from pathlib import Path
 
@@ -16,14 +17,17 @@ from .models import (
     CpuProfile,
     DynamicWindData,
     DynamicWindSimulationGroup,
+    Joint,
     MaterialPolicy,
     ObservedXmlSchemaReport,
     OutputMode,
     PrototypeSourceConfig,
+    PrototypeDiscoveryEntry,
     ValidationIssue,
     WindJsonResult,
 )
 from .normalizer import normalize_to_canonical
+from .normalizer import _joint_name_from_bone_id, _parse_generator_label
 from .prototype_sources import (
     apply_prototype_source_configs,
     merge_legacy_part_mesh_configs,
@@ -37,10 +41,6 @@ from .xml_reader import inspect_xml, read_source_xml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VAULT_ROOT = REPO_ROOT / "vault"
-BASELINE_BARK_MATERIAL_ID = 1
-BASELINE_LEAVES_MATERIAL_ID = 2
-
-
 def inspect_source(input_path: str) -> ObservedXmlSchemaReport:
     document = read_source_xml(input_path)
     report = inspect_xml(document)
@@ -61,10 +61,67 @@ def inspect_source(input_path: str) -> ObservedXmlSchemaReport:
     )
 
 
+def discover_part_prototypes(input_path: str) -> tuple[PrototypeDiscoveryEntry, ...]:
+    mesh_names_by_id: dict[int, str] = {}
+    mesh_instance_counts_by_id: dict[int, int] = {}
+    ordered_mesh_ids: list[int] = []
+    seen_mesh_ids: set[int] = set()
+    saw_leaf_references = False
+    leaf_without_mesh_id_instance_count = 0
+
+    for _event, elem in ET.iterparse(input_path, events=("end",)):
+        if elem.tag == "Mesh":
+            raw_mesh_id = elem.attrib.get("ID")
+            if raw_mesh_id is not None and raw_mesh_id.isdigit():
+                mesh_id = int(raw_mesh_id)
+                mesh_names_by_id[mesh_id] = elem.attrib.get("Name", f"Mesh_{mesh_id}")
+            elem.clear()
+            continue
+        if elem.tag != "LeafReferences":
+            continue
+
+        saw_leaf_references = True
+        mesh_ids = _read_streamed_mesh_ids(elem.findtext("MeshID"))
+        instance_count = _read_leaf_reference_instance_count(elem)
+        if mesh_ids:
+            mesh_count_deltas = _mesh_instance_count_deltas(mesh_ids, instance_count)
+            for mesh_id in mesh_ids:
+                if mesh_id in seen_mesh_ids:
+                    continue
+                seen_mesh_ids.add(mesh_id)
+                ordered_mesh_ids.append(mesh_id)
+                mesh_instance_counts_by_id.setdefault(mesh_id, 0)
+            for mesh_id, count_delta in mesh_count_deltas.items():
+                mesh_instance_counts_by_id[mesh_id] = mesh_instance_counts_by_id.get(mesh_id, 0) + count_delta
+        elif _leaf_reference_has_instances(elem):
+            leaf_without_mesh_id_instance_count += max(instance_count, 1)
+        elem.clear()
+
+    prototypes = tuple(
+        PrototypeDiscoveryEntry(
+            source_key=f"Mesh_{mesh_id}",
+            source_mesh_id=mesh_id,
+            source_name=mesh_names_by_id.get(mesh_id, f"Mesh_{mesh_id}"),
+            instance_count=mesh_instance_counts_by_id.get(mesh_id, 0),
+        )
+        for mesh_id in ordered_mesh_ids
+    )
+    if prototypes or not saw_leaf_references or not leaf_without_mesh_id_instance_count:
+        return prototypes
+    return (
+        PrototypeDiscoveryEntry(
+            source_key="LeafPrototype",
+            source_mesh_id=None,
+            source_name="LeafPrototype",
+            instance_count=leaf_without_mesh_id_instance_count,
+        ),
+    )
+
+
 def load_canonical_model(
     input_path: str,
     output_mode: OutputMode = OutputMode.SELF_CONTAINED,
-    material_policy: MaterialPolicy = MaterialPolicy.LEGACY_ROLE_IDS,
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES,
     bark_material_path: str | None = None,
     leaves_material_path: str | None = None,
     single_material_path: str | None = None,
@@ -133,7 +190,7 @@ def convert_file(
     input_path: str,
     output_path: str | None,
     output_mode: OutputMode = OutputMode.SELF_CONTAINED,
-    material_policy: MaterialPolicy = MaterialPolicy.LEGACY_ROLE_IDS,
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES,
     bark_material_path: str | None = None,
     leaves_material_path: str | None = None,
     single_material_path: str | None = None,
@@ -272,11 +329,9 @@ def convert_request(
 
 
 def inspect_wind_data(input_path: str, is_ground_cover: bool = False) -> DynamicWindData:
-    document = read_source_xml(input_path)
-    report = inspect_xml(document)
-    model = normalize_to_canonical(document, report)
+    skeleton = _load_wind_skeleton(input_path)
     return build_dynamic_wind_data(
-        model.skeleton,
+        skeleton,
         is_ground_cover=is_ground_cover,
     )
 
@@ -288,12 +343,9 @@ def generate_wind_json(
     gust_attenuation: float = 0.0,
     is_ground_cover: bool = False,
 ) -> WindJsonResult:
-    document = read_source_xml(input_path)
-    report = inspect_xml(document)
-    model = normalize_to_canonical(document, report)
+    skeleton = _load_wind_skeleton(input_path)
     dynamic_wind = build_dynamic_wind_data(
-        model.skeleton,
-        source_objects=model.source_objects,
+        skeleton,
         group_settings=group_settings,
         gust_attenuation=gust_attenuation,
         is_ground_cover=is_ground_cover,
@@ -306,6 +358,34 @@ def generate_wind_json(
         output_path=str(resolved_output),
         dynamic_wind=dynamic_wind,
     )
+
+
+def _load_wind_skeleton(input_path: str) -> tuple[Joint, ...]:
+    joints: list[Joint] = []
+    for _event, elem in ET.iterparse(input_path, events=("end",)):
+        if elem.tag != "Bone":
+            continue
+        raw_bone_id = elem.attrib.get("ID")
+        if raw_bone_id is None or not raw_bone_id.lstrip("-").isdigit():
+            elem.clear()
+            continue
+        bone_id = int(raw_bone_id)
+        raw_parent_id = elem.attrib.get("ParentID")
+        parsed_parent_id = None
+        if raw_parent_id not in {None, "", "-1"} and raw_parent_id.lstrip("-").isdigit():
+            parsed_parent_id = int(raw_parent_id)
+        generator_label, generator_level = _parse_generator_label(elem.attrib.get("Generator"), bone_id)
+        joints.append(
+            Joint(
+                name=_joint_name_from_bone_id(bone_id),
+                source_id=bone_id,
+                parent=_joint_name_from_bone_id(parsed_parent_id) if parsed_parent_id is not None else None,
+                generator_label=generator_label,
+                generator_level=generator_level,
+            )
+        )
+        elem.clear()
+    return tuple(joints)
 
 
 def _resolve_output_path(request: ConversionRequest, input_path: str) -> Path | None:
@@ -447,3 +527,53 @@ def _append_cleanup_warning(
             message=cleanup_warning,
         ),
     )
+
+
+def _read_streamed_mesh_ids(raw: str | None) -> list[int]:
+    if not raw:
+        return []
+    mesh_ids: list[int] = []
+    for token in raw.replace(",", " ").split():
+        if token.lstrip("-").isdigit():
+            mesh_ids.append(int(token))
+    return mesh_ids
+
+
+def _leaf_reference_has_instances(elem: ET.Element) -> bool:
+    for tag_name in ("MeshID", "X", "Y", "Z"):
+        text = elem.findtext(tag_name)
+        if text and text.strip():
+            return True
+    return False
+
+
+def _read_leaf_reference_instance_count(elem: ET.Element) -> int:
+    raw_count = (elem.attrib.get("Count") or "").strip()
+    if raw_count.isdigit():
+        parsed = int(raw_count)
+        if parsed > 0:
+            return parsed
+    return max(
+        _count_streamed_value_tokens(elem.findtext(tag_name))
+        for tag_name in ("MeshID", "X", "Y", "Z", "Scale", "BoneID")
+    )
+
+
+def _count_streamed_value_tokens(raw: str | None) -> int:
+    if raw is None:
+        return 0
+    text = raw.strip()
+    if not text:
+        return 0
+    return len(text.split())
+
+
+def _mesh_instance_count_deltas(mesh_ids: list[int], instance_count: int) -> dict[int, int]:
+    if not mesh_ids:
+        return {}
+    if len(mesh_ids) == 1 and instance_count > 1:
+        return {mesh_ids[0]: instance_count}
+    counts: dict[int, int] = {}
+    for mesh_id in mesh_ids:
+        counts[mesh_id] = counts.get(mesh_id, 0) + 1
+    return counts

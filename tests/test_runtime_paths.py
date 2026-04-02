@@ -119,6 +119,26 @@ def test_startup_sweep_removes_only_stale_job_workspaces(tmp_path: Path) -> None
     assert fresh_dir.exists()
 
 
+def test_startup_sweep_reports_inaccessible_jobs_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime_paths = resolve_runtime_paths(
+        settings_dir=tmp_path / "settings",
+        settings_path=tmp_path / "settings" / "gui_settings.json",
+        cache_root=tmp_path / "runtime_cache",
+    )
+
+    def raise_permission_error(*_args, **_kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(type(runtime_paths.jobs_root), "exists", raise_permission_error)
+
+    summary = sweep_stale_job_workspaces(runtime_paths, stale_after_seconds=24 * 60 * 60)
+
+    assert summary.removed_jobs == 0
+    assert summary.removed_partial_outputs == 0
+    assert summary.failed_jobs == 1
+    assert summary.failed_paths == (str(runtime_paths.jobs_root),)
+
+
 def test_success_cleanup_removes_runtime_job_workspace(tmp_path: Path) -> None:
     runtime_paths = resolve_runtime_paths(
         settings_dir=tmp_path / "settings",

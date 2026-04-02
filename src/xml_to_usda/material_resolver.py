@@ -57,8 +57,8 @@ def apply_material_policy(
     single_material_path: str | None,
     normalize_asset_path,
 ) -> CanonicalTreeModel:
-    if material_policy == MaterialPolicy.LEGACY_ROLE_IDS:
-        return _apply_legacy_material_policy(model, bark_material_path, leaves_material_path, normalize_asset_path)
+    if material_policy == MaterialPolicy.SOURCE_MATERIAL_ROLES:
+        return _apply_source_role_material_policy(model, bark_material_path, leaves_material_path, normalize_asset_path)
     if material_policy == MaterialPolicy.SINGLE_MATERIAL:
         return _apply_single_material_policy(model, single_material_path, normalize_asset_path)
     if material_policy == MaterialPolicy.VERTEX_COLOR_SPLIT:
@@ -66,20 +66,112 @@ def apply_material_policy(
     raise ValueError(f"Unsupported material policy: {material_policy}")
 
 
-def _apply_legacy_material_policy(
+def _apply_source_role_material_policy(
     model: CanonicalTreeModel,
     bark_material_path: str | None,
     leaves_material_path: str | None,
     normalize_asset_path,
 ) -> CanonicalTreeModel:
-    if not bark_material_path and not leaves_material_path:
-        return model
-    overrides = {
-        BASELINE_BARK_MATERIAL_ID: bark_material_path,
-        BASELINE_LEAVES_MATERIAL_ID: leaves_material_path,
+    role_map = _source_role_material_id_map(model)
+    base_mesh = _remap_mesh_material_ids(model.base_mesh, role_map)
+    prototypes = tuple(_remap_prototype_material_ids(prototype, role_map) for prototype in model.prototypes)
+    materials = _build_source_role_materials(
+        model,
+        role_map,
+        bark_material_path,
+        leaves_material_path,
+        normalize_asset_path,
+        base_mesh=base_mesh,
+        prototypes=prototypes,
+    )
+    return replace(model, materials=materials, base_mesh=base_mesh, prototypes=prototypes)
+
+
+def _source_role_material_id_map(model: CanonicalTreeModel) -> dict[int, int]:
+    source_material_ids = list(dict.fromkeys(_source_material_ids(model)))
+    if not source_material_ids:
+        return {}
+
+    role_map: dict[int, int] = {}
+    for material_id in source_material_ids:
+        if material_id in {BASELINE_BARK_MATERIAL_ID, BASELINE_LEAVES_MATERIAL_ID}:
+            role_map[material_id] = material_id
+
+    leaf_reference_material_ids = {
+        part.source_material_id
+        for part in model.assembly_parts
+        if part.source_material_id is not None
     }
-    materials = tuple(_apply_material_override(material, overrides, normalize_asset_path) for material in model.materials)
-    return replace(model, materials=materials)
+    unresolved_ids = [material_id for material_id in source_material_ids if material_id not in role_map]
+
+    if len(leaf_reference_material_ids) == 1:
+        leaf_material_id = next(iter(leaf_reference_material_ids))
+        if leaf_material_id in source_material_ids:
+            role_map[leaf_material_id] = BASELINE_LEAVES_MATERIAL_ID
+
+    for material_id in unresolved_ids:
+        role_map.setdefault(material_id, BASELINE_BARK_MATERIAL_ID)
+    return role_map
+
+
+def _build_source_role_materials(
+    model: CanonicalTreeModel,
+    role_map: dict[int, int],
+    bark_material_path: str | None,
+    leaves_material_path: str | None,
+    normalize_asset_path,
+    *,
+    base_mesh: MeshData | None,
+    prototypes,
+) -> tuple[MaterialSpec, ...]:
+    original_material_by_id = {material.source_id: material for material in model.materials}
+    source_ids_by_role: dict[int, set[int]] = {}
+    for source_material_id in _source_material_ids(model):
+        role_id = role_map.get(source_material_id, source_material_id)
+        source_ids_by_role.setdefault(role_id, set()).add(source_material_id)
+    used_role_ids = _used_material_ids(base_mesh, prototypes)
+
+    materials: list[MaterialSpec] = []
+    for role_id in sorted(set(source_ids_by_role) | used_role_ids):
+        source_material_ids = tuple(sorted(source_ids_by_role.get(role_id, {role_id})))
+        representative = next(
+            (original_material_by_id[source_id] for source_id in source_material_ids if source_id in original_material_by_id),
+            None,
+        )
+        name = "PrimaryMaterial" if role_id == BASELINE_BARK_MATERIAL_ID else "SecondaryMaterial"
+        two_sided = representative.two_sided if representative is not None else False
+        maps = representative.maps if representative is not None else ()
+        ue_asset_path = None
+        if role_id == BASELINE_BARK_MATERIAL_ID and bark_material_path:
+            ue_asset_path = normalize_asset_path(bark_material_path)
+        elif role_id == BASELINE_LEAVES_MATERIAL_ID and leaves_material_path:
+            ue_asset_path = normalize_asset_path(leaves_material_path)
+        materials.append(
+            MaterialSpec(
+                source_id=role_id,
+                name=name,
+                two_sided=two_sided,
+                maps=maps,
+                ue_asset_path=ue_asset_path,
+                source_material_ids=source_material_ids,
+            )
+        )
+    return tuple(materials)
+
+
+def _apply_source_role_override(
+    material: MaterialSpec,
+    role_map: dict[int, int],
+    bark_material_path: str | None,
+    leaves_material_path: str | None,
+    normalize_asset_path,
+) -> MaterialSpec:
+    role_id = role_map.get(material.source_id)
+    if role_id == BASELINE_BARK_MATERIAL_ID and bark_material_path:
+        return replace(material, ue_asset_path=normalize_asset_path(bark_material_path))
+    if role_id == BASELINE_LEAVES_MATERIAL_ID and leaves_material_path:
+        return replace(material, ue_asset_path=normalize_asset_path(leaves_material_path))
+    return material
 
 
 def _apply_material_override(material: MaterialSpec, overrides: dict[int, str | None], normalize_asset_path) -> MaterialSpec:
@@ -87,6 +179,56 @@ def _apply_material_override(material: MaterialSpec, overrides: dict[int, str | 
     if not ue_asset_path:
         return material
     return replace(material, ue_asset_path=normalize_asset_path(ue_asset_path))
+
+
+def _remap_mesh_material_ids(mesh: MeshData | None, role_map: dict[int, int]) -> MeshData | None:
+    if mesh is None or not mesh.sections:
+        return mesh
+    return replace(
+        mesh,
+        sections=tuple(
+            MeshSection(
+                material_id=role_map.get(section.material_id, section.material_id),
+                face_indices=section.face_indices,
+            )
+            for section in mesh.sections
+        ),
+    )
+
+
+def _remap_payload_material_ids(geometry_payload: GeometryBuffer | None, role_map: dict[int, int]) -> GeometryBuffer | None:
+    if geometry_payload is None or not geometry_payload.sections:
+        return geometry_payload
+    return replace_payload_sections(
+        geometry_payload,
+        tuple(
+            CompactMeshSection(
+                material_id=role_map.get(section.material_id, section.material_id),
+                face_indices=section.face_indices,
+            )
+            for section in geometry_payload.sections
+        ),
+    )
+
+
+def _remap_prototype_material_ids(prototype, role_map: dict[int, int]):
+    geometry_payload = _remap_payload_material_ids(prototype.geometry_payload, role_map)
+    mesh = _remap_mesh_material_ids(prototype.mesh, role_map)
+    if geometry_payload is prototype.geometry_payload and mesh is prototype.mesh:
+        return prototype
+    return replace(prototype, geometry_payload=geometry_payload, mesh=mesh)
+
+
+def _used_material_ids(base_mesh: MeshData | None, prototypes) -> set[int]:
+    material_ids: set[int] = set()
+    if base_mesh is not None:
+        material_ids.update(section.material_id for section in base_mesh.sections)
+    for prototype in prototypes:
+        section_source = prototype.geometry_payload.sections if prototype.geometry_payload is not None else (
+            prototype.mesh.sections if prototype.mesh is not None else ()
+        )
+        material_ids.update(section.material_id for section in section_source)
+    return material_ids
 
 
 def _apply_single_material_policy(
@@ -158,6 +300,8 @@ def _remap_mesh_to_single_material(mesh: MeshData | None, material_id: int) -> M
     if mesh is None:
         return None
     return replace(mesh, sections=_single_material_mesh_sections(material_id, len(mesh.face_vertex_counts)))
+
+
 
 
 def _replace_prototype_materials_to_single_material(prototype, material_id: int):

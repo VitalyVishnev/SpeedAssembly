@@ -111,11 +111,11 @@ Current material-policy baseline:
 
 - raw XML `Material ID` values are opaque source ids, not semantic roles
 - the converter must not assume that XML ids like `3` and `4` mean invalid bark/leaves assignment
-- semantic bark/leaves interpretation now exists only in explicit `legacy_role_ids` mode
+- semantic bark/leaves interpretation now exists only in explicit `source_material_roles` mode
 
 Supported exporter material policies:
 
-- `legacy_role_ids`
+- `source_material_roles`
   - compatibility mode only
   - keeps the old semantic expectation that material id `1` is primary and id `2` is leaves
   - keeps the old missing-role validation only in this mode
@@ -130,7 +130,7 @@ Supported exporter material policies:
   - any gray or other non-white value is assigned to material id `2`
   - if usable vertex colors are missing, the exporter warns and assigns the mesh to material id `1`
 
-Outside `legacy_role_ids`, authored XML material ids are preserved only as source metadata on canonical materials and instances.
+Outside `source_material_roles`, authored XML material ids are preserved only as source metadata on canonical materials and instances.
 
 Naming policy:
 

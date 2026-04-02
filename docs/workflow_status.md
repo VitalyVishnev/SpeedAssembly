@@ -73,7 +73,7 @@ Current operator-facing material controls:
 
 - the GUI exposes `Material Policy`
 - `single_material` uses a dedicated `Single Material Path` field
-- `legacy_role_ids` and `vertex_color_split` continue to use the bark/leaves override fields
+- `source_material_roles` and `vertex_color_split` continue to use the bark/leaves override fields
 - GUI settings persist the selected material policy and single-material path
 - the CLI exposes:
   - `--material-policy`
@@ -158,7 +158,7 @@ The remaining acceptance criterion is breadth, not a known functional blocker.
 - unique geometry survives as the `Base Skeletal Tree`
 - repeated geometry imports through `PointInstancer`
 - materials work for the baseline import path, including UE-backed material overrides
-- material-policy behavior is documented and regression-tested for `legacy_role_ids`, `single_material`, and `vertex_color_split`
+- material-policy behavior is documented and regression-tested for `source_material_roles`, `single_material`, and `vertex_color_split`
 - transforms and skeletal bindings are visually sane in UE
 - automated regression fixtures cover the supported structural cases
 - optional reuse of existing Unreal `PartMesh` skeletal assets is available

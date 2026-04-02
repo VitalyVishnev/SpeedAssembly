@@ -6,12 +6,14 @@ from pathlib import Path
 
 from .fbx_adapter import load_fbx_geometry
 from .job_control import emit_telemetry, throw_if_cancelled
+from .naming import make_stable_prim_name
 from .models import (
     CanonicalTreeModel,
     ConversionPhase,
     CpuProfile,
     FbxMaterialMode,
     Prototype,
+    PrototypeIdentity,
     PrototypeResolutionMode,
     PrototypeSourceConfig,
     PrototypeSourceMode,
@@ -79,19 +81,10 @@ def apply_prototype_source_configs(
     normalized_configs = _normalize_prototype_source_configs(prototype_source_configs, normalize_asset_path, is_valid_unreal_asset_path)
     metadata = model.metadata
     used_keys: set[str] = set()
+    matched_configs: list[PrototypeSourceConfig | None] = []
     prototypes: list[Prototype] = []
 
-    emit_telemetry(
-        telemetry_callback,
-        ConversionPhase.PROTOTYPE_RESOLUTION,
-        completed_units=0,
-        total_units=len(model.prototypes),
-        message="Resolving prototype source modes.",
-        started_at=started_at,
-    )
-
-    for index, prototype in enumerate(model.prototypes, start=1):
-        throw_if_cancelled(cancel_event)
+    for prototype in model.prototypes:
         matching_configs = [
             (lookup_key, normalized_configs[lookup_key])
             for lookup_key in (prototype.source_name, prototype.source_key)
@@ -106,8 +99,26 @@ def apply_prototype_source_configs(
                 "Conflicting source configurations found for prototype "
                 f"{prototype.source_name or prototype.source_key}."
             )
+        matched_configs.append(matching_configs[0][1] if matching_configs else None)
 
-        if not matching_configs:
+    used_prim_names = {
+        prototype.identity.prim_name
+        for prototype, config in zip(model.prototypes, matched_configs, strict=True)
+        if config is None or config.mode != PrototypeSourceMode.FBX_FILE
+    }
+
+    emit_telemetry(
+        telemetry_callback,
+        ConversionPhase.PROTOTYPE_RESOLUTION,
+        completed_units=0,
+        total_units=len(model.prototypes),
+        message="Resolving prototype source modes.",
+        started_at=started_at,
+    )
+
+    for index, (prototype, config) in enumerate(zip(model.prototypes, matched_configs, strict=True), start=1):
+        throw_if_cancelled(cancel_event)
+        if config is None:
             prototypes.append(replace(prototype, source_mode=PrototypeSourceMode.XML_MESH))
             emit_telemetry(
                 telemetry_callback,
@@ -119,8 +130,11 @@ def apply_prototype_source_configs(
             )
             continue
 
-        used_keys.update(key for key, _config in matching_configs)
-        config = matching_configs[0][1]
+        used_keys.update(
+            lookup_key
+            for lookup_key in (prototype.source_name, prototype.source_key)
+            if lookup_key and lookup_key in normalized_configs
+        )
         if config.mode == PrototypeSourceMode.XML_MESH:
             prototypes.append(
                 replace(
@@ -156,12 +170,19 @@ def apply_prototype_source_configs(
                 ConversionPhase.FBX_IMPORT,
                 completed_units=index - 1,
                 total_units=len(model.prototypes),
-                message=f"Importing FBX for {prototype.identity.prim_name}.",
+                message=f"Importing FBX for {Path(config.fbx_path).stem}.",
                 started_at=started_at,
+            )
+            fbx_source_name = Path(config.fbx_path).stem
+            fbx_prim_name = _allocate_unique_fbx_prim_name(fbx_source_name, used_prim_names)
+            resolved_identity = PrototypeIdentity(
+                source_key=prototype.identity.source_key,
+                prim_name=fbx_prim_name,
+                prototype_type=prototype.identity.prototype_type,
             )
             geometry_payload = load_fbx_geometry(
                 config.fbx_path,
-                prototype.identity.prim_name,
+                fbx_prim_name,
                 cpu_profile=cpu_profile,
                 telemetry_callback=telemetry_callback,
                 cancel_event=cancel_event,
@@ -169,10 +190,12 @@ def apply_prototype_source_configs(
             prototypes.append(
                 replace(
                     prototype,
+                    identity=resolved_identity,
                     mesh=None,
                     geometry_payload=geometry_payload,
                     resolution_mode=PrototypeResolutionMode.INLINE_MESH,
                     source_mode=PrototypeSourceMode.FBX_FILE,
+                    source_name=fbx_source_name,
                     fbx_material_mode=config.fbx_material_mode,
                     mesh_asset_path=None,
                     fbx_source_path=config.fbx_path,
@@ -253,3 +276,14 @@ def _coerce_optional_string(value) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _allocate_unique_fbx_prim_name(source_name: str, used_prim_names: set[str]) -> str:
+    base_name = make_stable_prim_name(source_name, fallback="Prototype")
+    candidate = base_name
+    suffix = 2
+    while candidate in used_prim_names:
+        candidate = f"{base_name}_{suffix}"
+        suffix += 1
+    used_prim_names.add(candidate)
+    return candidate

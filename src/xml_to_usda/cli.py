@@ -22,8 +22,8 @@ def build_parser() -> argparse.ArgumentParser:
     convert_parser.add_argument("output", help="Path to the output USDA file.")
     convert_parser.add_argument(
         "--material-policy",
-        choices=[policy.value for policy in MaterialPolicy],
-        default=MaterialPolicy.LEGACY_ROLE_IDS.value,
+        choices=MaterialPolicy.cli_choices(),
+        default=MaterialPolicy.SOURCE_MATERIAL_ROLES.value,
         help="Material authoring mode.",
     )
     convert_parser.add_argument("--bark-material-path", help="Unreal material path for the primary material bucket.")
@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
             return _run_convert(
                 args.input,
                 args.output,
-                MaterialPolicy(args.material_policy),
+                MaterialPolicy.parse(args.material_policy),
                 bark_material_path=args.bark_material_path,
                 leaves_material_path=args.leaves_material_path,
                 single_material_path=args.single_material_path,

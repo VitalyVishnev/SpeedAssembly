@@ -131,7 +131,7 @@ Checks:
 
 Material-policy interpretation:
 
-- `legacy_role_ids`
+- `source_material_roles`
   - expects the old primary/leaves semantic split
   - raw XML ids are still interpreted as semantic roles in this mode only
 - `single_material`
@@ -144,7 +144,7 @@ Material-policy interpretation:
 
 Practical rule:
 
-- if a fern or shrub uses source ids like `3/4`, do not debug it as a missing `1/2` material-role error unless the export intentionally used `legacy_role_ids`
+- if a fern or shrub uses source ids like `3/4`, do not debug it as a missing `1/2` material-role error; source ids are arbitrary project-local metadata, not a required bark/leaves numbering contract
 
 ## Only Part Meshes import, but the base mesh is missing
 

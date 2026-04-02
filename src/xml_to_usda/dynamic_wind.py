@@ -99,18 +99,53 @@ def default_group_settings(branch_orders: tuple[int, ...]) -> tuple[DynamicWindS
 
 
 def _resolve_generator_levels(skeleton: tuple[Joint, ...]) -> dict[str, int]:
-    generator_levels: dict[str, int] = {}
+    generator_levels: dict[str, int] = {
+        joint.name: joint.generator_level
+        for joint in skeleton
+        if joint.generator_level is not None
+    }
+    joints_by_name = {joint.name: joint for joint in skeleton}
+    child_names_by_parent: dict[str | None, list[str]] = {}
+    for joint in skeleton:
+        child_names_by_parent.setdefault(joint.parent, []).append(joint.name)
+
+    unresolved_joint_names = {
+        joint.name
+        for joint in skeleton
+        if joint.generator_level is None
+    }
+    progress = True
+    while unresolved_joint_names and progress:
+        progress = False
+        for joint_name in tuple(unresolved_joint_names):
+            joint = joints_by_name[joint_name]
+            parent_level = generator_levels.get(joint.parent) if joint.parent is not None else None
+            if parent_level is not None:
+                generator_levels[joint_name] = parent_level
+                unresolved_joint_names.remove(joint_name)
+                progress = True
+                continue
+
+            child_levels = [
+                generator_levels[child_name]
+                for child_name in child_names_by_parent.get(joint_name, ())
+                if child_name in generator_levels
+            ]
+            if child_levels:
+                generator_levels[joint_name] = max(min(child_levels) - 1, 0)
+                unresolved_joint_names.remove(joint_name)
+                progress = True
+
     missing: list[str] = []
     invalid: list[str] = []
 
     for joint in skeleton:
-        if joint.generator_level is None:
+        if joint.name not in generator_levels:
             if joint.generator_label is None:
                 missing.append(joint.name)
             else:
                 invalid.append(f"{joint.name}={joint.generator_label!r}")
             continue
-        generator_levels[joint.name] = joint.generator_level
 
     if missing or invalid:
         detail_parts: list[str] = []

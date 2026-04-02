@@ -18,6 +18,7 @@ from .models import (
     MeshSection,
     Prototype,
     PrototypeResolutionMode,
+    PrototypeSourceMode,
     PrototypeStrategy,
     SkeletalSupportPrimvars,
     UsdAssemblyDocument,
@@ -467,8 +468,10 @@ def _render_inline_instancer_prototype(prototype: Prototype, contract: UeSchemaC
         raise ValueError(f"Prototype {prototype.identity.prim_name} is missing mesh payload.")
 
     name = prototype.identity.prim_name
-    part_mesh_name = make_stable_prim_name(name, fallback=contract.part_mesh_name)
-    part_joint_name = make_stable_prim_name(name, fallback="root")
+    part_mesh_name, part_joint_name, part_skeleton_name, part_animation_name = _resolve_inline_part_names(
+        prototype,
+        contract,
+    )
     skinning = _render_single_joint_skinning(mesh, contract)
     material_binding = _render_material_binding(mesh)
     return f'''        def Xform "{name}"
@@ -477,7 +480,7 @@ def _render_inline_instancer_prototype(prototype: Prototype, contract: UeSchemaC
                 kind = "component"
             )
             {{
-                def SkelAnimation "{contract.part_animation_name}"
+                def SkelAnimation "{part_animation_name}"
                 {{
                     uniform token[] joints = ["{part_joint_name}"]
                     quath[] rotations = [{_identity_quaternion()}]
@@ -491,14 +494,14 @@ def _render_inline_instancer_prototype(prototype: Prototype, contract: UeSchemaC
                 {{
                     uniform token[] skel:joints = ["{part_joint_name}"]
                     uniform matrix4d primvars:skel:geomBindTransform = {_identity_matrix()}
-                    append rel skel:skeleton = {contract.part_skeleton_path(name)}
+                    append rel skel:skeleton = {_part_skeleton_path(contract, name, part_skeleton_name)}
                     uniform token subdivisionScheme = "none"
 {_indent(material_binding, 5)}
                     {_render_mesh_payload(mesh, contract.mesh_orientation)}
 {_indent(skinning, 5)}
                 }}
 
-                def Skeleton "{contract.part_skeleton_name}" (
+                def Skeleton "{part_skeleton_name}" (
                     prepend apiSchemas = ["{contract.skel_binding_api}"]
                 )
                 {{
@@ -507,7 +510,7 @@ def _render_inline_instancer_prototype(prototype: Prototype, contract: UeSchemaC
                     uniform token[] joints = ["{part_joint_name}"]
                     uniform token purpose = "guide"
                     uniform matrix4d[] restTransforms = [{_identity_matrix()}]
-                    append rel skel:animationSource = {contract.part_animation_path(name)}
+                    append rel skel:animationSource = {_part_animation_path(contract, name, part_animation_name)}
                     uniform token visibility = "invisible"
                 }}
             }}
@@ -764,7 +767,17 @@ def _prototype_inline_mesh(prototype: Prototype) -> MeshData | GeometryBuffer | 
 
 
 def _model_requires_streaming_writer(model: CanonicalTreeModel) -> bool:
-    return any(prototype.geometry_payload is not None for prototype in model.prototypes)
+    if any(prototype.geometry_payload is not None for prototype in model.prototypes):
+        return True
+    if len(model.assembly_parts) >= 10000:
+        return True
+    base_mesh = model.base_mesh
+    if base_mesh is not None:
+        if len(base_mesh.points) >= 100000:
+            return True
+        if len(base_mesh.face_vertex_indices) >= 300000:
+            return True
+    return False
 
 
 def _write_streaming_usda(
@@ -994,8 +1007,10 @@ def _write_streaming_instancer_prototype(handle, prototype: Prototype, contract:
         raise ValueError(f"Prototype {prototype.identity.prim_name} is missing mesh payload.")
 
     name = prototype.identity.prim_name
-    part_mesh_name = make_stable_prim_name(name, fallback=contract.part_mesh_name)
-    part_joint_name = make_stable_prim_name(name, fallback="root")
+    part_mesh_name, part_joint_name, part_skeleton_name, part_animation_name = _resolve_inline_part_names(
+        prototype,
+        contract,
+    )
     handle.write(
         f'''        def Xform "{name}"
         {{
@@ -1003,7 +1018,7 @@ def _write_streaming_instancer_prototype(handle, prototype: Prototype, contract:
                 kind = "component"
             )
             {{
-                def SkelAnimation "{contract.part_animation_name}"
+                def SkelAnimation "{part_animation_name}"
                 {{
                     uniform token[] joints = ["{part_joint_name}"]
                     quath[] rotations = [{_identity_quaternion()}]
@@ -1017,7 +1032,7 @@ def _write_streaming_instancer_prototype(handle, prototype: Prototype, contract:
                 {{
                     uniform token[] skel:joints = ["{part_joint_name}"]
                     uniform matrix4d primvars:skel:geomBindTransform = {_identity_matrix()}
-                    append rel skel:skeleton = {contract.part_skeleton_path(name)}
+                    append rel skel:skeleton = {_part_skeleton_path(contract, name, part_skeleton_name)}
                     uniform token subdivisionScheme = "none"
 '''
     )
@@ -1027,7 +1042,7 @@ def _write_streaming_instancer_prototype(handle, prototype: Prototype, contract:
     handle.write(
         f'''                }}
 
-                def Skeleton "{contract.part_skeleton_name}" (
+                def Skeleton "{part_skeleton_name}" (
                     prepend apiSchemas = ["{contract.skel_binding_api}"]
                 )
                 {{
@@ -1036,7 +1051,7 @@ def _write_streaming_instancer_prototype(handle, prototype: Prototype, contract:
                     uniform token[] joints = ["{part_joint_name}"]
                     uniform token purpose = "guide"
                     uniform matrix4d[] restTransforms = [{_identity_matrix()}]
-                    append rel skel:animationSource = {contract.part_animation_path(name)}
+                    append rel skel:animationSource = {_part_animation_path(contract, name, part_animation_name)}
                     uniform token visibility = "invisible"
                 }}
             }}
@@ -1212,3 +1227,37 @@ def _payload_has_uvs(mesh: MeshData | GeometryBuffer) -> bool:
     if isinstance(mesh, GeometryBuffer):
         return bool(mesh.uv_components)
     return bool(mesh.uv_coords)
+
+
+def _resolve_inline_part_names(
+    prototype: Prototype,
+    contract: UeSchemaContract,
+) -> tuple[str, str, str, str]:
+    prototype_name = prototype.identity.prim_name
+    part_mesh_name = make_stable_prim_name(prototype_name, fallback=contract.part_mesh_name)
+    part_joint_name = make_stable_prim_name(prototype_name, fallback="root")
+    if prototype.source_mode == PrototypeSourceMode.FBX_FILE:
+        part_skeleton_name = make_stable_prim_name(
+            f"{prototype_name}_Skeleton",
+            fallback=contract.part_skeleton_name,
+        )
+        part_animation_name = make_stable_prim_name(
+            f"{prototype_name}_Animation",
+            fallback=contract.part_animation_name,
+        )
+        return part_mesh_name, part_joint_name, part_skeleton_name, part_animation_name
+    return part_mesh_name, part_joint_name, contract.part_skeleton_name, contract.part_animation_name
+
+
+def _part_skeleton_path(contract: UeSchemaContract, prototype_name: str, skeleton_name: str) -> str:
+    return (
+        f"</{contract.root_prim_name}/{contract.assembly_parts_instancer_name}/"
+        f"{contract.prototype_scope_name}/{prototype_name}/{contract.part_skel_root_name}/{skeleton_name}>"
+    )
+
+
+def _part_animation_path(contract: UeSchemaContract, prototype_name: str, animation_name: str) -> str:
+    return (
+        f"</{contract.root_prim_name}/{contract.assembly_parts_instancer_name}/"
+        f"{contract.prototype_scope_name}/{prototype_name}/{contract.part_skel_root_name}/{animation_name}>"
+    )

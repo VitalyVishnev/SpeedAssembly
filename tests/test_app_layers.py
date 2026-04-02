@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -119,7 +120,7 @@ def test_gui_formatter_renders_diagnostics() -> None:
     rendered = format_conversion_results((result,))
 
     assert "Cleanup policy: ephemeral" in rendered
-    assert "Material policy: legacy_role_ids" in rendered
+    assert "Material policy: source_material_roles" in rendered
     assert "Input: input.xml" in rendered
     assert "[warning] demo: demo warning" in rendered
     assert "Status: failed" in rendered
@@ -144,6 +145,22 @@ def test_cli_parser_accepts_material_policy_flags() -> None:
     assert args.single_material_path == "/Game/Assembly/Fern/M_Fern.M_Fern"
     assert args.bark_material_path is None
     assert args.leaves_material_path is None
+
+
+def test_cli_parser_accepts_legacy_material_policy_alias() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "convert",
+            "input.xml",
+            "output.usda",
+            "--material-policy",
+            "legacy_role_ids",
+        ]
+    )
+
+    assert args.material_policy == "legacy_role_ids"
 
 
 def test_cli_parser_accepts_part_source_config_and_cpu_profile() -> None:
@@ -217,7 +234,7 @@ def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatc
         input_path,
         output_path,
         output_mode=OutputMode.SELF_CONTAINED,
-        material_policy=MaterialPolicy.LEGACY_ROLE_IDS,
+        material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
         bark_material_path=None,
         leaves_material_path=None,
         single_material_path=None,
@@ -265,7 +282,7 @@ def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatc
             (
                 str(SIMPLE_TREE_01),
                 "out.usda",
-                MaterialPolicy.LEGACY_ROLE_IDS,
+                MaterialPolicy.SOURCE_MATERIAL_ROLES,
                 "/Game/TestMaterials/M_Bark_Test",
                 "/Game/TestMaterials/M_Leaves_Test",
                 None,
@@ -273,7 +290,7 @@ def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatc
                 (),
             )
         ]
-        assert "Material policy: legacy_role_ids" in app.log_widget.get("1.0", "end-1c")
+        assert "Material policy: source_material_roles" in app.log_widget.get("1.0", "end-1c")
         assert "Material overrides:" in app.log_widget.get("1.0", "end-1c")
     finally:
         root.destroy()
@@ -289,7 +306,7 @@ def test_gui_run_conversion_passes_single_material_policy(monkeypatch: pytest.Mo
         input_path,
         output_path,
         output_mode=OutputMode.SELF_CONTAINED,
-        material_policy=MaterialPolicy.LEGACY_ROLE_IDS,
+        material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
         bark_material_path=None,
         leaves_material_path=None,
         single_material_path=None,
@@ -359,7 +376,7 @@ def test_gui_run_conversion_passes_part_mesh_xml_names(
         input_path,
         output_path,
         output_mode=OutputMode.SELF_CONTAINED,
-        material_policy=MaterialPolicy.LEGACY_ROLE_IDS,
+        material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
         bark_material_path=None,
         leaves_material_path=None,
         single_material_path=None,
@@ -407,7 +424,7 @@ def test_gui_run_conversion_passes_part_mesh_xml_names(
             (
                 str(SIMPLE_TREE_01),
                 "out.usda",
-                MaterialPolicy.LEGACY_ROLE_IDS,
+                MaterialPolicy.SOURCE_MATERIAL_ROLES,
                 None,
                 None,
                 None,
@@ -756,12 +773,125 @@ def test_gui_loads_persisted_material_paths(monkeypatch: pytest.MonkeyPatch, tmp
 
     try:
         app = ConversionApp(root)
-        assert app.material_policy_var.get() == MaterialPolicy.LEGACY_ROLE_IDS.value
+        assert app.material_policy_var.get() == MaterialPolicy.SOURCE_MATERIAL_ROLES.value
         assert app.bark_material_var.get() == "/Game/TestMaterials/M_Bark_Test"
         assert app.leaves_material_var.get() == "/Game/TestMaterials/M_Leaves_Test"
         assert app.single_material_var.get() == ""
         assert app.gust_attenuation_var.get() == pytest.approx(0.25)
         assert app.is_ground_cover_var.get() is True
+    finally:
+        root.destroy()
+
+
+def test_gui_refresh_wind_groups_uses_background_worker_for_large_xml(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    dynamic_wind = DynamicWindData(
+        joint_assignments=(DynamicWindJointAssignment(joint_name="root", simulation_group_index=0, branch_order=0),),
+        simulation_groups=(DynamicWindSimulationGroup(group_index=0, branch_order=0, is_trunk_group=True),),
+    )
+
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda _input_path, is_ground_cover=False: dynamic_wind)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+    monkeypatch.setattr(ConversionApp, "ASYNC_WIND_REFRESH_THRESHOLD_BYTES", 0)
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+
+        app.refresh_wind_groups()
+
+        for _ in range(50):
+            root.update()
+            if app._wind_group_rows:
+                break
+            time.sleep(0.01)
+
+        assert len(app._wind_group_rows) == 1
+        assert app._wind_group_rows[0]["group_index"] == 0
+        assert str(app.refresh_wind_button.cget("state")) == "normal"
+    finally:
+        root.destroy()
+
+
+def test_gui_refresh_wind_groups_retries_internal_worker_error_on_main_thread(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    dynamic_wind = DynamicWindData(
+        joint_assignments=(DynamicWindJointAssignment(joint_name="root", simulation_group_index=0, branch_order=0),),
+        simulation_groups=(DynamicWindSimulationGroup(group_index=0, branch_order=0, is_trunk_group=True),),
+    )
+    call_count = {"count": 0}
+    error_messages: list[str] = []
+
+    def flaky_inspect_wind_data(_input_path, is_ground_cover=False):
+        call_count["count"] += 1
+        if call_count["count"] == 1:
+            raise SystemError(r"D:\w1\s\Objects\setobject.c:2295: bad argument to internal function")
+        return dynamic_wind
+
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", flaky_inspect_wind_data)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda _title, message: error_messages.append(message))
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+    monkeypatch.setattr(ConversionApp, "ASYNC_WIND_REFRESH_THRESHOLD_BYTES", 0)
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+
+        app.refresh_wind_groups()
+
+        for _ in range(50):
+            root.update()
+            if app._wind_group_rows:
+                break
+            time.sleep(0.01)
+
+        assert call_count["count"] == 2
+        assert len(app._wind_group_rows) == 1
+        assert "after fallback retry" in app.status_var.get()
+        assert "Background wind worker failed once" in app.log_widget.get("1.0", "end-1c")
+        assert error_messages == []
+    finally:
+        root.destroy()
+
+
+def test_gui_browse_input_auto_refreshes_wind_groups_and_shows_instance_counts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    settings_path = tmp_path / "gui_settings.json"
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
+    monkeypatch.setattr("xml_to_usda.gui.filedialog.askopenfilename", lambda **_kwargs: str(SIMPLE_TREE_01))
+    dynamic_wind = DynamicWindData(
+        joint_assignments=(DynamicWindJointAssignment(joint_name="root", simulation_group_index=0, branch_order=0),),
+        simulation_groups=(DynamicWindSimulationGroup(group_index=0, branch_order=0, is_trunk_group=True),),
+    )
+
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda *_args, **_kwargs: dynamic_wind)
+
+    try:
+        app = ConversionApp(root)
+
+        app.browse_input()
+
+        assert app.input_var.get() == str(SIMPLE_TREE_01)
+        assert len(app._wind_group_rows) == 1
+        assert app._part_mesh_rows[0]["instance_count"] == 13
+        assert app._part_mesh_rows[1]["instance_count"] == 26
+        assert "39 repeated branch instances" in app.part_mesh_summary_var.get()
     finally:
         root.destroy()
 
@@ -782,7 +912,7 @@ def test_gui_persists_material_paths_after_successful_conversion(
         input_path,
         output_path,
         output_mode=OutputMode.SELF_CONTAINED,
-        material_policy=MaterialPolicy.LEGACY_ROLE_IDS,
+        material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
         bark_material_path=None,
         leaves_material_path=None,
         single_material_path=None,
@@ -810,17 +940,14 @@ def test_gui_persists_material_paths_after_successful_conversion(
         app.run_conversion()
 
         assert settings_path.exists()
-        assert settings_path.read_text(encoding="utf-8") == (
-            '{\n'
-            '  "material_policy": "legacy_role_ids",\n'
-            '  "bark_material_path": "/Game/TestMaterials/M_Bark_Test",\n'
-            '  "leaves_material_path": "/Game/TestMaterials/M_Leaves_Test",\n'
-            '  "single_material_path": "",\n'
-            '  "gust_attenuation": 0.0,\n'
-            '  "is_ground_cover": false,\n'
-            '  "wind_group_settings": {}\n'
-            '}'
-        )
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert payload["material_policy"] == "source_material_roles"
+        assert payload["bark_material_path"] == "/Game/TestMaterials/M_Bark_Test"
+        assert payload["leaves_material_path"] == "/Game/TestMaterials/M_Leaves_Test"
+        assert payload["single_material_path"] == ""
+        assert payload["gust_attenuation"] == 0.0
+        assert payload["is_ground_cover"] is False
+        assert isinstance(payload["wind_group_settings"], dict)
     finally:
         root.destroy()
 
@@ -841,17 +968,14 @@ def test_gui_persists_material_paths_without_running_conversion(
     app._handle_window_close()
 
     assert settings_path.exists()
-    assert settings_path.read_text(encoding="utf-8") == (
-        '{\n'
-        '  "material_policy": "legacy_role_ids",\n'
-        '  "bark_material_path": "/Game/Assembly/Custom/Bark_A.Bark_A",\n'
-        '  "leaves_material_path": "/Game/Assembly/Custom/Leaves_A.Leaves_A",\n'
-        '  "single_material_path": "",\n'
-        '  "gust_attenuation": 0.0,\n'
-        '  "is_ground_cover": false,\n'
-        '  "wind_group_settings": {}\n'
-        '}'
-    )
+    payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert payload["material_policy"] == "source_material_roles"
+    assert payload["bark_material_path"] == "/Game/Assembly/Custom/Bark_A.Bark_A"
+    assert payload["leaves_material_path"] == "/Game/Assembly/Custom/Leaves_A.Leaves_A"
+    assert payload["single_material_path"] == ""
+    assert payload["gust_attenuation"] == 0.0
+    assert payload["is_ground_cover"] is False
+    assert isinstance(payload["wind_group_settings"], dict)
 
 
 def test_gui_persists_single_material_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -869,17 +993,14 @@ def test_gui_persists_single_material_settings(monkeypatch: pytest.MonkeyPatch, 
         app._handle_window_close()
 
         assert settings_path.exists()
-        assert settings_path.read_text(encoding="utf-8") == (
-            '{\n'
-            '  "material_policy": "single_material",\n'
-            '  "bark_material_path": "",\n'
-            '  "leaves_material_path": "",\n'
-            '  "single_material_path": "/Game/Assembly/Fern/M_Fern.M_Fern",\n'
-            '  "gust_attenuation": 0.0,\n'
-            '  "is_ground_cover": false,\n'
-            '  "wind_group_settings": {}\n'
-            '}'
-        )
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert payload["material_policy"] == "single_material"
+        assert payload["bark_material_path"] == ""
+        assert payload["leaves_material_path"] == ""
+        assert payload["single_material_path"] == "/Game/Assembly/Fern/M_Fern.M_Fern"
+        assert payload["gust_attenuation"] == 0.0
+        assert payload["is_ground_cover"] is False
+        assert isinstance(payload["wind_group_settings"], dict)
     finally:
         try:
             root.destroy()
@@ -901,17 +1022,14 @@ def test_gui_persists_latest_field_edits_immediately(monkeypatch: pytest.MonkeyP
         app.leaves_material_var.set("/Game/Assembly/Latest/Leaves_Final.Leaves_Final")
 
         assert settings_path.exists()
-        assert settings_path.read_text(encoding="utf-8") == (
-            '{\n'
-            '  "material_policy": "legacy_role_ids",\n'
-            '  "bark_material_path": "/Game/Assembly/Latest/Bark_Final.Bark_Final",\n'
-            '  "leaves_material_path": "/Game/Assembly/Latest/Leaves_Final.Leaves_Final",\n'
-            '  "single_material_path": "",\n'
-            '  "gust_attenuation": 0.0,\n'
-            '  "is_ground_cover": false,\n'
-            '  "wind_group_settings": {}\n'
-            '}'
-        )
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert payload["material_policy"] == "source_material_roles"
+        assert payload["bark_material_path"] == "/Game/Assembly/Latest/Bark_Final.Bark_Final"
+        assert payload["leaves_material_path"] == "/Game/Assembly/Latest/Leaves_Final.Leaves_Final"
+        assert payload["single_material_path"] == ""
+        assert payload["gust_attenuation"] == 0.0
+        assert payload["is_ground_cover"] is False
+        assert isinstance(payload["wind_group_settings"], dict)
     finally:
         root.destroy()
 

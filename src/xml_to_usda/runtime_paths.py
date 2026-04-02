@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -69,7 +70,7 @@ class JobWorkspace:
         output_path: str | None,
         cleanup_policy: CleanupPolicy,
     ) -> "JobWorkspace":
-        runtime_paths.jobs_root.mkdir(parents=True, exist_ok=True)
+        _ensure_existing_directory(runtime_paths.jobs_root)
         job_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
         job_dir = runtime_paths.jobs_root / job_id
         job_dir.mkdir(parents=True, exist_ok=False)
@@ -147,7 +148,7 @@ def resolve_runtime_paths(
 ) -> RuntimePaths:
     resolved_settings_dir = Path(settings_dir) if settings_dir is not None else (Path.home() / ".xml_to_usda")
     resolved_settings_path = Path(settings_path) if settings_path is not None else (resolved_settings_dir / "gui_settings.json")
-    resolved_cache_root = Path(cache_root) if cache_root is not None else _default_cache_root()
+    resolved_cache_root = Path(cache_root) if cache_root is not None else _resolve_default_cache_root()
     return RuntimePaths(
         settings_dir=resolved_settings_dir,
         settings_path=resolved_settings_path,
@@ -162,14 +163,28 @@ def sweep_stale_job_workspaces(
     stale_after_seconds: int = DEFAULT_STALE_JOB_SECONDS,
     now: float | None = None,
 ) -> RuntimeCleanupSummary:
-    if not runtime_paths.jobs_root.exists():
-        return RuntimeCleanupSummary()
+    try:
+        if not runtime_paths.jobs_root.exists():
+            return RuntimeCleanupSummary()
+    except OSError:
+        return RuntimeCleanupSummary(
+            failed_jobs=1,
+            failed_paths=(str(runtime_paths.jobs_root),),
+        )
+
+    try:
+        job_dirs = list(runtime_paths.jobs_root.iterdir())
+    except OSError:
+        return RuntimeCleanupSummary(
+            failed_jobs=1,
+            failed_paths=(str(runtime_paths.jobs_root),),
+        )
 
     current_time = now if now is not None else time.time()
     removed_jobs = 0
     removed_partial_outputs = 0
     failed_paths: list[str] = []
-    for job_dir in runtime_paths.jobs_root.iterdir():
+    for job_dir in job_dirs:
         if not job_dir.is_dir():
             continue
         manifest_path = job_dir / "job_manifest.json"
@@ -202,6 +217,15 @@ def _default_cache_root() -> Path:
     return Path.home() / "AppData" / "Local" / APP_NAME / "cache"
 
 
+def _resolve_default_cache_root() -> Path:
+    primary_root = _default_cache_root()
+    if _is_runtime_cache_root_usable(primary_root):
+        return primary_root
+    fallback_root = Path(tempfile.gettempdir()) / APP_NAME / "cache"
+    _ensure_existing_directory(fallback_root)
+    return fallback_root
+
+
 def _remove_stale_partial_output(
     manifest_path: Path,
     runtime_paths: RuntimePaths,
@@ -226,3 +250,23 @@ def _remove_stale_partial_output(
     except OSError:
         failed_paths.append(str(partial_output))
         return 0
+
+
+def _ensure_existing_directory(path: Path) -> None:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        if os.path.isdir(str(path)):
+            return
+        raise
+
+
+def _is_runtime_cache_root_usable(path: Path) -> bool:
+    try:
+        _ensure_existing_directory(path)
+        probe_path = path / ".runtime_probe"
+        probe_path.write_text("", encoding="utf-8")
+        probe_path.unlink()
+        return True
+    except OSError:
+        return False

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import gc
 import json
 import threading
+import traceback
 import tkinter as tk
 from pathlib import Path
 from queue import Empty, Queue
@@ -19,7 +21,7 @@ from .models import (
     PrototypeSourceConfig,
     PrototypeSourceMode,
 )
-from .pipeline import convert_file, generate_wind_json, inspect_wind_data, load_canonical_model
+from .pipeline import convert_file, discover_part_prototypes, generate_wind_json, inspect_wind_data, load_canonical_model
 from .runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
 
 
@@ -29,6 +31,8 @@ class ConversionApp:
     RUNTIME_CACHE_ROOT = resolve_runtime_paths().cache_root
     MAX_WIND_INFLUENCE = 1.0
     MAX_SHIFT_TOP = 1.0
+    ASYNC_WIND_REFRESH_THRESHOLD_BYTES = 5 * 1024 * 1024
+    ASYNC_CONVERSION_THRESHOLD_BYTES = 5 * 1024 * 1024
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -40,7 +44,7 @@ class ConversionApp:
         self.cpu_profile_var = tk.StringVar(value=CpuProfile.BALANCED.value)
         self.preserve_temp_files_var = tk.BooleanVar(value=False)
         self.use_existing_part_meshes_var = tk.BooleanVar(value=False)
-        self.material_policy_var = tk.StringVar(value=MaterialPolicy.LEGACY_ROLE_IDS.value)
+        self.material_policy_var = tk.StringVar(value=MaterialPolicy.SOURCE_MATERIAL_ROLES.value)
         self.bark_material_var = tk.StringVar()
         self.leaves_material_var = tk.StringVar()
         self.single_material_var = tk.StringVar()
@@ -61,6 +65,10 @@ class ConversionApp:
         self._conversion_cancel_event = threading.Event()
         self._conversion_queue: Queue[tuple[str, object]] = Queue()
         self._conversion_queue_job: str | None = None
+        self._wind_thread: threading.Thread | None = None
+        self._wind_queue: Queue[tuple[str, object]] = Queue()
+        self._wind_queue_job: str | None = None
+        self._active_wind_request_id = 0
         self._load_settings()
         self._runtime_cleanup_summary = sweep_stale_job_workspaces(self._runtime_paths())
 
@@ -185,9 +193,11 @@ class ConversionApp:
             ),
         )
         part_mesh_intro.grid(row=0, column=0, sticky="w", pady=(0, 8))
+        self.part_mesh_summary_var = tk.StringVar(value="Repeated branch analysis has not run yet.")
+        ttk.Label(part_mesh_content, textvariable=self.part_mesh_summary_var).grid(row=1, column=0, sticky="w", pady=(0, 8))
 
         self.part_mesh_rows_container = ttk.Frame(part_mesh_content)
-        self.part_mesh_rows_container.grid(row=1, column=0, sticky="ew")
+        self.part_mesh_rows_container.grid(row=2, column=0, sticky="ew")
         self.part_mesh_rows_container.columnconfigure(0, weight=1)
 
         self._part_mesh_rows_placeholder = ttk.Label(self.part_mesh_rows_container, text="Select an XML file to load part meshes.")
@@ -199,7 +209,8 @@ class ConversionApp:
         wind_content.columnconfigure(1, weight=1)
         wind_content.columnconfigure(3, weight=1)
 
-        ttk.Button(wind_content, text="Refresh Wind Groups", command=self.refresh_wind_groups).grid(
+        self.refresh_wind_button = ttk.Button(wind_content, text="Refresh Wind Groups", command=self.refresh_wind_groups)
+        self.refresh_wind_button.grid(
             row=0, column=0, sticky="w", pady=(0, 8)
         )
         ttk.Checkbutton(
@@ -267,10 +278,13 @@ class ConversionApp:
         )
         if not selected:
             return
+        current_input = self.input_var.get().strip()
+        self.status_var.set("Source XML selected. Running XML analysis...")
         self.input_var.set(selected)
         if not self.output_var.get():
             self.output_var.set(str(Path(selected).with_suffix(".usda")))
-        self.refresh_wind_groups()
+        if current_input == selected:
+            self._handle_source_path_change()
 
     def browse_output(self) -> None:
         initial = self.output_var.get() or "tree.usda"
@@ -288,6 +302,9 @@ class ConversionApp:
         if not input_path:
             messagebox.showerror("Missing input", "Select a source XML file before loading wind groups.")
             return
+        if self._should_refresh_wind_groups_async(input_path):
+            self._start_wind_group_refresh_async(input_path)
+            return
         try:
             dynamic_wind = inspect_wind_data(input_path, is_ground_cover=bool(self.is_ground_cover_var.get()))
         except Exception as exc:
@@ -301,6 +318,156 @@ class ConversionApp:
             f"Loaded {len(dynamic_wind.simulation_groups)} wind groups from generator levels."
         )
         self._set_log(format_wind_group_summary(dynamic_wind))
+        gc.collect()
+
+    def _should_refresh_wind_groups_async(self, input_path: str) -> bool:
+        try:
+            return Path(input_path).stat().st_size >= self.ASYNC_WIND_REFRESH_THRESHOLD_BYTES
+        except OSError:
+            return False
+
+    def _start_wind_group_refresh_async(self, input_path: str) -> None:
+        if self._wind_thread is not None and self._wind_thread.is_alive():
+            self.status_var.set("Wind group inspection already running...")
+            return
+        self._active_wind_request_id += 1
+        request_id = self._active_wind_request_id
+        self.refresh_wind_button.configure(state="disabled")
+        self.status_var.set("Inspecting wind groups in background...")
+        self._set_log(
+            "Inspecting wind groups in background.\n"
+            "Large XML files may take a while; the UI should stay responsive."
+        )
+        self._wind_thread = threading.Thread(
+            target=self._run_wind_group_worker,
+            kwargs={
+                "request_id": request_id,
+                "input_path": input_path,
+                "is_ground_cover": bool(self.is_ground_cover_var.get()),
+            },
+            daemon=True,
+        )
+        self._wind_thread.start()
+        self._schedule_wind_queue_poll()
+
+    def _run_wind_group_worker(self, *, request_id: int, input_path: str, is_ground_cover: bool) -> None:
+        try:
+            dynamic_wind = inspect_wind_data(input_path, is_ground_cover=is_ground_cover)
+            self._wind_queue.put(("result", (request_id, input_path, is_ground_cover, dynamic_wind, None)))
+        except Exception as exc:
+            self._wind_queue.put(
+                (
+                    "result",
+                    (
+                        request_id,
+                        input_path,
+                        is_ground_cover,
+                        None,
+                        {
+                            "type": type(exc).__name__,
+                            "message": str(exc),
+                            "traceback": traceback.format_exc(),
+                        },
+                    ),
+                )
+            )
+
+    def _schedule_wind_queue_poll(self) -> None:
+        if self._wind_queue_job is not None:
+            return
+        self._wind_queue_job = self.root.after(100, self._poll_wind_queue)
+
+    def _poll_wind_queue(self) -> None:
+        self._wind_queue_job = None
+        keep_polling = False
+        while True:
+            try:
+                event_name, payload = self._wind_queue.get_nowait()
+            except Empty:
+                break
+            if event_name != "result":
+                continue
+            request_id, input_path, is_ground_cover, dynamic_wind, error_payload = payload
+            if request_id != self._active_wind_request_id:
+                continue
+            self.refresh_wind_button.configure(state="normal")
+            if error_payload is not None:
+                retry_handled, recovered_wind = self._retry_wind_group_refresh_if_needed(
+                    input_path=input_path,
+                    is_ground_cover=is_ground_cover,
+                    error_payload=error_payload,
+                )
+                if recovered_wind is None:
+                    if retry_handled:
+                        continue
+                    self.status_var.set("Wind group inspection failed.")
+                    self._set_log(self._format_wind_refresh_error(error_payload))
+                    messagebox.showerror("Wind group inspection failed", error_payload["message"])
+                    continue
+                dynamic_wind = recovered_wind
+            else:
+                self._rebuild_wind_group_controls(dynamic_wind.simulation_groups)
+                self.status_var.set(
+                    f"Loaded {len(dynamic_wind.simulation_groups)} wind groups from generator levels."
+                )
+                self._set_log(format_wind_group_summary(dynamic_wind))
+                continue
+
+            self._rebuild_wind_group_controls(dynamic_wind.simulation_groups)
+            self.status_var.set(
+                f"Loaded {len(dynamic_wind.simulation_groups)} wind groups from generator levels after fallback retry."
+            )
+            self._set_log(
+                format_wind_group_summary(dynamic_wind)
+                + "\n\nBackground wind worker failed once and the main-thread retry succeeded."
+            )
+            gc.collect()
+        if self._wind_thread is not None and self._wind_thread.is_alive():
+            keep_polling = True
+        elif self.refresh_wind_button.cget("state") != "normal":
+            self.refresh_wind_button.configure(state="normal")
+        if keep_polling:
+            self._schedule_wind_queue_poll()
+
+    def _retry_wind_group_refresh_if_needed(
+        self,
+        *,
+        input_path: str,
+        is_ground_cover: bool,
+        error_payload: dict[str, str],
+    ) -> tuple[bool, object | None]:
+        if not self._should_retry_failed_wind_refresh(error_payload):
+            return False, None
+        self.status_var.set("Retrying wind group inspection on the main thread...")
+        try:
+            return True, inspect_wind_data(input_path, is_ground_cover=is_ground_cover)
+        except Exception as retry_exc:
+            retry_payload = {
+                "type": type(retry_exc).__name__,
+                "message": str(retry_exc),
+                "traceback": traceback.format_exc(),
+            }
+            self._set_log(
+                self._format_wind_refresh_error(error_payload)
+                + "\n\nMain-thread retry also failed:\n"
+                + self._format_wind_refresh_error(retry_payload)
+            )
+            messagebox.showerror("Wind group inspection failed", retry_payload["message"])
+            return True, None
+
+    def _should_retry_failed_wind_refresh(self, error_payload: dict[str, str]) -> bool:
+        error_type = error_payload.get("type", "")
+        message = error_payload.get("message", "")
+        return error_type == "SystemError" or "bad argument to internal function" in message or "setobject.c" in message
+
+    def _format_wind_refresh_error(self, error_payload: dict[str, str]) -> str:
+        error_type = error_payload.get("type", "Exception")
+        message = error_payload.get("message", "")
+        formatted_traceback = error_payload.get("traceback", "").strip()
+        lines = [f"{error_type}: {message}"]
+        if formatted_traceback:
+            lines.extend(["", formatted_traceback])
+        return "\n".join(lines).strip()
 
     def run_conversion(self) -> None:
         input_path = self.input_var.get().strip()
@@ -342,6 +509,7 @@ class ConversionApp:
             return
 
         has_fbx_sources = any(config.mode == PrototypeSourceMode.FBX_FILE for config in prototype_source_configs)
+        run_conversion_async = has_fbx_sources or self._should_run_conversion_async(input_path)
         uses_new_source_contract = has_fbx_sources or (
             prototype_source_configs
             and (
@@ -350,7 +518,7 @@ class ConversionApp:
             )
         )
 
-        if has_fbx_sources:
+        if run_conversion_async:
             self._start_conversion_async(
                 input_path=input_path,
                 output_path=output_path,
@@ -388,6 +556,7 @@ class ConversionApp:
             self.status_var.set("Conversion failed.")
             self._set_log(str(exc))
             messagebox.showerror("Conversion failed", str(exc))
+            gc.collect()
             return
 
         self._save_settings()
@@ -408,10 +577,12 @@ class ConversionApp:
         if result.usda_document is None:
             self.status_var.set("Conversion finished with errors.")
             messagebox.showerror("Conversion failed", "See diagnostics in the log area.")
+            gc.collect()
             return
 
         self.status_var.set(f"Wrote USDA to {result.output_path}")
         messagebox.showinfo("Conversion complete", f"Wrote USDA to {result.output_path}")
+        gc.collect()
 
     def _start_conversion_async(
         self,
@@ -434,10 +605,10 @@ class ConversionApp:
 
         self._conversion_cancel_event = threading.Event()
         self._set_conversion_running(True)
-        self.status_var.set("Preparing FBX conversion job.")
+        self.status_var.set("Preparing background conversion job.")
         self._set_log(
-            "Starting background FBX conversion.\n"
-            "The UI stays responsive while geometry is imported and the USDA file is streamed to disk."
+            "Starting background conversion.\n"
+            "The UI stays responsive while the XML is normalized and the USDA file is written to disk."
         )
         self._conversion_thread = threading.Thread(
             target=self._run_conversion_worker,
@@ -601,14 +772,22 @@ class ConversionApp:
         if result.usda_document is None:
             self.status_var.set("Conversion finished with errors.")
             messagebox.showerror("Conversion failed", "See diagnostics in the log area.")
+            gc.collect()
             return
 
         self.status_var.set(f"Wrote USDA to {result.output_path}")
         messagebox.showinfo("Conversion complete", f"Wrote USDA to {result.output_path}")
+        gc.collect()
 
     def _set_conversion_running(self, active: bool) -> None:
         self.convert_button.configure(state="disabled" if active else "normal")
         self.cancel_button.configure(state="normal" if active else "disabled")
+
+    def _should_run_conversion_async(self, input_path: str) -> bool:
+        try:
+            return Path(input_path).stat().st_size >= self.ASYNC_CONVERSION_THRESHOLD_BYTES
+        except OSError:
+            return False
 
     def cancel_conversion(self) -> None:
         if self._conversion_thread is None or not self._conversion_thread.is_alive():
@@ -645,6 +824,7 @@ class ConversionApp:
         self._set_log(format_wind_json_result(result))
         self.status_var.set(f"Wrote wind JSON to {result.output_path}")
         messagebox.showinfo("Wind JSON complete", f"Wrote wind JSON to {result.output_path}")
+        gc.collect()
 
     def copy_log(self) -> None:
         self.root.clipboard_clear()
@@ -740,23 +920,29 @@ class ConversionApp:
     def _handle_source_path_change(self, *_args) -> None:
         if self._suspend_settings_save:
             return
+        self._active_wind_request_id += 1
         input_path = self.input_var.get().strip()
         if not input_path:
             self._clear_part_mesh_rows()
+            self._clear_wind_group_controls()
             return
         path = Path(input_path)
         if not path.exists():
             return
+        self._clear_wind_group_controls("Analyzing XML and loading wind groups...")
         try:
             self._refresh_part_mesh_rows(input_path)
         except Exception as exc:
             self.status_var.set("Part mesh discovery failed.")
             self._set_log(str(exc))
             messagebox.showerror("Part mesh discovery failed", str(exc))
+            return
+        self.refresh_wind_groups()
 
     def _clear_part_mesh_rows(self) -> None:
         self._current_part_mesh_settings_key = None
         self._part_mesh_rows.clear()
+        self.part_mesh_summary_var.set("Repeated branch analysis has not run yet.")
         for child in self.part_mesh_rows_container.winfo_children():
             child.destroy()
         self._part_mesh_rows_placeholder = ttk.Label(
@@ -766,16 +952,25 @@ class ConversionApp:
         self._part_mesh_rows_placeholder.grid(row=0, column=0, sticky="w")
         self._refresh_scroll_region()
 
+    def _clear_wind_group_controls(self, message: str = "Click Refresh Wind Groups to inspect wind settings.") -> None:
+        for child in self.wind_groups_container.winfo_children():
+            child.destroy()
+        self._wind_group_rows.clear()
+        if hasattr(self, "refresh_wind_button"):
+            self.refresh_wind_button.configure(state="normal")
+        ttk.Label(self.wind_groups_container, text=message).grid(row=0, column=0, sticky="w")
+        self._refresh_scroll_region()
+
     def _refresh_part_mesh_rows(self, input_path: str) -> None:
         if self._suspend_settings_save:
             return
         self._suspend_settings_save = True
         try:
-            _, model, _diagnostics = load_canonical_model(input_path)
+            prototypes = discover_part_prototypes(input_path)
             resolved_key = self._resolve_input_settings_key(input_path)
             self._current_part_mesh_settings_key = resolved_key
             persisted_rows = self._persisted_part_mesh_settings_by_input_path.get(resolved_key, [])
-            self._rebuild_part_mesh_rows(model.prototypes, persisted_rows)
+            self._rebuild_part_mesh_rows(prototypes, persisted_rows)
         finally:
             self._suspend_settings_save = False
         self._save_settings()
@@ -793,28 +988,36 @@ class ConversionApp:
         self._part_mesh_rows.clear()
 
         if not prototypes:
+            self.part_mesh_summary_var.set("No repeated branch instances were found in this XML.")
             ttk.Label(self.part_mesh_rows_container, text="No repeated part meshes found in this XML.").grid(
                 row=0, column=0, sticky="w"
             )
             self._refresh_scroll_region()
             return
 
+        total_instances = sum(prototype.instance_count for prototype in prototypes)
+        self.part_mesh_summary_var.set(
+            f"Found {total_instances} repeated branch instances across {len(prototypes)} prototype(s)."
+        )
+
         self.part_mesh_rows_container.columnconfigure(0, weight=1)
         header = ttk.Frame(self.part_mesh_rows_container)
         header.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         header.columnconfigure(0, weight=2)
         header.columnconfigure(1, weight=0)
-        header.columnconfigure(2, weight=1)
-        header.columnconfigure(3, weight=4)
+        header.columnconfigure(2, weight=0)
+        header.columnconfigure(3, weight=1)
         header.columnconfigure(4, weight=4)
-        header.columnconfigure(5, weight=2)
-        header.columnconfigure(6, weight=0)
+        header.columnconfigure(5, weight=4)
+        header.columnconfigure(6, weight=2)
+        header.columnconfigure(7, weight=0)
         ttk.Label(header, text="XML Mesh").grid(row=0, column=0, sticky="w")
         ttk.Label(header, text="Mesh ID").grid(row=0, column=1, sticky="w", padx=(12, 12))
-        ttk.Label(header, text="Source Mode").grid(row=0, column=2, sticky="w", padx=(0, 12))
-        ttk.Label(header, text="Unreal Object Path").grid(row=0, column=3, sticky="w", padx=(0, 12))
-        ttk.Label(header, text="FBX File").grid(row=0, column=4, sticky="w")
-        ttk.Label(header, text="FBX Materials").grid(row=0, column=5, sticky="w", padx=(12, 12))
+        ttk.Label(header, text="Instances").grid(row=0, column=2, sticky="w", padx=(0, 12))
+        ttk.Label(header, text="Source Mode").grid(row=0, column=3, sticky="w", padx=(0, 12))
+        ttk.Label(header, text="Unreal Object Path").grid(row=0, column=4, sticky="w", padx=(0, 12))
+        ttk.Label(header, text="FBX File").grid(row=0, column=5, sticky="w")
+        ttk.Label(header, text="FBX Materials").grid(row=0, column=6, sticky="w", padx=(12, 12))
 
         persisted_by_name = {
             str(record.get("source_name", "")): record
@@ -833,15 +1036,17 @@ class ConversionApp:
             row_frame = ttk.Frame(self.part_mesh_rows_container)
             row_frame.grid(row=row_index, column=0, sticky="ew", pady=(0, 6))
             row_frame.columnconfigure(0, weight=2)
-            row_frame.columnconfigure(2, weight=1)
-            row_frame.columnconfigure(3, weight=4)
+            row_frame.columnconfigure(3, weight=1)
             row_frame.columnconfigure(4, weight=4)
-            row_frame.columnconfigure(5, weight=2)
+            row_frame.columnconfigure(5, weight=4)
+            row_frame.columnconfigure(6, weight=2)
 
             mesh_id_text = f"Mesh_{prototype.source_mesh_id}" if prototype.source_mesh_id is not None else "<none>"
             display_name = prototype.source_name or prototype.source_key
+            instance_count_text = str(prototype.instance_count)
             ttk.Label(row_frame, text=display_name).grid(row=0, column=0, sticky="w")
             ttk.Label(row_frame, text=mesh_id_text).grid(row=0, column=1, sticky="w", padx=(12, 12))
+            ttk.Label(row_frame, text=instance_count_text).grid(row=0, column=2, sticky="w", padx=(0, 12))
 
             source_mode_var = tk.StringVar(value=PrototypeSourceMode.XML_MESH.value)
             use_unreal_var = tk.BooleanVar(value=False)
@@ -869,11 +1074,11 @@ class ConversionApp:
                 text="Browse...",
                 command=lambda var=fbx_var: self._browse_part_fbx(var),
             )
-            source_mode_combo.grid(row=0, column=2, sticky="ew", padx=(0, 12))
-            asset_entry.grid(row=0, column=3, sticky="ew")
-            fbx_entry.grid(row=0, column=4, sticky="ew", padx=(12, 8))
-            fbx_material_mode_combo.grid(row=0, column=5, sticky="ew", padx=(0, 12))
-            browse_button.grid(row=0, column=6, sticky="ew")
+            source_mode_combo.grid(row=0, column=3, sticky="ew", padx=(0, 12))
+            asset_entry.grid(row=0, column=4, sticky="ew")
+            fbx_entry.grid(row=0, column=5, sticky="ew", padx=(12, 8))
+            fbx_material_mode_combo.grid(row=0, column=6, sticky="ew", padx=(0, 12))
+            browse_button.grid(row=0, column=7, sticky="ew")
 
             record = persisted_by_name.get(display_name) or persisted_by_key.get(str(prototype.source_key))
             if record is not None:
@@ -915,6 +1120,7 @@ class ConversionApp:
                     "source_key": prototype.source_key,
                     "source_name": display_name,
                     "mesh_id": prototype.source_mesh_id,
+                    "instance_count": prototype.instance_count,
                     "source_mode_var": source_mode_var,
                     "use_unreal_var": use_unreal_var,
                     "asset_var": asset_var,
@@ -1059,14 +1265,14 @@ class ConversionApp:
     def _handle_ground_cover_change(self, *_args) -> None:
         if self._suspend_settings_save:
             return
-        if self.input_var.get().strip():
+        if self.input_var.get().strip() and self._wind_group_rows:
             self.refresh_wind_groups()
 
     def _current_material_policy(self) -> MaterialPolicy:
         try:
-            return MaterialPolicy(self.material_policy_var.get())
+            return MaterialPolicy.parse(self.material_policy_var.get())
         except ValueError:
-            return MaterialPolicy.LEGACY_ROLE_IDS
+            return MaterialPolicy.SOURCE_MATERIAL_ROLES
 
     def _current_cpu_profile(self) -> CpuProfile:
         try:
@@ -1115,6 +1321,12 @@ class ConversionApp:
             except tk.TclError:
                 pass
             self._conversion_queue_job = None
+        if self._wind_queue_job is not None:
+            try:
+                self.root.after_cancel(self._wind_queue_job)
+            except tk.TclError:
+                pass
+            self._wind_queue_job = None
         if self._conversion_thread is not None and self._conversion_thread.is_alive():
             self._conversion_cancel_event.set()
         if self._pending_settings_save_job is not None:
@@ -1130,7 +1342,9 @@ class ConversionApp:
         settings = self._read_settings()
         self.cpu_profile_var.set(str(settings.get("cpu_profile", CpuProfile.BALANCED.value)))
         self.preserve_temp_files_var.set(bool(settings.get("preserve_temp_files", False)))
-        self.material_policy_var.set(str(settings.get("material_policy", MaterialPolicy.LEGACY_ROLE_IDS.value)))
+        self.material_policy_var.set(
+            MaterialPolicy.parse(settings.get("material_policy", MaterialPolicy.SOURCE_MATERIAL_ROLES.value)).value
+        )
         self.bark_material_var.set(str(settings.get("bark_material_path", "")))
         self.leaves_material_var.set(str(settings.get("leaves_material_path", "")))
         self.single_material_var.set(str(settings.get("single_material_path", "")))
@@ -1159,7 +1373,9 @@ class ConversionApp:
         return {
             "cpu_profile": payload.get("cpu_profile", CpuProfile.BALANCED.value),
             "preserve_temp_files": payload.get("preserve_temp_files", False),
-            "material_policy": payload.get("material_policy", MaterialPolicy.LEGACY_ROLE_IDS.value),
+            "material_policy": MaterialPolicy.parse(
+                payload.get("material_policy", MaterialPolicy.SOURCE_MATERIAL_ROLES.value)
+            ).value,
             "bark_material_path": payload.get("bark_material_path", ""),
             "leaves_material_path": payload.get("leaves_material_path", ""),
             "single_material_path": payload.get("single_material_path", ""),
@@ -1470,7 +1686,7 @@ def format_conversion_results(
     results,
     cpu_profile: CpuProfile = CpuProfile.BALANCED,
     cleanup_policy: CleanupPolicy = CleanupPolicy.EPHEMERAL,
-    material_policy: MaterialPolicy = MaterialPolicy.LEGACY_ROLE_IDS,
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES,
     bark_material_path: str | None = None,
     leaves_material_path: str | None = None,
     single_material_path: str | None = None,

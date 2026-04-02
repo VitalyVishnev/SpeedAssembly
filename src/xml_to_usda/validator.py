@@ -3,15 +3,10 @@ from __future__ import annotations
 from .geometry_buffers import payload_face_count, payload_has_face_topology, payload_point_count, payload_sections
 from .models import (
     CanonicalTreeModel,
-    MaterialPolicy,
     PrototypeResolutionMode,
     PrototypeStrategy,
     ValidationIssue,
 )
-
-
-PRIMARY_MATERIAL_ID = 1
-LEAVES_MATERIAL_ID = 2
 
 
 ERROR_MARKERS = {
@@ -31,21 +26,6 @@ WARNING_MARKER_CODES = {"material_conflict", "material_policy_warning", "skeleto
 def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
     issues: list[ValidationIssue] = []
     material_ids = {material.source_id for material in model.materials}
-    material_policy = model.metadata.material_policy
-
-    if material_policy == MaterialPolicy.LEGACY_ROLE_IDS and model.materials:
-        missing_baseline_ids = [material_id for material_id in (PRIMARY_MATERIAL_ID, LEAVES_MATERIAL_ID) if material_id not in material_ids]
-        if missing_baseline_ids:
-            issues.append(
-                ValidationIssue(
-                    severity="error",
-                    code="missing_required_material_role",
-                    message=(
-                        "Tree asset requires explicit primary/leaves material ids for the current export baseline; "
-                        f"missing ids {missing_baseline_ids}."
-                    ),
-                )
-            )
 
     if not model.source_objects:
         issues.append(

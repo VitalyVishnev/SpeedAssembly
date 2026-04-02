@@ -62,9 +62,29 @@ class OutputMode(StrEnum):
 
 
 class MaterialPolicy(StrEnum):
-    LEGACY_ROLE_IDS = "legacy_role_ids"
+    SOURCE_MATERIAL_ROLES = "source_material_roles"
     SINGLE_MATERIAL = "single_material"
     VERTEX_COLOR_SPLIT = "vertex_color_split"
+
+    @classmethod
+    def parse(cls, raw: "MaterialPolicy | str | None") -> "MaterialPolicy":
+        if isinstance(raw, cls):
+            return raw
+        if raw is None:
+            return cls.SOURCE_MATERIAL_ROLES
+        normalized = str(raw).strip()
+        if normalized == "legacy_role_ids":
+            return cls.SOURCE_MATERIAL_ROLES
+        return cls(normalized)
+
+    @classmethod
+    def cli_choices(cls) -> tuple[str, ...]:
+        return (
+            cls.SOURCE_MATERIAL_ROLES.value,
+            cls.SINGLE_MATERIAL.value,
+            cls.VERTEX_COLOR_SPLIT.value,
+            "legacy_role_ids",
+        )
 
 
 class PrototypeStrategy(StrEnum):
@@ -293,6 +313,14 @@ class PrototypeSourceConfig:
 
 
 @dataclass(frozen=True)
+class PrototypeDiscoveryEntry:
+    source_key: str
+    source_mesh_id: int | None
+    source_name: str
+    instance_count: int = 0
+
+
+@dataclass(frozen=True)
 class ConversionTelemetry:
     phase: ConversionPhase
     completed_units: int = 0
@@ -435,7 +463,7 @@ class ExportMetadata:
     warnings: tuple[str, ...] = ()
     unknown_sections: tuple[str, ...] = ()
     output_mode: OutputMode = OutputMode.SELF_CONTAINED
-    material_policy: MaterialPolicy = MaterialPolicy.LEGACY_ROLE_IDS
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES
 
 
 @dataclass(frozen=True)
@@ -538,7 +566,7 @@ class ConversionRequest:
     output_directory: str | None = None
     output_naming_template: str | None = None
     output_mode: OutputMode = OutputMode.SELF_CONTAINED
-    material_policy: MaterialPolicy = MaterialPolicy.LEGACY_ROLE_IDS
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES
     bark_material_path: str | None = None
     leaves_material_path: str | None = None
     single_material_path: str | None = None

@@ -140,7 +140,7 @@ For the current contract:
 
 The exporter now has explicit material-policy modes:
 
-- `legacy_role_ids`
+- `source_material_roles`
   - compatibility mode only
   - raw XML material ids `1` and `2` are still interpreted as primary/leaves semantic slots
   - the old missing-role validation remains active only in this mode
@@ -162,7 +162,7 @@ Explicit FBX prototype material baseline:
 - every non-black face is assigned to the bark bucket
 - missing vertex colors are a hard failure for FBX mode
 
-Raw SpeedTree XML material ids must be treated as opaque source metadata outside `legacy_role_ids`.
+Raw SpeedTree XML material ids must be treated as opaque source metadata. `source_material_roles` may infer bark/leaves buckets from authored source usage, but it must not treat numeric ids like `1/2` as a required contract.
 They are not semantic bark/leaves roles for the generic pipeline contract.
 
 ## Current validated defaults
