@@ -7,6 +7,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from xml_to_usda.discovery_service import PrototypeMaterialSlotRowSpec
 from xml_to_usda.models import (
     BaseMaterialOverride,
     CleanupPolicy,
@@ -21,7 +22,6 @@ from xml_to_usda.models import (
     DynamicWindSimulationGroup,
     FbxMaterialMode,
     FbxMaterialSlotOverride,
-    FbxMaterialSlotSpec,
     MaterialPolicy,
     OutputMode,
     PrototypeSourceConfig,
@@ -143,22 +143,22 @@ def _effective_base_material_overrides(
     )
 
 
-def _normalize_sync_conversion_semantics(call: dict[str, object]) -> dict[str, object]:
+def _normalize_sync_conversion_semantics(request: ConversionRequest) -> dict[str, object]:
     return {
-        "input_paths": (call["input_path"],),
-        "output_path": call["output_path"],
-        "output_mode": call.get("output_mode", OutputMode.SELF_CONTAINED),
-        "material_policy": call.get("material_policy", MaterialPolicy.SOURCE_MATERIAL_ROLES),
-        "bark_material_path": call.get("bark_material_path"),
-        "leaves_material_path": call.get("leaves_material_path"),
-        "single_material_path": call.get("single_material_path"),
-        "base_material_overrides": _effective_base_material_overrides(call.get("base_material_overrides", ())),
-        "cpu_profile": call.get("cpu_profile", CpuProfile.BALANCED),
-        "cleanup_policy": call.get("cleanup_policy", CleanupPolicy.EPHEMERAL),
-        "use_explicit_material_contract": call.get("use_explicit_material_contract", False),
+        "input_paths": request.input_paths,
+        "output_path": request.output_path,
+        "output_mode": request.output_mode,
+        "material_policy": request.material_policy,
+        "bark_material_path": request.bark_material_path,
+        "leaves_material_path": request.leaves_material_path,
+        "single_material_path": request.single_material_path,
+        "base_material_overrides": _effective_base_material_overrides(request.base_material_overrides),
+        "cpu_profile": request.cpu_profile,
+        "cleanup_policy": request.cleanup_policy,
+        "use_explicit_material_contract": request.use_explicit_material_contract,
         "source_override_semantics": _normalize_source_override_semantics(
-            call.get("prototype_source_configs", ()),
-            call.get("part_mesh_asset_paths", ()),
+            request.prototype_source_configs,
+            request.part_mesh_asset_paths,
         ),
     }
 
@@ -187,25 +187,20 @@ def _capture_sync_conversion_semantics(monkeypatch: pytest.MonkeyPatch, tmp_path
     _, root = _build_tk_root_or_skip()
     from xml_to_usda.gui import ConversionApp
 
-    calls: list[dict[str, object]] = []
+    calls: list[ConversionRequest] = []
 
-    def fake_convert_file(input_path, output_path, output_mode=OutputMode.SELF_CONTAINED, **kwargs):
-        calls.append(
-            {
-                "input_path": input_path,
-                "output_path": output_path,
-                "output_mode": output_mode,
-                **kwargs,
-            }
-        )
-        return ConversionResult(
-            input_path=input_path,
-            output_path=output_path,
-            diagnostics=(),
-            usda_document=Mock(),
+    def fake_convert_request(request, telemetry_callback=None, cancel_event=None, runtime_paths=None):
+        calls.append(request)
+        return (
+            ConversionResult(
+                input_path=request.input_paths[0],
+                output_path=request.output_path,
+                diagnostics=(),
+                usda_document=Mock(),
+            ),
         )
 
-    monkeypatch.setattr("xml_to_usda.gui.convert_file", fake_convert_file)
+    monkeypatch.setattr("xml_to_usda.gui.convert_request", fake_convert_request)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
@@ -235,7 +230,7 @@ def _capture_async_request_semantics(
     from xml_to_usda.gui import ConversionApp
 
     captured: dict[str, object] = {}
-    convert_mock = Mock()
+    convert_request_mock = Mock()
 
     def fake_start_conversion_process(request, *, runtime_paths):
         captured["request"] = request
@@ -243,7 +238,7 @@ def _capture_async_request_semantics(
         return _DummyAsyncProcess(), object(), object()
 
     monkeypatch.setattr("xml_to_usda.gui.start_conversion_process", fake_start_conversion_process)
-    monkeypatch.setattr("xml_to_usda.gui.convert_file", convert_mock)
+    monkeypatch.setattr("xml_to_usda.gui.convert_request", convert_request_mock)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
     monkeypatch.setattr(ConversionApp, "_schedule_conversion_queue_poll", lambda self: None)
@@ -261,7 +256,7 @@ def _capture_async_request_semantics(
         app.output_var.set("out.usda")
         configure_app(app)
         app.run_conversion()
-        convert_mock.assert_not_called()
+        convert_request_mock.assert_not_called()
         assert "request" in captured
         return _normalize_async_request_semantics(captured["request"])
     finally:
@@ -302,8 +297,9 @@ def test_gui_formatter_renders_diagnostics() -> None:
         diagnostics=(ValidationIssue(severity="warning", code="demo", message="demo warning"),),
         usda_document=None,
     )
+    request = ConversionRequest(input_paths=("input.xml",), output_path="output.usda")
 
-    rendered = format_conversion_results((result,))
+    rendered = format_conversion_results((result,), request)
 
     assert "Cleanup policy: ephemeral" in rendered
     assert "Material policy: source_material_roles" in rendered
@@ -428,41 +424,20 @@ def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatc
     _, root = _build_tk_root_or_skip()
     from xml_to_usda.gui import ConversionApp
 
-    calls: list[tuple[str, str, MaterialPolicy, str | None, str | None, str | None, bool, tuple[tuple[str, str], ...]]] = []
+    calls: list[ConversionRequest] = []
 
-    def fake_convert_file(
-        input_path,
-        output_path,
-        output_mode=OutputMode.SELF_CONTAINED,
-        material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
-        bark_material_path=None,
-        leaves_material_path=None,
-        single_material_path=None,
-        cleanup_policy=None,
-        use_existing_part_meshes=False,
-        part_mesh_asset_paths=(),
-        runtime_paths=None,
-    ):
-        calls.append(
-            (
-                input_path,
-                output_path,
-                material_policy,
-                bark_material_path,
-                leaves_material_path,
-                single_material_path,
-                use_existing_part_meshes,
-                part_mesh_asset_paths,
-            )
-        )
-        return ConversionResult(
-            input_path=input_path,
-            output_path=output_path,
-            diagnostics=(),
-            usda_document=Mock(),
+    def fake_convert_request(request, telemetry_callback=None, cancel_event=None, runtime_paths=None):
+        calls.append(request)
+        return (
+            ConversionResult(
+                input_path=request.input_paths[0],
+                output_path=request.output_path,
+                diagnostics=(),
+                usda_document=Mock(),
+            ),
         )
 
-    monkeypatch.setattr("xml_to_usda.gui.convert_file", fake_convert_file)
+    monkeypatch.setattr("xml_to_usda.gui.convert_request", fake_convert_request)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
 
@@ -478,18 +453,16 @@ def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatc
 
         app.run_conversion()
 
-        assert calls == [
-            (
-                str(SIMPLE_TREE_01),
-                "out.usda",
-                MaterialPolicy.SOURCE_MATERIAL_ROLES,
-                "/Game/TestMaterials/M_Bark_Test",
-                "/Game/TestMaterials/M_Leaves_Test",
-                None,
-                False,
-                (),
-            )
-        ]
+        assert len(calls) == 1
+        request = calls[0]
+        assert request.input_paths == (str(SIMPLE_TREE_01),)
+        assert request.output_path == "out.usda"
+        assert request.material_policy == MaterialPolicy.SOURCE_MATERIAL_ROLES
+        assert request.bark_material_path == "/Game/TestMaterials/M_Bark_Test"
+        assert request.leaves_material_path == "/Game/TestMaterials/M_Leaves_Test"
+        assert request.single_material_path is None
+        assert request.use_existing_part_meshes is False
+        assert request.part_mesh_asset_paths == ()
         assert "Material policy: source_material_roles" in app.log_widget.get("1.0", "end-1c")
         assert "Material overrides:" in app.log_widget.get("1.0", "end-1c")
     finally:
@@ -503,39 +476,20 @@ def test_gui_run_conversion_passes_single_material_policy(monkeypatch: pytest.Mo
     _, root = _build_tk_root_or_skip()
     from xml_to_usda.gui import ConversionApp
 
-    calls: list[tuple[str, str, MaterialPolicy, str | None, str | None, str | None]] = []
+    calls: list[ConversionRequest] = []
 
-    def fake_convert_file(
-        input_path,
-        output_path,
-        output_mode=OutputMode.SELF_CONTAINED,
-        material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
-        bark_material_path=None,
-        leaves_material_path=None,
-        single_material_path=None,
-        cleanup_policy=None,
-        use_existing_part_meshes=False,
-        part_mesh_asset_paths=(),
-        runtime_paths=None,
-    ):
-        calls.append(
-            (
-                input_path,
-                output_path,
-                material_policy,
-                bark_material_path,
-                leaves_material_path,
-                single_material_path,
-            )
-        )
-        return ConversionResult(
-            input_path=input_path,
-            output_path=output_path,
-            diagnostics=(),
-            usda_document=Mock(),
+    def fake_convert_request(request, telemetry_callback=None, cancel_event=None, runtime_paths=None):
+        calls.append(request)
+        return (
+            ConversionResult(
+                input_path=request.input_paths[0],
+                output_path=request.output_path,
+                diagnostics=(),
+                usda_document=Mock(),
+            ),
         )
 
-    monkeypatch.setattr("xml_to_usda.gui.convert_file", fake_convert_file)
+    monkeypatch.setattr("xml_to_usda.gui.convert_request", fake_convert_request)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
 
@@ -551,16 +505,14 @@ def test_gui_run_conversion_passes_single_material_policy(monkeypatch: pytest.Mo
 
         app.run_conversion()
 
-        assert calls == [
-            (
-                str(SIMPLE_TREE_01),
-                "out.usda",
-                MaterialPolicy.SINGLE_MATERIAL,
-                None,
-                None,
-                "/Game/Assembly/Fern/M_Fern.M_Fern",
-            )
-        ]
+        assert len(calls) == 1
+        request = calls[0]
+        assert request.input_paths == (str(SIMPLE_TREE_01),)
+        assert request.output_path == "out.usda"
+        assert request.material_policy == MaterialPolicy.SINGLE_MATERIAL
+        assert request.bark_material_path is None
+        assert request.leaves_material_path is None
+        assert request.single_material_path == "/Game/Assembly/Fern/M_Fern.M_Fern"
         assert "Material policy: single_material" in app.log_widget.get("1.0", "end-1c")
         assert "Single material path: /Game/Assembly/Fern/M_Fern.M_Fern" in app.log_widget.get("1.0", "end-1c")
     finally:
@@ -576,41 +528,20 @@ def test_gui_run_conversion_passes_part_mesh_xml_names(
     _, root = _build_tk_root_or_skip()
     from xml_to_usda.gui import ConversionApp
 
-    calls: list[tuple[str, str, MaterialPolicy, str | None, str | None, str | None, bool, tuple[tuple[str, str], ...]]] = []
+    calls: list[ConversionRequest] = []
 
-    def fake_convert_file(
-        input_path,
-        output_path,
-        output_mode=OutputMode.SELF_CONTAINED,
-        material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
-        bark_material_path=None,
-        leaves_material_path=None,
-        single_material_path=None,
-        cleanup_policy=None,
-        use_existing_part_meshes=False,
-        part_mesh_asset_paths=(),
-        runtime_paths=None,
-    ):
-        calls.append(
-            (
-                input_path,
-                output_path,
-                material_policy,
-                bark_material_path,
-                leaves_material_path,
-                single_material_path,
-                use_existing_part_meshes,
-                part_mesh_asset_paths,
-            )
-        )
-        return ConversionResult(
-            input_path=input_path,
-            output_path=output_path,
-            diagnostics=(),
-            usda_document=Mock(),
+    def fake_convert_request(request, telemetry_callback=None, cancel_event=None, runtime_paths=None):
+        calls.append(request)
+        return (
+            ConversionResult(
+                input_path=request.input_paths[0],
+                output_path=request.output_path,
+                diagnostics=(),
+                usda_document=Mock(),
+            ),
         )
 
-    monkeypatch.setattr("xml_to_usda.gui.convert_file", fake_convert_file)
+    monkeypatch.setattr("xml_to_usda.gui.convert_request", fake_convert_request)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
 
@@ -626,18 +557,16 @@ def test_gui_run_conversion_passes_part_mesh_xml_names(
 
         app.run_conversion()
 
-        assert calls == [
-            (
-                str(SIMPLE_TREE_01),
-                "out.usda",
-                MaterialPolicy.SOURCE_MATERIAL_ROLES,
-                None,
-                None,
-                None,
-                True,
-                (("Twig_01", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
-            )
-        ]
+        assert len(calls) == 1
+        request = calls[0]
+        assert request.input_paths == (str(SIMPLE_TREE_01),)
+        assert request.output_path == "out.usda"
+        assert request.material_policy == MaterialPolicy.SOURCE_MATERIAL_ROLES
+        assert request.bark_material_path is None
+        assert request.leaves_material_path is None
+        assert request.single_material_path is None
+        assert request.use_existing_part_meshes is True
+        assert request.part_mesh_asset_paths == (("Twig_01", "/Game/TreeParts/SK_Twig01.SK_Twig01"),)
     finally:
         try:
             root.destroy()
@@ -812,7 +741,7 @@ def test_gui_refresh_wind_groups_builds_slider_rows(monkeypatch: pytest.MonkeyPa
         ),
     )
 
-    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda _input_path, is_ground_cover=False: dynamic_wind)
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_groups", lambda request: dynamic_wind)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
     monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
@@ -846,27 +775,29 @@ def test_gui_generate_wind_json_uses_slider_values(monkeypatch: pytest.MonkeyPat
     )
     calls: list[tuple] = []
 
-    def fake_generate_wind_json(
-        input_path,
-        output_path,
-        group_settings=(),
-        gust_attenuation=0.0,
-        is_ground_cover=False,
-    ):
-        calls.append((input_path, output_path, group_settings, gust_attenuation, is_ground_cover))
+    def fake_generate_wind_json(request):
+        calls.append(
+            (
+                request.input_path,
+                request.output_path,
+                request.group_settings,
+                request.gust_attenuation,
+                request.is_ground_cover,
+            )
+        )
         return WindJsonResult(
-            input_path=input_path,
-            output_path=output_path,
+            input_path=request.input_path,
+            output_path=request.output_path,
             dynamic_wind=DynamicWindData(
                 joint_assignments=dynamic_wind.joint_assignments,
-                simulation_groups=group_settings,
-                gust_attenuation=gust_attenuation,
-                is_ground_cover=is_ground_cover,
+                simulation_groups=request.group_settings,
+                gust_attenuation=request.gust_attenuation,
+                is_ground_cover=request.is_ground_cover,
             ),
         )
 
-    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda _input_path, is_ground_cover=False: dynamic_wind)
-    monkeypatch.setattr("xml_to_usda.gui.generate_wind_json", fake_generate_wind_json)
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_groups", lambda request: dynamic_wind)
+    monkeypatch.setattr("xml_to_usda.gui.generate_wind_json_from_request", fake_generate_wind_json)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
 
@@ -1065,31 +996,114 @@ def test_gui_persists_fbx_source_mode_and_cpu_profile(
             pass
 
 
+def test_gui_restores_last_session_paths_and_operator_state_on_startup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    settings_path = tmp_path / "gui_settings.json"
+    fake_fbx_path = tmp_path / "prototype_branch.fbx"
+    fake_fbx_path.write_text("", encoding="utf-8")
+    dynamic_wind = DynamicWindData(
+        joint_assignments=(DynamicWindJointAssignment(joint_name="root", simulation_group_index=0, branch_order=0),),
+        simulation_groups=(DynamicWindSimulationGroup(group_index=0, branch_order=0, is_trunk_group=True),),
+    )
+    restored_output_path = tmp_path / "restored_output.usda"
+
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
+    monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_groups", lambda request: dynamic_wind)
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        app.output_var.set(str(restored_output_path))
+        app.cpu_profile_var.set(CpuProfile.QUIET.value)
+        app.preserve_temp_files_var.set(True)
+        app.bark_material_var.set("/Game/Assembly/SimpleTree/Bark1.Bark1")
+        app.leaves_material_var.set("/Game/Assembly/SimpleTree/Leaves1.Leaves1")
+        app._base_material_rows[0]["material_path_var"].set("/Game/TestMaterials/M_Bark_Test")
+        row = app._part_mesh_rows[0]
+        row["source_mode_var"].set(PrototypeSourceMode.FBX_FILE.value)
+        row["fbx_var"].set(str(fake_fbx_path))
+        row["fbx_material_mode_var"].set(FbxMaterialMode.SINGLE_MATERIAL.value)
+        row["single_material_var"].set("/Game/TestMaterials/M_Twig_Test")
+        app._wind_group_rows[0]["influence_var"].set(0.35)
+        app._wind_group_rows[0]["shift_var"].set(0.1)
+        app._handle_window_close()
+
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        key = str(SIMPLE_TREE_01.resolve())
+        assert payload["last_input_path"] == str(SIMPLE_TREE_01)
+        assert payload["last_output_path"] == str(restored_output_path)
+        assert payload["cpu_profile"] == CpuProfile.QUIET.value
+        assert payload["preserve_temp_files"] is True
+        assert payload["base_material_settings_by_input_path"][key][0]["ue_asset_path"] == "/Game/TestMaterials/M_Bark_Test"
+        assert payload["part_mesh_settings_by_input_path"][key][0]["fbx_path"] == str(fake_fbx_path)
+        assert payload["wind_group_settings_by_input_path"][key]["0"]["influence"] == 0.35
+    finally:
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+    _, root = _build_tk_root_or_skip()
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
+    monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_groups", lambda request: dynamic_wind)
+
+    try:
+        app = ConversionApp(root)
+        for _ in range(10):
+            root.update()
+            if app._wind_group_rows:
+                break
+            time.sleep(0.01)
+
+        restored_row = app._part_mesh_rows[0]
+        assert app.input_var.get() == str(SIMPLE_TREE_01)
+        assert app.output_var.get() == str(restored_output_path)
+        assert app.cpu_profile_var.get() == CpuProfile.QUIET.value
+        assert app.preserve_temp_files_var.get() is True
+        assert app.bark_material_var.get() == "/Game/Assembly/SimpleTree/Bark1.Bark1"
+        assert app.leaves_material_var.get() == "/Game/Assembly/SimpleTree/Leaves1.Leaves1"
+        assert app._base_material_rows[0]["material_path_var"].get() == "/Game/TestMaterials/M_Bark_Test"
+        assert restored_row["source_mode_var"].get() == PrototypeSourceMode.FBX_FILE.value
+        assert restored_row["fbx_var"].get() == str(fake_fbx_path)
+        assert restored_row["fbx_material_mode_var"].get() == FbxMaterialMode.SINGLE_MATERIAL.value
+        assert restored_row["single_material_var"].get() == "/Game/TestMaterials/M_Twig_Test"
+        assert app._wind_group_rows[0]["influence_var"].get() == pytest.approx(0.35)
+        assert app._wind_group_rows[0]["shift_var"].get() == pytest.approx(0.1)
+    finally:
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+
 def test_gui_run_conversion_passes_explicit_base_material_overrides(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _, root = _build_tk_root_or_skip()
     from xml_to_usda.gui import ConversionApp
 
-    calls: list[dict[str, object]] = []
+    calls: list[ConversionRequest] = []
 
-    def fake_convert_file(input_path, output_path, output_mode=OutputMode.SELF_CONTAINED, **kwargs):
-        calls.append(
-            {
-                "input_path": input_path,
-                "output_path": output_path,
-                "output_mode": output_mode,
-                **kwargs,
-            }
-        )
-        return ConversionResult(
-            input_path=input_path,
-            output_path=output_path,
-            diagnostics=(),
-            usda_document=Mock(),
+    def fake_convert_request(request, telemetry_callback=None, cancel_event=None, runtime_paths=None):
+        calls.append(request)
+        return (
+            ConversionResult(
+                input_path=request.input_paths[0],
+                output_path=request.output_path,
+                diagnostics=(),
+                usda_document=Mock(),
+            ),
         )
 
-    monkeypatch.setattr("xml_to_usda.gui.convert_file", fake_convert_file)
+    monkeypatch.setattr("xml_to_usda.gui.convert_request", fake_convert_request)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
 
@@ -1104,9 +1118,9 @@ def test_gui_run_conversion_passes_explicit_base_material_overrides(
         app.run_conversion()
 
         assert len(calls) == 1
-        call = calls[0]
-        assert call["use_explicit_material_contract"] is True
-        assert call["base_material_overrides"] == (
+        request = calls[0]
+        assert request.use_explicit_material_contract is True
+        assert request.base_material_overrides == (
             BaseMaterialOverride(
                 source_id=1,
                 source_name="Bark_Mat",
@@ -1125,25 +1139,20 @@ def test_gui_run_conversion_passes_explicit_xml_part_material_settings(
     _, root = _build_tk_root_or_skip()
     from xml_to_usda.gui import ConversionApp
 
-    calls: list[dict[str, object]] = []
+    calls: list[ConversionRequest] = []
 
-    def fake_convert_file(input_path, output_path, output_mode=OutputMode.SELF_CONTAINED, **kwargs):
-        calls.append(
-            {
-                "input_path": input_path,
-                "output_path": output_path,
-                "output_mode": output_mode,
-                **kwargs,
-            }
-        )
-        return ConversionResult(
-            input_path=input_path,
-            output_path=output_path,
-            diagnostics=(),
-            usda_document=Mock(),
+    def fake_convert_request(request, telemetry_callback=None, cancel_event=None, runtime_paths=None):
+        calls.append(request)
+        return (
+            ConversionResult(
+                input_path=request.input_paths[0],
+                output_path=request.output_path,
+                diagnostics=(),
+                usda_document=Mock(),
+            ),
         )
 
-    monkeypatch.setattr("xml_to_usda.gui.convert_file", fake_convert_file)
+    monkeypatch.setattr("xml_to_usda.gui.convert_request", fake_convert_request)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
 
@@ -1160,9 +1169,9 @@ def test_gui_run_conversion_passes_explicit_xml_part_material_settings(
         app.run_conversion()
 
         assert len(calls) == 1
-        call = calls[0]
-        assert call["use_explicit_material_contract"] is True
-        assert call["prototype_source_configs"] == (
+        request = calls[0]
+        assert request.use_explicit_material_contract is True
+        assert request.prototype_source_configs == (
             PrototypeSourceConfig(
                 source_key="Mesh_1",
                 source_name="Twig_01",
@@ -1192,10 +1201,10 @@ def test_gui_collects_fbx_material_slot_overrides(
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
     monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
     monkeypatch.setattr(
-        "xml_to_usda.gui.inspect_fbx_material_slots",
+        "xml_to_usda.gui.inspect_fbx_material_slot_rows",
         lambda *_args, **_kwargs: (
-            FbxMaterialSlotSpec(source_id=1, name="Bark", face_count=12),
-            FbxMaterialSlotSpec(source_id=2, name="Needles", face_count=24),
+            PrototypeMaterialSlotRowSpec(slot_name="Bark", face_count=12),
+            PrototypeMaterialSlotRowSpec(slot_name="Needles", face_count=24),
         ),
     )
 
@@ -1248,10 +1257,10 @@ def test_gui_persists_fbx_material_slot_overrides(
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
     monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
     monkeypatch.setattr(
-        "xml_to_usda.gui.inspect_fbx_material_slots",
+        "xml_to_usda.gui.inspect_fbx_material_slot_rows",
         lambda *_args, **_kwargs: (
-            FbxMaterialSlotSpec(source_id=1, name="Bark", face_count=12),
-            FbxMaterialSlotSpec(source_id=2, name="Needles", face_count=24),
+            PrototypeMaterialSlotRowSpec(slot_name="Bark", face_count=12),
+            PrototypeMaterialSlotRowSpec(slot_name="Needles", face_count=24),
         ),
     )
 
@@ -1296,7 +1305,7 @@ def test_gui_persists_wind_group_settings_per_xml(
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
     monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
     monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
-    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda _input_path, is_ground_cover=False: dynamic_wind)
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_groups", lambda request: dynamic_wind)
 
     try:
         app = ConversionApp(root)
@@ -1326,7 +1335,7 @@ def test_gui_persists_wind_group_settings_per_xml(
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
     monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
     monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
-    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda _input_path, is_ground_cover=False: dynamic_wind)
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_groups", lambda request: dynamic_wind)
 
     try:
         app = ConversionApp(root)
@@ -1458,7 +1467,7 @@ def test_gui_refresh_wind_groups_uses_background_worker_for_large_xml(
         simulation_groups=(DynamicWindSimulationGroup(group_index=0, branch_order=0, is_trunk_group=True),),
     )
 
-    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda _input_path, is_ground_cover=False: dynamic_wind)
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_groups", lambda request: dynamic_wind)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
     monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
@@ -1466,7 +1475,9 @@ def test_gui_refresh_wind_groups_uses_background_worker_for_large_xml(
 
     try:
         app = ConversionApp(root)
+        app._suspend_settings_save = True
         app.input_var.set(str(SIMPLE_TREE_01))
+        app._suspend_settings_save = False
 
         app.refresh_wind_groups()
 
@@ -1502,7 +1513,10 @@ def test_gui_refresh_wind_groups_retries_internal_worker_error_on_main_thread(
             raise SystemError(r"D:\w1\s\Objects\setobject.c:2295: bad argument to internal function")
         return dynamic_wind
 
-    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", flaky_inspect_wind_data)
+    monkeypatch.setattr(
+        "xml_to_usda.gui.inspect_wind_groups",
+        lambda request: flaky_inspect_wind_data(request.input_path, is_ground_cover=request.is_ground_cover),
+    )
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda _title, message: error_messages.append(message))
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
     monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
@@ -1510,7 +1524,9 @@ def test_gui_refresh_wind_groups_retries_internal_worker_error_on_main_thread(
 
     try:
         app = ConversionApp(root)
+        app._suspend_settings_save = True
         app.input_var.set(str(SIMPLE_TREE_01))
+        app._suspend_settings_save = False
 
         app.refresh_wind_groups()
 
@@ -1544,7 +1560,7 @@ def test_gui_browse_input_auto_refreshes_wind_groups_and_shows_instance_counts(
         simulation_groups=(DynamicWindSimulationGroup(group_index=0, branch_order=0, is_trunk_group=True),),
     )
 
-    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda *_args, **_kwargs: dynamic_wind)
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_groups", lambda request: dynamic_wind)
 
     try:
         app = ConversionApp(root)
@@ -1572,27 +1588,17 @@ def test_gui_persists_material_paths_after_successful_conversion(
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
 
-    def fake_convert_file(
-        input_path,
-        output_path,
-        output_mode=OutputMode.SELF_CONTAINED,
-        material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
-        bark_material_path=None,
-        leaves_material_path=None,
-        single_material_path=None,
-        cleanup_policy=None,
-        use_existing_part_meshes=False,
-        part_mesh_asset_paths=(),
-        runtime_paths=None,
-    ):
-        return ConversionResult(
-            input_path=input_path,
-            output_path=output_path,
-            diagnostics=(),
-            usda_document=Mock(),
+    def fake_convert_request(request, telemetry_callback=None, cancel_event=None, runtime_paths=None):
+        return (
+            ConversionResult(
+                input_path=request.input_paths[0],
+                output_path=request.output_path,
+                diagnostics=(),
+                usda_document=Mock(),
+            ),
         )
 
-    monkeypatch.setattr("xml_to_usda.gui.convert_file", fake_convert_file)
+    monkeypatch.setattr("xml_to_usda.gui.convert_request", fake_convert_request)
 
     try:
         app = ConversionApp(root)
@@ -1707,7 +1713,7 @@ def test_gui_invalid_material_path_blocks_conversion(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
     monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
     monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
-    monkeypatch.setattr("xml_to_usda.gui.convert_file", convert_mock)
+    monkeypatch.setattr("xml_to_usda.gui.convert_request", convert_mock)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
 
     try:
@@ -1734,7 +1740,7 @@ def test_gui_invalid_single_material_path_blocks_conversion(monkeypatch: pytest.
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
     monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
     monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
-    monkeypatch.setattr("xml_to_usda.gui.convert_file", convert_mock)
+    monkeypatch.setattr("xml_to_usda.gui.convert_request", convert_mock)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
 
     try:
@@ -1762,7 +1768,7 @@ def test_gui_invalid_part_mesh_path_blocks_conversion(monkeypatch: pytest.Monkey
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
     monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
     monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
-    monkeypatch.setattr("xml_to_usda.gui.convert_file", convert_mock)
+    monkeypatch.setattr("xml_to_usda.gui.convert_request", convert_mock)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
 
     try:
@@ -1795,17 +1801,10 @@ def test_gui_logs_worker_traceback_when_background_conversion_fails(
     try:
         app = ConversionApp(root)
         app._conversion_error_traceback = "Traceback line 1\nTraceback line 2"
-        app._conversion_context = {
-            "cpu_profile": CpuProfile.BALANCED,
-            "cleanup_policy": CleanupPolicy.EPHEMERAL,
-            "material_policy": MaterialPolicy.SOURCE_MATERIAL_ROLES,
-            "bark_material_path": None,
-            "leaves_material_path": None,
-            "single_material_path": None,
-            "prototype_source_configs": (),
-            "use_existing_part_meshes": False,
-            "part_mesh_asset_paths": (),
-        }
+        app._conversion_context = ConversionRequest(
+            input_paths=("input.xml",),
+            output_path="output.usda",
+        )
 
         app._handle_conversion_job_result(
             ConversionJobResult(error_message="'list_iterator' object is not callable"),
@@ -1908,17 +1907,10 @@ def test_gui_reports_runtime_context_for_unexpected_worker_crash(
 
     try:
         app = ConversionApp(root)
-        app._conversion_context = {
-            "cpu_profile": CpuProfile.BALANCED,
-            "cleanup_policy": CleanupPolicy.EPHEMERAL,
-            "material_policy": MaterialPolicy.SOURCE_MATERIAL_ROLES,
-            "bark_material_path": None,
-            "leaves_material_path": None,
-            "single_material_path": None,
-            "prototype_source_configs": (),
-            "use_existing_part_meshes": False,
-            "part_mesh_asset_paths": (),
-        }
+        app._conversion_context = ConversionRequest(
+            input_paths=("input.xml",),
+            output_path="output.usda",
+        )
         app._last_conversion_telemetry = ConversionTelemetry(
             phase=ConversionPhase.FBX_IMPORT,
             completed_units=1,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .asset_paths import is_valid_unreal_asset_path
 from .geometry_buffers import payload_face_count, payload_has_face_topology, payload_point_count, payload_sections
 from .models import (
     CanonicalTreeModel,
@@ -177,7 +178,7 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                         )
                     )
                     continue
-                if not _is_valid_unreal_asset_path(prototype.mesh_asset_path):
+                if not is_valid_unreal_asset_path(prototype.mesh_asset_path):
                     issues.append(
                         ValidationIssue(
                             severity="error",
@@ -353,7 +354,3 @@ def _valid_binding_joint_tokens(model: CanonicalTreeModel) -> set[str]:
         tokens.add(joint.name)
         tokens.add(resolve(joint.name))
     return tokens
-
-
-def _is_valid_unreal_asset_path(path: str) -> bool:
-    return path.startswith("/Game/")

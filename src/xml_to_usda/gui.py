@@ -13,33 +13,50 @@ from pathlib import Path
 from queue import Empty, Queue
 from tkinter import filedialog, messagebox, ttk
 
+from .asset_paths import is_valid_unreal_asset_path
+from .conversion_service import prepare_conversion_plan
 from .conversion_process import close_process_queue, drain_process_queue, start_conversion_process
-from .fbx_adapter import inspect_fbx_material_slots
+from .discovery_service import (
+    discover_base_material_rows,
+    discover_part_prototype_rows,
+    inspect_fbx_material_slot_rows,
+)
 from .models import (
     BaseMaterialOverride,
     CleanupPolicy,
     ConversionRequest,
     ConversionJobResult,
-    ConversionPhase,
     ConversionTelemetry,
     CpuProfile,
     DynamicWindSimulationGroup,
     FbxMaterialMode,
     FbxMaterialSlotOverride,
-    FbxMaterialSlotSpec,
     MaterialPolicy,
     PrototypeSourceConfig,
     PrototypeSourceMode,
 )
-from .pipeline import (
-    convert_file,
-    discover_part_prototypes,
-    discover_source_materials,
-    generate_wind_json,
-    inspect_wind_data,
-    load_canonical_model,
+from .pipeline import convert_request
+from .settings_service import (
+    BaseMaterialSettingRecord,
+    FbxMaterialSlotSettingRecord,
+    GuiSettingsSnapshot,
+    PartSourceSettingRecord,
+    WindGroupSettingRecord,
+    load_gui_settings,
+    resolve_input_settings_key,
+    save_gui_settings,
 )
 from .runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
+from .wind_service import (
+    WindGenerationRequest,
+    WindInspectionRequest,
+    derive_wind_json_output_path,
+    format_wind_error,
+    generate_wind_json_from_request,
+    inspect_wind_groups,
+    prepare_wind_inspection_plan,
+    should_retry_wind_error,
+)
 
 
 class ConversionApp:
@@ -75,22 +92,22 @@ class ConversionApp:
         self._base_material_rows: list[dict[str, object]] = []
         self._part_mesh_rows: list[dict[str, object]] = []
         self._wind_group_rows: list[dict[str, object]] = []
-        self._persisted_wind_group_settings: dict[str, dict[str, object]] = {}
-        self._legacy_wind_group_settings: dict[str, dict[str, object]] = {}
-        self._persisted_wind_group_settings_by_input_path: dict[str, dict[str, dict[str, object]]] = {}
+        self._persisted_wind_group_settings: dict[str, WindGroupSettingRecord] = {}
+        self._legacy_wind_group_settings: dict[str, WindGroupSettingRecord] = {}
+        self._persisted_wind_group_settings_by_input_path: dict[str, dict[str, WindGroupSettingRecord]] = {}
         self._current_wind_settings_key: str | None = None
-        self._persisted_base_material_settings_by_input_path: dict[str, list[dict[str, object]]] = {}
+        self._persisted_base_material_settings_by_input_path: dict[str, tuple[BaseMaterialSettingRecord, ...]] = {}
         self._current_base_material_settings_key: str | None = None
-        self._persisted_part_mesh_settings_by_input_path: dict[str, list[dict[str, object]]] = {}
+        self._persisted_part_mesh_settings_by_input_path: dict[str, tuple[PartSourceSettingRecord, ...]] = {}
         self._current_part_mesh_settings_key: str | None = None
-        self._fbx_material_slot_cache: dict[str, tuple[FbxMaterialSlotSpec, ...]] = {}
         self._pending_settings_save_job: str | None = None
         self._suspend_settings_save = False
+        self._startup_restored_input_path = ""
         self._conversion_process = None
         self._conversion_cancel_event = None
         self._conversion_queue = None
         self._conversion_queue_job: str | None = None
-        self._conversion_context: dict[str, object] | None = None
+        self._conversion_context: ConversionRequest | None = None
         self._conversion_result_received = False
         self._conversion_error_traceback: str | None = None
         self._last_conversion_telemetry: ConversionTelemetry | None = None
@@ -103,6 +120,7 @@ class ConversionApp:
 
         self._build_layout()
         self._install_persistence_hooks()
+        self.root.after_idle(self._restore_previous_session_state)
         self.root.report_callback_exception = self._handle_tk_callback_exception
         self._show_startup_build_banner()
         self._show_startup_runtime_banner()
@@ -318,11 +336,16 @@ class ConversionApp:
         if not input_path:
             self._report_error("Missing input", "Select a source XML file before loading wind groups.")
             return
-        if self._should_refresh_wind_groups_async(input_path):
-            self._start_wind_group_refresh_async(input_path)
+        plan = prepare_wind_inspection_plan(
+            input_path=input_path,
+            is_ground_cover=bool(self.is_ground_cover_var.get()),
+            async_threshold_bytes=self.ASYNC_WIND_REFRESH_THRESHOLD_BYTES,
+        )
+        if plan.run_async:
+            self._start_wind_group_refresh_async(plan.request)
             return
         try:
-            dynamic_wind = inspect_wind_data(input_path, is_ground_cover=bool(self.is_ground_cover_var.get()))
+            dynamic_wind = inspect_wind_groups(plan.request)
         except Exception as exc:
             self._report_error("Wind group inspection failed", str(exc), status="Wind group inspection failed.")
             return
@@ -334,13 +357,7 @@ class ConversionApp:
         self._set_log(format_wind_group_summary(dynamic_wind))
         gc.collect()
 
-    def _should_refresh_wind_groups_async(self, input_path: str) -> bool:
-        try:
-            return Path(input_path).stat().st_size >= self.ASYNC_WIND_REFRESH_THRESHOLD_BYTES
-        except OSError:
-            return False
-
-    def _start_wind_group_refresh_async(self, input_path: str) -> None:
+    def _start_wind_group_refresh_async(self, request: WindInspectionRequest) -> None:
         if self._wind_thread is not None and self._wind_thread.is_alive():
             self.status_var.set("Wind group inspection already running...")
             return
@@ -356,26 +373,24 @@ class ConversionApp:
             target=self._run_wind_group_worker,
             kwargs={
                 "request_id": request_id,
-                "input_path": input_path,
-                "is_ground_cover": bool(self.is_ground_cover_var.get()),
+                "request": request,
             },
             daemon=True,
         )
         self._wind_thread.start()
         self._schedule_wind_queue_poll()
 
-    def _run_wind_group_worker(self, *, request_id: int, input_path: str, is_ground_cover: bool) -> None:
+    def _run_wind_group_worker(self, *, request_id: int, request: WindInspectionRequest) -> None:
         try:
-            dynamic_wind = inspect_wind_data(input_path, is_ground_cover=is_ground_cover)
-            self._wind_queue.put(("result", (request_id, input_path, is_ground_cover, dynamic_wind, None)))
+            dynamic_wind = inspect_wind_groups(request)
+            self._wind_queue.put(("result", (request_id, request, dynamic_wind, None)))
         except Exception as exc:
             self._wind_queue.put(
                 (
                     "result",
                     (
                         request_id,
-                        input_path,
-                        is_ground_cover,
+                        request,
                         None,
                         {
                             "type": type(exc).__name__,
@@ -401,14 +416,13 @@ class ConversionApp:
                 break
             if event_name != "result":
                 continue
-            request_id, input_path, is_ground_cover, dynamic_wind, error_payload = payload
+            request_id, request, dynamic_wind, error_payload = payload
             if request_id != self._active_wind_request_id:
                 continue
             self.refresh_wind_button.configure(state="normal")
             if error_payload is not None:
                 retry_handled, recovered_wind = self._retry_wind_group_refresh_if_needed(
-                    input_path=input_path,
-                    is_ground_cover=is_ground_cover,
+                    request=request,
                     error_payload=error_payload,
                 )
                 if recovered_wind is None:
@@ -417,7 +431,7 @@ class ConversionApp:
                     self._report_error(
                         "Wind group inspection failed",
                         error_payload["message"],
-                        details=self._format_wind_refresh_error(error_payload),
+                        details=format_wind_error(error_payload),
                         status="Wind group inspection failed.",
                     )
                     continue
@@ -449,15 +463,14 @@ class ConversionApp:
     def _retry_wind_group_refresh_if_needed(
         self,
         *,
-        input_path: str,
-        is_ground_cover: bool,
+        request: WindInspectionRequest,
         error_payload: dict[str, str],
     ) -> tuple[bool, object | None]:
-        if not self._should_retry_failed_wind_refresh(error_payload):
+        if not should_retry_wind_error(error_payload.get("type", ""), error_payload.get("message", "")):
             return False, None
         self.status_var.set("Retrying wind group inspection on the main thread...")
         try:
-            return True, inspect_wind_data(input_path, is_ground_cover=is_ground_cover)
+            return True, inspect_wind_groups(request)
         except Exception as retry_exc:
             retry_payload = {
                 "type": type(retry_exc).__name__,
@@ -465,32 +478,18 @@ class ConversionApp:
                 "traceback": traceback.format_exc(),
             }
             self._set_log(
-                self._format_wind_refresh_error(error_payload)
+                format_wind_error(error_payload)
                 + "\n\nMain-thread retry also failed:\n"
-                + self._format_wind_refresh_error(retry_payload)
+                + format_wind_error(retry_payload)
             )
             self._append_runtime_log_entry(
                 "error",
                 "Wind group inspection failed",
-                self._format_wind_refresh_error(error_payload)
+                format_wind_error(error_payload)
                 + "\n\nMain-thread retry also failed:\n"
-                + self._format_wind_refresh_error(retry_payload),
+                + format_wind_error(retry_payload),
             )
             return True, None
-
-    def _should_retry_failed_wind_refresh(self, error_payload: dict[str, str]) -> bool:
-        error_type = error_payload.get("type", "")
-        message = error_payload.get("message", "")
-        return error_type == "SystemError" or "bad argument to internal function" in message or "setobject.c" in message
-
-    def _format_wind_refresh_error(self, error_payload: dict[str, str]) -> str:
-        error_type = error_payload.get("type", "Exception")
-        message = error_payload.get("message", "")
-        formatted_traceback = error_payload.get("traceback", "").strip()
-        lines = [f"{error_type}: {message}"]
-        if formatted_traceback:
-            lines.extend(["", formatted_traceback])
-        return "\n".join(lines).strip()
 
     def run_conversion(self) -> None:
         input_path = self.input_var.get().strip()
@@ -501,20 +500,6 @@ class ConversionApp:
         bark_material_path = self.bark_material_var.get().strip()
         leaves_material_path = self.leaves_material_var.get().strip()
         single_material_path = self.single_material_var.get().strip()
-        effective_bark_material_path = bark_material_path or None
-        effective_leaves_material_path = leaves_material_path or None
-        effective_single_material_path = single_material_path or None
-        if material_policy == MaterialPolicy.SINGLE_MATERIAL:
-            effective_bark_material_path = None
-            effective_leaves_material_path = None
-        else:
-            effective_single_material_path = None
-        if not input_path:
-            self._report_error("Missing input", "Select a source XML file.")
-            return
-        if not output_path:
-            self._report_error("Missing output", "Select an output USDA path.")
-            return
         try:
             base_material_overrides = self._collect_base_material_overrides()
             prototype_source_configs = self._collect_part_source_configs()
@@ -522,95 +507,45 @@ class ConversionApp:
         except ValueError as exc:
             self._report_error("Invalid PartMesh mapping", str(exc))
             return
-        use_explicit_material_contract = self._should_use_explicit_material_contract(
-            base_material_overrides,
-            prototype_source_configs,
-        )
-
-        validation_error = (
-            self._validate_explicit_material_paths()
-            if use_explicit_material_contract
-            else self._validate_material_paths(
-                material_policy,
-                bark_material_path,
-                leaves_material_path,
-                single_material_path,
-            )
-        )
-        if validation_error is not None:
-            self._report_error("Invalid material path", validation_error)
-            return
-
-        has_fbx_sources = any(config.mode == PrototypeSourceMode.FBX_FILE for config in prototype_source_configs)
-        run_conversion_async = has_fbx_sources or self._should_run_conversion_async(input_path)
-        uses_new_source_contract = has_fbx_sources or (
-            prototype_source_configs
-            and (
-                cpu_profile != CpuProfile.BALANCED
-                or any(config.mode != PrototypeSourceMode.UNREAL_ASSET for config in prototype_source_configs)
-            )
-        )
-
-        if run_conversion_async:
-            self._start_conversion_async(
+        try:
+            plan = prepare_conversion_plan(
                 input_path=input_path,
                 output_path=output_path,
                 cpu_profile=cpu_profile,
                 cleanup_policy=cleanup_policy,
                 material_policy=material_policy,
-                bark_material_path=effective_bark_material_path,
-                leaves_material_path=effective_leaves_material_path,
-                single_material_path=effective_single_material_path,
+                bark_material_path=bark_material_path or None,
+                leaves_material_path=leaves_material_path or None,
+                single_material_path=single_material_path or None,
                 base_material_overrides=base_material_overrides,
-                use_explicit_material_contract=use_explicit_material_contract,
+                prototype_source_configs=prototype_source_configs,
                 use_existing_part_meshes=use_existing_part_meshes,
                 part_mesh_asset_paths=part_mesh_asset_paths,
-                prototype_source_configs=prototype_source_configs,
+                async_threshold_bytes=self.ASYNC_CONVERSION_THRESHOLD_BYTES,
             )
+        except ValueError as exc:
+            message = str(exc)
+            if message == "Select a source XML file.":
+                self._report_error("Missing input", message)
+            elif message == "Select an output USDA path.":
+                self._report_error("Missing output", message)
+            else:
+                self._report_error("Invalid material path", message)
+            return
+
+        if plan.run_async:
+            self._start_conversion_async(plan.request)
             return
 
         try:
-            convert_kwargs = {
-                "material_policy": material_policy,
-                "bark_material_path": effective_bark_material_path,
-                "leaves_material_path": effective_leaves_material_path,
-                "single_material_path": effective_single_material_path,
-                "cleanup_policy": cleanup_policy,
-            }
-            if use_explicit_material_contract or uses_new_source_contract:
-                convert_kwargs["cpu_profile"] = cpu_profile
-                convert_kwargs["cleanup_policy"] = cleanup_policy
-                convert_kwargs["prototype_source_configs"] = prototype_source_configs
-                convert_kwargs["base_material_overrides"] = base_material_overrides
-                convert_kwargs["use_explicit_material_contract"] = use_explicit_material_contract
-            else:
-                convert_kwargs["use_existing_part_meshes"] = use_existing_part_meshes
-                convert_kwargs["part_mesh_asset_paths"] = part_mesh_asset_paths
-                convert_kwargs["cleanup_policy"] = cleanup_policy
-            convert_kwargs["runtime_paths"] = self._runtime_paths()
-            result = convert_file(input_path, output_path, **convert_kwargs)
+            result = convert_request(plan.request, runtime_paths=self._runtime_paths())[0]
         except Exception as exc:
             self._report_error("Conversion failed", str(exc), status="Conversion failed.")
             gc.collect()
             return
 
         self._save_settings()
-        self._set_log(
-            format_conversion_results(
-                (result,),
-                cpu_profile=cpu_profile,
-                cleanup_policy=cleanup_policy,
-                material_policy=material_policy,
-                bark_material_path=effective_bark_material_path,
-                leaves_material_path=effective_leaves_material_path,
-                single_material_path=effective_single_material_path,
-                base_material_overrides=base_material_overrides,
-                use_explicit_material_contract=use_explicit_material_contract,
-                prototype_source_configs=prototype_source_configs,
-                use_existing_part_meshes=use_existing_part_meshes,
-                part_mesh_asset_paths=part_mesh_asset_paths,
-            )
-        )
+        self._set_log(format_conversion_results((result,), plan.request))
         if result.usda_document is None:
             self.status_var.set("Conversion finished with errors.")
             self._append_runtime_log_entry("error", "Conversion failed", "See diagnostics in the log area.")
@@ -621,23 +556,7 @@ class ConversionApp:
         messagebox.showinfo("Conversion complete", f"Wrote USDA to {result.output_path}")
         gc.collect()
 
-    def _start_conversion_async(
-        self,
-        *,
-        input_path: str,
-        output_path: str,
-        cpu_profile: CpuProfile,
-        cleanup_policy: CleanupPolicy,
-        material_policy: MaterialPolicy,
-        bark_material_path: str | None,
-        leaves_material_path: str | None,
-        single_material_path: str | None,
-        base_material_overrides: tuple[BaseMaterialOverride, ...],
-        use_explicit_material_contract: bool,
-        use_existing_part_meshes: bool,
-        part_mesh_asset_paths: tuple[tuple[str, str], ...],
-        prototype_source_configs: tuple[PrototypeSourceConfig, ...],
-    ) -> None:
+    def _start_conversion_async(self, request: ConversionRequest) -> None:
         if self._conversion_process is not None and self._conversion_process.is_alive():
             self._report_error("Conversion running", "A conversion is already running.")
             return
@@ -648,34 +567,7 @@ class ConversionApp:
             "Starting background conversion.\n"
             "The UI stays responsive while a dedicated worker process normalizes XML, imports FBX, and writes USDA."
         )
-        request = ConversionRequest(
-            input_paths=(input_path,),
-            output_path=output_path,
-            material_policy=material_policy,
-            bark_material_path=bark_material_path,
-            leaves_material_path=leaves_material_path,
-            single_material_path=single_material_path,
-            base_material_overrides=base_material_overrides,
-            cpu_profile=cpu_profile,
-            cleanup_policy=cleanup_policy,
-            use_explicit_material_contract=use_explicit_material_contract,
-            prototype_source_configs=prototype_source_configs,
-            use_existing_part_meshes=use_existing_part_meshes,
-            part_mesh_asset_paths=part_mesh_asset_paths,
-        )
-        self._conversion_context = {
-            "cpu_profile": cpu_profile,
-            "cleanup_policy": cleanup_policy,
-            "material_policy": material_policy,
-            "bark_material_path": bark_material_path,
-            "leaves_material_path": leaves_material_path,
-            "single_material_path": single_material_path,
-            "base_material_overrides": base_material_overrides,
-            "use_explicit_material_contract": use_explicit_material_contract,
-            "prototype_source_configs": prototype_source_configs,
-            "use_existing_part_meshes": use_existing_part_meshes,
-            "part_mesh_asset_paths": part_mesh_asset_paths,
-        }
+        self._conversion_context = request
         self._conversion_result_received = False
         self._conversion_error_traceback = None
         self._last_conversion_telemetry = None
@@ -710,7 +602,7 @@ class ConversionApp:
                     continue
                 if event_name == "result":
                     self._conversion_result_received = True
-                    self._handle_conversion_job_result(payload, self._conversion_context or {})
+                    self._handle_conversion_job_result(payload, self._conversion_context)
                     keep_polling = False
                     continue
         if self._conversion_process is not None and self._conversion_process.is_alive():
@@ -733,7 +625,7 @@ class ConversionApp:
                 crash_message = f"{crash_message}\n\n{self._conversion_error_traceback}"
             self._handle_conversion_job_result(
                 ConversionJobResult(cancelled=bool(self._conversion_cancel_event and self._conversion_cancel_event.is_set()), error_message=crash_message),
-                self._conversion_context or {},
+                self._conversion_context,
             )
             keep_polling = False
         if keep_polling:
@@ -752,7 +644,7 @@ class ConversionApp:
             f"  jobs_root={self._runtime_paths().jobs_root}"
         )
 
-    def _handle_conversion_job_result(self, job_result: ConversionJobResult, context: dict[str, object]) -> None:
+    def _handle_conversion_job_result(self, job_result: ConversionJobResult, request: ConversionRequest | None) -> None:
         self._set_conversion_running(False)
         error_traceback = self._conversion_error_traceback
         self._close_conversion_process()
@@ -776,22 +668,11 @@ class ConversionApp:
             self._set_log("Conversion cancelled before a result was produced.")
             return
 
-        self._set_log(
-            format_conversion_results(
-                (result,),
-                cpu_profile=context["cpu_profile"],
-                cleanup_policy=context["cleanup_policy"],
-                material_policy=context["material_policy"],
-                bark_material_path=context["bark_material_path"],
-                leaves_material_path=context["leaves_material_path"],
-                single_material_path=context["single_material_path"],
-                base_material_overrides=context["base_material_overrides"],
-                use_explicit_material_contract=context["use_explicit_material_contract"],
-                prototype_source_configs=context["prototype_source_configs"],
-                use_existing_part_meshes=context["use_existing_part_meshes"],
-                part_mesh_asset_paths=context["part_mesh_asset_paths"],
-            )
+        resolved_request = request or ConversionRequest(
+            input_paths=(result.input_path,),
+            output_path=result.output_path,
         )
+        self._set_log(format_conversion_results((result,), resolved_request))
         if result.usda_document is None:
             self.status_var.set("Conversion finished with errors.")
             self._append_runtime_log_entry("error", "Conversion failed", "See diagnostics in the log area.")
@@ -805,12 +686,6 @@ class ConversionApp:
     def _set_conversion_running(self, active: bool) -> None:
         self.convert_button.configure(state="disabled" if active else "normal")
         self.cancel_button.configure(state="normal" if active else "disabled")
-
-    def _should_run_conversion_async(self, input_path: str) -> bool:
-        try:
-            return Path(input_path).stat().st_size >= self.ASYNC_CONVERSION_THRESHOLD_BYTES
-        except OSError:
-            return False
 
     def cancel_conversion(self) -> None:
         if self._conversion_process is None or not self._conversion_process.is_alive():
@@ -829,14 +704,16 @@ class ConversionApp:
             if not self._wind_group_rows:
                 return
 
-        output_path = str(self._derive_wind_json_output_path())
+        output_path = str(derive_wind_json_output_path(input_path, self.output_var.get().strip()))
         try:
-            result = generate_wind_json(
-                input_path,
-                output_path,
-                group_settings=self._collect_wind_group_settings(),
-                gust_attenuation=float(self.gust_attenuation_var.get()),
-                is_ground_cover=bool(self.is_ground_cover_var.get()),
+            result = generate_wind_json_from_request(
+                WindGenerationRequest(
+                    input_path=input_path,
+                    output_path=output_path,
+                    group_settings=self._collect_wind_group_settings(),
+                    gust_attenuation=float(self.gust_attenuation_var.get()),
+                    is_ground_cover=bool(self.is_ground_cover_var.get()),
+                )
             )
         except Exception as exc:
             self._report_error("Wind JSON generation failed", str(exc), status="Wind JSON generation failed.")
@@ -996,65 +873,6 @@ class ConversionApp:
         except OSError:
             return
 
-    def _validate_material_paths(
-        self,
-        material_policy: MaterialPolicy,
-        bark_material_path: str,
-        leaves_material_path: str,
-        single_material_path: str,
-    ) -> str | None:
-        checks: list[tuple[str, str]] = []
-        if material_policy == MaterialPolicy.SINGLE_MATERIAL:
-            checks.append(("Single", single_material_path))
-        else:
-            checks.extend((("Bark", bark_material_path), ("Leaves", leaves_material_path)))
-        for label, path in checks:
-            if path and not _is_valid_unreal_asset_path(path):
-                return f"{label} material path must start with /Game/."
-        return None
-
-    def _validate_explicit_material_paths(self) -> str | None:
-        for row in self._base_material_rows:
-            material_path = str(row["material_path_var"].get()).strip()
-            if material_path and not _is_valid_unreal_asset_path(material_path):
-                return (
-                    f"Base XML material path for "
-                    f"{row['source_name']} (ID {row['source_id']}) must start with /Game/."
-                )
-        for row in self._part_mesh_rows:
-            mode = PrototypeSourceMode(str(row["source_mode_var"].get()))
-            if mode == PrototypeSourceMode.UNREAL_ASSET:
-                continue
-            part_material_mode = FbxMaterialMode(str(row["fbx_material_mode_var"].get()))
-            if part_material_mode == FbxMaterialMode.SINGLE_MATERIAL:
-                single_path = str(row["single_material_var"].get()).strip()
-                if single_path and not _is_valid_unreal_asset_path(single_path):
-                    return f"Single material path for {row['source_name']} must start with /Game/."
-                continue
-            if part_material_mode == FbxMaterialMode.MATERIAL_SLOTS:
-                overrides = self._collect_part_row_material_slot_overrides(row)
-                for override in overrides:
-                    if override.ue_asset_path and not _is_valid_unreal_asset_path(override.ue_asset_path):
-                        return (
-                            f"FBX material slot path for {row['source_name']} "
-                            f"slot {override.slot_name} must start with /Game/."
-                        )
-                if mode == PrototypeSourceMode.FBX_FILE and not any(
-                    override.ue_asset_path for override in overrides
-                ):
-                    return (
-                        f"Material Slots mode for {row['source_name']} requires at least one Unreal "
-                        "material path in the discovered FBX material slots."
-                    )
-                continue
-            for label, value in (
-                ("Black", str(row["black_material_var"].get()).strip()),
-                ("White", str(row["white_material_var"].get()).strip()),
-            ):
-                if value and not _is_valid_unreal_asset_path(value):
-                    return f"{label} material path for {row['source_name']} must start with /Game/."
-        return None
-
     def _collect_base_material_overrides(self) -> tuple[BaseMaterialOverride, ...]:
         if not self._base_material_rows:
             return ()
@@ -1068,24 +886,6 @@ class ConversionApp:
                 )
             )
         return tuple(overrides)
-
-    def _should_use_explicit_material_contract(
-        self,
-        base_material_overrides: tuple[BaseMaterialOverride, ...],
-        prototype_source_configs: tuple[PrototypeSourceConfig, ...],
-    ) -> bool:
-        if any(override.ue_asset_path for override in base_material_overrides):
-            return True
-        for config in prototype_source_configs:
-            if config.mode == PrototypeSourceMode.UNREAL_ASSET:
-                continue
-            if config.fbx_material_mode != FbxMaterialMode.VERTEX_COLOR_SPLIT:
-                return True
-            if config.single_material_path or config.black_material_path or config.white_material_path:
-                return True
-            if config.mode == PrototypeSourceMode.FBX_FILE:
-                return True
-        return False
 
     def _collect_part_mesh_overrides(self) -> tuple[bool, tuple[tuple[str, str], ...]]:
         configs = self._collect_part_source_configs()
@@ -1133,7 +933,7 @@ class ConversionApp:
                 asset_path = str(row["asset_var"].get()).strip()
                 if not asset_path:
                     continue
-                if not _is_valid_unreal_asset_path(asset_path):
+                if not is_valid_unreal_asset_path(asset_path):
                     raise ValueError(f"PartMesh asset path for {source_name} must start with /Game/.")
                 configs.append(
                     PrototypeSourceConfig(
@@ -1181,7 +981,7 @@ class ConversionApp:
         path = Path(input_path)
         if not path.exists():
             return
-        resolved_key = self._resolve_input_settings_key(input_path)
+        resolved_key = resolve_input_settings_key(input_path)
         self._current_wind_settings_key = resolved_key
         self._persisted_wind_group_settings = self._resolve_persisted_wind_settings_for_key(resolved_key)
         self._clear_wind_group_controls("Analyzing XML and loading wind groups...")
@@ -1193,7 +993,7 @@ class ConversionApp:
             return
         self.refresh_wind_groups()
 
-    def _resolve_persisted_wind_settings_for_key(self, settings_key: str) -> dict[str, dict[str, object]]:
+    def _resolve_persisted_wind_settings_for_key(self, settings_key: str) -> dict[str, WindGroupSettingRecord]:
         if settings_key in self._persisted_wind_group_settings_by_input_path:
             return dict(self._persisted_wind_group_settings_by_input_path[settings_key])
         if not self._persisted_wind_group_settings_by_input_path:
@@ -1218,33 +1018,34 @@ class ConversionApp:
             return
         self._suspend_settings_save = True
         try:
-            materials = discover_source_materials(input_path)
-            resolved_key = self._resolve_input_settings_key(input_path)
+            resolved_key = resolve_input_settings_key(input_path)
             self._current_base_material_settings_key = resolved_key
-            persisted_rows = self._persisted_base_material_settings_by_input_path.get(resolved_key, [])
-            self._rebuild_base_material_rows(materials, persisted_rows)
+            discovery = discover_base_material_rows(
+                input_path,
+                persisted_records=self._persisted_base_material_settings_by_input_path.get(resolved_key, ()),
+            )
+            self._rebuild_base_material_rows(discovery)
         finally:
             self._suspend_settings_save = False
         self._save_settings()
 
     def _rebuild_base_material_rows(
         self,
-        materials: tuple[BaseMaterialOverride, ...],
-        persisted_rows: list[dict[str, object]] | tuple[dict[str, object], ...] = (),
+        discovery,
     ) -> None:
         for child in self.base_material_rows_container.winfo_children():
             child.destroy()
         self._base_material_rows.clear()
 
-        if not materials:
-            self.base_material_summary_var.set("No XML material slots were found in this file.")
+        if not discovery.rows:
+            self.base_material_summary_var.set(discovery.summary)
             ttk.Label(self.base_material_rows_container, text="No XML material slots found in this XML.").grid(
                 row=0, column=0, sticky="w"
             )
             self._refresh_scroll_region()
             return
 
-        self.base_material_summary_var.set(f"Found {len(materials)} base XML material slot(s).")
+        self.base_material_summary_var.set(discovery.summary)
         self.base_material_rows_container.columnconfigure(0, weight=1)
         header = ttk.Frame(self.base_material_rows_container)
         header.grid(row=0, column=0, sticky="ew", pady=(0, 6))
@@ -1253,21 +1054,13 @@ class ConversionApp:
         ttk.Label(header, text="ID").grid(row=0, column=1, sticky="w", padx=(12, 12))
         ttk.Label(header, text="Unreal Material Path").grid(row=0, column=2, sticky="w")
 
-        persisted_by_id = {
-            int(record.get("source_id")): record
-            for record in persisted_rows
-            if isinstance(record, dict) and str(record.get("source_id", "")).lstrip("-").isdigit()
-        }
-
-        for row_index, material in enumerate(materials, start=1):
+        for row_index, material in enumerate(discovery.rows, start=1):
             row_frame = ttk.Frame(self.base_material_rows_container)
             row_frame.grid(row=row_index, column=0, sticky="ew", pady=(0, 6))
             row_frame.columnconfigure(2, weight=1)
             ttk.Label(row_frame, text=material.source_name or f"Material_{material.source_id}").grid(row=0, column=0, sticky="w")
             ttk.Label(row_frame, text=str(material.source_id)).grid(row=0, column=1, sticky="w", padx=(12, 12))
-            material_path_var = tk.StringVar(
-                value=str(persisted_by_id.get(material.source_id, {}).get("ue_asset_path", ""))
-            )
+            material_path_var = tk.StringVar(value=material.ue_asset_path)
             entry = ttk.Entry(row_frame, textvariable=material_path_var)
             entry.grid(row=0, column=2, sticky="ew")
             material_path_var.trace_add("write", self._handle_persisted_field_change)
@@ -1308,39 +1101,34 @@ class ConversionApp:
             return
         self._suspend_settings_save = True
         try:
-            prototypes = discover_part_prototypes(input_path)
-            resolved_key = self._resolve_input_settings_key(input_path)
+            resolved_key = resolve_input_settings_key(input_path)
             self._current_part_mesh_settings_key = resolved_key
-            persisted_rows = self._persisted_part_mesh_settings_by_input_path.get(resolved_key, [])
-            self._rebuild_part_mesh_rows(prototypes, persisted_rows)
+            discovery = discover_part_prototype_rows(
+                input_path,
+                persisted_records=self._persisted_part_mesh_settings_by_input_path.get(resolved_key, ()),
+            )
+            self._rebuild_part_mesh_rows(discovery)
         finally:
             self._suspend_settings_save = False
         self._save_settings()
 
-    def _resolve_input_settings_key(self, input_path: str) -> str:
-        return str(Path(input_path).expanduser().resolve())
-
     def _rebuild_part_mesh_rows(
         self,
-        prototypes,
-        persisted_rows: list[dict[str, object]] | tuple[dict[str, object], ...] = (),
+        discovery,
     ) -> None:
         for child in self.part_mesh_rows_container.winfo_children():
             child.destroy()
         self._part_mesh_rows.clear()
 
-        if not prototypes:
-            self.part_mesh_summary_var.set("No repeated branch instances were found in this XML.")
+        if not discovery.rows:
+            self.part_mesh_summary_var.set(discovery.summary)
             ttk.Label(self.part_mesh_rows_container, text="No repeated part meshes found in this XML.").grid(
                 row=0, column=0, sticky="w"
             )
             self._refresh_scroll_region()
             return
 
-        total_instances = sum(prototype.instance_count for prototype in prototypes)
-        self.part_mesh_summary_var.set(
-            f"Found {total_instances} repeated branch instances across {len(prototypes)} prototype(s)."
-        )
+        self.part_mesh_summary_var.set(discovery.summary)
 
         self.part_mesh_rows_container.columnconfigure(0, weight=1)
         header = ttk.Frame(self.part_mesh_rows_container)
@@ -1367,20 +1155,9 @@ class ConversionApp:
         ttk.Label(header, text="Black Material").grid(row=0, column=8, sticky="w", padx=(12, 0))
         ttk.Label(header, text="White Material").grid(row=0, column=9, sticky="w", padx=(12, 0))
 
-        persisted_by_name = {
-            str(record.get("source_name", "")): record
-            for record in persisted_rows
-            if isinstance(record, dict) and record.get("source_name")
-        }
-        persisted_by_key = {
-            str(record.get("source_key", "")): record
-            for record in persisted_rows
-            if isinstance(record, dict) and record.get("source_key")
-        }
-
         self._part_mesh_rows_placeholder = ttk.Label(self.part_mesh_rows_container, text="")
         row_index = 1
-        for prototype in prototypes:
+        for prototype in discovery.rows:
             row_frame = ttk.Frame(self.part_mesh_rows_container)
             row_frame.grid(row=row_index, column=0, sticky="ew", pady=(0, 6))
             row_frame.columnconfigure(0, weight=2)
@@ -1399,14 +1176,14 @@ class ConversionApp:
             ttk.Label(row_frame, text=mesh_id_text).grid(row=0, column=1, sticky="w", padx=(12, 12))
             ttk.Label(row_frame, text=instance_count_text).grid(row=0, column=2, sticky="w", padx=(0, 12))
 
-            source_mode_var = tk.StringVar(value=PrototypeSourceMode.XML_MESH.value)
-            use_unreal_var = tk.BooleanVar(value=False)
-            asset_var = tk.StringVar(value="")
-            fbx_var = tk.StringVar(value="")
-            fbx_material_mode_var = tk.StringVar(value=FbxMaterialMode.VERTEX_COLOR_SPLIT.value)
-            single_material_var = tk.StringVar(value="")
-            black_material_var = tk.StringVar(value="")
-            white_material_var = tk.StringVar(value="")
+            source_mode_var = tk.StringVar(value=prototype.source_mode.value)
+            use_unreal_var = tk.BooleanVar(value=prototype.source_mode == PrototypeSourceMode.UNREAL_ASSET)
+            asset_var = tk.StringVar(value=prototype.unreal_asset_path)
+            fbx_var = tk.StringVar(value=prototype.fbx_path)
+            fbx_material_mode_var = tk.StringVar(value=prototype.fbx_material_mode.value)
+            single_material_var = tk.StringVar(value=prototype.single_material_path)
+            black_material_var = tk.StringVar(value=prototype.black_material_path)
+            white_material_var = tk.StringVar(value=prototype.white_material_path)
             source_mode_combo = ttk.Combobox(
                 row_frame,
                 textvariable=source_mode_var,
@@ -1479,33 +1256,7 @@ class ConversionApp:
                 "restored_slot_override_records": (),
             }
 
-            record = persisted_by_name.get(display_name) or persisted_by_key.get(str(prototype.source_key))
-            if record is not None:
-                restored_mode = str(record.get("source_mode", "")).strip() or (
-                    PrototypeSourceMode.UNREAL_ASSET.value if bool(record.get("use_unreal_reference", False)) else PrototypeSourceMode.XML_MESH.value
-                )
-                if restored_mode not in {mode.value for mode in PrototypeSourceMode}:
-                    restored_mode = PrototypeSourceMode.XML_MESH.value
-                restored_fbx_material_mode = str(
-                    record.get("fbx_material_mode", FbxMaterialMode.VERTEX_COLOR_SPLIT.value)
-                ).strip()
-                if restored_fbx_material_mode == FbxMaterialMode.AUTO.value:
-                    restored_fbx_material_mode = FbxMaterialMode.VERTEX_COLOR_SPLIT.value
-                if restored_fbx_material_mode not in {
-                    FbxMaterialMode.VERTEX_COLOR_SPLIT.value,
-                    FbxMaterialMode.SINGLE_MATERIAL.value,
-                    FbxMaterialMode.MATERIAL_SLOTS.value,
-                }:
-                    restored_fbx_material_mode = FbxMaterialMode.VERTEX_COLOR_SPLIT.value
-                source_mode_var.set(restored_mode)
-                fbx_material_mode_var.set(restored_fbx_material_mode)
-                use_unreal_var.set(restored_mode == PrototypeSourceMode.UNREAL_ASSET.value)
-                asset_var.set(str(record.get("unreal_asset_path", "")))
-                fbx_var.set(str(record.get("fbx_path", "")))
-                single_material_var.set(str(record.get("single_material_path", "")))
-                black_material_var.set(str(record.get("black_material_path", "")))
-                white_material_var.set(str(record.get("white_material_path", "")))
-                row_data["restored_slot_override_records"] = tuple(record.get("fbx_material_slot_overrides", ()))
+            row_data["restored_slot_override_records"] = prototype.fbx_material_slot_overrides
 
             self._part_mesh_rows.append(row_data)
             self._handle_part_source_mode_change(row_data)
@@ -1627,7 +1378,11 @@ class ConversionApp:
             placeholder.grid(row=0, column=0, sticky="w")
             return
         try:
-            slot_specs = self._inspect_fbx_material_slots_cached(fbx_path)
+            slot_specs = inspect_fbx_material_slot_rows(
+                fbx_path,
+                cpu_profile=self._current_cpu_profile(),
+                persisted_records=row.get("restored_slot_override_records", ()),
+            )
         except Exception as exc:
             placeholder.configure(text=f"FBX material slot analysis failed: {exc}")
             placeholder.grid(row=0, column=0, sticky="w")
@@ -1637,53 +1392,27 @@ class ConversionApp:
             placeholder.grid(row=0, column=0, sticky="w")
             return
 
-        persisted_overrides = self._material_slot_override_lookup(
-            row.get("restored_slot_override_records", ())
-        )
         container.columnconfigure(1, weight=1)
         ttk.Label(container, text="FBX Material Slots").grid(row=0, column=0, sticky="w", pady=(0, 4))
         ttk.Label(container, text="Unreal Material Path").grid(row=0, column=1, sticky="w", pady=(0, 4))
         for slot_index, slot_spec in enumerate(slot_specs, start=1):
-            path_var = tk.StringVar(value=persisted_overrides.get(slot_spec.name, ""))
+            path_var = tk.StringVar(value=slot_spec.ue_asset_path)
             path_var.trace_add("write", self._handle_persisted_field_change)
             ttk.Label(
                 container,
-                text=f"{slot_spec.name} ({slot_spec.face_count} faces)",
+                text=f"{slot_spec.slot_name} ({slot_spec.face_count} faces)",
             ).grid(row=slot_index, column=0, sticky="w", padx=(0, 12), pady=(0, 4))
             entry = ttk.Entry(container, textvariable=path_var)
             entry.grid(row=slot_index, column=1, sticky="ew", pady=(0, 4))
             row["material_slot_rows"].append(
                 {
-                    "slot_name": slot_spec.name,
+                    "slot_name": slot_spec.slot_name,
                     "face_count": slot_spec.face_count,
                     "path_var": path_var,
                     "entry": entry,
                 }
             )
         row["restored_slot_override_records"] = ()
-
-    def _inspect_fbx_material_slots_cached(self, fbx_path: str) -> tuple[FbxMaterialSlotSpec, ...]:
-        resolved = str(Path(fbx_path).expanduser().resolve())
-        cached = self._fbx_material_slot_cache.get(resolved)
-        if cached is not None:
-            return cached
-        slots = inspect_fbx_material_slots(
-            resolved,
-            cpu_profile=self._current_cpu_profile(),
-        )
-        self._fbx_material_slot_cache[resolved] = slots
-        return slots
-
-    def _material_slot_override_lookup(self, records) -> dict[str, str]:
-        lookup: dict[str, str] = {}
-        for record in records or ():
-            if not isinstance(record, dict):
-                continue
-            slot_name = str(record.get("slot_name", "")).strip()
-            ue_asset_path = str(record.get("ue_asset_path", "")).strip()
-            if slot_name and ue_asset_path:
-                lookup[slot_name] = ue_asset_path
-        return lookup
 
     def _collect_part_row_material_slot_overrides(
         self,
@@ -1762,6 +1491,7 @@ class ConversionApp:
 
     def _install_persistence_hooks(self) -> None:
         self.input_var.trace_add("write", self._handle_source_path_change)
+        self.output_var.trace_add("write", self._handle_persisted_field_change)
         self.cpu_profile_var.trace_add("write", self._handle_persisted_field_change)
         self.preserve_temp_files_var.trace_add("write", self._handle_persisted_field_change)
         self.material_policy_var.trace_add("write", self._handle_material_policy_change)
@@ -1772,6 +1502,20 @@ class ConversionApp:
         self.is_ground_cover_var.trace_add("write", self._handle_persisted_field_change)
         self.is_ground_cover_var.trace_add("write", self._handle_ground_cover_change)
         self.root.protocol("WM_DELETE_WINDOW", self._handle_window_close)
+
+    def _restore_previous_session_state(self) -> None:
+        input_path = self._startup_restored_input_path.strip()
+        self._startup_restored_input_path = ""
+        if not input_path:
+            return
+        if self.input_var.get().strip() != input_path:
+            return
+        if not Path(input_path).exists():
+            self.status_var.set("Saved source XML path is unavailable.")
+            self._append_log(f"Saved source XML path is unavailable: {input_path}")
+            return
+        self.status_var.set("Restoring previous session settings...")
+        self._handle_source_path_change()
 
     def _handle_persisted_field_change(self, *_args) -> None:
         if self._suspend_settings_save:
@@ -1890,86 +1634,23 @@ class ConversionApp:
         self._last_conversion_telemetry = None
 
     def _load_settings(self) -> None:
-        settings = self._read_settings()
-        self.cpu_profile_var.set(str(settings.get("cpu_profile", CpuProfile.BALANCED.value)))
-        self.preserve_temp_files_var.set(bool(settings.get("preserve_temp_files", False)))
-        self.material_policy_var.set(
-            MaterialPolicy.parse(settings.get("material_policy", MaterialPolicy.SOURCE_MATERIAL_ROLES.value)).value
-        )
-        self.bark_material_var.set(str(settings.get("bark_material_path", "")))
-        self.leaves_material_var.set(str(settings.get("leaves_material_path", "")))
-        self.single_material_var.set(str(settings.get("single_material_path", "")))
-        self.gust_attenuation_var.set(float(settings.get("gust_attenuation", 0.0)))
-        self.is_ground_cover_var.set(bool(settings.get("is_ground_cover", False)))
-        self._legacy_wind_group_settings = dict(settings.get("wind_group_settings", {}))
+        settings = load_gui_settings(self.SETTINGS_PATH)
+        self._startup_restored_input_path = settings.last_input_path
+        self.input_var.set(self._startup_restored_input_path)
+        self.output_var.set(settings.last_output_path)
+        self.cpu_profile_var.set(settings.cpu_profile.value)
+        self.preserve_temp_files_var.set(bool(settings.preserve_temp_files))
+        self.material_policy_var.set(settings.material_policy.value)
+        self.bark_material_var.set(settings.bark_material_path)
+        self.leaves_material_var.set(settings.leaves_material_path)
+        self.single_material_var.set(settings.single_material_path)
+        self.gust_attenuation_var.set(float(settings.gust_attenuation))
+        self.is_ground_cover_var.set(bool(settings.is_ground_cover))
+        self._legacy_wind_group_settings = dict(settings.wind_group_settings)
         self._persisted_wind_group_settings = dict(self._legacy_wind_group_settings)
-        self._persisted_wind_group_settings_by_input_path = dict(
-            settings.get("wind_group_settings_by_input_path", {})
-        )
-        self._persisted_base_material_settings_by_input_path = dict(
-            settings.get("base_material_settings_by_input_path", {})
-        )
-        self._persisted_part_mesh_settings_by_input_path = dict(
-            settings.get("part_mesh_settings_by_input_path", {})
-        )
-
-    def _read_settings(self) -> dict:
-        if not self.SETTINGS_PATH.exists():
-            return {}
-        try:
-            payload = json.loads(self.SETTINGS_PATH.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return {}
-        if not isinstance(payload, dict):
-            return {}
-        wind_group_settings = payload.get("wind_group_settings", {})
-        if not isinstance(wind_group_settings, dict):
-            wind_group_settings = {}
-        wind_group_settings_by_input_path = payload.get("wind_group_settings_by_input_path", {})
-        if not isinstance(wind_group_settings_by_input_path, dict):
-            wind_group_settings_by_input_path = {}
-        part_mesh_settings = payload.get("part_mesh_settings_by_input_path", {})
-        if not isinstance(part_mesh_settings, dict):
-            part_mesh_settings = {}
-        base_material_settings = payload.get("base_material_settings_by_input_path", {})
-        if not isinstance(base_material_settings, dict):
-            base_material_settings = {}
-        return {
-            "cpu_profile": payload.get("cpu_profile", CpuProfile.BALANCED.value),
-            "preserve_temp_files": payload.get("preserve_temp_files", False),
-            "material_policy": MaterialPolicy.parse(
-                payload.get("material_policy", MaterialPolicy.SOURCE_MATERIAL_ROLES.value)
-            ).value,
-            "bark_material_path": payload.get("bark_material_path", ""),
-            "leaves_material_path": payload.get("leaves_material_path", ""),
-            "single_material_path": payload.get("single_material_path", ""),
-            "gust_attenuation": payload.get("gust_attenuation", 0.0),
-            "is_ground_cover": payload.get("is_ground_cover", False),
-            "wind_group_settings": {
-                str(key): value
-                for key, value in wind_group_settings.items()
-                if isinstance(value, dict)
-            },
-            "wind_group_settings_by_input_path": {
-                str(key): {
-                    str(group_key): group_value
-                    for group_key, group_value in group_settings.items()
-                    if isinstance(group_value, dict)
-                }
-                for key, group_settings in wind_group_settings_by_input_path.items()
-                if isinstance(group_settings, dict)
-            },
-            "base_material_settings_by_input_path": {
-                str(key): value
-                for key, value in base_material_settings.items()
-                if isinstance(value, list)
-            },
-            "part_mesh_settings_by_input_path": {
-                str(key): value
-                for key, value in part_mesh_settings.items()
-                if isinstance(value, list)
-            },
-        }
+        self._persisted_wind_group_settings_by_input_path = dict(settings.wind_group_settings_by_input_path)
+        self._persisted_base_material_settings_by_input_path = dict(settings.base_material_settings_by_input_path)
+        self._persisted_part_mesh_settings_by_input_path = dict(settings.part_mesh_settings_by_input_path)
 
     def _save_settings(self) -> None:
         try:
@@ -1979,7 +1660,6 @@ class ConversionApp:
                 except tk.TclError:
                     pass
                 self._pending_settings_save_job = None
-            self.SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
             base_material_settings_by_input_path = dict(self._persisted_base_material_settings_by_input_path)
             part_mesh_settings_by_input_path = dict(self._persisted_part_mesh_settings_by_input_path)
             wind_group_settings_by_input_path = dict(self._persisted_wind_group_settings_by_input_path)
@@ -2001,54 +1681,53 @@ class ConversionApp:
                     wind_group_settings_by_input_path[self._current_wind_settings_key] = current_wind_group_settings
                 else:
                     wind_group_settings_by_input_path.pop(self._current_wind_settings_key, None)
-            payload = {
-                "material_policy": self._current_material_policy().value,
-                "bark_material_path": self.bark_material_var.get().strip(),
-                "leaves_material_path": self.leaves_material_var.get().strip(),
-                "single_material_path": self.single_material_var.get().strip(),
-                "gust_attenuation": round(float(self.gust_attenuation_var.get()), 4),
-                "is_ground_cover": bool(self.is_ground_cover_var.get()),
-                "wind_group_settings": current_wind_group_settings,
-            }
-            if self._current_cpu_profile() != CpuProfile.BALANCED:
-                payload["cpu_profile"] = self._current_cpu_profile().value
-            if bool(self.preserve_temp_files_var.get()):
-                payload["preserve_temp_files"] = True
-            if part_mesh_settings_by_input_path:
-                payload["part_mesh_settings_by_input_path"] = part_mesh_settings_by_input_path
-            if base_material_settings_by_input_path:
-                payload["base_material_settings_by_input_path"] = base_material_settings_by_input_path
-            if wind_group_settings_by_input_path:
-                payload["wind_group_settings_by_input_path"] = wind_group_settings_by_input_path
-            self.SETTINGS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            save_gui_settings(
+                self.SETTINGS_PATH,
+                GuiSettingsSnapshot(
+                    last_input_path=self.input_var.get().strip(),
+                    last_output_path=self.output_var.get().strip(),
+                    cpu_profile=self._current_cpu_profile(),
+                    preserve_temp_files=bool(self.preserve_temp_files_var.get()),
+                    material_policy=self._current_material_policy(),
+                    bark_material_path=self.bark_material_var.get().strip(),
+                    leaves_material_path=self.leaves_material_var.get().strip(),
+                    single_material_path=self.single_material_var.get().strip(),
+                    gust_attenuation=float(self.gust_attenuation_var.get()),
+                    is_ground_cover=bool(self.is_ground_cover_var.get()),
+                    wind_group_settings=current_wind_group_settings,
+                    wind_group_settings_by_input_path=wind_group_settings_by_input_path,
+                    base_material_settings_by_input_path=base_material_settings_by_input_path,
+                    part_mesh_settings_by_input_path=part_mesh_settings_by_input_path,
+                ),
+            )
             self._persisted_base_material_settings_by_input_path = base_material_settings_by_input_path
             self._persisted_part_mesh_settings_by_input_path = part_mesh_settings_by_input_path
             self._persisted_wind_group_settings_by_input_path = wind_group_settings_by_input_path
         except OSError:
             return
 
-    def _serialize_base_material_settings(self) -> list[dict[str, object]]:
+    def _serialize_base_material_settings(self) -> tuple[BaseMaterialSettingRecord, ...]:
         if not self._base_material_rows:
-            return []
-        serialized: list[dict[str, object]] = []
+            return ()
+        serialized: list[BaseMaterialSettingRecord] = []
         for row in self._base_material_rows:
             ue_asset_path = str(row["material_path_var"].get()).strip()
             if not ue_asset_path:
                 continue
             serialized.append(
-                {
-                    "source_id": int(row["source_id"]),
-                    "source_name": str(row["source_name"]),
-                    "ue_asset_path": ue_asset_path,
-                }
+                BaseMaterialSettingRecord(
+                    source_id=int(row["source_id"]),
+                    source_name=str(row["source_name"]),
+                    ue_asset_path=ue_asset_path,
+                )
             )
-        return serialized
+        return tuple(serialized)
 
-    def _serialize_part_mesh_settings(self) -> list[dict[str, object]]:
+    def _serialize_part_mesh_settings(self) -> tuple[PartSourceSettingRecord, ...]:
         if not self._part_mesh_rows:
-            return []
+            return ()
 
-        serialized: list[dict[str, object]] = []
+        serialized: list[PartSourceSettingRecord] = []
         for row in self._part_mesh_rows:
             source_mode = PrototypeSourceMode(str(row["source_mode_var"].get()))
             use_unreal_reference = bool(row["use_unreal_var"].get())
@@ -2071,41 +1750,34 @@ class ConversionApp:
                 and not material_slot_overrides
             ):
                 continue
-            record = {
-                "source_name": str(row["source_name"]),
-                "source_key": str(row["source_key"]),
-            }
-            if source_mode == PrototypeSourceMode.UNREAL_ASSET:
-                record["use_unreal_reference"] = True
-                record["unreal_asset_path"] = asset_path
-            elif source_mode == PrototypeSourceMode.FBX_FILE:
-                record["source_mode"] = PrototypeSourceMode.FBX_FILE.value
-                record["fbx_path"] = fbx_path
-                record["fbx_material_mode"] = fbx_material_mode.value
-            else:
-                record["source_mode"] = PrototypeSourceMode.XML_MESH.value
-                record["fbx_material_mode"] = fbx_material_mode.value
-            if single_material_path:
-                record["single_material_path"] = single_material_path
-            if black_material_path:
-                record["black_material_path"] = black_material_path
-            if white_material_path:
-                record["white_material_path"] = white_material_path
-            if material_slot_overrides:
-                record["fbx_material_slot_overrides"] = [
-                    {
-                        "slot_name": override.slot_name,
-                        "ue_asset_path": override.ue_asset_path or "",
-                    }
-                    for override in material_slot_overrides
-                ]
-            serialized.append(record)
-        return serialized
+            if use_unreal_reference and source_mode != PrototypeSourceMode.UNREAL_ASSET:
+                source_mode = PrototypeSourceMode.UNREAL_ASSET
+            serialized.append(
+                PartSourceSettingRecord(
+                    source_name=str(row["source_name"]),
+                    source_key=str(row["source_key"]),
+                    source_mode=source_mode,
+                    unreal_asset_path=asset_path,
+                    fbx_path=fbx_path,
+                    fbx_material_mode=fbx_material_mode,
+                    single_material_path=single_material_path,
+                    black_material_path=black_material_path,
+                    white_material_path=white_material_path,
+                    fbx_material_slot_overrides=tuple(
+                        FbxMaterialSlotSettingRecord(
+                            slot_name=override.slot_name,
+                            ue_asset_path=override.ue_asset_path or "",
+                        )
+                        for override in material_slot_overrides
+                    ),
+                )
+            )
+        return tuple(serialized)
 
-    def _serialize_wind_group_settings(self) -> dict[str, dict[str, object]]:
+    def _serialize_wind_group_settings(self) -> dict[str, WindGroupSettingRecord]:
         if not self._wind_group_rows:
             return dict(self._persisted_wind_group_settings)
-        serialized: dict[str, dict[str, object]] = {}
+        serialized: dict[str, WindGroupSettingRecord] = {}
         for row in self._wind_group_rows:
             group_index = int(row["group_index"])
             dual_influence_var = row["dual_influence_var"]
@@ -2113,22 +1785,15 @@ class ConversionApp:
             min_influence_var = row["min_influence_var"]
             max_influence_var = row["max_influence_var"]
             shift_var = row["shift_var"]
-            serialized[str(group_index)] = {
-                "use_dual_influence": bool(dual_influence_var.get()),
-                "influence": round(float(influence_var.get()), 4),
-                "min_influence": round(float(min_influence_var.get()), 4),
-                "max_influence": round(float(max_influence_var.get()), 4),
-                "shift_top": round(float(shift_var.get()), 4),
-            }
+            serialized[str(group_index)] = WindGroupSettingRecord(
+                use_dual_influence=bool(dual_influence_var.get()),
+                influence=float(influence_var.get()),
+                min_influence=float(min_influence_var.get()),
+                max_influence=float(max_influence_var.get()),
+                shift_top=float(shift_var.get()),
+            )
         self._persisted_wind_group_settings = serialized
         return serialized
-
-    def _derive_wind_json_output_path(self) -> Path:
-        output_path = self.output_var.get().strip()
-        if output_path:
-            resolved_output = Path(output_path)
-            return resolved_output.with_name(f"{resolved_output.stem}_DynamicWind.json")
-        return Path(self.input_var.get().strip()).with_name(f"{Path(self.input_var.get().strip()).stem}_DynamicWind.json")
 
     def _rebuild_wind_group_controls(self, groups: tuple[DynamicWindSimulationGroup, ...]) -> None:
         for child in self.wind_groups_container.winfo_children():
@@ -2253,8 +1918,8 @@ class ConversionApp:
         self._save_settings()
 
     def _persisted_group_value(self, group_index: int, field_name: str, default: float) -> float:
-        persisted = self._persisted_wind_group_settings.get(str(group_index), {})
-        value = persisted.get(field_name, default)
+        persisted = self._persisted_wind_group_settings.get(str(group_index))
+        value = getattr(persisted, field_name, default)
         try:
             numeric_value = float(value)
         except (TypeError, ValueError):
@@ -2263,8 +1928,8 @@ class ConversionApp:
         return max(0.0, min(numeric_value, maximum))
 
     def _persisted_group_bool(self, group_index: int, field_name: str, default: bool) -> bool:
-        persisted = self._persisted_wind_group_settings.get(str(group_index), {})
-        value = persisted.get(field_name, default)
+        persisted = self._persisted_wind_group_settings.get(str(group_index))
+        value = getattr(persisted, field_name, default)
         if isinstance(value, bool):
             return value
         if isinstance(value, str):
@@ -2330,53 +1995,47 @@ class ConversionApp:
 
 def format_conversion_results(
     results,
-    cpu_profile: CpuProfile = CpuProfile.BALANCED,
-    cleanup_policy: CleanupPolicy = CleanupPolicy.EPHEMERAL,
-    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES,
-    bark_material_path: str | None = None,
-    leaves_material_path: str | None = None,
-    single_material_path: str | None = None,
-    base_material_overrides: tuple[BaseMaterialOverride, ...] = (),
-    use_explicit_material_contract: bool = False,
-    prototype_source_configs: tuple[PrototypeSourceConfig, ...] = (),
-    use_existing_part_meshes: bool = False,
-    part_mesh_asset_paths: tuple[tuple[str, str], ...] = (),
+    request: ConversionRequest,
 ) -> str:
     lines: list[str] = [
-        f"CPU profile: {cpu_profile.value}",
-        f"Cleanup policy: {cleanup_policy.value}",
+        f"CPU profile: {request.cpu_profile.value}",
+        f"Cleanup policy: {request.cleanup_policy.value}",
     ]
-    if use_explicit_material_contract:
+    if request.use_explicit_material_contract:
         lines.append("Material contract: explicit_base_and_part_materials")
-        if base_material_overrides:
+        if request.base_material_overrides:
             lines.append("Base XML material overrides:")
-            for override in base_material_overrides:
+            for override in request.base_material_overrides:
                 lines.append(
                     f"  - {override.source_name or f'Material_{override.source_id}'} "
                     f"(ID {override.source_id}): {override.ue_asset_path or '<none>'}"
                 )
             lines.append("")
     else:
-        lines.append(f"Material policy: {material_policy.value}")
-    if not use_explicit_material_contract and material_policy == MaterialPolicy.SINGLE_MATERIAL and single_material_path:
-        lines.append(f"Single material path: {single_material_path}")
+        lines.append(f"Material policy: {request.material_policy.value}")
+    if (
+        not request.use_explicit_material_contract
+        and request.material_policy == MaterialPolicy.SINGLE_MATERIAL
+        and request.single_material_path
+    ):
+        lines.append(f"Single material path: {request.single_material_path}")
         lines.append("")
-    elif not use_explicit_material_contract and (bark_material_path or leaves_material_path):
+    elif not request.use_explicit_material_contract and (request.bark_material_path or request.leaves_material_path):
         lines.append("Material overrides:")
-        lines.append(f"  - bark: {bark_material_path or '<none>'}")
-        lines.append(f"  - leaves: {leaves_material_path or '<none>'}")
+        lines.append(f"  - bark: {request.bark_material_path or '<none>'}")
+        lines.append(f"  - leaves: {request.leaves_material_path or '<none>'}")
         lines.append("")
-    if use_existing_part_meshes:
+    if request.use_existing_part_meshes:
         lines.append("Existing PartMesh overrides:")
-        if part_mesh_asset_paths:
-            for source_key, asset_path in part_mesh_asset_paths:
+        if request.part_mesh_asset_paths:
+            for source_key, asset_path in request.part_mesh_asset_paths:
                 lines.append(f"  - {source_key}: {asset_path}")
         else:
             lines.append("  - enabled with no explicit mappings")
         lines.append("")
-    if prototype_source_configs:
+    if request.prototype_source_configs:
         lines.append("Prototype source overrides:")
-        for config in prototype_source_configs:
+        for config in request.prototype_source_configs:
             source_label = config.source_name or config.source_key
             if config.mode == PrototypeSourceMode.UNREAL_ASSET:
                 lines.append(f"  - {source_label}: unreal_asset -> {config.asset_path or '<missing>'}")
@@ -2386,7 +2045,7 @@ def format_conversion_results(
                 )
             else:
                 lines.append(f"  - {source_label}: xml_mesh[{config.fbx_material_mode.value}]")
-            if use_explicit_material_contract and config.mode != PrototypeSourceMode.UNREAL_ASSET:
+            if request.use_explicit_material_contract and config.mode != PrototypeSourceMode.UNREAL_ASSET:
                 lines.append(f"      single: {config.single_material_path or '<none>'}")
                 lines.append(f"      black: {config.black_material_path or '<none>'}")
                 lines.append(f"      white: {config.white_material_path or '<none>'}")
@@ -2461,12 +2120,6 @@ def format_wind_json_result(result) -> str:
             f"Group {group.group_index}: mode={mode}, level={group.branch_order}, {influence_info}, shiftTop={shift_top:.2f}, trunk={group.is_trunk_group}"
         )
     return "\n".join(lines)
-
-
-def _is_valid_unreal_asset_path(path: str) -> bool:
-    return path.startswith("/Game/")
-
-
 def _format_telemetry_status(telemetry: ConversionTelemetry) -> str:
     detail = telemetry.message or telemetry.phase.value.replace("_", " ").title()
     progress = ""

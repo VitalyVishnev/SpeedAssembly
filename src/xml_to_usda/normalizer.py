@@ -1,7 +1,6 @@
 ﻿from __future__ import annotations
 
 import math
-import re
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from dataclasses import replace
@@ -32,13 +31,12 @@ from .models import (
     Vector2,
     Vector3,
 )
+from .skeleton_rules import joint_name_from_bone_id, parse_generator_label
 from .source_transform import SourceTransform, build_source_transform
 
 
 PRIMARY_MATERIAL_ID = 1
 LEAVES_MATERIAL_ID = 2
-_GENERATOR_LEVEL_PATTERN = re.compile(r"^Group_(?P<level>\d+)(?:[ _-]\d+)?$", re.IGNORECASE)
-_GENERATOR_SUFFIX_LEVEL_PATTERN = re.compile(r"^(?P<label>.+?)[ _-](?P<level>\d+)$", re.IGNORECASE)
 
 
 def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> CanonicalTreeModel:
@@ -435,7 +433,7 @@ def _extract_skeleton(root: ET.Element, messages: list[str], source_transform: S
         parsed_parent_id = None
         if parent_id not in {None, "", "-1"} and parent_id.lstrip("-").isdigit():
             parsed_parent_id = int(parent_id)
-        generator_label, generator_level = _parse_generator_label(bone.attrib.get("Generator"), int(bone_id))
+        generator_label, generator_level = parse_generator_label(bone.attrib.get("Generator"), int(bone_id))
         raw_bones.append(
             (
                 int(bone_id),
@@ -449,7 +447,7 @@ def _extract_skeleton(root: ET.Element, messages: list[str], source_transform: S
     start_by_id = {bone_id: start for bone_id, _, start, _, _ in raw_bones}
     joints: list[Joint] = []
     for bone_id, parsed_parent_id, start, generator_label, generator_level in raw_bones:
-        parent = _joint_name_from_bone_id(parsed_parent_id) if parsed_parent_id is not None else None
+        parent = joint_name_from_bone_id(parsed_parent_id) if parsed_parent_id is not None else None
         if parsed_parent_id is None or parsed_parent_id not in start_by_id:
             rest_translate = start
         else:
@@ -461,7 +459,7 @@ def _extract_skeleton(root: ET.Element, messages: list[str], source_transform: S
             )
         joints.append(
             Joint(
-                name=_joint_name_from_bone_id(bone_id),
+                name=joint_name_from_bone_id(bone_id),
                 source_id=bone_id,
                 parent=parent,
                 generator_label=generator_label,
@@ -471,23 +469,6 @@ def _extract_skeleton(root: ET.Element, messages: list[str], source_transform: S
             )
         )
     return joints
-
-
-def _parse_generator_label(generator_label: str | None, bone_id: int) -> tuple[str | None, int | None]:
-    if generator_label is None or not generator_label.strip():
-        return None, None
-
-    normalized_label = " ".join(generator_label.strip().split())
-    lower_label = normalized_label.lower()
-    if lower_label in {"trunk", "root"}:
-        return normalized_label, 0
-    match = _GENERATOR_LEVEL_PATTERN.match(normalized_label)
-    if match is not None:
-        return normalized_label, int(match.group("level"))
-    suffix_match = _GENERATOR_SUFFIX_LEVEL_PATTERN.match(normalized_label)
-    if suffix_match is not None:
-        return normalized_label, int(suffix_match.group("level"))
-    return normalized_label, None
 
 
 def _extract_assembly_parts_from_leaf_references(
@@ -588,7 +569,7 @@ def _resolve_source_object_joint_name(source_object: SourceObject, skeleton: tup
     joint_names = {joint.name for joint in skeleton}
     if source_object.object_id.isdigit():
         numeric_id = int(source_object.object_id)
-        candidate_joint = _joint_name_from_bone_id(numeric_id)
+        candidate_joint = joint_name_from_bone_id(numeric_id)
         if candidate_joint in joint_names:
             return candidate_joint
     return None
@@ -778,12 +759,6 @@ def _vector_from_named_attributes(
     ))
 
 
-def _joint_name_from_bone_id(bone_id: int | None) -> str:
-    if bone_id is None:
-        return "root"
-    return "root" if bone_id == 0 else f"bone_{bone_id:03d}"
-
-
 def _capture_token_from_bone_id(bone_id: int | None) -> str:
     return f"Tree_point_{bone_id or 0}"
 
@@ -795,7 +770,7 @@ def _capture_token_from_joint(joint: Joint, fallback_index: int) -> str:
 def _binding_from_bone_id(source_bone_id: int | None) -> InstanceBinding:
     if source_bone_id is None:
         return InstanceBinding(joint_tokens=(), weights=())
-    token = _joint_name_from_bone_id(source_bone_id)
+    token = joint_name_from_bone_id(source_bone_id)
     return InstanceBinding(joint_tokens=(token,), weights=(1.0,))
 
 

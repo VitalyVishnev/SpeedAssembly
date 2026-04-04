@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from dataclasses import replace
 from pathlib import Path
 
+from .asset_paths import is_valid_unreal_asset_path, normalize_unreal_asset_path
 from .fbx_adapter import load_fbx_geometry
 from .job_control import cpu_worker_count, emit_telemetry, throw_if_cancelled
 from .naming import make_stable_prim_name
@@ -24,6 +25,7 @@ from .models import (
     PrototypeSourceConfig,
     PrototypeSourceMode,
 )
+from .prototype_keys import normalize_prototype_source_key
 
 
 @dataclass(frozen=True)
@@ -89,8 +91,6 @@ def apply_prototype_source_configs(
     model: CanonicalTreeModel,
     prototype_source_configs: tuple[PrototypeSourceConfig, ...],
     *,
-    normalize_asset_path,
-    is_valid_unreal_asset_path,
     cpu_profile: CpuProfile = CpuProfile.BALANCED,
     telemetry_callback=None,
     cancel_event=None,
@@ -99,7 +99,7 @@ def apply_prototype_source_configs(
     if not prototype_source_configs:
         return model
 
-    normalized_configs = _normalize_prototype_source_configs(prototype_source_configs, normalize_asset_path, is_valid_unreal_asset_path)
+    normalized_configs = _normalize_prototype_source_configs(prototype_source_configs)
     metadata = model.metadata
     used_keys: set[str] = set()
     matched_configs: list[PrototypeSourceConfig | None] = []
@@ -274,24 +274,28 @@ def apply_prototype_source_configs(
 
 def _normalize_prototype_source_configs(
     prototype_source_configs: tuple[PrototypeSourceConfig, ...],
-    normalize_asset_path,
-    is_valid_unreal_asset_path,
 ) -> dict[str, PrototypeSourceConfig]:
     overrides: dict[str, PrototypeSourceConfig] = {}
     for config in prototype_source_configs:
-        source_key = normalize_prototype_override_key(config.source_name or config.source_key)
+        source_key = normalize_prototype_source_key(config.source_name or config.source_key)
         if not source_key:
             raise ValueError("Prototype source config keys must not be empty.")
 
         normalized = replace(
             config,
-            single_material_path=normalize_asset_path(config.single_material_path) if config.single_material_path else None,
-            black_material_path=normalize_asset_path(config.black_material_path) if config.black_material_path else None,
-            white_material_path=normalize_asset_path(config.white_material_path) if config.white_material_path else None,
+            single_material_path=normalize_unreal_asset_path(config.single_material_path)
+            if config.single_material_path
+            else None,
+            black_material_path=normalize_unreal_asset_path(config.black_material_path)
+            if config.black_material_path
+            else None,
+            white_material_path=normalize_unreal_asset_path(config.white_material_path)
+            if config.white_material_path
+            else None,
             fbx_material_slot_overrides=tuple(
                 FbxMaterialSlotOverride(
                     slot_name=override.slot_name,
-                    ue_asset_path=normalize_asset_path(override.ue_asset_path)
+                    ue_asset_path=normalize_unreal_asset_path(override.ue_asset_path)
                     if override.ue_asset_path
                     else None,
                 )
@@ -299,7 +303,7 @@ def _normalize_prototype_source_configs(
             ),
         )
         if config.mode == PrototypeSourceMode.UNREAL_ASSET:
-            asset_path = normalize_asset_path(config.asset_path or "")
+            asset_path = normalize_unreal_asset_path(config.asset_path or "")
             if not is_valid_unreal_asset_path(asset_path):
                 raise ValueError(f"PartMesh asset path for {source_key} must start with /Game/.")
             normalized = replace(normalized, asset_path=asset_path)
@@ -316,19 +320,6 @@ def _normalize_prototype_source_configs(
             raise ValueError(f"Duplicate prototype source config for {source_key} uses conflicting values.")
         overrides[source_key] = normalized
     return overrides
-
-
-def normalize_prototype_override_key(raw_key: str) -> str:
-    key = raw_key.strip()
-    if not key:
-        return ""
-    lower_key = key.lower()
-    for prefix in ("mesh_", "meshid:", "mesh_id:"):
-        if lower_key.startswith(prefix) and key[len(prefix):].strip().isdigit():
-            return f"Mesh_{int(key[len(prefix):].strip())}"
-    if key.isdigit():
-        return f"Mesh_{int(key)}"
-    return key
 
 
 def _coerce_optional_string(value) -> str | None:
