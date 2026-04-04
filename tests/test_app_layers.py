@@ -89,6 +89,185 @@ def _build_tk_root_or_skip():
     return tkinter, root
 
 
+class _DummyAsyncProcess:
+    def is_alive(self) -> bool:
+        return False
+
+    def join(self, timeout=None) -> None:
+        return None
+
+
+def _normalize_source_override_semantics(
+    prototype_source_configs: tuple[PrototypeSourceConfig, ...],
+    part_mesh_asset_paths: tuple[tuple[str, str], ...],
+) -> tuple[tuple[object, ...], ...]:
+    records: list[tuple[object, ...]] = []
+    for config in prototype_source_configs:
+        records.append(
+            (
+                config.source_name or config.source_key,
+                config.mode.value,
+                config.asset_path,
+                config.fbx_path,
+                config.fbx_material_mode.value,
+                config.single_material_path,
+                config.black_material_path,
+                config.white_material_path,
+                tuple((override.slot_name, override.ue_asset_path) for override in config.fbx_material_slot_overrides),
+            )
+        )
+    for source_key, asset_path in part_mesh_asset_paths:
+        records.append(
+            (
+                source_key,
+                PrototypeSourceMode.UNREAL_ASSET.value,
+                asset_path,
+                None,
+                FbxMaterialMode.AUTO.value,
+                None,
+                None,
+                None,
+                (),
+            )
+        )
+    return tuple(dict.fromkeys(records))
+
+
+def _effective_base_material_overrides(
+    base_material_overrides: tuple[BaseMaterialOverride, ...],
+) -> tuple[BaseMaterialOverride, ...]:
+    return tuple(
+        override
+        for override in base_material_overrides
+        if override.ue_asset_path
+    )
+
+
+def _normalize_sync_conversion_semantics(call: dict[str, object]) -> dict[str, object]:
+    return {
+        "input_paths": (call["input_path"],),
+        "output_path": call["output_path"],
+        "output_mode": call.get("output_mode", OutputMode.SELF_CONTAINED),
+        "material_policy": call.get("material_policy", MaterialPolicy.SOURCE_MATERIAL_ROLES),
+        "bark_material_path": call.get("bark_material_path"),
+        "leaves_material_path": call.get("leaves_material_path"),
+        "single_material_path": call.get("single_material_path"),
+        "base_material_overrides": _effective_base_material_overrides(call.get("base_material_overrides", ())),
+        "cpu_profile": call.get("cpu_profile", CpuProfile.BALANCED),
+        "cleanup_policy": call.get("cleanup_policy", CleanupPolicy.EPHEMERAL),
+        "use_explicit_material_contract": call.get("use_explicit_material_contract", False),
+        "source_override_semantics": _normalize_source_override_semantics(
+            call.get("prototype_source_configs", ()),
+            call.get("part_mesh_asset_paths", ()),
+        ),
+    }
+
+
+def _normalize_async_request_semantics(request: ConversionRequest) -> dict[str, object]:
+    return {
+        "input_paths": request.input_paths,
+        "output_path": request.output_path,
+        "output_mode": request.output_mode,
+        "material_policy": request.material_policy,
+        "bark_material_path": request.bark_material_path,
+        "leaves_material_path": request.leaves_material_path,
+        "single_material_path": request.single_material_path,
+        "base_material_overrides": _effective_base_material_overrides(request.base_material_overrides),
+        "cpu_profile": request.cpu_profile,
+        "cleanup_policy": request.cleanup_policy,
+        "use_explicit_material_contract": request.use_explicit_material_contract,
+        "source_override_semantics": _normalize_source_override_semantics(
+            request.prototype_source_configs,
+            request.part_mesh_asset_paths,
+        ),
+    }
+
+
+def _capture_sync_conversion_semantics(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, configure_app) -> dict[str, object]:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    calls: list[dict[str, object]] = []
+
+    def fake_convert_file(input_path, output_path, output_mode=OutputMode.SELF_CONTAINED, **kwargs):
+        calls.append(
+            {
+                "input_path": input_path,
+                "output_path": output_path,
+                "output_mode": output_mode,
+                **kwargs,
+            }
+        )
+        return ConversionResult(
+            input_path=input_path,
+            output_path=output_path,
+            diagnostics=(),
+            usda_document=Mock(),
+        )
+
+    monkeypatch.setattr("xml_to_usda.gui.convert_file", fake_convert_file)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+    monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        app.output_var.set("out.usda")
+        configure_app(app)
+        app.run_conversion()
+        assert len(calls) == 1
+        return _normalize_sync_conversion_semantics(calls[0])
+    finally:
+        root.destroy()
+
+
+def _capture_async_request_semantics(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    configure_app,
+    *,
+    force_threshold: bool,
+) -> dict[str, object]:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    captured: dict[str, object] = {}
+    convert_mock = Mock()
+
+    def fake_start_conversion_process(request, *, runtime_paths):
+        captured["request"] = request
+        captured["runtime_paths"] = runtime_paths
+        return _DummyAsyncProcess(), object(), object()
+
+    monkeypatch.setattr("xml_to_usda.gui.start_conversion_process", fake_start_conversion_process)
+    monkeypatch.setattr("xml_to_usda.gui.convert_file", convert_mock)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ConversionApp, "_schedule_conversion_queue_poll", lambda self: None)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+    monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
+    if force_threshold:
+        monkeypatch.setattr(ConversionApp, "ASYNC_CONVERSION_THRESHOLD_BYTES", 0)
+    else:
+        monkeypatch.setattr(ConversionApp, "ASYNC_CONVERSION_THRESHOLD_BYTES", 1_000_000_000)
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        app.output_var.set("out.usda")
+        configure_app(app)
+        app.run_conversion()
+        convert_mock.assert_not_called()
+        assert "request" in captured
+        return _normalize_async_request_semantics(captured["request"])
+    finally:
+        root.destroy()
+
+
 def test_gui_smoke_builds_window() -> None:
     _, root = _build_tk_root_or_skip()
     from xml_to_usda.gui import ConversionApp
@@ -464,6 +643,156 @@ def test_gui_run_conversion_passes_part_mesh_xml_names(
             root.destroy()
         except Exception:
             pass
+
+
+def test_gui_default_conversion_semantics_match_between_sync_and_async_threshold_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def configure_app(_app) -> None:
+        return None
+
+    sync_semantics = _capture_sync_conversion_semantics(monkeypatch, tmp_path / "sync", configure_app)
+    async_semantics = _capture_async_request_semantics(
+        monkeypatch,
+        tmp_path / "async",
+        configure_app,
+        force_threshold=True,
+    )
+
+    assert async_semantics == sync_semantics
+
+
+def test_gui_single_material_conversion_semantics_match_between_sync_and_async_threshold_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def configure_app(app) -> None:
+        app.material_policy_var.set(MaterialPolicy.SINGLE_MATERIAL.value)
+        app.single_material_var.set("/Game/Assembly/Fern/M_Fern.M_Fern")
+
+    sync_semantics = _capture_sync_conversion_semantics(monkeypatch, tmp_path / "sync", configure_app)
+    async_semantics = _capture_async_request_semantics(
+        monkeypatch,
+        tmp_path / "async",
+        configure_app,
+        force_threshold=True,
+    )
+
+    assert async_semantics == sync_semantics
+
+
+def test_gui_explicit_base_material_override_semantics_match_between_sync_and_async_threshold_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def configure_app(app) -> None:
+        app.cpu_profile_var.set(CpuProfile.QUIET.value)
+        app.preserve_temp_files_var.set(True)
+        app._base_material_rows[0]["material_path_var"].set("/Game/TestMaterials/M_Bark_Test")
+
+    sync_semantics = _capture_sync_conversion_semantics(monkeypatch, tmp_path / "sync", configure_app)
+    async_semantics = _capture_async_request_semantics(
+        monkeypatch,
+        tmp_path / "async",
+        configure_app,
+        force_threshold=True,
+    )
+
+    assert async_semantics == sync_semantics
+
+
+def test_gui_explicit_xml_part_material_semantics_match_between_sync_and_async_threshold_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def configure_app(app) -> None:
+        app.cpu_profile_var.set(CpuProfile.QUIET.value)
+        app.preserve_temp_files_var.set(True)
+        row = app._part_mesh_rows[0]
+        row["fbx_material_mode_var"].set(FbxMaterialMode.SINGLE_MATERIAL.value)
+        row["single_material_var"].set("/Game/TreeParts/M_Twig.M_Twig")
+
+    sync_semantics = _capture_sync_conversion_semantics(monkeypatch, tmp_path / "sync", configure_app)
+    async_semantics = _capture_async_request_semantics(
+        monkeypatch,
+        tmp_path / "async",
+        configure_app,
+        force_threshold=True,
+    )
+
+    assert async_semantics == sync_semantics
+
+
+def test_gui_unreal_asset_part_override_semantics_match_between_sync_and_async_threshold_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def configure_app(app) -> None:
+        row = app._part_mesh_rows[0]
+        row["use_unreal_var"].set(True)
+        row["asset_var"].set("/Game/TreeParts/SK_Twig01.SK_Twig01")
+
+    sync_semantics = _capture_sync_conversion_semantics(monkeypatch, tmp_path / "sync", configure_app)
+    async_semantics = _capture_async_request_semantics(
+        monkeypatch,
+        tmp_path / "async",
+        configure_app,
+        force_threshold=True,
+    )
+
+    assert async_semantics == sync_semantics
+
+
+def test_gui_fbx_part_override_builds_async_request_without_using_sync_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_fbx_path = tmp_path / "spruce_branch.fbx"
+    fake_fbx_path.write_text("", encoding="utf-8")
+
+    def configure_app(app) -> None:
+        app.cpu_profile_var.set(CpuProfile.QUIET.value)
+        app.preserve_temp_files_var.set(True)
+        row = app._part_mesh_rows[0]
+        row["source_mode_var"].set(PrototypeSourceMode.FBX_FILE.value)
+        row["fbx_var"].set(str(fake_fbx_path))
+        row["fbx_material_mode_var"].set(FbxMaterialMode.SINGLE_MATERIAL.value)
+        row["single_material_var"].set("/Game/TreeParts/M_Twig.M_Twig")
+
+    async_semantics = _capture_async_request_semantics(
+        monkeypatch,
+        tmp_path / "async",
+        configure_app,
+        force_threshold=False,
+    )
+
+    assert async_semantics == {
+        "input_paths": (str(SIMPLE_TREE_01),),
+        "output_path": "out.usda",
+        "output_mode": OutputMode.SELF_CONTAINED,
+        "material_policy": MaterialPolicy.SOURCE_MATERIAL_ROLES,
+        "bark_material_path": None,
+        "leaves_material_path": None,
+        "single_material_path": None,
+        "base_material_overrides": (),
+        "cpu_profile": CpuProfile.QUIET,
+        "cleanup_policy": CleanupPolicy.PRESERVE_FOR_DEBUGGING,
+        "use_explicit_material_contract": True,
+        "source_override_semantics": (
+            (
+                "Twig_01",
+                PrototypeSourceMode.FBX_FILE.value,
+                None,
+                str(fake_fbx_path.resolve()),
+                FbxMaterialMode.SINGLE_MATERIAL.value,
+                "/Game/TreeParts/M_Twig.M_Twig",
+                None,
+                None,
+                (),
+            ),
+        ),
+    }
 
 
 def test_gui_refresh_wind_groups_builds_slider_rows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
