@@ -56,6 +56,7 @@ from xml_to_usda.prototype_sources import load_prototype_source_configs_from_jso
 from xml_to_usda.runtime_paths import resolve_runtime_paths
 from xml_to_usda.source_transform import build_source_transform
 from xml_to_usda.ue_schema import DEFAULT_UE_SCHEMA_CONTRACT
+from xml_to_usda.usda_authoring import author_usda_stream, author_usda_text, build_authoring_context
 from xml_to_usda.usda_writer import render_usda, write_usda_document
 from xml_to_usda.validator import validate_model
 from xml_to_usda.xml_reader import inspect_xml, read_source_xml, render_inspect_report
@@ -2204,6 +2205,34 @@ def test_streaming_writer_matches_rendered_usda_logically_for_small_fbx_payload(
     assert written.stats.streamed is True
     assert output_path.exists()
     assert _normalize_usda_logical_text(output_path.read_text(encoding="utf-8")) == _normalize_usda_logical_text(rendered.text)
+
+
+def test_authoring_engine_matches_text_and_file_sinks_for_baseline_model(tmp_path: Path) -> None:
+    _, model, diagnostics = load_canonical_model(str(SIMPLE_TREE_01))
+    context = build_authoring_context(model, diagnostics, base_mesh_name="UnifiedBaseline")
+
+    text_output = author_usda_text(context)
+    output_path = tmp_path / "authoring_engine_baseline.usda"
+    with output_path.open("w", encoding="utf-8") as handle:
+        author_usda_stream(handle, context)
+
+    assert _normalize_usda_emitted_text(output_path.read_text(encoding="utf-8")) == _normalize_usda_emitted_text(text_output)
+
+
+def test_authoring_engine_matches_text_and_file_sinks_for_external_asset_prototypes(tmp_path: Path) -> None:
+    _, model, diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        use_existing_part_meshes=True,
+        part_mesh_asset_paths=(("Mesh_1", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
+    )
+    context = build_authoring_context(model, diagnostics, base_mesh_name="UnifiedExternal")
+
+    text_output = author_usda_text(context)
+    output_path = tmp_path / "authoring_engine_external.usda"
+    with output_path.open("w", encoding="utf-8") as handle:
+        author_usda_stream(handle, context)
+
+    assert _normalize_usda_emitted_text(output_path.read_text(encoding="utf-8")) == _normalize_usda_emitted_text(text_output)
 
 
 def test_explicit_base_material_overrides_do_not_force_untouched_xml_prototypes_into_split() -> None:
