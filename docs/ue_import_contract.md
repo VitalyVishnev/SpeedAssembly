@@ -157,10 +157,19 @@ The exporter now has explicit material-policy modes:
 
 Explicit FBX prototype material baseline:
 
-- embedded FBX materials are ignored in v1
-- exact-black faces are assigned to the leaves bucket
-- every non-black face is assigned to the bark bucket
-- missing vertex colors are a hard failure for FBX mode
+- explicit repeated-part FBX material modes now include:
+  - `single_material`
+  - `vertex_color_split`
+  - `material_slots`
+- `vertex_color_split`
+  - exact-black faces are assigned to the leaves bucket
+  - every non-black face is assigned to the bark bucket
+  - missing vertex colors are a hard failure in strict mode
+- `material_slots`
+  - only FBX material slots actually used by faces are surfaced
+  - repeated FBX material names are merged into one logical slot override row
+  - if some slot rows are blank, one filled Unreal material path is reused with a warning
+  - if all slot rows are blank, conversion fails
 
 Raw SpeedTree XML material ids must be treated as opaque source metadata. `source_material_roles` may infer bark/leaves buckets from authored source usage, but it must not treat numeric ids like `1/2` as a required contract.
 They are not semantic bark/leaves roles for the generic pipeline contract.

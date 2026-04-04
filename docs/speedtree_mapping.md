@@ -145,8 +145,11 @@ Current GUI material workflow, stage 1:
 - repeated part rows currently expose:
   - `single_material`
   - `vertex_color_split`
-- stage-1 `vertex_color_split` is an explicit black/white split for repeated-part materials
-- stage-1 does not yet expose `get materials from FBX`; embedded FBX material-slot import remains a later step
+  - `material_slots` for `FBX file` rows
+- `vertex_color_split` is an explicit black/white split for repeated-part materials
+- `material_slots` derives its slot list from the imported FBX payload instead of from SpeedTree XML
+- only FBX slots actually used by imported faces are exposed
+- repeated FBX material names are merged into one logical slot row
 
 Naming policy:
 
@@ -183,9 +186,11 @@ Explicit FBX replacement rules:
 - the chosen FBX file must provide rigid polygon mesh data only
 - the FBX origin is treated as the attachment pivot
 - the converter merges all FBX mesh nodes into one prototype-local payload before USDA authoring
-- embedded FBX materials are ignored in v1
-- stage-1 GUI part-material split uses exact black and exact white face buckets
-- legacy/config `auto` mode may still use the older fallback-oriented split logic outside the GUI stage-1 workflow
+- GUI `vertex_color_split` uses exact black and exact white face buckets
+- GUI `material_slots` reads face-used FBX material slots from the imported payload
+- if some `material_slots` rows are blank, one filled Unreal material path is reused with a warning
+- if all `material_slots` rows are blank, conversion fails
+- legacy/config `auto` mode may still use the older fallback-oriented split logic outside the GUI's explicit repeated-part workflow
 - missing vertex colors are a hard failure for FBX mode
 
 Main skeleton naming rule:

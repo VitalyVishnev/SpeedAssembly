@@ -73,9 +73,12 @@ GUI material workflow, stage 1:
 - part rows currently expose:
   - `vertex_color_split`
   - `single_material`
+  - `material_slots` for `FBX file` rows only
 - `vertex_color_split` on part rows is explicit black/white bucketing, not a hidden bark/leaves fallback
 - `single_material` on part rows uses its own dedicated Unreal material path field
-- the planned `get materials from FBX` mode is not part of stage 1 yet
+- `material_slots` analyzes the FBX and shows only the material slots that are actually used by faces in that FBX payload
+- `material_slots` merges identical FBX material names into one UI row
+- `material_slots` labels rows using the FBX material name, or `Unassigned` when the FBX faces are not bound to a named material slot
 
 Huge FBX branch replacement notes:
 
@@ -86,13 +89,18 @@ Huge FBX branch replacement notes:
   - `auto`
   - `vertex_color_split`
   - `single_material`
-- the GUI stage-1 workflow intentionally exposes only `vertex_color_split` and `single_material`; `auto` remains a compatibility/config mode, not the recommended interactive workflow
+  - `material_slots`
+- the GUI workflow intentionally exposes explicit repeated-part material modes instead of `auto`; `auto` remains a compatibility/config mode, not the recommended interactive workflow
 - `auto` uses vertex-color split only when vertex colors exist and produce more than one bucket
 - if vertex colors are missing, incomplete, or effectively uniform, `auto` falls back to a single material section
 - explicit `vertex_color_split` is strict: it must produce a usable split or the conversion fails with a detailed reason
 - if Autodesk FBX SDK bindings throw an internal vertex-color access error during import, the converter retries strict `vertex_color_split` once in a fresh worker process before surfacing the detailed failure
-- stage-1 `vertex_color_split` expects exact black and exact white face buckets for part materials
-- embedded FBX material-slot import is not implemented yet in the UI workflow
+- `vertex_color_split` expects exact black and exact white face buckets for part materials
+- `material_slots` is available only for `fbx_file` prototype rows
+- `material_slots` uses only FBX slots that are actually referenced by imported faces
+- if multiple FBX mesh nodes use the same material name, they are merged into one UI slot row
+- if some `material_slots` paths are left blank, the converter reuses one of the filled slot paths and emits a warning
+- if every `material_slots` path is blank, conversion fails loudly
 - huge FBX jobs stream USDA directly to disk instead of building one giant in-memory string
 - runtime conversion temp files live in a separate cache root under `%LOCALAPPDATA%/XMLtoUSDAConverter/cache/jobs`
 - by default the converter removes per-job runtime temp data on success, cancel, and failure

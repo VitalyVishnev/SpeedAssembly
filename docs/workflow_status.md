@@ -82,8 +82,12 @@ Current operator-facing material controls:
 - current GUI part-material modes are:
   - `vertex_color_split`
   - `single_material`
+  - `material_slots` for `FBX file` rows
 - `vertex_color_split` for part rows is an explicit black/white split
 - `single_material` for part rows uses its own dedicated Unreal material path field
+- `material_slots` reads the FBX and shows only the slots actually used by faces in the imported payload
+- `material_slots` merges repeated FBX material names into one UI slot row
+- `material_slots` labels unnamed slot usage as `Unassigned`
 - the GUI no longer relies on `auto` as the primary interactive workflow for part materials
 - GUI settings persist per-XML base-material rows and per-XML repeated-part material settings
 - the CLI exposes:
@@ -135,11 +139,15 @@ Current huge-FBX contract:
   - `auto`
   - `vertex_color_split`
   - `single_material`
-- stage-1 GUI uses only `vertex_color_split` and `single_material` for repeated-part materials
-- stage-1 `vertex_color_split` expects exact black and exact white face buckets for part-material assignment
+  - `material_slots`
+- GUI repeated-part material controls expose `vertex_color_split`, `single_material`, and `material_slots` for `FBX file` rows
+- `vertex_color_split` expects exact black and exact white face buckets for part-material assignment
 - if `fbx_material_mode=auto` and FBX vertex colors are missing, incomplete, or all collapse to one bucket, the prototype falls back to one primary material section
 - if `fbx_material_mode=vertex_color_split`, the split is strict: unusable colors or Autodesk SDK vertex-color access failures now produce a detailed conversion error instead of silently degrading the prototype to one material
-- stage-1 does not yet expose `get materials from FBX` in the GUI; embedded FBX material-slot import remains a later step
+- if `fbx_material_mode=material_slots`, only the slots actually used by faces are emitted
+- if multiple FBX mesh nodes share the same material name, they collapse to one logical slot row in the UI and one logical slot override contract
+- if some `material_slots` rows are blank, one filled Unreal material path is reused and a warning is emitted
+- if every `material_slots` row is blank, conversion fails loudly
 - huge FBX prototype payloads are written through the streaming USDA path using a temp file plus atomic replace on success
 - when multiple explicit FBX prototype replacements are present, their imports may overlap in parallel worker processes
 - telemetry for huge jobs now distinguishes `xml_normalization`, `prototype_resolution`, `fbx_import`, `material_resolution`, and `usda_writing`
@@ -195,6 +203,7 @@ The remaining acceptance criterion is breadth, not a known functional blocker.
 - repeated geometry imports through `PointInstancer`
 - materials work for the baseline import path, including UE-backed material overrides
 - material-policy behavior is documented and regression-tested for `source_material_roles`, `single_material`, and `vertex_color_split`
+- explicit repeated-part material behavior is regression-tested for `single_material`, `vertex_color_split`, and `material_slots`
 - transforms and skeletal bindings are visually sane in UE
 - automated regression fixtures cover the supported structural cases
 - optional reuse of existing Unreal `PartMesh` skeletal assets is available

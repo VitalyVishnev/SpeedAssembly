@@ -304,6 +304,8 @@ The converter must make these decisions explicitly:
 4. how Assembly Parts bind to the Main Skeleton
 5. how transforms are converted
 6. how missing data is handled
+7. how base-tree XML material slots are resolved separately from repeated-part prototype material modes
+8. how explicit FBX repeated-part material modes (`single_material`, `vertex_color_split`, `material_slots`) are resolved
 
 No hidden heuristics.
 
