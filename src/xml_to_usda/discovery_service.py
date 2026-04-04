@@ -1,3 +1,12 @@
+"""Application-facing discovery services for XML and FBX-backed UI rows.
+
+Layer: application.
+
+These helpers expose typed discovery/view-model specs to the UI layer without
+letting widget code depend directly on XML streaming details or raw FBX slot
+inspection internals.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -60,6 +69,7 @@ def discover_base_material_rows(
     input_path: str,
     persisted_records: tuple[BaseMaterialSettingRecord, ...] = (),
 ) -> BaseMaterialDiscovery:
+    """Discover base XML material rows and merge persisted UI assignments."""
     materials = discover_source_materials(input_path)
     if not materials:
         return BaseMaterialDiscovery(
@@ -85,6 +95,7 @@ def discover_part_prototype_rows(
     input_path: str,
     persisted_records: tuple[PartSourceSettingRecord, ...] = (),
 ) -> PrototypeDiscovery:
+    """Discover repeated-part prototype rows and merge persisted source settings."""
     prototypes = discover_part_prototypes(input_path)
     if not prototypes:
         return PrototypeDiscovery(
@@ -151,6 +162,7 @@ def inspect_fbx_material_slot_rows(
     cpu_profile: CpuProfile,
     persisted_records: tuple[FbxMaterialSlotSettingRecord, ...] = (),
 ) -> tuple[PrototypeMaterialSlotRowSpec, ...]:
+    """Inspect face-used FBX slots and apply any persisted Unreal material paths."""
     resolved_path = str(Path(fbx_path).expanduser().resolve())
     slots = _inspect_fbx_material_slots_cached(resolved_path, cpu_profile.value)
     persisted_by_name = {record.slot_name: record.ue_asset_path for record in persisted_records if record.slot_name}

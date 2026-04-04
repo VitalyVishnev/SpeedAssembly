@@ -1,3 +1,12 @@
+"""Prototype source resolution and retained compatibility bridges.
+
+Layer: infrastructure with light application-facing compatibility helpers.
+
+This module owns explicit prototype-source overrides and FBX payload loading.
+It also retains the legacy `part_mesh_asset_paths` bridge so older request
+shapes continue to resolve through the same prototype-source contract.
+"""
+
 from __future__ import annotations
 
 import multiprocessing
@@ -73,6 +82,12 @@ def merge_legacy_part_mesh_configs(
     use_existing_part_meshes: bool,
     part_mesh_asset_paths: tuple[tuple[str, str], ...],
 ) -> tuple[PrototypeSourceConfig, ...]:
+    """Translate the legacy part-mesh mapping contract into source configs.
+
+    This compatibility helper is intentionally retained because old CLI/tests
+    and earlier request shapes still express Unreal prototype reuse through
+    `use_existing_part_meshes` plus `part_mesh_asset_paths`.
+    """
     if not use_existing_part_meshes or not part_mesh_asset_paths:
         return prototype_source_configs
 

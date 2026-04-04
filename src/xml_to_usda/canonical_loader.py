@@ -1,3 +1,12 @@
+"""Canonical model loading from source XML through validated tree assets.
+
+Layer: application/domain boundary.
+
+This module coordinates reading, schema inspection, normalization, prototype
+source resolution, material resolution, and final model validation to produce
+the canonical tree model consumed by downstream exporters.
+"""
+
 from __future__ import annotations
 
 import time
@@ -38,6 +47,7 @@ def load_canonical_model(
     telemetry_callback=None,
     cancel_event=None,
 ) -> tuple[ObservedXmlSchemaReport, CanonicalTreeModel, tuple]:
+    """Load one XML source into the canonical tree model plus diagnostics."""
     started_at = time.perf_counter()
     emit_telemetry(
         telemetry_callback,
@@ -110,6 +120,7 @@ def _apply_material_policy(
     leaves_material_path: str | None,
     single_material_path: str | None,
 ) -> CanonicalTreeModel:
+    """Compatibility helper retained for callers that still import it via `pipeline`."""
     return resolve_material_policy(
         model,
         material_policy=material_policy,

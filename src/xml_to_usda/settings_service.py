@@ -1,3 +1,12 @@
+"""Typed GUI settings persistence and legacy-settings compatibility parsing.
+
+Layer: application/infrastructure boundary.
+
+The current GUI persists one typed settings snapshot, but this module also
+retains compatibility with earlier payload shapes so existing operator settings
+continue to load after packaged or launcher upgrades.
+"""
+
 from __future__ import annotations
 
 import json
@@ -62,10 +71,12 @@ class GuiSettingsSnapshot:
 
 
 def resolve_input_settings_key(input_path: str) -> str:
+    """Return the normalized per-input key used for persisted GUI state."""
     return str(Path(input_path).expanduser().resolve())
 
 
 def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
+    """Load GUI settings, accepting retained legacy payload fields when present."""
     path = Path(settings_path)
     if not path.exists():
         return GuiSettingsSnapshot()
@@ -101,6 +112,7 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
 
 
 def save_gui_settings(settings_path: str | Path, snapshot: GuiSettingsSnapshot) -> None:
+    """Write the current canonical GUI settings payload."""
     path = Path(settings_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -142,6 +154,8 @@ def _parse_cpu_profile(raw_value) -> CpuProfile:
 
 
 def _parse_prototype_source_mode(raw_value, *, use_unreal_reference: bool = False) -> PrototypeSourceMode:
+    # Retained for older settings payloads that stored Unreal mode as a boolean
+    # instead of the newer explicit `source_mode` enum string.
     if use_unreal_reference:
         return PrototypeSourceMode.UNREAL_ASSET
     try:

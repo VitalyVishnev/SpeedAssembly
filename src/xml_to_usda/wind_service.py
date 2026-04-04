@@ -1,3 +1,12 @@
+"""Application-facing wind inspection and JSON-generation services.
+
+Layer: application.
+
+This module converts UI/CLI wind intents into typed requests and keeps retry and
+error-formatting policy out of the Tk layer. The actual wind analysis and JSON
+authoring stay in `wind_pipeline`.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,18 +18,21 @@ from .wind_pipeline import generate_wind_json, inspect_wind_data
 
 @dataclass(frozen=True)
 class WindInspectionRequest:
+    """Typed request for wind-group inspection."""
     input_path: str
     is_ground_cover: bool = False
 
 
 @dataclass(frozen=True)
 class WindInspectionPlan:
+    """Wind inspection request plus the chosen execution mode."""
     request: WindInspectionRequest
     run_async: bool
 
 
 @dataclass(frozen=True)
 class WindGenerationRequest:
+    """Typed request for Dynamic Wind JSON generation."""
     input_path: str
     output_path: str
     group_settings: tuple[DynamicWindSimulationGroup, ...]
@@ -34,6 +46,7 @@ def prepare_wind_inspection_plan(
     is_ground_cover: bool,
     async_threshold_bytes: int,
 ) -> WindInspectionPlan:
+    """Build one wind-inspection plan from operator-facing inputs."""
     resolved_input_path = input_path.strip()
     return WindInspectionPlan(
         request=WindInspectionRequest(

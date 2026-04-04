@@ -1,3 +1,12 @@
+"""Conversion orchestration over validated requests and runtime workspaces.
+
+Layer: application/infrastructure boundary.
+
+This module owns the request-level conversion flow, runtime job workspace
+lifecycles, telemetry bridging, and final `ConversionResult` assembly. It
+should not absorb GUI behavior or low-level USDA authoring logic.
+"""
+
 from __future__ import annotations
 
 from .canonical_loader import load_canonical_model
@@ -38,6 +47,7 @@ def convert_file(
     cancel_event=None,
     runtime_paths: RuntimePaths | None = None,
 ) -> ConversionResult:
+    """Convenience wrapper that converts one input path via `ConversionRequest`."""
     request = ConversionRequest(
         input_paths=(input_path,),
         output_path=output_path,
@@ -68,6 +78,7 @@ def convert_request(
     cancel_event=None,
     runtime_paths: RuntimePaths | None = None,
 ) -> tuple[ConversionResult, ...]:
+    """Convert one or more inputs described by a validated request."""
     validate_conversion_request(request)
 
     results: list[ConversionResult] = []

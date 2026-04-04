@@ -1,3 +1,13 @@
+"""Domain models and stable public value types for the conversion pipeline.
+
+Layer: domain.
+
+This module defines the typed contracts shared across parsing, normalization,
+application services, orchestration, USDA authoring, CLI, subprocess workers,
+and UI adapters. It should stay free of GUI, filesystem, and process-control
+implementation details.
+"""
+
 from __future__ import annotations
 
 from array import array
@@ -68,10 +78,12 @@ class MaterialPolicy(StrEnum):
 
     @classmethod
     def parse(cls, raw: "MaterialPolicy | str | None") -> "MaterialPolicy":
+        """Parse operator-facing and retained compatibility material-policy values."""
         if isinstance(raw, cls):
             return raw
         if raw is None:
             return cls.SOURCE_MATERIAL_ROLES
+        # Retained for CLI/config/settings compatibility with earlier operator flows.
         normalized = str(raw).strip()
         if normalized == "legacy_role_ids":
             return cls.SOURCE_MATERIAL_ROLES
@@ -79,6 +91,7 @@ class MaterialPolicy(StrEnum):
 
     @classmethod
     def cli_choices(cls) -> tuple[str, ...]:
+        """Return supported CLI values, including the retained legacy alias."""
         return (
             cls.SOURCE_MATERIAL_ROLES.value,
             cls.SINGLE_MATERIAL.value,

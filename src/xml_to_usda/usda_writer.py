@@ -1,3 +1,13 @@
+"""Public USDA-writing facade over the shared authoring engine.
+
+Layer: infrastructure facade.
+
+`render_usda` and `write_usda_document` stay stable for callers and tests,
+while the actual authoring semantics live in `usda_authoring`. This module
+should only coordinate output strategy concerns such as in-memory text vs
+streaming-to-disk, `.partial` handling, and telemetry.
+"""
+
 from __future__ import annotations
 
 import time
@@ -20,6 +30,7 @@ def render_usda(
     contract: UeSchemaContract = DEFAULT_UE_SCHEMA_CONTRACT,
     base_mesh_name: str | None = None,
 ) -> UsdAssemblyDocument:
+    """Render a USDA document fully in memory using the shared authoring engine."""
     context = build_authoring_context(
         model,
         diagnostics,
@@ -40,6 +51,7 @@ def write_usda_document(
     telemetry_callback=None,
     cancel_event=None,
 ) -> UsdAssemblyDocument:
+    """Write USDA via the shared authoring engine, choosing text or streaming output."""
     context = build_authoring_context(
         model,
         diagnostics,
@@ -98,3 +110,6 @@ def write_usda_document(
         if temp_output.exists():
             temp_output.unlink()
         raise
+
+
+__all__ = ["render_usda", "write_usda_document"]

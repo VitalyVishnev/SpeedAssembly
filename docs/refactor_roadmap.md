@@ -371,6 +371,7 @@ A cleaner architecture still fails maintainability goals if it is only understan
 - fewer silent compatibility branches
 - easier onboarding
 - cleaner public/internal API distinctions
+- a developer-facing architecture map is available in `docs/developer_architecture.md`
 
 ### Definition of done
 

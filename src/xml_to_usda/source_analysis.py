@@ -1,3 +1,11 @@
+"""Read-only XML/source analysis helpers for reports and UI discovery.
+
+Layer: application/domain boundary.
+
+These helpers inspect source XML and derive report/discovery data without
+performing full conversion orchestration or USDA writing.
+"""
+
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
@@ -9,6 +17,7 @@ from .xml_reader import inspect_xml, read_source_xml
 
 
 def inspect_source(input_path: str) -> ObservedXmlSchemaReport:
+    """Inspect one source XML file and enrich the observed-schema report."""
     document = read_source_xml(input_path)
     report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
@@ -29,6 +38,7 @@ def inspect_source(input_path: str) -> ObservedXmlSchemaReport:
 
 
 def discover_part_prototypes(input_path: str) -> tuple[PrototypeDiscoveryEntry, ...]:
+    """Discover repeated-part prototype identities from streamed `LeafReferences`."""
     mesh_names_by_id: dict[int, str] = {}
     mesh_instance_counts_by_id: dict[int, int] = {}
     ordered_mesh_ids: list[int] = []
@@ -86,6 +96,7 @@ def discover_part_prototypes(input_path: str) -> tuple[PrototypeDiscoveryEntry, 
 
 
 def discover_source_materials(input_path: str) -> tuple[BaseMaterialOverride, ...]:
+    """Discover base-tree XML material slots while ignoring prototype-only materials."""
     material_names_by_id: dict[int, str] = {}
     material_id_order: list[int] = []
     used_base_material_ids: set[int] = set()

@@ -1,3 +1,12 @@
+"""Shared USDA authoring engine used by both text and streaming export paths.
+
+Layer: infrastructure.
+
+This module owns exporter semantics and prim/block emitters. Callers should use
+`usda_writer` for public entrypoints rather than depending on these internals
+directly.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -27,6 +36,7 @@ from .ue_schema import DEFAULT_UE_SCHEMA_CONTRACT, UeSchemaContract
 
 @dataclass(frozen=True)
 class AuthoringContext:
+    """Resolved authoring state shared by both text and streaming sinks."""
     model: CanonicalTreeModel
     diagnostics: tuple[ValidationIssue, ...]
     contract: UeSchemaContract

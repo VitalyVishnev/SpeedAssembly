@@ -1,3 +1,12 @@
+"""Application-facing request planning for conversion launches.
+
+Layer: application.
+
+This service translates UI/CLI semantic inputs into one stable
+`ConversionRequest` contract and decides the runtime launch strategy. It should
+not depend on widget trees, runtime workspaces, or USDA authoring details.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -19,6 +28,7 @@ from .models import (
 
 @dataclass(frozen=True)
 class ConversionLaunchPlan:
+    """A fully prepared conversion request plus the chosen execution mode."""
     request: ConversionRequest
     run_async: bool
 
@@ -39,6 +49,7 @@ def prepare_conversion_plan(
     part_mesh_asset_paths: tuple[tuple[str, str], ...],
     async_threshold_bytes: int,
 ) -> ConversionLaunchPlan:
+    """Build one stable conversion plan from operator-facing semantic inputs."""
     resolved_input_path = input_path.strip()
     resolved_output_path = output_path.strip()
     if not resolved_input_path:
