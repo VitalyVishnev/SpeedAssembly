@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 import tempfile
 import time
 import uuid
@@ -58,6 +59,7 @@ class JobWorkspace:
     cleanup_policy: CleanupPolicy
     job_dir: Path
     manifest_path: Path
+    runtime_context: dict[str, object]
     started_at: float = field(default_factory=time.time)
     current_phase: ConversionPhase = ConversionPhase.PREPARING
 
@@ -82,6 +84,7 @@ class JobWorkspace:
             cleanup_policy=cleanup_policy,
             job_dir=job_dir,
             manifest_path=job_dir / "job_manifest.json",
+            runtime_context=capture_runtime_context(),
         )
         workspace.write_manifest(status="running")
         return workspace
@@ -107,6 +110,7 @@ class JobWorkspace:
             "debug_preserve": self.debug_preserve,
             "started_at_unix": self.started_at,
             "updated_at_unix": time.time(),
+            "runtime_context": self.runtime_context,
         }
         if error_message:
             payload["error_message"] = error_message
@@ -215,6 +219,19 @@ def _default_cache_root() -> Path:
     if local_app_data:
         return Path(local_app_data) / APP_NAME / "cache"
     return Path.home() / "AppData" / "Local" / APP_NAME / "cache"
+
+
+def capture_runtime_context() -> dict[str, object]:
+    meipass = getattr(sys, "_MEIPASS", None)
+    return {
+        "pid": os.getpid(),
+        "ppid": os.getppid() if hasattr(os, "getppid") else None,
+        "frozen": bool(getattr(sys, "frozen", False)),
+        "meipass": str(meipass) if meipass else None,
+        "executable": sys.executable,
+        "argv0": sys.argv[0] if sys.argv else "",
+        "cwd": os.getcwd(),
+    }
 
 
 def _resolve_default_cache_root() -> Path:

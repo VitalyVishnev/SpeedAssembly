@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import multiprocessing
 import sys
 
 from .models import CleanupPolicy, CpuProfile, MaterialPolicy
@@ -37,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--cpu-profile",
         choices=[profile.value for profile in CpuProfile],
         default=CpuProfile.BALANCED.value,
-        help="CPU usage profile for heavy FBX and USDA export work.",
+        help="CPU usage profile for heavy FBX and USDA export work. Default: balanced.",
     )
     convert_parser.add_argument(
         "--preserve-temp-files",
@@ -54,6 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    multiprocessing.freeze_support()
     parser = build_parser()
     args = parser.parse_args(argv)
     runtime_paths = resolve_runtime_paths()

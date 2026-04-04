@@ -9,6 +9,7 @@ from .dynamic_wind import build_dynamic_wind_data, write_dynamic_wind_json
 from .job_control import ConversionCancelledError, emit_telemetry, throw_if_cancelled
 from .material_resolver import apply_material_policy as resolve_material_policy, resolve_prototype_materials
 from .models import (
+    BaseMaterialOverride,
     CanonicalTreeModel,
     CleanupPolicy,
     ConversionRequest,
@@ -118,6 +119,48 @@ def discover_part_prototypes(input_path: str) -> tuple[PrototypeDiscoveryEntry, 
     )
 
 
+def discover_source_materials(input_path: str) -> tuple[BaseMaterialOverride, ...]:
+    material_names_by_id: dict[int, str] = {}
+    material_id_order: list[int] = []
+    used_base_material_ids: set[int] = set()
+    element_stack: list[str] = []
+
+    for event, elem in ET.iterparse(input_path, events=("start", "end")):
+        if event == "start":
+            element_stack.append(elem.tag)
+            continue
+
+        if elem.tag == "Material":
+            raw_source_id = elem.attrib.get("ID")
+            if raw_source_id is not None and raw_source_id.lstrip("-").isdigit():
+                source_id = int(raw_source_id)
+                if source_id not in material_names_by_id:
+                    material_id_order.append(source_id)
+                material_names_by_id[source_id] = elem.attrib.get("Name", f"Material_{source_id}")
+        elif elem.tag == "Triangles":
+            raw_source_id = elem.attrib.get("Material")
+            if (
+                raw_source_id is not None
+                and raw_source_id.lstrip("-").isdigit()
+                and "Object" in element_stack
+                and "Mesh" not in element_stack
+            ):
+                used_base_material_ids.add(int(raw_source_id))
+
+        if element_stack:
+            element_stack.pop()
+        elem.clear()
+
+    return tuple(
+        BaseMaterialOverride(
+            source_id=source_id,
+            source_name=material_names_by_id.get(source_id, f"Material_{source_id}"),
+        )
+        for source_id in material_id_order
+        if source_id in used_base_material_ids
+    )
+
+
 def load_canonical_model(
     input_path: str,
     output_mode: OutputMode = OutputMode.SELF_CONTAINED,
@@ -125,7 +168,9 @@ def load_canonical_model(
     bark_material_path: str | None = None,
     leaves_material_path: str | None = None,
     single_material_path: str | None = None,
+    base_material_overrides: tuple[BaseMaterialOverride, ...] = (),
     cpu_profile: CpuProfile = CpuProfile.BALANCED,
+    use_explicit_material_contract: bool = False,
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = (),
     use_existing_part_meshes: bool = False,
     part_mesh_asset_paths: tuple[tuple[str, str], ...] = (),
@@ -158,11 +203,6 @@ def load_canonical_model(
         cancel_event=cancel_event,
         started_at=started_at,
     )
-    model = resolve_prototype_materials(
-        model,
-        cpu_profile=cpu_profile,
-        cancel_event=cancel_event,
-    )
     emit_telemetry(
         telemetry_callback,
         ConversionPhase.MATERIAL_RESOLUTION,
@@ -170,14 +210,33 @@ def load_canonical_model(
         started_at=started_at,
     )
     throw_if_cancelled(cancel_event)
-    model = resolve_material_policy(
-        model,
-        material_policy=material_policy,
-        bark_material_path=bark_material_path,
-        leaves_material_path=leaves_material_path,
-        single_material_path=single_material_path,
-        normalize_asset_path=_normalize_unreal_asset_path,
-    )
+    if use_explicit_material_contract:
+        model = resolve_material_policy(
+            model,
+            material_policy=material_policy,
+            bark_material_path=bark_material_path,
+            leaves_material_path=leaves_material_path,
+            single_material_path=single_material_path,
+            normalize_asset_path=_normalize_unreal_asset_path,
+            base_material_overrides=base_material_overrides,
+            explicit_part_material_contract=True,
+            cpu_profile=cpu_profile,
+            cancel_event=cancel_event,
+        )
+    else:
+        model = resolve_prototype_materials(
+            model,
+            cpu_profile=cpu_profile,
+            cancel_event=cancel_event,
+        )
+        model = resolve_material_policy(
+            model,
+            material_policy=material_policy,
+            bark_material_path=bark_material_path,
+            leaves_material_path=leaves_material_path,
+            single_material_path=single_material_path,
+            normalize_asset_path=_normalize_unreal_asset_path,
+        )
     model = replace(
         model,
         metadata=replace(model.metadata, output_mode=output_mode, material_policy=material_policy),
@@ -194,8 +253,10 @@ def convert_file(
     bark_material_path: str | None = None,
     leaves_material_path: str | None = None,
     single_material_path: str | None = None,
+    base_material_overrides: tuple[BaseMaterialOverride, ...] = (),
     cpu_profile: CpuProfile = CpuProfile.BALANCED,
     cleanup_policy: CleanupPolicy = CleanupPolicy.EPHEMERAL,
+    use_explicit_material_contract: bool = False,
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = (),
     use_existing_part_meshes: bool = False,
     part_mesh_asset_paths: tuple[tuple[str, str], ...] = (),
@@ -211,8 +272,10 @@ def convert_file(
         bark_material_path=bark_material_path,
         leaves_material_path=leaves_material_path,
         single_material_path=single_material_path,
+        base_material_overrides=base_material_overrides,
         cpu_profile=cpu_profile,
         cleanup_policy=cleanup_policy,
+        use_explicit_material_contract=use_explicit_material_contract,
         prototype_source_configs=prototype_source_configs,
         use_existing_part_meshes=use_existing_part_meshes,
         part_mesh_asset_paths=part_mesh_asset_paths,
@@ -262,7 +325,9 @@ def convert_request(
                 bark_material_path=request.bark_material_path,
                 leaves_material_path=request.leaves_material_path,
                 single_material_path=request.single_material_path,
+                base_material_overrides=request.base_material_overrides,
                 cpu_profile=request.cpu_profile,
+                use_explicit_material_contract=request.use_explicit_material_contract,
                 prototype_source_configs=request.prototype_source_configs,
                 use_existing_part_meshes=request.use_existing_part_meshes,
                 part_mesh_asset_paths=request.part_mesh_asset_paths,

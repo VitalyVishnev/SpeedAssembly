@@ -27,6 +27,75 @@ function Get-VenvExecutable([string]$RepoRoot) {
     return $pythonExe
 }
 
+function Get-GitBuildMetadata([string]$RepoRoot) {
+    $metadata = @{
+        git_branch = $null
+        git_head = $null
+        git_dirty = $null
+        change_summary = $null
+    }
+
+    try {
+        $branch = git -C $RepoRoot branch --show-current 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $metadata.git_branch = (($branch | Out-String).Trim())
+        }
+    }
+    catch {
+    }
+
+    try {
+        $head = git -C $RepoRoot rev-parse --short HEAD 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $metadata.git_head = (($head | Out-String).Trim())
+        }
+    }
+    catch {
+    }
+
+    try {
+        $statusLines = @(git -C $RepoRoot status --short 2>$null)
+        if ($LASTEXITCODE -eq 0) {
+            $metadata.git_dirty = ($statusLines.Count -gt 0)
+            $summaryItems = @($statusLines | Select-Object -First 3 | ForEach-Object { $_.Trim() })
+            if ($statusLines.Count -gt 3) {
+                $summaryItems += "(+$($statusLines.Count - 3) more)"
+            }
+            if ($summaryItems.Count -gt 0) {
+                $metadata.change_summary = ($summaryItems -join '; ')
+            }
+        }
+    }
+    catch {
+    }
+
+    return $metadata
+}
+
+function Write-BuildInfo(
+    [string]$DistPath,
+    [string]$ExePath,
+    [string]$PythonExe,
+    [string]$RepoRoot,
+    [string]$BuildMode
+) {
+    $buildInfoPath = Join-Path $DistPath 'build_info.json'
+    $gitMetadata = Get-GitBuildMetadata -RepoRoot $RepoRoot
+    $payload = [ordered]@{
+        built_at = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
+        build_mode = $BuildMode
+        exe_path = $ExePath
+        python_exe = $PythonExe
+        repo_root = $RepoRoot
+        git_branch = $gitMetadata.git_branch
+        git_head = $gitMetadata.git_head
+        git_dirty = $gitMetadata.git_dirty
+        change_summary = $gitMetadata.change_summary
+    }
+    $payload | ConvertTo-Json | Set-Content -Path $buildInfoPath -Encoding UTF8
+    Write-Host "Wrote build info: $buildInfoPath"
+}
+
 $repoRoot = Convert-ToWinPath ([System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')))
 $launcherScript = Join-Path $repoRoot 'scripts\launch_gui.py'
 $venvScripts = Join-Path $repoRoot '.venv310\Scripts'
@@ -84,6 +153,8 @@ try {
             throw "Expected exe was not created: $exePath"
         }
 
+        Write-BuildInfo -DistPath $distPath -ExePath $exePath -PythonExe $pythonExe -RepoRoot $repoRoot -BuildMode 'package'
+
         Write-Host "Built: $exePath"
         if ($OpenOutput) {
             Invoke-Item $distPath
@@ -105,6 +176,9 @@ try {
             throw "Expected exe was not created: $exePath"
         }
 
+        $pythonExe = Get-VenvExecutable -RepoRoot $repoRoot
+        Write-BuildInfo -DistPath $distPath -ExePath $exePath -PythonExe $pythonExe -RepoRoot $repoRoot -BuildMode 'launcher'
+
         Write-Host "Built: $exePath"
         if ($OpenOutput) {
             Invoke-Item $distPath
@@ -114,8 +188,4 @@ try {
 finally {
     Pop-Location
 }
-
-
-
-
 

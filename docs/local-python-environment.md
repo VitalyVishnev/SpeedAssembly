@@ -54,6 +54,14 @@ Build helpers also use `.venv310`:
 .\scripts\build_gui_exe.cmd -Package
 ```
 
+Each build helper run also writes `dist\build_info.json`. The GUI reads that file on startup and prints a `Build info:` banner at the top of the in-app `Log`, so launcher-build testing no longer depends on the executable file timestamp.
+
+Large-job execution note:
+
+- the GUI now launches big conversion jobs through a spawned worker subprocess
+- on Windows, that worker may itself launch additional `spawn` worker processes for parallel FBX prototype import
+- this is why `.venv310`, `multiprocessing.freeze_support()`, and a real file-backed Python entry point matter for stress tests and packaged builds
+
 ## Runtime temp files and cache hygiene
 
 - UI settings remain separate from runtime conversion temp data
@@ -61,6 +69,7 @@ Build helpers also use `.venv310`:
 - default runtime behavior is `ephemeral`: per-job temp dirs are removed on success, cancel, and failure
 - the GUI `Preserve temp files for debugging` switch and CLI `--preserve-temp-files` flag keep the job dir and manifest on disk for investigation
 - stale job dirs older than 24 hours are cleaned during startup sweep
+- GUI-side runtime errors are appended to `~/.xml_to_usda/gui_runtime.log` so failures can be reviewed later without relying on modal popups
 - build artifacts such as `build/` and `dist/` are not part of runtime cache hygiene and are only cleaned by build helpers
 
 ## Recreate the environment

@@ -8,16 +8,23 @@ from unittest.mock import Mock
 import pytest
 
 from xml_to_usda.models import (
+    BaseMaterialOverride,
     CleanupPolicy,
+    ConversionJobResult,
+    ConversionPhase,
     ConversionRequest,
     ConversionResult,
+    ConversionTelemetry,
     CpuProfile,
     DynamicWindData,
     DynamicWindJointAssignment,
     DynamicWindSimulationGroup,
     FbxMaterialMode,
+    FbxMaterialSlotOverride,
+    FbxMaterialSlotSpec,
     MaterialPolicy,
     OutputMode,
+    PrototypeSourceConfig,
     PrototypeSourceMode,
     ValidationIssue,
     WindJsonResult,
@@ -184,6 +191,20 @@ def test_cli_parser_accepts_part_source_config_and_cpu_profile() -> None:
     assert args.preserve_temp_files is True
 
 
+def test_cli_parser_defaults_cpu_profile_to_balanced() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "convert",
+            "input.xml",
+            "output.usda",
+        ]
+    )
+
+    assert args.cpu_profile == CpuProfile.BALANCED.value
+
+
 def test_convert_file_applies_baseline_material_overrides(tmp_path: Path) -> None:
     result = convert_file(
         str(SIMPLE_TREE_01),
@@ -293,7 +314,10 @@ def test_gui_run_conversion_passes_material_paths(monkeypatch: pytest.MonkeyPatc
         assert "Material policy: source_material_roles" in app.log_widget.get("1.0", "end-1c")
         assert "Material overrides:" in app.log_widget.get("1.0", "end-1c")
     finally:
-        root.destroy()
+        try:
+            root.destroy()
+        except Exception:
+            pass
 
 
 def test_gui_run_conversion_passes_single_material_policy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -361,7 +385,10 @@ def test_gui_run_conversion_passes_single_material_policy(monkeypatch: pytest.Mo
         assert "Material policy: single_material" in app.log_widget.get("1.0", "end-1c")
         assert "Single material path: /Game/Assembly/Fern/M_Fern.M_Fern" in app.log_widget.get("1.0", "end-1c")
     finally:
-        root.destroy()
+        try:
+            root.destroy()
+        except Exception:
+            pass
 
 
 def test_gui_run_conversion_passes_part_mesh_xml_names(
@@ -433,7 +460,10 @@ def test_gui_run_conversion_passes_part_mesh_xml_names(
             )
         ]
     finally:
-        root.destroy()
+        try:
+            root.destroy()
+        except Exception:
+            pass
 
 
 def test_gui_refresh_wind_groups_builds_slider_rows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -563,6 +593,31 @@ def test_gui_refresh_part_mesh_rows_autoloads_xml_meshes(
         assert [row["mesh_id"] for row in app._part_mesh_rows] == [1, 2]
         assert str(app._part_mesh_rows[0]["asset_entry"].cget("state")) == "disabled"
     finally:
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+
+def test_gui_refresh_base_material_rows_autoloads_xml_materials(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    try:
+        settings_path = tmp_path / "gui_settings.json"
+        monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+        monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+
+        assert len(app._base_material_rows) == 1
+        assert app.base_material_summary_var.get() == "Found 1 base XML material slot(s)."
+        assert [(row["source_id"], row["source_name"]) for row in app._base_material_rows] == [
+            (1, "Bark_Mat"),
+        ]
+    finally:
         root.destroy()
 
 
@@ -643,6 +698,7 @@ def test_gui_persists_fbx_source_mode_and_cpu_profile(
         key = str(SIMPLE_TREE_01.resolve())
         assert payload["cpu_profile"] == "quiet"
         assert payload["preserve_temp_files"] is True
+        assert "wind_group_settings_by_input_path" in payload
         assert payload["part_mesh_settings_by_input_path"][key][0] == {
             "source_name": "Twig_01",
             "source_key": "Mesh_1",
@@ -673,6 +729,285 @@ def test_gui_persists_fbx_source_mode_and_cpu_profile(
         assert str(restored_row["fbx_entry"].cget("state")) == "normal"
         assert str(restored_row["fbx_material_mode_combo"].cget("state")) == "readonly"
         assert str(restored_row["asset_entry"].cget("state")) == "disabled"
+    finally:
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+
+def test_gui_run_conversion_passes_explicit_base_material_overrides(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    calls: list[dict[str, object]] = []
+
+    def fake_convert_file(input_path, output_path, output_mode=OutputMode.SELF_CONTAINED, **kwargs):
+        calls.append(
+            {
+                "input_path": input_path,
+                "output_path": output_path,
+                "output_mode": output_mode,
+                **kwargs,
+            }
+        )
+        return ConversionResult(
+            input_path=input_path,
+            output_path=output_path,
+            diagnostics=(),
+            usda_document=Mock(),
+        )
+
+    monkeypatch.setattr("xml_to_usda.gui.convert_file", fake_convert_file)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
+
+    try:
+        monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+        monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        app.output_var.set("out.usda")
+        app._base_material_rows[0]["material_path_var"].set("/Game/TestMaterials/M_Bark_Test")
+
+        app.run_conversion()
+
+        assert len(calls) == 1
+        call = calls[0]
+        assert call["use_explicit_material_contract"] is True
+        assert call["base_material_overrides"] == (
+            BaseMaterialOverride(
+                source_id=1,
+                source_name="Bark_Mat",
+                ue_asset_path="/Game/TestMaterials/M_Bark_Test",
+            ),
+        )
+        assert "Material contract: explicit_base_and_part_materials" in app.log_widget.get("1.0", "end-1c")
+        assert "Base XML material overrides:" in app.log_widget.get("1.0", "end-1c")
+    finally:
+        root.destroy()
+
+
+def test_gui_run_conversion_passes_explicit_xml_part_material_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    calls: list[dict[str, object]] = []
+
+    def fake_convert_file(input_path, output_path, output_mode=OutputMode.SELF_CONTAINED, **kwargs):
+        calls.append(
+            {
+                "input_path": input_path,
+                "output_path": output_path,
+                "output_mode": output_mode,
+                **kwargs,
+            }
+        )
+        return ConversionResult(
+            input_path=input_path,
+            output_path=output_path,
+            diagnostics=(),
+            usda_document=Mock(),
+        )
+
+    monkeypatch.setattr("xml_to_usda.gui.convert_file", fake_convert_file)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
+    monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda *args, **kwargs: None)
+
+    try:
+        monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+        monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        app.output_var.set("out.usda")
+        row = app._part_mesh_rows[0]
+        row["fbx_material_mode_var"].set(FbxMaterialMode.SINGLE_MATERIAL.value)
+        row["single_material_var"].set("/Game/TreeParts/M_Twig.M_Twig")
+
+        app.run_conversion()
+
+        assert len(calls) == 1
+        call = calls[0]
+        assert call["use_explicit_material_contract"] is True
+        assert call["prototype_source_configs"] == (
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.XML_MESH,
+                fbx_material_mode=FbxMaterialMode.SINGLE_MATERIAL,
+                asset_path=None,
+                fbx_path=None,
+                single_material_path="/Game/TreeParts/M_Twig.M_Twig",
+                black_material_path=None,
+                white_material_path=None,
+            ),
+        )
+        assert "Prototype source overrides:" in app.log_widget.get("1.0", "end-1c")
+        assert "xml_mesh[single_material]" in app.log_widget.get("1.0", "end-1c")
+    finally:
+        root.destroy()
+
+
+def test_gui_collects_fbx_material_slot_overrides(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    fake_fbx_path = tmp_path / "spruce_branch.fbx"
+    fake_fbx_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+    monkeypatch.setattr(
+        "xml_to_usda.gui.inspect_fbx_material_slots",
+        lambda *_args, **_kwargs: (
+            FbxMaterialSlotSpec(source_id=1, name="Bark", face_count=12),
+            FbxMaterialSlotSpec(source_id=2, name="Needles", face_count=24),
+        ),
+    )
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        row = app._part_mesh_rows[0]
+        row["source_mode_var"].set(PrototypeSourceMode.FBX_FILE.value)
+        row["fbx_var"].set(str(fake_fbx_path))
+        row["fbx_material_mode_var"].set(FbxMaterialMode.MATERIAL_SLOTS.value)
+        row["material_slot_rows"][0]["path_var"].set("/Game/TreeParts/M_Bark.M_Bark")
+
+        configs = app._collect_part_source_configs()
+
+        assert configs == (
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_material_mode=FbxMaterialMode.MATERIAL_SLOTS,
+                fbx_path=str(fake_fbx_path.resolve()),
+                single_material_path=None,
+                black_material_path=None,
+                white_material_path=None,
+                fbx_material_slot_overrides=(
+                    FbxMaterialSlotOverride(
+                        slot_name="Bark",
+                        ue_asset_path="/Game/TreeParts/M_Bark.M_Bark",
+                    ),
+                    FbxMaterialSlotOverride(
+                        slot_name="Needles",
+                        ue_asset_path=None,
+                    ),
+                ),
+            ),
+        )
+    finally:
+        root.destroy()
+
+
+def test_gui_persists_fbx_material_slot_overrides(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    settings_path = tmp_path / "gui_settings.json"
+    fake_fbx_path = tmp_path / "spruce_branch.fbx"
+    fake_fbx_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
+    monkeypatch.setattr(
+        "xml_to_usda.gui.inspect_fbx_material_slots",
+        lambda *_args, **_kwargs: (
+            FbxMaterialSlotSpec(source_id=1, name="Bark", face_count=12),
+            FbxMaterialSlotSpec(source_id=2, name="Needles", face_count=24),
+        ),
+    )
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        row = app._part_mesh_rows[0]
+        row["source_mode_var"].set(PrototypeSourceMode.FBX_FILE.value)
+        row["fbx_var"].set(str(fake_fbx_path))
+        row["fbx_material_mode_var"].set(FbxMaterialMode.MATERIAL_SLOTS.value)
+        row["material_slot_rows"][0]["path_var"].set("/Game/TreeParts/M_Bark.M_Bark")
+        app._handle_window_close()
+
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        key = str(SIMPLE_TREE_01.resolve())
+        assert payload["part_mesh_settings_by_input_path"][key][0]["fbx_material_mode"] == "material_slots"
+        assert payload["part_mesh_settings_by_input_path"][key][0]["fbx_material_slot_overrides"] == [
+            {"slot_name": "Bark", "ue_asset_path": "/Game/TreeParts/M_Bark.M_Bark"},
+            {"slot_name": "Needles", "ue_asset_path": ""},
+        ]
+    finally:
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+
+def test_gui_persists_wind_group_settings_per_xml(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    settings_path = tmp_path / "gui_settings.json"
+    other_xml = Path(__file__).parent / "data" / "leafrefs_on_branch_levels.xml"
+    dynamic_wind = DynamicWindData(
+        joint_assignments=(DynamicWindJointAssignment(joint_name="root", simulation_group_index=0, branch_order=0),),
+        simulation_groups=(DynamicWindSimulationGroup(group_index=0, branch_order=0, is_trunk_group=True),),
+    )
+
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
+    monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda _input_path, is_ground_cover=False: dynamic_wind)
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        app.refresh_wind_groups()
+        app._wind_group_rows[0]["influence_var"].set(0.35)
+        app._save_settings()
+
+        app.input_var.set(str(other_xml))
+        app.refresh_wind_groups()
+        app._wind_group_rows[0]["influence_var"].set(0.75)
+        app._save_settings()
+        app._handle_window_close()
+
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        first_key = str(SIMPLE_TREE_01.resolve())
+        second_key = str(other_xml.resolve())
+        assert payload["wind_group_settings_by_input_path"][first_key]["0"]["influence"] == 0.35
+        assert payload["wind_group_settings_by_input_path"][second_key]["0"]["influence"] == 0.75
+    finally:
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+    _, root = _build_tk_root_or_skip()
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
+    monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
+    monkeypatch.setattr("xml_to_usda.gui.inspect_wind_data", lambda _input_path, is_ground_cover=False: dynamic_wind)
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        app.refresh_wind_groups()
+        assert app._wind_group_rows[0]["influence_var"].get() == pytest.approx(0.35)
+
+        app.input_var.set(str(other_xml))
+        app.refresh_wind_groups()
+        assert app._wind_group_rows[0]["influence_var"].get() == pytest.approx(0.75)
     finally:
         try:
             root.destroy()
@@ -1039,13 +1374,12 @@ def test_gui_invalid_material_path_blocks_conversion(monkeypatch: pytest.MonkeyP
     from xml_to_usda.gui import ConversionApp
 
     convert_mock = Mock()
-    error_messages: list[str] = []
 
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
     monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+    monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
     monkeypatch.setattr("xml_to_usda.gui.convert_file", convert_mock)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
-    monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda _title, message: error_messages.append(message))
 
     try:
         app = ConversionApp(root)
@@ -1056,7 +1390,8 @@ def test_gui_invalid_material_path_blocks_conversion(monkeypatch: pytest.MonkeyP
         app.run_conversion()
 
         convert_mock.assert_not_called()
-        assert error_messages == ["Bark material path must start with /Game/."]
+        assert app.status_var.get() == "Invalid material path"
+        assert "Bark material path must start with /Game/." in app.log_widget.get("1.0", "end-1c")
     finally:
         root.destroy()
 
@@ -1066,13 +1401,12 @@ def test_gui_invalid_single_material_path_blocks_conversion(monkeypatch: pytest.
     from xml_to_usda.gui import ConversionApp
 
     convert_mock = Mock()
-    error_messages: list[str] = []
 
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
     monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+    monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
     monkeypatch.setattr("xml_to_usda.gui.convert_file", convert_mock)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
-    monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda _title, message: error_messages.append(message))
 
     try:
         app = ConversionApp(root)
@@ -1084,7 +1418,8 @@ def test_gui_invalid_single_material_path_blocks_conversion(monkeypatch: pytest.
         app.run_conversion()
 
         convert_mock.assert_not_called()
-        assert error_messages == ["Single material path must start with /Game/."]
+        assert app.status_var.get() == "Invalid material path"
+        assert "Single material path must start with /Game/." in app.log_widget.get("1.0", "end-1c")
     finally:
         root.destroy()
 
@@ -1094,13 +1429,12 @@ def test_gui_invalid_part_mesh_path_blocks_conversion(monkeypatch: pytest.Monkey
     from xml_to_usda.gui import ConversionApp
 
     convert_mock = Mock()
-    error_messages: list[str] = []
 
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
     monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+    monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
     monkeypatch.setattr("xml_to_usda.gui.convert_file", convert_mock)
     monkeypatch.setattr("xml_to_usda.gui.messagebox.showinfo", lambda *args, **kwargs: None)
-    monkeypatch.setattr("xml_to_usda.gui.messagebox.showerror", lambda _title, message: error_messages.append(message))
 
     try:
         app = ConversionApp(root)
@@ -1112,7 +1446,177 @@ def test_gui_invalid_part_mesh_path_blocks_conversion(monkeypatch: pytest.Monkey
         app.run_conversion()
 
         convert_mock.assert_not_called()
-        assert error_messages == ["PartMesh asset path for Twig_01 must start with /Game/."]
+        assert app.status_var.get() == "Invalid PartMesh mapping"
+        assert "PartMesh asset path for Twig_01 must start with /Game/." in app.log_widget.get("1.0", "end-1c")
+    finally:
+        root.destroy()
+
+
+def test_gui_logs_worker_traceback_when_background_conversion_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+    monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
+
+    try:
+        app = ConversionApp(root)
+        app._conversion_error_traceback = "Traceback line 1\nTraceback line 2"
+        app._conversion_context = {
+            "cpu_profile": CpuProfile.BALANCED,
+            "cleanup_policy": CleanupPolicy.EPHEMERAL,
+            "material_policy": MaterialPolicy.SOURCE_MATERIAL_ROLES,
+            "bark_material_path": None,
+            "leaves_material_path": None,
+            "single_material_path": None,
+            "prototype_source_configs": (),
+            "use_existing_part_meshes": False,
+            "part_mesh_asset_paths": (),
+        }
+
+        app._handle_conversion_job_result(
+            ConversionJobResult(error_message="'list_iterator' object is not callable"),
+            app._conversion_context,
+        )
+
+        log_text = app.log_widget.get("1.0", "end-1c")
+        assert "'list_iterator' object is not callable" in log_text
+        assert "Traceback line 1" in log_text
+        assert app.status_var.get() == "Conversion failed."
+        assert "Traceback line 2" in (tmp_path / "gui_runtime.log").read_text(encoding="utf-8")
+    finally:
+        root.destroy()
+
+
+def test_gui_logs_tk_callback_exceptions_without_crashing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+    monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
+
+    try:
+        app = ConversionApp(root)
+        try:
+            raise RuntimeError("ui blew up")
+        except RuntimeError as exc:
+            app._handle_tk_callback_exception(RuntimeError, exc, exc.__traceback__)
+
+        assert app.status_var.get() == "UI callback failed."
+        log_text = app.log_widget.get("1.0", "end-1c")
+        assert "RuntimeError: ui blew up" in log_text
+        assert "UI callback failed" in (tmp_path / "gui_runtime.log").read_text(encoding="utf-8")
+    finally:
+        root.destroy()
+
+
+def test_gui_shows_startup_build_banner_when_build_info_exists(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    import xml_to_usda.gui as gui_module
+    from xml_to_usda.gui import ConversionApp
+
+    build_root = tmp_path / "dist"
+    build_root.mkdir(parents=True, exist_ok=True)
+    fake_exe = build_root / "XMLtoUSDAConverter.exe"
+    fake_exe.write_text("", encoding="utf-8")
+    (build_root / "build_info.json").write_text(
+        json.dumps(
+            {
+                "built_at": "2026-04-04 12:34:56 +05:00",
+                "build_mode": "launcher",
+                "exe_path": str(fake_exe),
+                "python_exe": str(tmp_path / ".venv310" / "Scripts" / "python.exe"),
+                "git_branch": "codex/test",
+                "git_head": "abc1234",
+                "git_dirty": True,
+                "change_summary": "M src/xml_to_usda/gui.py; M scripts/build_gui_exe.ps1",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+    monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
+    monkeypatch.setattr(gui_module.sys, "argv", [str(fake_exe)])
+    monkeypatch.setattr(gui_module.sys, "executable", str(fake_exe))
+
+    try:
+        app = ConversionApp(root)
+        log_text = app.log_widget.get("1.0", "end-1c")
+        assert "Build info:" in log_text
+        assert "Runtime info:" in log_text
+        assert "built_at: 2026-04-04 12:34:56 +05:00" in log_text
+        assert "mode: launcher" in log_text
+        assert "git_head: abc1234" in log_text
+        assert "changes: M src/xml_to_usda/gui.py; M scripts/build_gui_exe.ps1" in log_text
+        assert "Build banner" in (tmp_path / "gui_runtime.log").read_text(encoding="utf-8")
+    finally:
+        root.destroy()
+
+
+def test_gui_reports_runtime_context_for_unexpected_worker_crash(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+    monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
+
+    try:
+        app = ConversionApp(root)
+        app._conversion_context = {
+            "cpu_profile": CpuProfile.BALANCED,
+            "cleanup_policy": CleanupPolicy.EPHEMERAL,
+            "material_policy": MaterialPolicy.SOURCE_MATERIAL_ROLES,
+            "bark_material_path": None,
+            "leaves_material_path": None,
+            "single_material_path": None,
+            "prototype_source_configs": (),
+            "use_existing_part_meshes": False,
+            "part_mesh_asset_paths": (),
+        }
+        app._last_conversion_telemetry = ConversionTelemetry(
+            phase=ConversionPhase.FBX_IMPORT,
+            completed_units=1,
+            total_units=2,
+            message="Imported FBX Branch_A.",
+            elapsed_seconds=123.4,
+        )
+        app.status_var.set("Imported FBX Branch_A (1/2) 123.4s")
+        app._handle_conversion_job_result(
+            ConversionJobResult(
+                error_message=(
+                    "Conversion worker process crashed unexpectedly (exit code 3221225477)\n"
+                    "Last telemetry: Imported FBX Branch_A. (1/2) 123.4s\n"
+                    "Runtime context:\n"
+                    "  frozen=False\n"
+                    "  executable=python.exe\n"
+                    "  argv0=test\n"
+                    "  jobs_root=C:/tmp/jobs"
+                )
+            ),
+            app._conversion_context,
+        )
+
+        log_text = app.log_widget.get("1.0", "end-1c")
+        assert "Conversion worker process crashed unexpectedly" in log_text
+        assert "Last telemetry:" in log_text
+        assert "Runtime context:" in log_text
     finally:
         root.destroy()
 

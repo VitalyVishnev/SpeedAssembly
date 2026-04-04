@@ -132,6 +132,22 @@ Supported exporter material policies:
 
 Outside `source_material_roles`, authored XML material ids are preserved only as source metadata on canonical materials and instances.
 
+Current GUI material workflow, stage 1:
+
+- the base tree and repeated parts are configured separately in the GUI
+- `Base XML materials` are discovered directly from XML `Materials/Material`, but only for ids used by unique base-tree geometry under `Objects/Object`
+- each base-material row exposes:
+  - source `ID`
+  - source `Name`
+  - one Unreal material path
+- multiple XML material rows may intentionally point at the same Unreal material path
+- repeated part prototypes do not reuse those base-material rows as their only control surface
+- repeated part rows currently expose:
+  - `single_material`
+  - `vertex_color_split`
+- stage-1 `vertex_color_split` is an explicit black/white split for repeated-part materials
+- stage-1 does not yet expose `get materials from FBX`; embedded FBX material-slot import remains a later step
+
 Naming policy:
 
 - the generated USDA filename is the canonical authored asset name for the base skeletal tree
@@ -168,9 +184,8 @@ Explicit FBX replacement rules:
 - the FBX origin is treated as the attachment pivot
 - the converter merges all FBX mesh nodes into one prototype-local payload before USDA authoring
 - embedded FBX materials are ignored in v1
-- vertex colors drive the initial material buckets for FBX mode:
-  - exact black face -> leaves bucket
-  - every non-black face -> bark bucket
+- stage-1 GUI part-material split uses exact black and exact white face buckets
+- legacy/config `auto` mode may still use the older fallback-oriented split logic outside the GUI stage-1 workflow
 - missing vertex colors are a hard failure for FBX mode
 
 Main skeleton naming rule:

@@ -186,6 +186,34 @@ If UE does not import it as the intended asset, it is a failure.
 
 Do not assume a formal stable public specification. Build against real samples.
 
+## Engineering architecture policy
+
+This repository must prefer modular, system-oriented design over short-term convenience.
+
+Required engineering behavior:
+
+1. Build independently evolvable subsystems with explicit contracts.
+2. Keep XML parsing, normalization, USDA authoring, validation, FBX import, material resolution, CLI, GUI, and runtime orchestration separated so each can be improved without rewriting the rest of the pipeline.
+3. Give each module, class, and function one clear responsibility with well-bounded inputs, outputs, and failure modes.
+4. Route cross-cutting behavior through explicit interfaces or shared domain models, not through ad-hoc flags, hidden globals, or unrelated modules reaching into each other.
+5. Keep side effects at the edges where practical; core transformation logic should stay deterministic, inspectable, and easy to test in isolation.
+6. Prefer extending the normalized model or module contract over stacking one-off conditionals onto an already fragile path.
+7. Hardcoded values are acceptable only when they are backed by a verified UE contract, a verified observed source pattern, or an explicitly documented runtime constraint.
+8. If a value, rule, or branch is intentionally hardcoded because the importer contract requires it, document that reason near the code or in project docs.
+
+### Question-first rule for unresolved design choices
+
+If implementation requires a structural, architectural, or contract decision and the correct choice is not grounded by the documented source-of-truth order, stop and ask questions before coding.
+
+Do not:
+
+- ship a speculative shortcut just to unblock the moment
+- hide an unresolved design choice behind a "temporary" fallback
+- add a branch that only fixes the current sample when the general contract is still unclear
+- normalize confusion into production behavior by saying "we will clean it up later"
+
+Clarification is preferred over a fast wrong abstraction.
+
 ## Mandatory use of `vault`
 
 `vault` is a primary comparison source during development.
@@ -211,6 +239,16 @@ Use these until UE validation disproves them:
 - current validated stage defaults are:
   - `metersPerUnit = 1`
   - `upAxis = "Y"`
+
+## Current performance and UX priority
+
+Use these as active engineering guidance unless real production validation disproves them:
+
+- `CpuProfile.BALANCED` is the default operator-facing profile and should remain the default unless measured production timing makes that untenable.
+- Low aggregate CPU usage during a huge conversion is not, by itself, a bug. The current parallelism is primarily across independent prototypes and stages, not inside one single Autodesk FBX scene import.
+- Prefer successful completion, deterministic output, system responsiveness, cleanup, diagnostics, and package-build stability over aggressive all-core saturation.
+- Do not prioritize intra-file FBX all-core optimization unless real production trees show unacceptable wall-clock timings.
+- Launcher and packaged GUI runtimes are both supported. Fixes that only make the launcher stable are incomplete when the packaged executable still fails on the same workflow.
 
 ## Required work order
 
@@ -248,6 +286,13 @@ At minimum, the model must represent concepts such as:
 - `Assembly Part`
 - `Instance`
 - `Binding`
+
+The internal model and surrounding modules should also preserve clean subsystem boundaries:
+
+- parsing should not depend on writer-specific formatting decisions
+- normalization should not depend on GUI state or CLI plumbing
+- USDA writing should consume normalized data rather than raw XML traversal state
+- validation and diagnostics should be able to inspect normalized or authored output without mutating core conversion logic
 
 ## Mapping rules that must be explicit in code
 
@@ -319,6 +364,25 @@ Errors must say:
 
 Do not silently emit broken USDA.
 
+## Code quality standard
+
+Production code in this repository must be clean, modular, readable, and professional.
+
+Required characteristics:
+
+- names should reflect domain meaning, not temporary implementation detail
+- modules and files should stay focused; avoid "god modules" that mix parsing, domain logic, writing, UI, and process control
+- functions should be small enough that their invariant, side effects, and error behavior are easy to understand
+- control flow should be straightforward and reviewable, not clever at the expense of maintainability
+- duplicated logic should be consolidated behind one owned abstraction when it represents the same rule
+- invariants, assumptions, and failure paths should be explicit
+- hidden mutable state should be minimized
+- comments should explain why a non-obvious rule exists, especially when it comes from UE behavior or a verified `vault` pattern
+- touched code should become more coherent, not less, after a change
+- every non-trivial change should land with the right tests for its layer instead of relying on manual memory
+
+Code that is fast to patch but hard to reason about is not considered a successful implementation.
+
 ## Testing requirements
 
 ### Unit tests
@@ -364,8 +428,10 @@ Do not:
 - guess UE schema attributes from memory
 - bake repeated Assembly Parts into unique meshes
 - call a static assembly skeletal
+- encode unresolved behavior in undocumented hardcoded branches
 - ignore `vault` examples
 - mix local, world, and source transform spaces
+- use a "temporary" architectural shortcut when the correct contract is still unknown
 - silently create fallback geometry without logging it
 - trust community snippets over schema inspection and working imports
 

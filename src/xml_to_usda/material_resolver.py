@@ -5,15 +5,18 @@ from dataclasses import replace
 
 from .geometry_buffers import replace_payload_sections, single_material_sections
 from .models import (
+    BaseMaterialOverride,
     CanonicalTreeModel,
     CompactMeshSection,
     CpuProfile,
     FbxMaterialMode,
+    FbxMaterialSlotOverride,
     GeometryBuffer,
     MaterialPolicy,
     MaterialSpec,
     MeshData,
     MeshSection,
+    PrototypeResolutionMode,
     PrototypeSourceMode,
 )
 from .payload_partition import partition_fbx_material_faces
@@ -21,6 +24,8 @@ from .payload_partition import partition_fbx_material_faces
 
 BASELINE_BARK_MATERIAL_ID = 1
 BASELINE_LEAVES_MATERIAL_ID = 2
+BLACK_BUCKET_ID = -101
+WHITE_BUCKET_ID = -102
 
 
 def resolve_prototype_materials(
@@ -56,7 +61,20 @@ def apply_material_policy(
     leaves_material_path: str | None,
     single_material_path: str | None,
     normalize_asset_path,
+    *,
+    base_material_overrides: tuple[BaseMaterialOverride, ...] = (),
+    explicit_part_material_contract: bool = False,
+    cpu_profile: CpuProfile = CpuProfile.BALANCED,
+    cancel_event=None,
 ) -> CanonicalTreeModel:
+    if explicit_part_material_contract:
+        return _apply_explicit_material_contract(
+            model,
+            base_material_overrides=base_material_overrides,
+            normalize_asset_path=normalize_asset_path,
+            cpu_profile=cpu_profile,
+            cancel_event=cancel_event,
+        )
     if material_policy == MaterialPolicy.SOURCE_MATERIAL_ROLES:
         return _apply_source_role_material_policy(model, bark_material_path, leaves_material_path, normalize_asset_path)
     if material_policy == MaterialPolicy.SINGLE_MATERIAL:
@@ -64,6 +82,138 @@ def apply_material_policy(
     if material_policy == MaterialPolicy.VERTEX_COLOR_SPLIT:
         return _apply_vertex_color_split_policy(model, bark_material_path, leaves_material_path, normalize_asset_path)
     raise ValueError(f"Unsupported material policy: {material_policy}")
+
+
+def _apply_explicit_material_contract(
+    model: CanonicalTreeModel,
+    *,
+    base_material_overrides: tuple[BaseMaterialOverride, ...],
+    normalize_asset_path,
+    cpu_profile: CpuProfile,
+    cancel_event,
+) -> CanonicalTreeModel:
+    materials = list(_apply_base_material_overrides(model.materials, base_material_overrides, normalize_asset_path))
+    next_material_id = max((material.source_id for material in materials), default=0) + 1
+    prototypes = []
+    warnings: list[str] = []
+
+    for prototype in model.prototypes:
+        if prototype.resolution_mode == PrototypeResolutionMode.EXTERNAL_ASSET:
+            prototypes.append(prototype)
+            continue
+        if not _prototype_uses_explicit_part_material_contract(prototype):
+            prototypes.append(prototype)
+            continue
+
+        material_mode = prototype.fbx_material_mode
+        if material_mode == FbxMaterialMode.SINGLE_MATERIAL:
+            material_id = next_material_id
+            next_material_id += 1
+            materials.append(
+                MaterialSpec(
+                    source_id=material_id,
+                    name=f"{prototype.identity.prim_name}_SingleMaterial",
+                    ue_asset_path=normalize_asset_path(prototype.single_material_path)
+                    if prototype.single_material_path
+                    else None,
+                    source_material_ids=(material_id,),
+                )
+            )
+            prototypes.append(_replace_prototype_sections_with_single_material(prototype, material_id))
+            continue
+
+        if material_mode == FbxMaterialMode.MATERIAL_SLOTS:
+            sections, slot_material_specs, slot_warnings = _explicit_fbx_material_slot_sections_for_prototype(
+                prototype,
+                normalize_asset_path=normalize_asset_path,
+                starting_material_id=next_material_id,
+            )
+            next_material_id += len(slot_material_specs)
+            materials.extend(slot_material_specs)
+            warnings.extend(slot_warnings)
+            prototypes.append(_replace_prototype_sections(prototype, sections))
+            continue
+
+        sections, failure_reason = _explicit_vertex_color_sections_for_prototype(
+            prototype,
+            cpu_profile=cpu_profile,
+            cancel_event=cancel_event,
+        )
+        if sections is None:
+            raise ValueError(
+                "Prototype "
+                f"{prototype.identity.prim_name} requested vertex_color_split but could not produce a usable black/white split because {failure_reason}"
+            )
+
+        black_material_id = next_material_id
+        white_material_id = next_material_id + 1
+        next_material_id += 2
+        materials.extend(
+            (
+                MaterialSpec(
+                    source_id=black_material_id,
+                    name=f"{prototype.identity.prim_name}_Black",
+                    ue_asset_path=normalize_asset_path(prototype.black_material_path)
+                    if prototype.black_material_path
+                    else None,
+                    source_material_ids=(black_material_id,),
+                ),
+                MaterialSpec(
+                    source_id=white_material_id,
+                    name=f"{prototype.identity.prim_name}_White",
+                    ue_asset_path=normalize_asset_path(prototype.white_material_path)
+                    if prototype.white_material_path
+                    else None,
+                    source_material_ids=(white_material_id,),
+                ),
+            )
+        )
+        prototypes.append(
+            _replace_prototype_sections(
+                prototype,
+                _remap_bucket_sections(sections, black_material_id, white_material_id),
+            )
+        )
+
+    metadata = model.metadata
+    if warnings:
+        metadata = replace(metadata, warnings=metadata.warnings + tuple(warnings))
+    return replace(model, materials=tuple(materials), prototypes=tuple(prototypes), metadata=metadata)
+
+
+def _prototype_uses_explicit_part_material_contract(prototype) -> bool:
+    if prototype.source_mode == PrototypeSourceMode.UNREAL_ASSET:
+        return False
+    if prototype.source_mode == PrototypeSourceMode.FBX_FILE:
+        return True
+    if prototype.fbx_material_mode != FbxMaterialMode.AUTO:
+        return True
+    return bool(
+        prototype.single_material_path
+        or prototype.black_material_path
+        or prototype.white_material_path
+    )
+
+
+def _apply_base_material_overrides(
+    materials: tuple[MaterialSpec, ...],
+    base_material_overrides: tuple[BaseMaterialOverride, ...],
+    normalize_asset_path,
+) -> tuple[MaterialSpec, ...]:
+    if not base_material_overrides:
+        return materials
+    overrides_by_id = {
+        override.source_id: (
+            normalize_asset_path(override.ue_asset_path)
+            if override.ue_asset_path
+            else None
+        )
+        for override in base_material_overrides
+    }
+    return tuple(
+        replace(material, ue_asset_path=overrides_by_id.get(material.source_id, material.ue_asset_path))
+        for material in materials
+    )
 
 
 def _apply_source_role_material_policy(
@@ -316,6 +466,50 @@ def _replace_prototype_materials_to_single_material(prototype, material_id: int)
     return prototype
 
 
+def _replace_prototype_sections_with_single_material(prototype, material_id: int):
+    if prototype.geometry_payload is not None:
+        return replace(
+            prototype,
+            geometry_payload=replace_payload_sections(
+                prototype.geometry_payload,
+                single_material_sections(material_id, prototype.geometry_payload.face_count),
+            ),
+        )
+    if prototype.mesh is not None:
+        return replace(prototype, mesh=_remap_mesh_to_single_material(prototype.mesh, material_id))
+    return prototype
+
+
+def _replace_prototype_sections(prototype, sections):
+    if prototype.geometry_payload is not None:
+        return replace(prototype, geometry_payload=replace_payload_sections(prototype.geometry_payload, sections))
+    if prototype.mesh is not None:
+        return replace(prototype, mesh=replace(prototype.mesh, sections=sections))
+    return prototype
+
+
+def _remap_bucket_sections(
+    sections: tuple[MeshSection | CompactMeshSection, ...],
+    black_material_id: int,
+    white_material_id: int,
+):
+    def _resolve_material_id(bucket_id: int) -> int:
+        if bucket_id == BLACK_BUCKET_ID:
+            return black_material_id
+        if bucket_id == WHITE_BUCKET_ID:
+            return white_material_id
+        raise ValueError(f"Unsupported explicit color bucket id: {bucket_id}")
+
+    remapped = []
+    for section in sections:
+        material_id = _resolve_material_id(section.material_id)
+        if isinstance(section, CompactMeshSection):
+            remapped.append(CompactMeshSection(material_id=material_id, face_indices=section.face_indices))
+        else:
+            remapped.append(MeshSection(material_id=material_id, face_indices=section.face_indices))
+    return tuple(remapped)
+
+
 def _single_material_mesh_sections(material_id: int, face_count: int) -> tuple[MeshSection, ...]:
     if face_count <= 0:
         return ()
@@ -391,6 +585,61 @@ def _vertex_color_split_sections(mesh: MeshData) -> tuple[MeshSection, ...] | No
     )
 
 
+def _explicit_vertex_color_sections_for_prototype(
+    prototype,
+    *,
+    cpu_profile: CpuProfile,
+    cancel_event,
+):
+    if prototype.source_mode == PrototypeSourceMode.FBX_FILE and prototype.geometry_payload is not None:
+        return _explicit_fbx_vertex_color_sections_for_payload(
+            prototype.geometry_payload,
+            cpu_profile=cpu_profile,
+            cancel_event=cancel_event,
+        )
+    if prototype.geometry_payload is not None:
+        sections = _explicit_black_white_sections_for_payload(prototype.geometry_payload)
+        if sections is None:
+            return None, _describe_explicit_vertex_color_failure_for_payload(prototype.geometry_payload)
+        return sections, None
+    if prototype.mesh is not None:
+        sections = _explicit_black_white_sections_for_mesh(prototype.mesh)
+        if sections is None:
+            return None, _describe_explicit_vertex_color_failure_for_mesh(prototype.mesh)
+        return sections, None
+    return None, "prototype mesh payload is missing"
+
+
+def _explicit_black_white_sections_for_mesh(mesh: MeshData) -> tuple[MeshSection, ...] | None:
+    if not mesh.vertex_colors or not mesh.face_vertex_counts or not mesh.face_vertex_indices:
+        return None
+
+    sections_by_material: dict[int, list[int]] = {
+        BLACK_BUCKET_ID: [],
+        WHITE_BUCKET_ID: [],
+    }
+    offset = 0
+    for face_index, face_count in enumerate(mesh.face_vertex_counts):
+        face_indices = mesh.face_vertex_indices[offset:offset + face_count]
+        offset += face_count
+        if len(face_indices) != face_count:
+            return None
+        if any(point_index < 0 or point_index >= len(mesh.vertex_colors) for point_index in face_indices):
+            return None
+        bucket_id = _classify_mesh_face_vertex_colors(mesh, face_indices)
+        if bucket_id is None:
+            return None
+        sections_by_material[bucket_id].append(face_index)
+
+    if not sections_by_material[BLACK_BUCKET_ID] or not sections_by_material[WHITE_BUCKET_ID]:
+        return None
+    return tuple(
+        MeshSection(material_id=material_id, face_indices=tuple(face_indices))
+        for material_id, face_indices in sections_by_material.items()
+        if face_indices
+    )
+
+
 def _vertex_color_split_sections_for_payload(payload: GeometryBuffer) -> tuple[CompactMeshSection, ...] | None:
     if payload.vertex_color_count == 0 or payload.face_count == 0 or not payload.face_vertex_indices:
         return None
@@ -422,6 +671,107 @@ def _vertex_color_split_sections_for_payload(payload: GeometryBuffer) -> tuple[C
         for material_id, face_indices in sections_by_material.items()
         if face_indices
     )
+
+
+def _explicit_fbx_vertex_color_sections_for_payload(
+    payload: GeometryBuffer,
+    *,
+    cpu_profile: CpuProfile,
+    cancel_event,
+) -> tuple[tuple[CompactMeshSection, ...] | None, str | None]:
+    if payload.vertex_color_warning:
+        return None, payload.vertex_color_warning
+    if payload.vertex_color_count == 0 or payload.face_count == 0 or not payload.face_vertex_indices:
+        return None, "vertex colors are missing"
+    sections = partition_fbx_material_faces(
+        payload,
+        cpu_profile=cpu_profile,
+        cancel_event=cancel_event,
+    )
+    if sections is None:
+        return None, _describe_explicit_vertex_color_failure_for_payload(payload)
+    remapped_sections = []
+    for section in sections:
+        if section.material_id == BASELINE_LEAVES_MATERIAL_ID:
+            remapped_sections.append(CompactMeshSection(material_id=BLACK_BUCKET_ID, face_indices=section.face_indices))
+        elif section.material_id == BASELINE_BARK_MATERIAL_ID:
+            remapped_sections.append(CompactMeshSection(material_id=WHITE_BUCKET_ID, face_indices=section.face_indices))
+    if len(remapped_sections) < 2:
+        return None, "vertex colors do not create both black and white buckets"
+    return tuple(remapped_sections), None
+
+
+def _explicit_black_white_sections_for_payload(payload: GeometryBuffer) -> tuple[CompactMeshSection, ...] | None:
+    if payload.vertex_color_count == 0 or payload.face_count == 0 or not payload.face_vertex_indices:
+        return None
+    sections_by_material: dict[int, array] = {
+        BLACK_BUCKET_ID: array("i"),
+        WHITE_BUCKET_ID: array("i"),
+    }
+    offset = 0
+    for face_index, face_count in enumerate(payload.face_vertex_counts):
+        face_indices = payload.face_vertex_indices[offset:offset + face_count]
+        offset += face_count
+        if len(face_indices) != face_count:
+            return None
+        bucket_id = _classify_payload_face_vertex_colors(payload, face_indices)
+        if bucket_id is None:
+            return None
+        sections_by_material[bucket_id].append(face_index)
+    if not sections_by_material[BLACK_BUCKET_ID] or not sections_by_material[WHITE_BUCKET_ID]:
+        return None
+    return tuple(
+        CompactMeshSection(material_id=material_id, face_indices=face_indices)
+        for material_id, face_indices in sections_by_material.items()
+        if face_indices
+    )
+
+
+def _classify_mesh_face_vertex_colors(mesh: MeshData, face_indices) -> int | None:
+    colors = [mesh.vertex_colors[point_index] for point_index in face_indices]
+    if all(color.is_exact_black() for color in colors):
+        return BLACK_BUCKET_ID
+    if all(color.is_exact_white() for color in colors):
+        return WHITE_BUCKET_ID
+    return None
+
+
+def _classify_payload_face_vertex_colors(payload: GeometryBuffer, face_indices) -> int | None:
+    saw_black = False
+    saw_white = False
+    for point_index in face_indices:
+        color_offset = point_index * 4
+        if color_offset + 2 >= len(payload.vertex_color_components):
+            return None
+        red = payload.vertex_color_components[color_offset]
+        green = payload.vertex_color_components[color_offset + 1]
+        blue = payload.vertex_color_components[color_offset + 2]
+        if red == 0.0 and green == 0.0 and blue == 0.0:
+            saw_black = True
+            continue
+        if red == 1.0 and green == 1.0 and blue == 1.0:
+            saw_white = True
+            continue
+        return None
+    if saw_black and not saw_white:
+        return BLACK_BUCKET_ID
+    if saw_white and not saw_black:
+        return WHITE_BUCKET_ID
+    return None
+
+
+def _describe_explicit_vertex_color_failure_for_mesh(mesh: MeshData) -> str:
+    if not mesh.vertex_colors:
+        return "vertex colors are missing"
+    return "faces do not resolve cleanly into exact black and exact white buckets"
+
+
+def _describe_explicit_vertex_color_failure_for_payload(payload: GeometryBuffer) -> str:
+    if payload.vertex_color_warning:
+        return payload.vertex_color_warning
+    if payload.vertex_color_count == 0:
+        return "vertex colors are missing"
+    return "faces do not resolve cleanly into exact black and exact white buckets"
 
 
 def _fbx_vertex_color_sections(payload: GeometryBuffer) -> tuple[CompactMeshSection, ...] | None:
@@ -469,6 +819,13 @@ def _resolve_fbx_material_sections(
         return ()
     if prototype.fbx_material_mode == FbxMaterialMode.SINGLE_MATERIAL:
         return single_material_sections(BASELINE_BARK_MATERIAL_ID, payload.face_count)
+    if prototype.fbx_material_mode == FbxMaterialMode.MATERIAL_SLOTS:
+        if _has_useful_fbx_material_slot_split(payload):
+            return payload.sections
+        raise ValueError(
+            "Prototype "
+            f"{prototype.identity.prim_name} requested FBX material_slots but the FBX payload does not expose usable material slot sections."
+        )
 
     sections = partition_fbx_material_faces(
         payload,
@@ -480,15 +837,14 @@ def _resolve_fbx_material_sections(
 
     warning_reason = _describe_fbx_material_fallback_reason(payload, sections)
     if prototype.fbx_material_mode == FbxMaterialMode.VERTEX_COLOR_SPLIT:
-        warnings.append(
-            "material_policy_warning: "
-            f"Prototype {prototype.identity.prim_name} requested FBX vertex_color_split but fell back to primary material because {warning_reason}"
+        raise ValueError(
+            "Prototype "
+            f"{prototype.identity.prim_name} requested FBX vertex_color_split but could not produce a usable split because {warning_reason}"
         )
-    else:
-        warnings.append(
-            "material_policy_warning: "
-            f"Prototype {prototype.identity.prim_name} uses single material because {warning_reason}"
-        )
+    warnings.append(
+        "material_policy_warning: "
+        f"Prototype {prototype.identity.prim_name} uses single material because {warning_reason}"
+    )
     return single_material_sections(BASELINE_BARK_MATERIAL_ID, payload.face_count)
 
 
@@ -496,12 +852,91 @@ def _has_useful_fbx_material_split(sections: tuple[CompactMeshSection, ...] | No
     return sections is not None and len(sections) > 1
 
 
+def _has_useful_fbx_material_slot_split(payload: GeometryBuffer) -> bool:
+    return bool(payload.fbx_material_slots and payload.sections)
+
+
 def _describe_fbx_material_fallback_reason(
     payload: GeometryBuffer,
     sections: tuple[CompactMeshSection, ...] | None,
 ) -> str:
+    if payload.vertex_color_warning:
+        return payload.vertex_color_warning
     if payload.vertex_color_count == 0:
         return "vertex colors are missing"
     if sections is None:
         return "vertex colors are incomplete or unusable"
     return "vertex colors do not create more than one material bucket"
+
+
+def _explicit_fbx_material_slot_sections_for_prototype(
+    prototype,
+    *,
+    normalize_asset_path,
+    starting_material_id: int,
+) -> tuple[tuple[CompactMeshSection, ...], tuple[MaterialSpec, ...], tuple[str, ...]]:
+    payload = prototype.geometry_payload
+    if payload is None or not payload.sections or not payload.fbx_material_slots:
+        raise ValueError(
+            "Prototype "
+            f"{prototype.identity.prim_name} requested FBX material_slots but the FBX payload does not expose any usable material slots."
+        )
+
+    overrides_by_name = {
+        override.slot_name: normalize_asset_path(override.ue_asset_path)
+        if override.ue_asset_path
+        else None
+        for override in prototype.fbx_material_slot_overrides
+    }
+    first_filled_override = next(
+        (
+            normalize_asset_path(override.ue_asset_path)
+            for override in prototype.fbx_material_slot_overrides
+            if override.ue_asset_path
+        ),
+        None,
+    )
+    if not first_filled_override:
+        raise ValueError(
+            "Prototype "
+            f"{prototype.identity.prim_name} requested FBX material_slots but none of the FBX material slot overrides have an Unreal material path."
+        )
+
+    slot_material_ids: dict[int, int] = {}
+    materials: list[MaterialSpec] = []
+    warnings: list[str] = []
+    next_material_id = starting_material_id
+    for slot_spec in payload.fbx_material_slots:
+        slot_material_ids[slot_spec.source_id] = next_material_id
+        resolved_path = overrides_by_name.get(slot_spec.name)
+        if not resolved_path:
+            resolved_path = first_filled_override
+            warnings.append(
+                "material_policy_warning: "
+                f"Prototype {prototype.identity.prim_name} FBX material slot {slot_spec.name!r} has no Unreal material path; "
+                f"using {resolved_path} from another filled slot override."
+            )
+        materials.append(
+            MaterialSpec(
+                source_id=next_material_id,
+                name=f"{prototype.identity.prim_name}_{slot_spec.name}",
+                ue_asset_path=resolved_path,
+                source_material_ids=(slot_spec.source_id,),
+            )
+        )
+        next_material_id += 1
+
+    remapped_sections = tuple(
+        CompactMeshSection(
+            material_id=slot_material_ids[section.material_id],
+            face_indices=section.face_indices,
+        )
+        for section in payload.sections
+        if section.material_id in slot_material_ids
+    )
+    if not remapped_sections:
+        raise ValueError(
+            "Prototype "
+            f"{prototype.identity.prim_name} requested FBX material_slots but none of the imported faces were assigned to the discovered slots."
+        )
+    return remapped_sections, tuple(materials), tuple(warnings)

@@ -83,6 +83,10 @@ def test_job_workspace_is_created_inside_runtime_cache_root(tmp_path: Path) -> N
     try:
         assert workspace.job_dir.parent == runtime_paths.jobs_root
         assert workspace.manifest_path.exists()
+        manifest_payload = json.loads(workspace.manifest_path.read_text(encoding="utf-8"))
+        assert manifest_payload["runtime_context"]["pid"] > 0
+        assert "executable" in manifest_payload["runtime_context"]
+        assert "argv0" in manifest_payload["runtime_context"]
     finally:
         workspace.finalize(status="cancelled")
 

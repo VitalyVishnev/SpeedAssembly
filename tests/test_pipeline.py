@@ -4,11 +4,13 @@ import json
 import threading
 import xml.etree.ElementTree as ET
 from dataclasses import replace
+from enum import Enum
 from pathlib import Path
 
 import pytest
 
 from xml_to_usda.dynamic_wind import build_dynamic_wind_data
+from xml_to_usda.fbx_adapter import FbxVertexColorReadError, _read_vertex_color
 from xml_to_usda.normalizer import (
     _build_base_mesh,
     _extract_assembly_parts_from_leaf_references,
@@ -19,10 +21,12 @@ from xml_to_usda.normalizer import (
     normalize_to_canonical,
 )
 from xml_to_usda.models import (
+    BaseMaterialOverride,
     Color4,
     CpuProfile,
     DynamicWindSimulationGroup,
     FbxMaterialMode,
+    FbxMaterialSlotOverride,
     Joint,
     MaterialPolicy,
     MaterialSpec,
@@ -41,6 +45,7 @@ from xml_to_usda.normalizer import _vertex_color_material_sections
 from xml_to_usda.pipeline import (
     _apply_material_policy,
     convert_file,
+    discover_source_materials,
     discover_part_prototypes,
     generate_wind_json,
     inspect_source,
@@ -76,6 +81,8 @@ def _write_fbx_json_payload(
     *,
     include_vertex_colors: bool = True,
     color_components: list[float] | None = None,
+    fbx_material_slots: list[dict[str, object]] | None = None,
+    sections: list[dict[str, object]] | None = None,
     file_name: str = "prototype_payload.json",
 ) -> Path:
     payload = {
@@ -109,6 +116,10 @@ def _write_fbx_json_payload(
             1.0, 1.0, 1.0, 1.0,
             1.0, 1.0, 1.0, 1.0,
         ]
+    if fbx_material_slots is not None:
+        payload["fbx_material_slots"] = fbx_material_slots
+    if sections is not None:
+        payload["sections"] = sections
     payload_path = tmp_path / file_name
     payload_path.write_text(json.dumps(payload), encoding="utf-8")
     return payload_path
@@ -1629,6 +1640,43 @@ def test_fbx_part_source_config_replaces_inline_prototype_with_geometry_payload(
     }
 
 
+def test_frozen_runtime_uses_sequential_fbx_import_for_multiple_prototypes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import xml_to_usda.prototype_sources as prototype_sources_module
+
+    payload_path = _write_fbx_json_payload(tmp_path, file_name="SM_BigBranch_01_HIGH.json")
+
+    class _ForbiddenExecutor:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("ProcessPoolExecutor should not be created in frozen package mode.")
+
+    monkeypatch.setattr(prototype_sources_module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(prototype_sources_module, "ProcessPoolExecutor", _ForbiddenExecutor)
+
+    _, model, diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_path=str(payload_path),
+            ),
+            PrototypeSourceConfig(
+                source_key="Mesh_2",
+                source_name="Twig_02",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_path=str(payload_path),
+            ),
+        ),
+    )
+
+    assert not any(issue.severity == "error" for issue in diagnostics)
+    assert all(prototype.geometry_payload is not None for prototype in model.prototypes)
+
+
 def test_fbx_part_source_restores_authored_instance_scale_without_xml_original_scale_multiplier(tmp_path: Path) -> None:
     payload_path = _write_fbx_json_payload(tmp_path)
     _, baseline_model, _ = load_canonical_model(str(SIMPLE_TREE_01))
@@ -1751,6 +1799,76 @@ def test_fbx_part_source_force_single_material_ignores_useful_vertex_color_split
     }
 
 
+def test_fbx_part_source_with_vertex_color_warning_uses_specific_fallback_reason(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(tmp_path, include_vertex_colors=False)
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    payload["vertex_color_warning"] = "Autodesk FBX SDK vertex-color access failed for prototype_payload.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    _, model, diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_path=str(payload_path),
+            ),
+        ),
+    )
+
+    prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_1")
+
+    assert prototype.geometry_payload is not None
+    assert prototype.geometry_payload.vertex_color_warning == payload["vertex_color_warning"]
+    assert {section.material_id: list(section.face_indices) for section in prototype.geometry_payload.sections} == {
+        1: [0, 1],
+    }
+    assert any(
+        issue.code == "material_policy_warning" and payload["vertex_color_warning"] in issue.message
+        for issue in diagnostics
+    )
+
+
+def test_fbx_part_source_explicit_vertex_color_split_requires_usable_colors(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(tmp_path, include_vertex_colors=False)
+
+    with pytest.raises(ValueError, match="requested FBX vertex_color_split"):
+        load_canonical_model(
+            str(SIMPLE_TREE_01),
+            prototype_source_configs=(
+                PrototypeSourceConfig(
+                    source_key="Mesh_1",
+                    source_name="Twig_01",
+                    mode=PrototypeSourceMode.FBX_FILE,
+                    fbx_material_mode=FbxMaterialMode.VERTEX_COLOR_SPLIT,
+                    fbx_path=str(payload_path),
+                ),
+            ),
+        )
+
+
+def test_fbx_part_source_explicit_vertex_color_split_reports_binding_warning_reason(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(tmp_path, include_vertex_colors=False)
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    payload["vertex_color_warning"] = "Autodesk FBX SDK vertex-color access failed for prototype_payload.json"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Autodesk FBX SDK vertex-color access failed"):
+        load_canonical_model(
+            str(SIMPLE_TREE_01),
+            prototype_source_configs=(
+                PrototypeSourceConfig(
+                    source_key="Mesh_1",
+                    source_name="Twig_01",
+                    mode=PrototypeSourceMode.FBX_FILE,
+                    fbx_material_mode=FbxMaterialMode.VERTEX_COLOR_SPLIT,
+                    fbx_path=str(payload_path),
+                ),
+            ),
+        )
+
+
 def test_fbx_part_source_explicit_vertex_color_split_keeps_split_when_useful(tmp_path: Path) -> None:
     payload_path = _write_fbx_json_payload(tmp_path)
 
@@ -1775,6 +1893,166 @@ def test_fbx_part_source_explicit_vertex_color_split_keeps_split_when_useful(tmp
         1: [1],
         2: [0],
     }
+
+
+def test_fbx_part_source_material_slots_assigns_named_slots_and_warns_for_missing_paths(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(
+        tmp_path,
+        fbx_material_slots=[
+            {"source_id": 1, "name": "Bark", "face_count": 1},
+            {"source_id": 2, "name": "Needles", "face_count": 1},
+        ],
+        sections=[
+            {"material_id": 1, "face_indices": [0]},
+            {"material_id": 2, "face_indices": [1]},
+        ],
+    )
+
+    _, model, diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        use_explicit_material_contract=True,
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_material_mode=FbxMaterialMode.MATERIAL_SLOTS,
+                fbx_path=str(payload_path),
+                fbx_material_slot_overrides=(
+                    FbxMaterialSlotOverride(
+                        slot_name="Bark",
+                        ue_asset_path="/Game/TreeParts/M_Bark.M_Bark",
+                    ),
+                    FbxMaterialSlotOverride(
+                        slot_name="Needles",
+                        ue_asset_path=None,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_1")
+    bark_material = next(material for material in model.materials if material.name == "prototype_payload_Bark")
+    needles_material = next(material for material in model.materials if material.name == "prototype_payload_Needles")
+
+    assert bark_material.ue_asset_path == "/Game/TreeParts/M_Bark.M_Bark"
+    assert needles_material.ue_asset_path == "/Game/TreeParts/M_Bark.M_Bark"
+    assert prototype.geometry_payload is not None
+    assert {section.material_id: list(section.face_indices) for section in prototype.geometry_payload.sections} == {
+        bark_material.source_id: [0],
+        needles_material.source_id: [1],
+    }
+    assert any(
+        issue.code == "material_policy_warning"
+        and "Needles" in issue.message
+        and "/Game/TreeParts/M_Bark.M_Bark" in issue.message
+        for issue in diagnostics
+    )
+
+
+def test_fbx_part_source_material_slots_requires_at_least_one_filled_path(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(
+        tmp_path,
+        fbx_material_slots=[
+            {"source_id": 1, "name": "Bark", "face_count": 1},
+        ],
+        sections=[
+            {"material_id": 1, "face_indices": [0, 1]},
+        ],
+    )
+
+    with pytest.raises(ValueError, match="none of the FBX material slot overrides have an Unreal material path"):
+        load_canonical_model(
+            str(SIMPLE_TREE_01),
+            use_explicit_material_contract=True,
+            prototype_source_configs=(
+                PrototypeSourceConfig(
+                    source_key="Mesh_1",
+                    source_name="Twig_01",
+                    mode=PrototypeSourceMode.FBX_FILE,
+                    fbx_material_mode=FbxMaterialMode.MATERIAL_SLOTS,
+                    fbx_path=str(payload_path),
+                    fbx_material_slot_overrides=(
+                        FbxMaterialSlotOverride(slot_name="Bark", ue_asset_path=None),
+                    ),
+                ),
+            ),
+        )
+
+
+def test_read_vertex_color_wraps_autodesk_binding_internal_error() -> None:
+    class _BrokenColorElement:
+        def GetDirectArray(self):
+            raise SystemError(r"D:\_w\1\s\Objects\dictobject.c:1514: bad argument to internal function")
+
+    class _BrokenMesh:
+        def GetElementVertexColorCount(self):
+            return 1
+
+        def GetElementVertexColor(self, _index):
+            return _BrokenColorElement()
+
+    with pytest.raises(FbxVertexColorReadError, match="Autodesk FBX SDK failed while reading vertex colors"):
+        _read_vertex_color(_BrokenMesh(), 0, 0)
+
+
+def test_read_vertex_color_accepts_python_enum_mapping_and_reference_modes() -> None:
+    class _MappingMode(Enum):
+        eByControlPoint = 1
+        eByPolygonVertex = 2
+        eAllSame = 3
+
+    class _ReferenceMode(Enum):
+        eDirect = 0
+        eIndex = 1
+        eIndexToDirect = 2
+
+    class _Color:
+        def __init__(self, red: float, green: float, blue: float, alpha: float) -> None:
+            self.mRed = red
+            self.mGreen = green
+            self.mBlue = blue
+            self.mAlpha = alpha
+
+    class _Array:
+        def __init__(self, values) -> None:
+            self._values = list(values)
+
+        def GetCount(self):
+            return len(self._values)
+
+        def GetAt(self, index):
+            return self._values[index]
+
+    class _ColorElement:
+        def GetDirectArray(self):
+            return _Array((_Color(0.0, 0.0, 0.0, 1.0), _Color(1.0, 1.0, 1.0, 1.0)))
+
+        def GetIndexArray(self):
+            return _Array((1, 0, 1))
+
+        def GetMappingMode(self):
+            return _MappingMode.eByPolygonVertex
+
+        def GetReferenceMode(self):
+            return _ReferenceMode.eIndexToDirect
+
+    class _Mesh:
+        def GetElementVertexColorCount(self):
+            return 1
+
+        def GetElementVertexColor(self, _index):
+            return _ColorElement()
+
+        def GetPolygonVertexIndex(self, _polygon_index):
+            return 0
+
+        def GetPolygonVertex(self, _polygon_index, vertex_order):
+            return vertex_order
+
+    assert _read_vertex_color(_Mesh(), 0, 0) == (1.0, 1.0, 1.0, 1.0)
+    assert _read_vertex_color(_Mesh(), 0, 1) == (0.0, 0.0, 0.0, 1.0)
 
 
 def test_conflicting_fbx_material_modes_for_same_prototype_are_rejected(tmp_path: Path) -> None:
@@ -1836,6 +2114,76 @@ def test_fbx_part_source_streams_usda_to_disk(tmp_path: Path) -> None:
     )
     assert 'def GeomSubset "Material_1_1"' in usda_text
     assert 'def GeomSubset "Material_2_2"' in usda_text
+
+
+def test_explicit_base_material_overrides_do_not_force_untouched_xml_prototypes_into_split() -> None:
+    _, baseline_model, _ = load_canonical_model(str(SIMPLE_TREE_01))
+    _, explicit_model, diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        base_material_overrides=(
+            BaseMaterialOverride(
+                source_id=1,
+                source_name="Bark_Mat",
+                ue_asset_path="/Game/TestMaterials/M_Bark_Test",
+            ),
+        ),
+        use_explicit_material_contract=True,
+    )
+
+    assert not any(issue.severity == "error" for issue in diagnostics)
+    assert next(material for material in explicit_model.materials if material.source_id == 1).ue_asset_path == (
+        "/Game/TestMaterials/M_Bark_Test.M_Bark_Test"
+    )
+    assert [
+        tuple((section.material_id, tuple(section.face_indices)) for section in prototype.mesh.sections)
+        for prototype in baseline_model.prototypes
+        if prototype.mesh is not None
+    ] == [
+        tuple((section.material_id, tuple(section.face_indices)) for section in prototype.mesh.sections)
+        for prototype in explicit_model.prototypes
+        if prototype.mesh is not None
+    ]
+
+
+def test_discover_source_materials_ignores_prototype_only_material_slots() -> None:
+    materials = discover_source_materials(str(SIMPLE_TREE_01))
+
+    assert materials == (
+        BaseMaterialOverride(
+            source_id=1,
+            source_name="Bark_Mat",
+            ue_asset_path=None,
+        ),
+    )
+
+
+def test_explicit_xml_part_single_material_adds_prototype_local_material_override() -> None:
+    _, model, diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        use_explicit_material_contract=True,
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.XML_MESH,
+                fbx_material_mode=FbxMaterialMode.SINGLE_MATERIAL,
+                single_material_path="/Game/TreeParts/M_Twig.M_Twig",
+            ),
+        ),
+    )
+
+    assert not any(issue.severity == "error" for issue in diagnostics)
+    prototype_one = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_1")
+    prototype_two = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_2")
+    prototype_material = next(
+        material for material in model.materials if material.name == "Twig_01_SingleMaterial"
+    )
+
+    assert prototype_material.ue_asset_path == "/Game/TreeParts/M_Twig.M_Twig"
+    assert prototype_one.mesh is not None
+    assert {section.material_id for section in prototype_one.mesh.sections} == {prototype_material.source_id}
+    assert prototype_two.mesh is not None
+    assert {section.material_id for section in prototype_two.mesh.sections} == {1}
 
 
 def test_mesh_with_original_scale_reports_invalid_point_payloads() -> None:

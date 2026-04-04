@@ -73,7 +73,10 @@ def inspect_xml(document: SourceXmlDocument) -> ObservedXmlSchemaReport:
 
     for elem in root.iter():
         tag_counts[elem.tag] += 1
-        attributes_by_tag[elem.tag].update(sorted(elem.attrib.keys()))
+        # Iterate over attribute names directly instead of calling .keys().
+        # This is more permissive with mapping-like views and avoids rare
+        # descriptor errors observed in packaged/worker execution paths.
+        attributes_by_tag[elem.tag].update(sorted(elem.attrib))
 
     known_sections = {
         name: sum(

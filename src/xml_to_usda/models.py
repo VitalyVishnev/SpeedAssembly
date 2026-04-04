@@ -107,6 +107,7 @@ class FbxMaterialMode(StrEnum):
     AUTO = "auto"
     VERTEX_COLOR_SPLIT = "vertex_color_split"
     SINGLE_MATERIAL = "single_material"
+    MATERIAL_SLOTS = "material_slots"
 
 
 class CpuProfile(StrEnum):
@@ -172,6 +173,26 @@ class MaterialSpec:
     maps: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
     ue_asset_path: str | None = None
     source_material_ids: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class BaseMaterialOverride:
+    source_id: int
+    source_name: str = ""
+    ue_asset_path: str | None = None
+
+
+@dataclass(frozen=True)
+class FbxMaterialSlotSpec:
+    source_id: int
+    name: str
+    face_count: int = 0
+
+
+@dataclass(frozen=True)
+class FbxMaterialSlotOverride:
+    slot_name: str
+    ue_asset_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -265,6 +286,10 @@ class Prototype:
     fbx_material_mode: FbxMaterialMode = FbxMaterialMode.AUTO
     mesh_asset_path: str | None = None
     fbx_source_path: str | None = None
+    single_material_path: str | None = None
+    black_material_path: str | None = None
+    white_material_path: str | None = None
+    fbx_material_slot_overrides: tuple["FbxMaterialSlotOverride", ...] = ()
     geometry_payload: "GeometryBuffer | None" = None
 
 
@@ -276,6 +301,8 @@ class GeometryBuffer:
     face_vertex_indices: array
     uv_components: array = field(default_factory=lambda: array("f"))
     vertex_color_components: array = field(default_factory=lambda: array("f"))
+    vertex_color_warning: str | None = None
+    fbx_material_slots: tuple["FbxMaterialSlotSpec", ...] = ()
     sections: tuple[CompactMeshSection, ...] = ()
     skel_joint_indices: array = field(default_factory=lambda: array("i"))
     skel_joint_weights: array = field(default_factory=lambda: array("f"))
@@ -310,6 +337,10 @@ class PrototypeSourceConfig:
     fbx_material_mode: FbxMaterialMode = FbxMaterialMode.AUTO
     asset_path: str | None = None
     fbx_path: str | None = None
+    single_material_path: str | None = None
+    black_material_path: str | None = None
+    white_material_path: str | None = None
+    fbx_material_slot_overrides: tuple["FbxMaterialSlotOverride", ...] = ()
 
 
 @dataclass(frozen=True)
@@ -570,8 +601,10 @@ class ConversionRequest:
     bark_material_path: str | None = None
     leaves_material_path: str | None = None
     single_material_path: str | None = None
+    base_material_overrides: tuple[BaseMaterialOverride, ...] = ()
     cpu_profile: CpuProfile = CpuProfile.BALANCED
     cleanup_policy: CleanupPolicy = CleanupPolicy.EPHEMERAL
+    use_explicit_material_contract: bool = False
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = ()
     use_existing_part_meshes: bool = False
     part_mesh_asset_paths: tuple[tuple[str, str], ...] = ()

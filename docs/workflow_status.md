@@ -71,10 +71,21 @@ The wind-group contract has also been validated on the attached grass sample:
 
 Current operator-facing material controls:
 
-- the GUI exposes `Material Policy`
-- `single_material` uses a dedicated `Single Material Path` field
-- `source_material_roles` and `vertex_color_split` continue to use the bark/leaves override fields
-- GUI settings persist the selected material policy and single-material path
+- the GUI now separates `Base XML materials` from repeated-part material settings
+- base XML materials are discovered from the XML source and shown as per-slot rows:
+  - source `ID`
+  - source `Name`
+  - Unreal material path
+- prototype-only material slots used only by instanced repeated parts are intentionally excluded from the base-material list
+- assigning the same Unreal material path to multiple XML rows is a supported way to intentionally collapse those XML slots to the same UE material asset
+- repeated part prototypes now carry their own stage-1 material controls in the GUI
+- current GUI part-material modes are:
+  - `vertex_color_split`
+  - `single_material`
+- `vertex_color_split` for part rows is an explicit black/white split
+- `single_material` for part rows uses its own dedicated Unreal material path field
+- the GUI no longer relies on `auto` as the primary interactive workflow for part materials
+- GUI settings persist per-XML base-material rows and per-XML repeated-part material settings
 - the CLI exposes:
   - `--material-policy`
   - `--single-material-path`
@@ -94,6 +105,25 @@ Current operator-facing part-source controls:
   - `--part-source-config`
   - `--cpu-profile`
 
+Current operator-facing wind-settings contract:
+
+- wind-group slider values are persisted per input XML path
+- switching between different trees must restore the last saved wind values for that specific XML instead of reusing another tree's settings
+
+Current large-job execution contract:
+
+- large GUI conversions are executed in a dedicated worker subprocess instead of inside the Tk UI process
+- the GUI process now only owns the UI and telemetry polling; the worker subprocess owns XML normalization, FBX import, material resolution, and USDA writing
+- explicit FBX prototype imports are parallelized across a `spawn` process pool when more than one FBX prototype must be imported
+- this parallelism is currently prototype-level and stage-level, not "all cores inside one single FBX file"
+- packaged frozen runs deliberately fall back to sequential multi-FBX import instead of nested parallel FBX workers, because package-build stability currently has higher priority than peak CPU saturation
+- if that worker pool cannot be created in the current environment, FBX prototype import falls back to sequential execution instead of failing outright
+- the conversion worker must not be daemonized, because parallel FBX import requires child worker processes
+- the validated `WorldTree.xml` stress path with two huge FBX branch replacements completes successfully through the subprocess path
+- `balanced` remains the default operator-facing CPU profile for this path
+- low total CPU percentage on a monster export with only one or two huge FBX prototypes is currently expected and is not treated as a defect on its own
+- the active engineering priority for huge jobs is runtime stability, recovery, diagnostics, and packaged-build reliability before deeper intra-file FBX saturation work
+
 Current huge-FBX contract:
 
 - XML `LOD/@Filename` is ignored for this workflow
@@ -105,11 +135,15 @@ Current huge-FBX contract:
   - `auto`
   - `vertex_color_split`
   - `single_material`
-- FBX prototype material sections are derived from vertex colors when useful:
-  - exact black face -> leaves
-  - every non-black face -> bark
-- if FBX vertex colors are missing, incomplete, or all collapse to one bucket, the prototype falls back to one primary material section
+- stage-1 GUI uses only `vertex_color_split` and `single_material` for repeated-part materials
+- stage-1 `vertex_color_split` expects exact black and exact white face buckets for part-material assignment
+- if `fbx_material_mode=auto` and FBX vertex colors are missing, incomplete, or all collapse to one bucket, the prototype falls back to one primary material section
+- if `fbx_material_mode=vertex_color_split`, the split is strict: unusable colors or Autodesk SDK vertex-color access failures now produce a detailed conversion error instead of silently degrading the prototype to one material
+- stage-1 does not yet expose `get materials from FBX` in the GUI; embedded FBX material-slot import remains a later step
 - huge FBX prototype payloads are written through the streaming USDA path using a temp file plus atomic replace on success
+- when multiple explicit FBX prototype replacements are present, their imports may overlap in parallel worker processes
+- telemetry for huge jobs now distinguishes `xml_normalization`, `prototype_resolution`, `fbx_import`, `material_resolution`, and `usda_writing`
+- runtime job manifests now also record a small `runtime_context` block so packaged-worker crashes can be compared against launcher-worker crashes after the fact
 
 The only remaining open item before `Phase 1` can be considered complete is broader validation on multiple real SpeedTree structures with different tree and grass shapes:
 
@@ -147,6 +181,8 @@ Recent exporter fixes that must remain stable:
 - the fern-style `single_material` path no longer depends on XML material ids being `1/2`
 - multi-root plants must keep a real `Base Skeletal Tree`; they must not regress into `Assembly Parts`-only imports because of collapsed root-joint aliases
 - inline part skeletons must not fall back to a generic `Root_Skeleton` naming pattern caused by a hardcoded local joint name
+- large GUI conversions must not reuse the Tk process for Autodesk FBX import or huge USDA writing
+- the conversion subprocess must remain non-daemon so nested FBX worker processes can be created on Windows
 
 The remaining acceptance criterion is breadth, not a known functional blocker.
 

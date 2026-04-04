@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .job_control import apply_process_profile, throw_if_cancelled
-from .models import CpuProfile, GeometryBuffer
+from .models import CompactMeshSection, CpuProfile, FbxMaterialSlotSpec, GeometryBuffer
 
 
 class FbxImportError(ValueError):
@@ -17,6 +17,10 @@ class FbxBackendUnavailableError(FbxImportError):
     pass
 
 
+class FbxVertexColorReadError(FbxImportError):
+    pass
+
+
 class FbxBackend:
     def load_mesh_payload(
         self,
@@ -24,9 +28,19 @@ class FbxBackend:
         prototype_name: str,
         *,
         cpu_profile: CpuProfile,
+        strict_vertex_colors: bool = False,
         telemetry_callback=None,
         cancel_event=None,
     ) -> GeometryBuffer:
+        raise NotImplementedError
+
+    def inspect_material_slots(
+        self,
+        fbx_path: str,
+        *,
+        cpu_profile: CpuProfile,
+        cancel_event=None,
+    ) -> tuple[FbxMaterialSlotSpec, ...]:
         raise NotImplementedError
 
 
@@ -38,6 +52,7 @@ class AutodeskFbxBackend(FbxBackend):
         prototype_name: str,
         *,
         cpu_profile: CpuProfile,
+        strict_vertex_colors: bool = False,
         telemetry_callback=None,
         cancel_event=None,
     ) -> GeometryBuffer:
@@ -73,6 +88,9 @@ class AutodeskFbxBackend(FbxBackend):
             face_vertex_indices = array("i")
             uv_components = array("f")
             vertex_color_components = array("f")
+            vertex_color_warning: str | None = None
+            material_slot_face_indices: dict[str, array] = {}
+            material_slot_order: list[str] = []
             point_offset = 0
             usable_vertex_colors = True
 
@@ -93,6 +111,7 @@ class AutodeskFbxBackend(FbxBackend):
 
                 mesh_color_components = [0.0] * (local_point_count * 4)
                 has_colors = False
+                vertex_colors_disabled_for_mesh = not usable_vertex_colors
                 assigned_color_flags = bytearray(local_point_count)
                 referenced_point_flags = bytearray(local_point_count)
                 uv_element = mesh.GetElementUV(0) if mesh.GetElementUVCount() > 0 else None
@@ -106,6 +125,14 @@ class AutodeskFbxBackend(FbxBackend):
                             f"FBX triangulation produced a non-triangle polygon in {Path(fbx_path).name}."
                         )
                     face_vertex_counts.append(3)
+                    _append_face_to_material_slot_sections(
+                        node,
+                        mesh,
+                        polygon_index,
+                        face_index=len(face_vertex_counts) - 1,
+                        material_slot_face_indices=material_slot_face_indices,
+                        material_slot_order=material_slot_order,
+                    )
                     for vertex_order in range(polygon_size):
                         control_point_index = int(mesh.GetPolygonVertex(polygon_index, vertex_order))
                         if control_point_index < 0 or control_point_index >= local_point_count:
@@ -120,7 +147,23 @@ class AutodeskFbxBackend(FbxBackend):
                             if mapped:
                                 uv_components.extend((float(uv[0]), float(uv[1])))
 
-                        color = _read_vertex_color(mesh, polygon_index, vertex_order)
+                        if vertex_colors_disabled_for_mesh:
+                            continue
+                        try:
+                            color = _read_vertex_color(mesh, polygon_index, vertex_order)
+                        except FbxVertexColorReadError as exc:
+                            detailed_reason = (
+                                "Autodesk FBX SDK vertex-color access failed for "
+                                f"{Path(fbx_path).name} at polygon {polygon_index}, vertex {vertex_order}: {exc}"
+                            )
+                            if strict_vertex_colors:
+                                raise FbxImportError(detailed_reason) from exc
+                            vertex_colors_disabled_for_mesh = True
+                            usable_vertex_colors = False
+                            vertex_color_components = array("f")
+                            if vertex_color_warning is None:
+                                vertex_color_warning = detailed_reason
+                            continue
                         if color is None:
                             continue
                         has_colors = True
@@ -134,6 +177,10 @@ class AutodeskFbxBackend(FbxBackend):
                                 )
                         mesh_color_components[color_offset:color_offset + 4] = color
                         assigned_color_flags[control_point_index] = 1
+
+                if vertex_colors_disabled_for_mesh:
+                    point_offset += local_point_count
+                    continue
 
                 if has_colors:
                     missing_vertex_colors = [
@@ -161,7 +208,65 @@ class AutodeskFbxBackend(FbxBackend):
                 face_vertex_indices=face_vertex_indices,
                 uv_components=uv_components,
                 vertex_color_components=vertex_color_components,
+                vertex_color_warning=vertex_color_warning,
+                fbx_material_slots=_build_fbx_material_slot_specs(material_slot_order, material_slot_face_indices),
+                sections=_build_fbx_material_slot_sections(material_slot_order, material_slot_face_indices),
             )
+        finally:
+            destroy = getattr(sdk_manager, "Destroy", None)
+            if callable(destroy):
+                destroy()
+
+    def inspect_material_slots(
+        self,
+        fbx_path: str,
+        *,
+        cpu_profile: CpuProfile,
+        cancel_event=None,
+    ) -> tuple[FbxMaterialSlotSpec, ...]:
+        apply_process_profile(cpu_profile)
+        throw_if_cancelled(cancel_event)
+        try:
+            import fbx  # type: ignore
+        except ImportError as exc:
+            raise FbxBackendUnavailableError(
+                "Autodesk FBX SDK Python bindings are required for FBX import. "
+                "Install the official SDK bindings so the 'fbx' module is available."
+            ) from exc
+
+        sdk_manager, scene = _initialize_sdk_objects(fbx)
+        try:
+            if not _load_scene(fbx, sdk_manager, scene, str(fbx_path)):
+                raise FbxImportError(f"Failed to load FBX scene: {fbx_path}")
+            geometry_converter = fbx.FbxGeometryConverter(sdk_manager)
+            geometry_converter.Triangulate(scene, True)
+
+            mesh_nodes: list = []
+            _collect_mesh_nodes(scene.GetRootNode(), mesh_nodes, fbx)
+            if not mesh_nodes:
+                raise FbxImportError(f"FBX file does not contain any polygon mesh nodes: {fbx_path}")
+
+            material_slot_face_indices: dict[str, array] = {}
+            material_slot_order: list[str] = []
+            face_index = 0
+            for node in mesh_nodes:
+                throw_if_cancelled(cancel_event)
+                mesh = node.GetMesh()
+                if mesh is None:
+                    continue
+                for polygon_index in range(mesh.GetPolygonCount()):
+                    if polygon_index % 10_000 == 0:
+                        throw_if_cancelled(cancel_event)
+                    _append_face_to_material_slot_sections(
+                        node,
+                        mesh,
+                        polygon_index,
+                        face_index=face_index,
+                        material_slot_face_indices=material_slot_face_indices,
+                        material_slot_order=material_slot_order,
+                    )
+                    face_index += 1
+            return _build_fbx_material_slot_specs(material_slot_order, material_slot_face_indices)
         finally:
             destroy = getattr(sdk_manager, "Destroy", None)
             if callable(destroy):
@@ -178,6 +283,7 @@ class JsonGeometryBackend(FbxBackend):
         prototype_name: str,
         *,
         cpu_profile: CpuProfile,
+        strict_vertex_colors: bool = False,
         telemetry_callback=None,
         cancel_event=None,
     ) -> GeometryBuffer:
@@ -189,6 +295,49 @@ class JsonGeometryBackend(FbxBackend):
             face_vertex_indices=array("i", payload["face_vertex_indices"]),
             uv_components=array("f", payload.get("uv_components", [])),
             vertex_color_components=array("f", payload.get("vertex_color_components", [])),
+            vertex_color_warning=payload.get("vertex_color_warning"),
+            fbx_material_slots=tuple(
+                FbxMaterialSlotSpec(
+                    source_id=int(slot["source_id"]),
+                    name=str(slot["name"]),
+                    face_count=int(slot.get("face_count", 0)),
+                )
+                for slot in payload.get("fbx_material_slots", [])
+            ),
+            sections=tuple(
+                CompactMeshSection(
+                    material_id=int(section["material_id"]),
+                    face_indices=array("i", section.get("face_indices", [])),
+                )
+                for section in payload.get("sections", [])
+            ),
+        )
+
+    def inspect_material_slots(
+        self,
+        fbx_path: str,
+        *,
+        cpu_profile: CpuProfile,
+        cancel_event=None,
+    ) -> tuple[FbxMaterialSlotSpec, ...]:
+        payload = json.loads(Path(fbx_path).read_text(encoding="utf-8"))
+        explicit_slots = payload.get("fbx_material_slots", [])
+        if explicit_slots:
+            return tuple(
+                FbxMaterialSlotSpec(
+                    source_id=int(slot["source_id"]),
+                    name=str(slot["name"]),
+                    face_count=int(slot.get("face_count", 0)),
+                )
+                for slot in explicit_slots
+            )
+        return tuple(
+            FbxMaterialSlotSpec(
+                source_id=index,
+                name=f"MaterialSlot_{index}",
+                face_count=len(section.get("face_indices", [])),
+            )
+            for index, section in enumerate(payload.get("sections", []), start=1)
         )
 
 
@@ -213,6 +362,7 @@ def load_fbx_geometry(
     prototype_name: str,
     *,
     cpu_profile: CpuProfile = CpuProfile.BALANCED,
+    strict_vertex_colors: bool = False,
     telemetry_callback=None,
     cancel_event=None,
 ) -> GeometryBuffer:
@@ -221,7 +371,22 @@ def load_fbx_geometry(
         fbx_path,
         prototype_name,
         cpu_profile=cpu_profile,
+        strict_vertex_colors=strict_vertex_colors,
         telemetry_callback=telemetry_callback,
+        cancel_event=cancel_event,
+    )
+
+
+def inspect_fbx_material_slots(
+    fbx_path: str,
+    *,
+    cpu_profile: CpuProfile = CpuProfile.BALANCED,
+    cancel_event=None,
+) -> tuple[FbxMaterialSlotSpec, ...]:
+    backend = get_fbx_backend(fbx_path)
+    return backend.inspect_material_slots(
+        fbx_path,
+        cpu_profile=cpu_profile,
         cancel_event=cancel_event,
     )
 
@@ -237,37 +402,131 @@ def _collect_mesh_nodes(node, mesh_nodes: list, fbx_module) -> None:
 
 
 def _read_vertex_color(mesh, polygon_index: int, vertex_order: int) -> tuple[float, float, float, float] | None:
-    if mesh.GetElementVertexColorCount() <= 0:
-        return None
-    color_element = mesh.GetElementVertexColor(0)
-    if color_element is None:
-        return None
-    polygon_vertex_index = mesh.GetPolygonVertexIndex(polygon_index) + vertex_order
-    direct_array = color_element.GetDirectArray()
-    if direct_array.GetCount() <= 0:
-        return None
-    mapping_mode = color_element.GetMappingMode()
-    reference_mode = color_element.GetReferenceMode()
-    if mapping_mode not in (0, 1, 3):  # eByControlPoint, eByPolygonVertex, eAllSame
-        return None
-
-    if mapping_mode == 3:
-        direct_index = 0
-    elif mapping_mode == 1:
-        direct_index = polygon_vertex_index
-    else:
-        direct_index = mesh.GetPolygonVertex(polygon_index, vertex_order)
-
-    if reference_mode == 1:  # eIndexToDirect
-        index_array = color_element.GetIndexArray()
-        if direct_index >= index_array.GetCount():
+    try:
+        if mesh.GetElementVertexColorCount() <= 0:
             return None
-        direct_index = index_array.GetAt(direct_index)
+        color_element = mesh.GetElementVertexColor(0)
+        if color_element is None:
+            return None
+        polygon_vertex_index = mesh.GetPolygonVertexIndex(polygon_index) + vertex_order
+        direct_array = color_element.GetDirectArray()
+        if direct_array.GetCount() <= 0:
+            return None
+        mapping_mode = _enum_name(color_element.GetMappingMode())
+        reference_mode = _enum_name(color_element.GetReferenceMode())
+        if mapping_mode not in {"eByControlPoint", "eByPolygonVertex", "eAllSame"}:
+            return None
 
-    if direct_index >= direct_array.GetCount():
+        if mapping_mode == "eAllSame":
+            direct_index = 0
+        elif mapping_mode == "eByPolygonVertex":
+            direct_index = polygon_vertex_index
+        else:
+            direct_index = mesh.GetPolygonVertex(polygon_index, vertex_order)
+
+        if reference_mode in {"eIndexToDirect", "eIndex"}:
+            index_array = color_element.GetIndexArray()
+            if direct_index >= index_array.GetCount():
+                return None
+            direct_index = index_array.GetAt(direct_index)
+
+        if direct_index >= direct_array.GetCount():
+            return None
+        color = direct_array.GetAt(direct_index)
+        return (float(color.mRed), float(color.mGreen), float(color.mBlue), float(color.mAlpha))
+    except Exception as exc:
+        raise FbxVertexColorReadError(
+            "Autodesk FBX SDK failed while reading vertex colors. "
+            "Falling back to single-material FBX import is recommended for this payload."
+        ) from exc
+
+
+def _enum_name(value) -> str:
+    name = getattr(value, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    text = str(value)
+    if "." in text:
+        return text.rsplit(".", 1)[-1]
+    return text
+
+
+def _append_face_to_material_slot_sections(
+    node,
+    mesh,
+    polygon_index: int,
+    *,
+    face_index: int,
+    material_slot_face_indices: dict[str, array],
+    material_slot_order: list[str],
+) -> None:
+    slot_name = _read_polygon_material_slot_name(node, mesh, polygon_index)
+    face_indices = material_slot_face_indices.get(slot_name)
+    if face_indices is None:
+        face_indices = array("i")
+        material_slot_face_indices[slot_name] = face_indices
+        material_slot_order.append(slot_name)
+    face_indices.append(face_index)
+
+
+def _read_polygon_material_slot_name(node, mesh, polygon_index: int) -> str:
+    local_material_index = _resolve_polygon_material_index(node, mesh, polygon_index)
+    if local_material_index is None or local_material_index < 0:
+        return "Unassigned"
+    material_count = int(node.GetMaterialCount())
+    if 0 <= local_material_index < material_count:
+        material = node.GetMaterial(local_material_index)
+        if material is not None:
+            material_name = str(material.GetName()).strip()
+            if material_name:
+                return material_name
+    return f"MaterialSlot_{local_material_index}"
+
+
+def _resolve_polygon_material_index(node, mesh, polygon_index: int) -> int | None:
+    try:
+        if mesh.GetElementMaterialCount() > 0:
+            material_element = mesh.GetElementMaterial(0)
+            if material_element is not None:
+                mapping_mode = _enum_name(material_element.GetMappingMode())
+                index_array = material_element.GetIndexArray()
+                if mapping_mode == "eAllSame" and index_array.GetCount() > 0:
+                    return int(index_array.GetAt(0))
+                if mapping_mode in {"eByPolygon", "eByPolygonVertex"} and polygon_index < index_array.GetCount():
+                    return int(index_array.GetAt(polygon_index))
+        if int(node.GetMaterialCount()) == 1:
+            return 0
+    except Exception:
         return None
-    color = direct_array.GetAt(direct_index)
-    return (float(color.mRed), float(color.mGreen), float(color.mBlue), float(color.mAlpha))
+    return None
+
+
+def _build_fbx_material_slot_specs(
+    material_slot_order: list[str],
+    material_slot_face_indices: dict[str, array],
+) -> tuple[FbxMaterialSlotSpec, ...]:
+    return tuple(
+        FbxMaterialSlotSpec(
+            source_id=index,
+            name=slot_name,
+            face_count=len(material_slot_face_indices.get(slot_name, ())),
+        )
+        for index, slot_name in enumerate(material_slot_order, start=1)
+    )
+
+
+def _build_fbx_material_slot_sections(
+    material_slot_order: list[str],
+    material_slot_face_indices: dict[str, array],
+) -> tuple[CompactMeshSection, ...]:
+    return tuple(
+        CompactMeshSection(
+            material_id=index,
+            face_indices=material_slot_face_indices.get(slot_name, array("i")),
+        )
+        for index, slot_name in enumerate(material_slot_order, start=1)
+        if material_slot_face_indices.get(slot_name)
+    )
 
 
 def _initialize_sdk_objects(fbx_module):
