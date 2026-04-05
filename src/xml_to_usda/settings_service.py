@@ -92,7 +92,9 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
         last_output_path=str(payload.get("last_output_path", "")),
         cpu_profile=_parse_cpu_profile(payload.get("cpu_profile")),
         preserve_temp_files=bool(payload.get("preserve_temp_files", False)),
-        material_policy=MaterialPolicy.parse(payload.get("material_policy", MaterialPolicy.SOURCE_MATERIAL_ROLES.value)),
+        material_policy=_parse_gui_material_policy(
+            payload.get("material_policy", MaterialPolicy.SOURCE_MATERIAL_ROLES.value)
+        ),
         bark_material_path=str(payload.get("bark_material_path", "")),
         leaves_material_path=str(payload.get("leaves_material_path", "")),
         single_material_path=str(payload.get("single_material_path", "")),
@@ -151,6 +153,17 @@ def _parse_cpu_profile(raw_value) -> CpuProfile:
         return CpuProfile(str(raw_value))
     except (TypeError, ValueError):
         return CpuProfile.BALANCED
+
+
+def _parse_gui_material_policy(raw_value) -> MaterialPolicy:
+    """Parse persisted GUI material policy values, including retired aliases."""
+    normalized = str(raw_value).strip() if raw_value is not None else ""
+    if normalized == "legacy_role_ids":
+        return MaterialPolicy.SOURCE_MATERIAL_ROLES
+    try:
+        return MaterialPolicy.parse(normalized or MaterialPolicy.SOURCE_MATERIAL_ROLES.value)
+    except ValueError:
+        return MaterialPolicy.SOURCE_MATERIAL_ROLES
 
 
 def _parse_prototype_source_mode(raw_value, *, use_unreal_reference: bool = False) -> PrototypeSourceMode:

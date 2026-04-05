@@ -1,5 +1,16 @@
 # Refactor Roadmap
 
+## Status
+
+This roadmap is **completed** and kept as an **archived planning document**.
+
+Stages `0` through `6` were completed during the major refactor cycle.
+
+Use this file as historical context for why the architecture was reshaped.
+Do not treat it as the current active work queue.
+
+For the current project structure, use `docs/developer_architecture.md`.
+
 ## Role
 
 This document is the persistent project roadmap for architectural refactoring.

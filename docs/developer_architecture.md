@@ -113,8 +113,8 @@ surface.
 
 These compatibility paths are intentionally still present:
 
-- `MaterialPolicy.parse("legacy_role_ids")`
-  Retained for CLI/config/settings compatibility with earlier operator flows.
+- legacy persisted GUI `material_policy` value `legacy_role_ids`
+  Retained only as a settings-load migration into `source_material_roles`.
 - legacy GUI settings payloads for `wind_group_settings`
   Retained so packaged or launcher upgrades do not discard saved operator state.
 - legacy settings boolean `use_unreal_reference`

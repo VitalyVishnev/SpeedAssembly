@@ -329,22 +329,6 @@ def test_cli_parser_accepts_material_policy_flags() -> None:
     assert args.leaves_material_path is None
 
 
-def test_cli_parser_accepts_legacy_material_policy_alias() -> None:
-    parser = build_parser()
-
-    args = parser.parse_args(
-        [
-            "convert",
-            "input.xml",
-            "output.usda",
-            "--material-policy",
-            "legacy_role_ids",
-        ]
-    )
-
-    assert args.material_policy == "legacy_role_ids"
-
-
 def test_cli_parser_accepts_part_source_config_and_cpu_profile() -> None:
     parser = build_parser()
 

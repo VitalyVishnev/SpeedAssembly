@@ -78,25 +78,21 @@ class MaterialPolicy(StrEnum):
 
     @classmethod
     def parse(cls, raw: "MaterialPolicy | str | None") -> "MaterialPolicy":
-        """Parse operator-facing and retained compatibility material-policy values."""
+        """Parse the canonical operator-facing material-policy values."""
         if isinstance(raw, cls):
             return raw
         if raw is None:
             return cls.SOURCE_MATERIAL_ROLES
-        # Retained for CLI/config/settings compatibility with earlier operator flows.
         normalized = str(raw).strip()
-        if normalized == "legacy_role_ids":
-            return cls.SOURCE_MATERIAL_ROLES
         return cls(normalized)
 
     @classmethod
     def cli_choices(cls) -> tuple[str, ...]:
-        """Return supported CLI values, including the retained legacy alias."""
+        """Return the supported canonical CLI values."""
         return (
             cls.SOURCE_MATERIAL_ROLES.value,
             cls.SINGLE_MATERIAL.value,
             cls.VERTEX_COLOR_SPLIT.value,
-            "legacy_role_ids",
         )
 
 
