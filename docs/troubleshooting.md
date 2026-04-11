@@ -128,7 +128,10 @@ Practical rule:
 - if a large-job crash reproduces only in an older launcher or packaged exe, rebuild first
 - if the current build still crashes, preserve temp files and inspect the last recorded phase before debugging XML content
 - if parallel FBX import cannot start in the current environment, the converter should now fall back to sequential import instead of terminating the job immediately
-- packaged frozen runs also prefer sequential multi-FBX import on purpose; lower CPU usage there is expected if that tradeoff avoids standalone crashes
+- packaged frozen runs now isolate each FBX import in its own worker process for stability while still allowing parallel multi-FBX import
+- extremely large packaged FBX replacements now start with the requested helper concurrency and only downgrade after an actual native helper crash proves the current level is unsafe
+- packaged helper startup is fastest when the build contains the dedicated `XMLtoUSDAWorker` sidecar binary; the runtime falls back to the GUI executable only for older package layouts
+- if packaged telemetry stalls at `fbx_import`, compare the worker count message with the selected CPU profile before assuming the exporter is hung
 
 ## Huge FBX export appears busy for a long time
 

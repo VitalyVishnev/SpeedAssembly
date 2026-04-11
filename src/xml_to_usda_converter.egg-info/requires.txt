@@ -2,3 +2,7 @@
 [dev]
 pytest>=8.0
 pyinstaller>=6.0
+pytest-qt>=4.4
+
+[ui-next]
+PySide6<7,>=6.8

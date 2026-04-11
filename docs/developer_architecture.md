@@ -94,6 +94,14 @@ Representative modules:
 UI code should not hold core conversion semantics. It should gather operator
 state, call application services, and render results.
 
+The repository now has two UI shells:
+
+- the stable Tk fallback under `src/xml_to_usda/gui*.py`
+- the beta PySide6 shell under `src/xml_to_usda/qt_ui/`
+
+Both shells must use the same application/runtime contracts instead of growing
+their own conversion rules.
+
 ## Stable public facades
 
 These modules are intentionally retained as compatibility surfaces:

@@ -1,0 +1,112 @@
+{
+  "name": "default",
+  "display_name": "Shishkin Glass Bootstrap",
+  "colors": {
+    "window_text": "#1A1A15",
+    "muted_text": "#403D30",
+    "input_fill": "#DCE5E8",
+    "input_text": "#10110E",
+    "button_fill": "#6D7340",
+    "button_text": "#13130F",
+    "secondary_fill": "#D9BB62",
+    "accent_fill": "#BF8C4E",
+    "danger_fill": "#A65233",
+    "titlebar_fill": "#DCE5E8",
+    "titlebar_text": "#13130F",
+    "log_fill": "#DCE5E8",
+    "card_fill": "#DCE5E8",
+    "card_text": "#1A1A15",
+    "card_border": "#DCE5E8",
+    "tab_fill": "#DCE5E880",
+    "tab_selected_fill": "#D9BB62",
+    "tab_hover_fill": "#D9BB62BC",
+    "tab_text": "#1A1A15"
+  },
+  "font_sizes": {
+    "title": 15,
+    "body": 13,
+    "small": 11
+  },
+  "radii": {
+    "window": 30,
+    "panel": 34,
+    "control": 18,
+    "button": 18,
+    "card": 20,
+    "tab": 18
+  },
+  "spacing": {
+    "outer_margin": 28,
+    "panel_padding": 24,
+    "section_gap": 18,
+    "control_gap": 12
+  },
+  "control_heights": {
+    "titlebar": 26,
+    "input": 34,
+    "button": 34
+  },
+  "border_widths": {
+    "panel": 1,
+    "control": 0,
+    "card": 1
+  },
+  "layout": {
+    "panel_min_width": 860,
+    "panel_preferred_width": 1000,
+    "panel_max_width": 1180,
+    "panel_min_height": 680,
+    "panel_vertical_offset": 0,
+    "left_column_width": 280,
+    "action_column_width": 196,
+    "tabs_min_height": 440,
+    "tab_min_width": 120,
+    "file_row_gap": 8
+  },
+  "glass": {
+    "tint_color": "#DCE5E8",
+    "tint_opacity": 0.22,
+    "border_color": "#DCE5E8",
+    "border_opacity": 0.45,
+    "light_gradient_opacity": 0.11,
+    "light_gradient_mid_opacity": 0.04,
+    "light_gradient_height": 0.18,
+    "dark_gradient_opacity": 0.07,
+    "dark_gradient_height": 0.13,
+    "noise_asset": "none",
+    "noise_opacity": 0.0,
+    "noise_scale": 1.0
+  },
+  "chrome": {
+    "titlebar_fill": "#DCE5E8",
+    "titlebar_text": "#13130F",
+    "window_button_size": 22,
+    "title_pill_width": 78,
+    "title_pill_height": 24,
+    "adjust_ui_button_width": 104,
+    "adjust_ui_button_height": 24,
+    "file_button_width": 132
+  },
+  "effects": {
+    "panel_shadow_blur": 22,
+    "panel_shadow_alpha": 68,
+    "panel_shadow_offset_y": 6
+  },
+  "assets": {
+    "background_image": "assets/shishkin_oak_grove_background.jpg",
+    "background_blur_image": "assets/shishkin_oak_grove_blur.jpg",
+    "background_options": {
+      "Oak Grove": "assets/shishkin_oak_grove_background.jpg",
+      "Bootstrap": "assets/shishkin_bootstrap_background.ppm"
+    },
+    "background_blur_options": {
+      "Oak Grove Blur": "assets/shishkin_oak_grove_blur.jpg",
+      "Bootstrap Blur": "assets/shishkin_bootstrap_blur.ppm"
+    },
+    "noise_assets": {
+      "None": "",
+      "Blue Noise": "assets/BlueNoise256.png",
+      "White Noise": "assets/WhiteNoise256.png"
+    }
+  }
+}

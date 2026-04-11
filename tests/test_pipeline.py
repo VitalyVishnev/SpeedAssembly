@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import pickle
 import threading
 import xml.etree.ElementTree as ET
 from dataclasses import replace
@@ -715,6 +716,31 @@ def test_inspect_wind_data_uses_generator_levels(tmp_path: Path) -> None:
     assert len(dynamic_wind.simulation_groups) == 3
     assert dynamic_wind.simulation_groups[0].is_trunk_group is True
     assert [group.branch_order for group in dynamic_wind.simulation_groups] == [0, 1, 2]
+
+
+def test_generate_wind_json_respects_explicit_trunk_group_selection(tmp_path: Path) -> None:
+    input_path = _write_generator_level_sample(
+        tmp_path,
+        ("Group_0 2", "Group_0", "Group_1", "Group_1", "Group_2"),
+    )
+    output_path = tmp_path / "explicit_trunk_DynamicWind.json"
+
+    generate_wind_json(
+        str(input_path),
+        str(output_path),
+        group_settings=(
+            DynamicWindSimulationGroup(group_index=0, branch_order=0, is_trunk_group=False),
+            DynamicWindSimulationGroup(group_index=1, branch_order=1, is_trunk_group=True),
+            DynamicWindSimulationGroup(group_index=2, branch_order=2, is_trunk_group=False),
+        ),
+        is_ground_cover=False,
+    )
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert payload["SimulationGroups"][0]["bIsTrunkGroup"] is False
+    assert payload["SimulationGroups"][1]["bIsTrunkGroup"] is True
+    assert payload["SimulationGroups"][2]["bIsTrunkGroup"] is False
 
 
 def test_inspect_wind_data_clears_trunk_groups_when_ground_cover_is_enabled(tmp_path: Path) -> None:
@@ -1682,13 +1708,16 @@ def test_fbx_part_source_config_replaces_inline_prototype_with_geometry_payload(
     }
 
 
-def test_frozen_runtime_uses_sequential_fbx_import_for_multiple_prototypes(
+def test_frozen_runtime_uses_isolated_fbx_import_for_multiple_prototypes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from xml_to_usda.fbx_adapter import load_fbx_geometry
     import xml_to_usda.prototype_sources as prototype_sources_module
 
     payload_path = _write_fbx_json_payload(tmp_path, file_name="SM_BigBranch_01_HIGH.json")
+    payload = load_fbx_geometry(str(payload_path), "SM_BigBranch_01_HIGH")
+    isolated_parallel_calls: list[tuple[str, ...]] = []
 
     class _ForbiddenExecutor:
         def __init__(self, *args, **kwargs):
@@ -1696,6 +1725,18 @@ def test_frozen_runtime_uses_sequential_fbx_import_for_multiple_prototypes(
 
     monkeypatch.setattr(prototype_sources_module.sys, "frozen", True, raising=False)
     monkeypatch.setattr(prototype_sources_module, "ProcessPoolExecutor", _ForbiddenExecutor)
+    monkeypatch.setattr(prototype_sources_module, "cpu_worker_count", lambda _profile: 4)
+    monkeypatch.setattr(
+        prototype_sources_module,
+        "import_fbx_payloads",
+        lambda tasks, **kwargs: isolated_parallel_calls.append(
+            tuple(task.display_name for task in tasks)
+        )
+        or {
+            task.task_id: payload
+            for task in tasks
+        },
+    )
 
     _, model, diagnostics = load_canonical_model(
         str(SIMPLE_TREE_01),
@@ -1717,6 +1758,192 @@ def test_frozen_runtime_uses_sequential_fbx_import_for_multiple_prototypes(
 
     assert not any(issue.severity == "error" for issue in diagnostics)
     assert all(prototype.geometry_payload is not None for prototype in model.prototypes)
+    assert isolated_parallel_calls == [("SM_BigBranch_01_HIGH", "SM_BigBranch_01_HIGH")]
+
+
+def test_isolated_fbx_worker_writes_payload_to_file_instead_of_queue(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import xml_to_usda.prototype_sources as prototype_sources_module
+
+    written_payload = {"points": [1, 2, 3]}
+    written_messages: list[tuple[str, object]] = []
+    result_path = tmp_path / "isolated_payload.pkl"
+    prepared_import = prototype_sources_module._PreparedFbxImport(
+        prototype_index=0,
+        original_prototype=object(),
+        config=PrototypeSourceConfig(
+            source_key="Mesh_1",
+            source_name="Twig_01",
+            mode=PrototypeSourceMode.FBX_FILE,
+            fbx_path=str(tmp_path / "dummy.fbx"),
+        ),
+        resolved_identity=type("Identity", (), {"prim_name": "SM_BigBranch_01_HIGH"})(),
+        resolved_source_name="SM_BigBranch_01_HIGH",
+    )
+
+    class _Queue:
+        def put(self, item):
+            written_messages.append(item)
+
+    monkeypatch.setattr(
+        prototype_sources_module,
+        "_load_fbx_payload_worker",
+        lambda *args, **kwargs: written_payload,
+    )
+
+    prototype_sources_module._fbx_payload_process_entry(
+        prepared_import=prepared_import,
+        cpu_profile_value=CpuProfile.BALANCED.value,
+        message_queue=_Queue(),
+        result_path=str(result_path),
+    )
+
+    assert written_messages == []
+    assert prototype_sources_module._load_isolated_fbx_payload_file(result_path) == written_payload
+    assert not result_path.exists()
+
+
+def test_cli_fbx_worker_command_writes_payload_pickle_and_returns_zero(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from xml_to_usda.cli import main as cli_main
+    from xml_to_usda.fbx_worker_subprocess import read_fbx_worker_error, FBX_WORKER_COMMAND, FbxWorkerRequest, write_fbx_worker_request
+    import xml_to_usda.fbx_worker_subprocess as fbx_worker_subprocess_module
+
+    result_path = tmp_path / "worker_payload.pkl"
+    error_path = tmp_path / "worker_error.json"
+    request_path = tmp_path / "worker_request.json"
+    written_payload = {"points": [1, 2, 3]}
+
+    monkeypatch.setattr(
+        fbx_worker_subprocess_module,
+        "load_fbx_geometry",
+        lambda *args, **kwargs: written_payload,
+    )
+    write_fbx_worker_request(
+        request_path,
+        FbxWorkerRequest(
+            fbx_path=str(tmp_path / "dummy.fbx"),
+            prototype_name="SM_BigBranch_01_HIGH",
+            cpu_profile=CpuProfile.BALANCED,
+            strict_vertex_colors=False,
+            result_path=str(result_path),
+            error_path=str(error_path),
+        ),
+    )
+
+    exit_code = cli_main([FBX_WORKER_COMMAND, "--request", str(request_path)])
+
+    assert exit_code == 0
+    assert error_path.exists() is False
+    with result_path.open("rb") as handle:
+        assert pickle.load(handle) == written_payload
+    assert read_fbx_worker_error(error_path) is None
+
+
+def test_fbx_import_supervisor_prefers_sidecar_worker_directory_in_frozen_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import xml_to_usda.fbx_import_supervisor as supervisor_module
+
+    request_path = tmp_path / "worker_request.json"
+    gui_executable = tmp_path / "XMLtoUSDAConverter.exe"
+    worker_executable = tmp_path / "XMLtoUSDAWorker" / "XMLtoUSDAWorker.exe"
+    worker_executable.parent.mkdir(parents=True, exist_ok=True)
+    gui_executable.write_bytes(b"")
+    worker_executable.write_bytes(b"")
+
+    monkeypatch.setattr(supervisor_module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(supervisor_module.sys, "executable", str(gui_executable))
+
+    command = supervisor_module._resolve_helper_command(request_path)
+
+    assert command == [
+        str(worker_executable),
+        supervisor_module.FBX_WORKER_COMMAND,
+        "--request",
+        str(request_path),
+    ]
+
+
+def test_fbx_import_supervisor_keeps_requested_initial_concurrency_for_heavy_inputs() -> None:
+    import xml_to_usda.fbx_import_supervisor as supervisor_module
+
+    prepared_imports = (
+        supervisor_module.FbxImportTask(
+            task_id=0,
+            display_name="SM_BigBranch_01_HIGH",
+            prototype_name="SM_BigBranch_01_HIGH",
+            fbx_path="first.fbx",
+            cpu_profile=CpuProfile.BALANCED,
+        ),
+        supervisor_module.FbxImportTask(
+            task_id=1,
+            display_name="SM_BigBranch_02_HIGH",
+            prototype_name="SM_BigBranch_02_HIGH",
+            fbx_path="second.fbx",
+            cpu_profile=CpuProfile.BALANCED,
+        ),
+    )
+
+    worker_count = supervisor_module._resolve_initial_worker_count(
+        prepared_imports,
+        requested_worker_count=4,
+    )
+
+    assert worker_count == 4
+
+
+def test_fbx_import_supervisor_retries_remaining_tasks_with_lower_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import xml_to_usda.fbx_import_supervisor as supervisor_module
+
+    tasks = (
+        supervisor_module.FbxImportTask(
+            task_id=0,
+            display_name="SM_BigBranch_01_HIGH",
+            prototype_name="SM_BigBranch_01_HIGH",
+            fbx_path="first.fbx",
+            cpu_profile=CpuProfile.BALANCED,
+        ),
+        supervisor_module.FbxImportTask(
+            task_id=1,
+            display_name="SM_BigBranch_02_HIGH",
+            prototype_name="SM_BigBranch_02_HIGH",
+            fbx_path="second.fbx",
+            cpu_profile=CpuProfile.BALANCED,
+        ),
+    )
+    worker_counts: list[int] = []
+
+    monkeypatch.setattr(supervisor_module, "cpu_worker_count", lambda _profile: 2)
+    monkeypatch.setattr(
+        supervisor_module,
+        "_resolve_initial_worker_count",
+        lambda _tasks, requested_worker_count: requested_worker_count,
+    )
+
+    def _fake_run_import_batch(tasks, *, worker_count, **kwargs):
+        worker_counts.append(worker_count)
+        if worker_count == 2:
+            raise supervisor_module._NativeHelperCrash(
+                "native crash",
+                partial_results={0: "payload-0"},
+                remaining_tasks=(tasks[1],),
+            )
+        return {1: "payload-1"}
+
+    monkeypatch.setattr(supervisor_module, "_run_import_batch", _fake_run_import_batch)
+
+    results = supervisor_module.import_fbx_payloads(tasks, cpu_profile=CpuProfile.BALANCED)
+
+    assert worker_counts == [2, 1]
+    assert results == {0: "payload-0", 1: "payload-1"}
 
 
 def test_fbx_part_source_restores_authored_instance_scale_without_xml_original_scale_multiplier(tmp_path: Path) -> None:

@@ -45,6 +45,7 @@ class PartSourceSettingRecord:
 
 @dataclass(frozen=True)
 class WindGroupSettingRecord:
+    is_trunk_group: bool = False
     use_dual_influence: bool = True
     influence: float = 1.0
     min_influence: float = 0.0
@@ -199,6 +200,7 @@ def _parse_wind_group_settings(raw_value) -> dict[str, WindGroupSettingRecord]:
         if not isinstance(value, dict):
             continue
         settings[str(key)] = WindGroupSettingRecord(
+            is_trunk_group=_coerce_bool(value.get("is_trunk_group"), False),
             use_dual_influence=_coerce_bool(value.get("use_dual_influence"), True),
             influence=_coerce_float(value.get("influence", 1.0), 1.0),
             min_influence=_coerce_float(value.get("min_influence", 0.0), 0.0),
@@ -358,6 +360,7 @@ def _serialize_wind_group_settings(
 ) -> dict[str, dict[str, object]]:
     return {
         str(key): {
+            "is_trunk_group": bool(record.is_trunk_group),
             "use_dual_influence": record.use_dual_influence,
             "influence": round(float(record.influence), 4),
             "min_influence": round(float(record.min_influence), 4),

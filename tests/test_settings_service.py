@@ -64,6 +64,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
         is_ground_cover=True,
         wind_group_settings={
             "0": WindGroupSettingRecord(
+                is_trunk_group=True,
                 use_dual_influence=False,
                 influence=0.7,
                 min_influence=0.2,
@@ -73,7 +74,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
         },
         wind_group_settings_by_input_path={
             input_key: {
-                "0": WindGroupSettingRecord(influence=0.35, shift_top=0.1),
+                "0": WindGroupSettingRecord(is_trunk_group=True, influence=0.35, shift_top=0.1),
             }
         },
         base_material_settings_by_input_path={
@@ -114,6 +115,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert payload["cpu_profile"] == CpuProfile.QUIET.value
     assert payload["preserve_temp_files"] is True
     assert payload["material_policy"] == MaterialPolicy.SINGLE_MATERIAL.value
+    assert payload["wind_group_settings"]["0"]["is_trunk_group"] is True
     assert payload["part_mesh_settings_by_input_path"][input_key][0]["fbx_material_mode"] == "material_slots"
     assert payload["part_mesh_settings_by_input_path"][input_key][0]["fbx_material_slot_overrides"] == [
         {"slot_name": "Bark", "ue_asset_path": "/Game/TreeParts/M_Bark.M_Bark"},

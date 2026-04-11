@@ -98,11 +98,13 @@ function Write-BuildInfo(
 
 $repoRoot = Convert-ToWinPath ([System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')))
 $launcherScript = Join-Path $repoRoot 'scripts\launch_gui.py'
+$workerLauncherScript = Join-Path $repoRoot 'scripts\launch_fbx_worker.py'
 $venvScripts = Join-Path $repoRoot '.venv310\Scripts'
 $launcherExe = Join-Path $venvScripts 'xml-to-usda-gui.exe'
 $distPath = Join-Path $repoRoot 'dist'
 $buildPath = Join-Path $repoRoot 'build'
 $exePath = Join-Path $distPath 'XMLtoUSDAConverter.exe'
+$workerExePath = Join-Path $distPath 'XMLtoUSDAWorker\XMLtoUSDAWorker.exe'
 
 Push-Location $repoRoot
 try {
@@ -149,13 +151,35 @@ try {
             throw 'PyInstaller build failed.'
         }
 
+        $workerPyInstallerArgs = @(
+            '-m', 'PyInstaller',
+            '--noconfirm',
+            '--clean',
+            '--console',
+            '--name', 'XMLtoUSDAWorker',
+            '--paths', (Join-Path $repoRoot 'src'),
+            '--distpath', $distPath,
+            '--workpath', (Join-Path $buildPath 'worker'),
+            $workerLauncherScript
+        )
+
+        Write-Host "Building sidecar FBX worker exe with $pythonExe ..."
+        & $pythonExe @workerPyInstallerArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw 'PyInstaller worker build failed.'
+        }
+
         if (-not (Test-Path $exePath)) {
             throw "Expected exe was not created: $exePath"
+        }
+        if (-not (Test-Path $workerExePath)) {
+            throw "Expected worker exe was not created: $workerExePath"
         }
 
         Write-BuildInfo -DistPath $distPath -ExePath $exePath -PythonExe $pythonExe -RepoRoot $repoRoot -BuildMode 'package'
 
         Write-Host "Built: $exePath"
+        Write-Host "Built worker: $workerExePath"
         if ($OpenOutput) {
             Invoke-Item $distPath
         }
@@ -188,4 +212,3 @@ try {
 finally {
     Pop-Location
 }
-

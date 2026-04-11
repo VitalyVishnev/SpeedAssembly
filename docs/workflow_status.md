@@ -120,12 +120,14 @@ Current large-job execution contract:
 - the GUI process now only owns the UI and telemetry polling; the worker subprocess owns XML normalization, FBX import, material resolution, and USDA writing
 - explicit FBX prototype imports are parallelized across a `spawn` process pool when more than one FBX prototype must be imported
 - this parallelism is currently prototype-level and stage-level, not "all cores inside one single FBX file"
-- packaged frozen runs deliberately fall back to sequential multi-FBX import instead of nested parallel FBX workers, because package-build stability currently has higher priority than peak CPU saturation
+- packaged frozen runs use isolated helper imports through the shared FBX supervisor and start from the requested prototype-level concurrency
+- packaged builds now prefer a dedicated sidecar `XMLtoUSDAWorker` binary for helper imports when it is present next to the GUI package output
+- if a native helper crash occurs at that concurrency, the supervisor automatically retries the remaining FBX imports with a lower helper count instead of failing the whole job immediately
 - if that worker pool cannot be created in the current environment, FBX prototype import falls back to sequential execution instead of failing outright
 - the conversion worker must not be daemonized, because parallel FBX import requires child worker processes
 - the validated `WorldTree.xml` stress path with two huge FBX branch replacements completes successfully through the subprocess path
 - `balanced` remains the default operator-facing CPU profile for this path
-- low total CPU percentage on a monster export with only one or two huge FBX prototypes is currently expected and is not treated as a defect on its own
+- low total CPU percentage on a monster export with only one or two huge FBX prototypes is not, by itself, a defect; the more important signal is whether the supervisor keeps safe parallel progress instead of stalling or crashing
 - the active engineering priority for huge jobs is runtime stability, recovery, diagnostics, and packaged-build reliability before deeper intra-file FBX saturation work
 
 Current huge-FBX contract:

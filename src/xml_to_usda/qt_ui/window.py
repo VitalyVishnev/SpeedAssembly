@@ -1,0 +1,1409 @@
+﻿"""Frameless PySide6 shell for the next-generation UI.
+
+Layer: UI.
+
+This shell keeps the new glassmorphism direction isolated from the stable Tk
+GUI while reusing the same conversion, discovery, wind, and settings services.
+"""
+
+from __future__ import annotations
+
+import os
+from copy import deepcopy
+from dataclasses import dataclass, replace
+from pathlib import Path
+
+from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QFrame,
+    QGraphicsDropShadowEffect,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QTabWidget,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ..gui_formatters import format_wind_group_summary, format_wind_json_result
+from ..models import CleanupPolicy
+from ..runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
+from .adjust_ui import AdjustUiDialog
+from .background_jobs import QtBackgroundJobsController
+from .dependencies import QtUiDependencies
+from .dialogs import TextDialog
+from .operator_state import (
+    SETTINGS_DIR,
+    SETTINGS_PATH,
+    load_base_material_records,
+    load_operator_state,
+    load_part_source_records,
+    load_wind_group_records,
+    resolve_settings_key,
+    save_nested_input_settings,
+)
+from .panels import GeometryTabPanel, MaterialsTabPanel, WindTabPanel
+from .persistence import (
+    UiShellState,
+    default_ui_theme_export_path,
+    default_ui_theme_overrides_path,
+    save_ui_shell_state,
+    save_ui_theme_overrides,
+)
+from .theme import (
+    ResolvedTheme,
+    ThemeOverrides,
+    ThemeSpec,
+    build_stylesheet,
+    compute_cover_source_rect,
+    load_bundled_theme,
+    merge_theme,
+    resolve_theme_asset,
+    theme_to_payload,
+    write_theme_payload,
+)
+
+
+@dataclass(frozen=True)
+class WindowAssets:
+    background: QPixmap
+    panel_blur: QPixmap
+    noise: QPixmap
+
+
+CONVERSION_MODES: tuple[tuple[str, str, bool], ...] = (
+    ("skeletal_assembly", "Skeletal Assembly", True),
+    ("skeletal_parts", "Skeletal Parts", False),
+    ("static_assembly", "Static Assembly", False),
+    ("static_parts", "Static Parts", False),
+)
+
+
+class PathLineEdit(QLineEdit):
+    pathChanged = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._full_text = ""
+        self.textEdited.connect(self._handle_text_edited)
+
+    def text(self) -> str:  # type: ignore[override]
+        return self._full_text
+
+    def setText(self, text: str) -> None:  # type: ignore[override]
+        self._full_text = text or ""
+        self._sync_visible_text(emit_signal=True)
+
+    def focusInEvent(self, event) -> None:  # type: ignore[override]
+        self._sync_visible_text(emit_signal=False)
+        super().focusInEvent(event)
+        if self._full_text:
+            QTimer.singleShot(0, self.selectAll)
+
+    def focusOutEvent(self, event) -> None:  # type: ignore[override]
+        self._full_text = super().text()
+        super().focusOutEvent(event)
+        self._sync_visible_text(emit_signal=False)
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        if not self.hasFocus():
+            self._sync_visible_text(emit_signal=False)
+
+    def _handle_text_edited(self, text: str) -> None:
+        self._full_text = text
+        self.pathChanged.emit(self._full_text)
+
+    def _sync_visible_text(self, *, emit_signal: bool) -> None:
+        display_text = self._full_text if self.hasFocus() else self._compact_path(self._full_text)
+        with QSignalBlocker(self):
+            super().setText(display_text)
+        if emit_signal:
+            self.pathChanged.emit(self._full_text)
+
+    @staticmethod
+    def _compact_path(text: str) -> str:
+        normalized = text.strip().replace("/", "\\")
+        if not normalized:
+            return ""
+        parts = [part for part in normalized.split("\\") if part]
+        if len(parts) <= 1:
+            return parts[0] if parts else normalized
+        return f"...\\{parts[-2]}\\{parts[-1]}"
+
+
+class TitleBar(QFrame):
+    def __init__(self, window: "MainWindow", theme: ResolvedTheme) -> None:
+        super().__init__(window)
+        self._window = window
+        self._drag_origin: QPoint | None = None
+        self.setObjectName("TitleBar")
+
+        self._layout = QHBoxLayout(self)
+
+        self.help_button = QPushButton("?", self)
+        self.help_button.setObjectName("WindowButton")
+        self.help_button.clicked.connect(window.open_help_dialog)
+        self._layout.addWidget(self.help_button, 0, Qt.AlignmentFlag.AlignLeft)
+
+        self.log_button = QPushButton("LOG", self)
+        self.log_button.setObjectName("TitlePillButton")
+        self.log_button.clicked.connect(window.open_log_dialog)
+        self._layout.addWidget(self.log_button, 0, Qt.AlignmentFlag.AlignLeft)
+
+        self.adjust_button = QPushButton("Adjust UI", self)
+        self.adjust_button.setObjectName("AdjustUiButton")
+        self.adjust_button.clicked.connect(window.open_adjust_ui_dialog)
+        self._layout.addWidget(self.adjust_button, 0, Qt.AlignmentFlag.AlignLeft)
+
+        self.title_label = QLabel("XML to USDA Converter Next", self)
+        self.title_label.setObjectName("TitleLabel")
+        self._layout.addWidget(self.title_label)
+        self._layout.addStretch(1)
+
+        self.minimize_button = QPushButton("\u2212", self)
+        self.minimize_button.setObjectName("WindowButton")
+        self.minimize_button.clicked.connect(window.showMinimized)
+        self._layout.addWidget(self.minimize_button)
+
+        self.maximize_button = QPushButton("\u25a1", self)
+        self.maximize_button.setObjectName("WindowButton")
+        self.maximize_button.clicked.connect(window.toggle_maximized)
+        self._layout.addWidget(self.maximize_button)
+
+        self.close_button = QPushButton("\u00d7", self)
+        self.close_button.setObjectName("CloseWindowButton")
+        self.close_button.clicked.connect(window.close)
+        self._layout.addWidget(self.close_button)
+
+        self.apply_theme(theme)
+
+    def apply_theme(self, theme: ResolvedTheme) -> None:
+        spacing = theme.spacing["control_gap"]
+        edge_padding = max(spacing, 18)
+        self._layout.setContentsMargins(edge_padding, 2, edge_padding, 2)
+        self._layout.setSpacing(max(8, spacing - 2))
+        titlebar_height = int(theme.control_heights["titlebar"])
+        pill_height = int(theme.chrome.get("title_pill_height", 24))
+        adjust_height = int(theme.chrome.get("adjust_ui_button_height", pill_height))
+        button_size = int(theme.chrome.get("window_button_size", 22))
+        self.setFixedHeight(max(24, titlebar_height + 4, pill_height + 8, adjust_height + 8, button_size + 8))
+        self.log_button.setFixedWidth(int(theme.chrome.get("title_pill_width", 78)))
+        self.log_button.setFixedHeight(pill_height)
+        self.adjust_button.setFixedWidth(int(theme.chrome.get("adjust_ui_button_width", 104)))
+        self.adjust_button.setFixedHeight(adjust_height)
+        for button in (self.help_button, self.minimize_button, self.maximize_button, self.close_button):
+            button.setFixedSize(button_size, button_size)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._window.toggle_maximized()
+        super().mouseDoubleClickEvent(event)
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton and not self._window.isMaximized():
+            window_point = self.mapTo(self._window, event.position().toPoint())
+            edges = self._window._hit_test_edges(window_point)
+            if edges != Qt.Edge(0) and self._window.windowHandle() is not None:
+                self._window.windowHandle().startSystemResize(edges)
+                event.accept()
+                return
+            self._drag_origin = event.globalPosition().toPoint() - self._window.frameGeometry().topLeft()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        window_point = self.mapTo(self._window, event.position().toPoint())
+        if self._drag_origin is None:
+            self._window._update_cursor_for_position(window_point)
+        if self._drag_origin is not None and event.buttons() & Qt.MouseButton.LeftButton and not self._window.isMaximized():
+            self._window.move(event.globalPosition().toPoint() - self._drag_origin)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        self._drag_origin = None
+        super().mouseReleaseEvent(event)
+
+    def leaveEvent(self, event) -> None:  # type: ignore[override]
+        if not self._window.isMaximized():
+            self._window.unsetCursor()
+        super().leaveEvent(event)
+class GlassPanel(QFrame):
+    def __init__(
+        self,
+        theme: ResolvedTheme,
+        panel_pixmap: QPixmap,
+        noise_pixmap: QPixmap,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        shadow = QGraphicsDropShadowEffect(self)
+        self.setGraphicsEffect(shadow)
+        self._theme = theme
+        self._panel_pixmap = panel_pixmap
+        self._noise_pixmap = noise_pixmap
+        self._noise_tile = QPixmap()
+        self.set_theme(theme, panel_pixmap, noise_pixmap)
+
+    def set_theme(self, theme: ResolvedTheme, panel_pixmap: QPixmap, noise_pixmap: QPixmap) -> None:
+        self._theme = theme
+        self._panel_pixmap = panel_pixmap
+        self._noise_pixmap = noise_pixmap
+        effect = self.graphicsEffect()
+        if isinstance(effect, QGraphicsDropShadowEffect):
+            effect.setBlurRadius(int(theme.effects.get("panel_shadow_blur", 22)))
+            effect.setColor(QColor(0, 0, 0, int(theme.effects.get("panel_shadow_alpha", 68))))
+            effect.setOffset(0, int(theme.effects.get("panel_shadow_offset_y", 6)))
+        self._noise_tile = self._build_noise_tile()
+        self.update()
+
+    def _build_noise_tile(self) -> QPixmap:
+        if self._noise_pixmap.isNull():
+            return QPixmap()
+        noise_scale = max(0.25, float(self._theme.glass.get("noise_scale", 1.0)))
+        target_width = max(8, int(round(self._noise_pixmap.width() * noise_scale)))
+        target_height = max(8, int(round(self._noise_pixmap.height() * noise_scale)))
+        return self._noise_pixmap.scaled(
+            target_width,
+            target_height,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        rect = QRectF(self.rect())
+        border_rect = rect.adjusted(0.5, 0.5, -0.5, -0.5)
+        radius = self._theme.radii["panel"]
+
+        path = QPainterPath()
+        path.addRoundedRect(rect, radius, radius)
+        painter.setClipPath(path)
+        owner_window = self.window()
+        if isinstance(owner_window, MainWindow):
+            panel_rect = QRect(self.mapTo(owner_window, QPoint(0, 0)), self.size())
+            panel_background = owner_window._panel_background_slice(panel_rect)
+        else:
+            panel_background = None
+        if panel_background is not None and not panel_background.isNull():
+            painter.drawPixmap(self.rect(), panel_background)
+        else:
+            _draw_cover_pixmap(painter, self.rect(), self._panel_pixmap)
+
+        tint = QColor(str(self._theme.glass["tint_color"]))
+        tint.setAlphaF(tint.alphaF() * float(self._theme.glass.get("tint_opacity", 0.22)))
+        painter.fillPath(path, tint)
+
+        gradient = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+        top_height = max(0.01, min(1.0, float(self._theme.glass.get("light_gradient_height", 0.18))))
+        dark_height = max(0.01, min(1.0, float(self._theme.glass.get("dark_gradient_height", 0.13))))
+        dark_start = max(top_height, 1.0 - dark_height)
+        gradient.setColorAt(0.0, QColor(255, 255, 255, int(round(255 * float(self._theme.glass.get("light_gradient_opacity", 0.11))))))
+        gradient.setColorAt(top_height, QColor(255, 255, 255, int(round(255 * float(self._theme.glass.get("light_gradient_mid_opacity", 0.04))))))
+        gradient.setColorAt(dark_start, QColor(255, 255, 255, 0))
+        gradient.setColorAt(1.0, QColor(0, 0, 0, int(round(255 * float(self._theme.glass.get("dark_gradient_opacity", 0.07))))))
+        painter.fillPath(path, gradient)
+
+        if not self._noise_tile.isNull() and float(self._theme.glass.get("noise_opacity", 0.0)) > 0.0:
+            painter.save()
+            painter.setClipPath(path)
+            painter.setOpacity(float(self._theme.glass.get("noise_opacity", 0.0)))
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Overlay)
+            painter.drawTiledPixmap(self.rect(), self._noise_tile)
+            painter.restore()
+
+        painter.setClipping(False)
+        border_path = QPainterPath()
+        border_path.addRoundedRect(border_rect, radius, radius)
+        border_color = QColor(str(self._theme.glass["border_color"]))
+        border_color.setAlphaF(border_color.alphaF() * float(self._theme.glass.get("border_opacity", 0.45)))
+        pen = QPen(border_color)
+        pen.setWidthF(float(self._theme.border_widths.get("panel", 1)))
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(border_path)
+
+
+class MainWindow(QWidget):
+    ASYNC_WIND_REFRESH_THRESHOLD_BYTES = 5 * 1024 * 1024
+    ASYNC_CONVERSION_THRESHOLD_BYTES = 5 * 1024 * 1024
+    EDGE_RESIZE_MARGIN = 14
+    _DWMWA_WINDOW_CORNER_PREFERENCE = 33
+    _DWMWCP_DONOTROUND = 1
+
+    def __init__(
+        self,
+        theme: ResolvedTheme,
+        state: UiShellState,
+        *,
+        dependencies: QtUiDependencies,
+        state_path=None,
+        operator_settings_path=None,
+        base_theme: ThemeSpec | None = None,
+        theme_overrides: ThemeOverrides | None = None,
+        theme_overrides_path=None,
+    ) -> None:
+        super().__init__()
+        self._theme = theme
+        self._base_theme = base_theme if base_theme is not None else load_bundled_theme(theme.name)
+        self._theme_overrides = theme_overrides if theme_overrides is not None else ThemeOverrides(theme.name, {})
+        self._theme_overrides_path = (
+            Path(theme_overrides_path) if theme_overrides_path is not None else default_ui_theme_overrides_path()
+        )
+        self._theme_export_path = default_ui_theme_export_path()
+        self._state = state
+        self._deps = dependencies
+        self._state_path = state_path
+        self._operator_settings_path = Path(operator_settings_path) if operator_settings_path is not None else SETTINGS_PATH
+        self._assets = self._load_window_assets(theme)
+        self._native_corner_preference_applied = False
+        self._restore_geometry = QRect(state.x, state.y, state.width, state.height)
+        self._active_resize_edges = Qt.Edge(0)
+        self._current_settings_key: str | None = None
+        self._auto_output_path: str | None = None
+        self._persistence_suspended = False
+        self._pending_generate_after_refresh = False
+        self._current_dynamic_wind = None
+        self._conversion_running = False
+        self._wind_refresh_running = False
+        self._wind_json_running = False
+        self._conversion_mode = "skeletal_assembly"
+        self._log_text = ""
+        self._log_dialog: TextDialog | None = None
+        self._help_dialog: TextDialog | None = None
+        self._adjust_ui_dialog: AdjustUiDialog | None = None
+
+        self._operator_state, self._operator_snapshot = load_operator_state(
+            self._deps,
+            settings_path=self._operator_settings_path,
+        )
+        self._runtime_paths = resolve_runtime_paths(
+            settings_dir=SETTINGS_DIR,
+            settings_path=self._operator_settings_path,
+        )
+        self._runtime_cleanup_summary = sweep_stale_job_workspaces(self._runtime_paths)
+
+        self._settings_save_timer = QTimer(self)
+        self._settings_save_timer.setSingleShot(True)
+        self._settings_save_timer.setInterval(150)
+        self._settings_save_timer.timeout.connect(self._save_operator_state)
+        self._source_refresh_timer = QTimer(self)
+        self._source_refresh_timer.setSingleShot(True)
+        self._source_refresh_timer.setInterval(200)
+        self._source_refresh_timer.timeout.connect(self.refresh_wind_groups)
+
+        self._background_jobs = QtBackgroundJobsController(
+            self,
+            deps=self._deps,
+            runtime_paths=self._runtime_paths,
+        )
+
+        self.setWindowTitle("XML to USDA Converter Next")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StaticContents, True)
+        self.setMouseTracking(True)
+        self.setMinimumSize(QSize(1160, 780))
+        self.setStyleSheet(build_stylesheet(theme))
+
+        self._build_layout()
+        self._install_resize_event_filters()
+        self._apply_saved_state()
+        self._apply_operator_state_to_widgets()
+        self._set_log(self._startup_log_text())
+        self._apply_runtime_cleanup_summary()
+        self._reload_input_dependent_tabs()
+        self._refresh_state_cards()
+        self._update_action_state()
+        self._update_window_shape()
+
+    def _build_layout(self) -> None:
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self._outer_layout = outer
+
+        self.title_bar = TitleBar(self, self._theme)
+        outer.addWidget(self.title_bar, 0)
+
+        body = QWidget(self)
+        self._body_widget = body
+        body_layout = QVBoxLayout(body)
+        self._body_layout = body_layout
+        body_layout.addStretch(1)
+
+        self.panel = GlassPanel(self._theme, self._assets.panel_blur, self._assets.noise, self)
+        panel_layout = QVBoxLayout(self.panel)
+        self._panel_layout = panel_layout
+        panel_layout.addLayout(self._build_top_rows())
+        panel_layout.addLayout(self._build_content_rows())
+        body_layout.addWidget(self.panel, 0, Qt.AlignmentFlag.AlignCenter)
+        body_layout.addStretch(1)
+        self._apply_theme_to_layout()
+        self._update_panel_metrics()
+
+        outer.addWidget(body, 1)
+
+    def _install_resize_event_filters(self) -> None:
+        self.installEventFilter(self)
+        self.title_bar.installEventFilter(self)
+        self._body_widget.installEventFilter(self)
+        self.setMouseTracking(True)
+        self.title_bar.setMouseTracking(True)
+        self._body_widget.setMouseTracking(True)
+        for child in self.title_bar.findChildren(QWidget):
+            child.installEventFilter(self)
+            child.setMouseTracking(True)
+
+    def eventFilter(self, watched, event) -> bool:  # type: ignore[override]
+        if self.isMaximized():
+            return super().eventFilter(watched, event)
+
+        if isinstance(watched, QWidget) and event.type() in {
+            QEvent.Type.MouseMove,
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.MouseButtonDblClick,
+        }:
+            event_position = event.position().toPoint()
+            window_position = event_position if watched is self else watched.mapTo(self, event_position)
+            edges = self._hit_test_edges(window_position)
+            if event.type() == QEvent.Type.MouseMove:
+                self._update_cursor_for_position(window_position)
+            elif (
+                event.type() == QEvent.Type.MouseButtonPress
+                and event.button() == Qt.MouseButton.LeftButton
+                and edges != Qt.Edge(0)
+                and self.windowHandle() is not None
+            ):
+                self.windowHandle().startSystemResize(edges)
+                return True
+
+        if event.type() == QEvent.Type.Leave and watched in {self, self.title_bar, self._body_widget}:
+            self.unsetCursor()
+
+        return super().eventFilter(watched, event)
+
+    def _build_top_rows(self):
+        spacing = self._theme.spacing["control_gap"]
+        layout = QGridLayout()
+        self._top_rows_layout = layout
+        layout.setHorizontalSpacing(spacing)
+
+        self.source_button = QPushButton("Input XML", self)
+        self.source_button.setObjectName("FileButton")
+        self.source_button.clicked.connect(self.browse_input)
+        self.output_button = QPushButton("Output USDA", self)
+        self.output_button.setObjectName("FileButton")
+        self.output_button.clicked.connect(self.browse_output)
+
+        self.source_input = PathLineEdit(self)
+        self.source_input.setPlaceholderText("Source XML path")
+        self.source_input.pathChanged.connect(self._handle_source_text_changed)
+
+        self.output_input = PathLineEdit(self)
+        self.output_input.setPlaceholderText("Output USDA path")
+        self.output_input.pathChanged.connect(self._handle_output_text_changed)
+
+        self.convert_button = QPushButton("Convert to USDA", self)
+        self.convert_button.setObjectName("SplitActionMainButton")
+        self.convert_button.clicked.connect(self._handle_convert_button_clicked)
+        self.convert_mode_button = QToolButton(self)
+        self.convert_mode_button.setObjectName("SplitActionMenuButton")
+        self.convert_mode_button.setText("⚙")
+        self.convert_mode_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.convert_mode_button.setMenu(self._build_conversion_mode_menu())
+        self.convert_action_divider = QFrame(self)
+        self.convert_action_divider.setObjectName("SplitActionDivider")
+        self.convert_action_frame = QFrame(self)
+        self.convert_action_frame.setObjectName("SplitActionFrame")
+        convert_action_layout = QHBoxLayout(self.convert_action_frame)
+        convert_action_layout.setContentsMargins(0, 0, 0, 0)
+        convert_action_layout.setSpacing(0)
+        convert_action_layout.addWidget(self.convert_button, 1)
+        convert_action_layout.addWidget(self.convert_action_divider, 0)
+        convert_action_layout.addWidget(self.convert_mode_button, 0)
+        self.generate_button = QPushButton("Generate Wind JSON", self)
+        self.generate_button.setObjectName("PrimaryActionButton")
+        self.generate_button.clicked.connect(self.run_generate_wind_json)
+        self._action_buttons = [
+            self.generate_button,
+        ]
+
+        right_column = QVBoxLayout()
+        self._action_column_layout = right_column
+        right_column.setSpacing(max(6, spacing - 4))
+        right_column.addWidget(self.convert_action_frame)
+        right_column.addWidget(self.generate_button)
+        right_column.addStretch(1)
+
+        layout.addWidget(self.source_button, 0, 0)
+        layout.addWidget(self.source_input, 0, 1)
+        layout.addLayout(right_column, 0, 2, 2, 1)
+        layout.addWidget(self.output_button, 1, 0)
+        layout.addWidget(self.output_input, 1, 1)
+        layout.setColumnStretch(1, 1)
+        layout.setRowMinimumHeight(0, 34)
+        layout.setRowMinimumHeight(1, 34)
+        return layout
+
+    def _build_content_rows(self):
+        spacing = self._theme.spacing["section_gap"]
+        content = QHBoxLayout()
+        self._content_layout = content
+        content.setSpacing(spacing)
+
+        left_column = QVBoxLayout()
+        self._left_column_layout = left_column
+        left_column.setSpacing(spacing)
+        self.materials_card_label = QLabel("", self)
+        self.materials_card_label.setWordWrap(True)
+        self.materials_card_label.setObjectName("MutedLabel")
+        self.materials_card = self._build_info_card("Loaded operator material defaults", self.materials_card_label)
+        left_column.addWidget(self.materials_card)
+
+        self.runtime_card_label = QLabel("", self)
+        self.runtime_card_label.setWordWrap(True)
+        self.runtime_card_label.setObjectName("MutedLabel")
+        self.runtime_card = self._build_info_card("Current beta-shell runtime state", self.runtime_card_label)
+        left_column.addWidget(self.runtime_card)
+        left_column.addStretch(1)
+
+        right_column = QVBoxLayout()
+        self._right_column_layout = right_column
+        right_column.setSpacing(spacing)
+        self.status_label = QLabel("PySide6 beta shell is ready.", self)
+        self.status_label.setObjectName("StatusLabel")
+        self.status_label.setWordWrap(True)
+        right_column.addWidget(self.status_label, 0)
+
+        self.wind_panel = WindTabPanel(
+            on_change=self._handle_tab_state_changed,
+            on_refresh_requested=self.refresh_wind_groups,
+        )
+        self.geometry_panel = GeometryTabPanel(
+            browse_fbx=self._browse_part_fbx,
+            on_change=self._handle_geometry_state_changed,
+        )
+        self.materials_panel = MaterialsTabPanel(
+            deps=self._deps,
+            on_change=self._handle_tab_state_changed,
+        )
+
+        self.tabs = QTabWidget(self)
+        self.tabs.addTab(self.wind_panel, "Wind")
+        self.tabs.addTab(self.geometry_panel, "Geometry")
+        self.tabs.addTab(self.materials_panel, "Materials")
+        right_column.addWidget(self.tabs, 1)
+
+        content.addLayout(left_column, 0)
+        content.addLayout(right_column, 1)
+        return content
+
+    def _build_conversion_mode_menu(self) -> QMenu:
+        menu = QMenu(self)
+        action_group = QActionGroup(menu)
+        action_group.setExclusive(True)
+        self._conversion_mode_actions: dict[str, QAction] = {}
+        for mode_key, label, supported in CONVERSION_MODES:
+            action = QAction(label, menu)
+            action.setCheckable(True)
+            action.setData(mode_key)
+            action.setEnabled(supported)
+            action.setChecked(mode_key == self._conversion_mode)
+            if supported:
+                action.triggered.connect(lambda _checked=False, selected=mode_key: self._set_conversion_mode(selected))
+            self._conversion_mode_actions[mode_key] = action
+            action_group.addAction(action)
+            menu.addAction(action)
+        return menu
+
+    def _set_conversion_mode(self, mode_key: str) -> None:
+        self._conversion_mode = mode_key
+        for key, action in self._conversion_mode_actions.items():
+            action.setChecked(key == mode_key)
+        selected_label = next((label for key, label, _supported in CONVERSION_MODES if key == mode_key), mode_key)
+        self._append_log(f"Conversion mode selected: {selected_label}")
+
+    def _build_info_card(self, title: str, content_label: QLabel) -> QWidget:
+        card = QFrame(self)
+        card.setObjectName("PanelCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(18, 18, 18, 18)
+        title_label = QLabel(title, card)
+        title_label.setStyleSheet("font-weight: 600;")
+        layout.addWidget(title_label)
+        layout.addWidget(content_label)
+        return card
+
+    def _load_window_assets(self, theme: ResolvedTheme) -> WindowAssets:
+        noise_asset = str(theme.glass.get("noise_asset", ""))
+        noise_pixmap = QPixmap()
+        if noise_asset:
+            noise_pixmap = QPixmap(str(resolve_theme_asset(theme, noise_asset)))
+        return WindowAssets(
+            background=QPixmap(str(resolve_theme_asset(theme, theme.background_image))),
+            panel_blur=QPixmap(str(resolve_theme_asset(theme, theme.background_blur_image))),
+            noise=noise_pixmap,
+        )
+
+    def _apply_runtime_theme(self, theme: ResolvedTheme) -> None:
+        self._theme = theme
+        self._assets = self._load_window_assets(theme)
+        self.setStyleSheet(build_stylesheet(theme))
+        self.title_bar.apply_theme(theme)
+        self.panel.set_theme(theme, self._assets.panel_blur, self._assets.noise)
+        self._apply_theme_to_layout()
+        self._update_panel_metrics()
+        self._update_window_shape()
+        self.panel.update()
+        self.update()
+        for dialog in (self._log_dialog, self._help_dialog, self._adjust_ui_dialog):
+            if dialog is not None:
+                dialog.setStyleSheet(build_stylesheet(theme))
+
+    def _apply_theme_to_layout(self) -> None:
+        outer_margin = int(self._theme.spacing["outer_margin"])
+        vertical_offset = int(self._theme.layout.get("panel_vertical_offset", 0))
+        top_margin = max(8, outer_margin + max(0, vertical_offset))
+        bottom_margin = max(8, outer_margin + max(0, -vertical_offset))
+        self._body_layout.setContentsMargins(outer_margin, top_margin, outer_margin, bottom_margin)
+
+        panel_padding = int(self._theme.spacing["panel_padding"])
+        self._panel_layout.setContentsMargins(panel_padding, panel_padding, panel_padding, panel_padding)
+        self._panel_layout.setSpacing(int(self._theme.spacing["section_gap"]))
+
+        self._top_rows_layout.setHorizontalSpacing(int(self._theme.spacing["control_gap"]))
+        self._top_rows_layout.setVerticalSpacing(int(self._theme.layout.get("file_row_gap", 8)))
+        self._content_layout.setSpacing(int(self._theme.spacing["section_gap"]))
+        self._left_column_layout.setSpacing(int(self._theme.spacing["section_gap"]))
+        self._right_column_layout.setSpacing(int(self._theme.spacing["section_gap"]))
+        self._action_column_layout.setSpacing(max(6, int(self._theme.spacing["control_gap"]) - 4))
+
+        file_button_width = int(self._theme.chrome.get("file_button_width", 74))
+        self.source_button.setFixedWidth(file_button_width)
+        self.output_button.setFixedWidth(file_button_width)
+
+        action_width = int(self._theme.layout.get("action_column_width", 148))
+        self.convert_action_frame.setFixedWidth(action_width)
+        button_height = int(self._theme.control_heights["button"])
+        gear_width = max(34, min(52, button_height + 6))
+        self.convert_action_frame.setFixedHeight(button_height)
+        self.convert_button.setFixedHeight(button_height)
+        self.convert_button.setMinimumWidth(max(72, action_width - gear_width - 1))
+        self.convert_mode_button.setFixedWidth(gear_width)
+        self.convert_mode_button.setFixedHeight(button_height)
+        for button in self._action_buttons:
+            button.setFixedWidth(action_width)
+            button.setFixedHeight(button_height)
+
+        left_column_width = int(self._theme.layout.get("left_column_width", 280))
+        self.materials_card.setFixedWidth(left_column_width)
+        self.runtime_card.setFixedWidth(left_column_width)
+        self.tabs.setMinimumHeight(int(self._theme.layout.get("tabs_min_height", 440)))
+        self.panel.setMinimumHeight(int(self._theme.layout.get("panel_min_height", 680)))
+
+    def _apply_saved_state(self) -> None:
+        self.setGeometry(self._restore_geometry)
+        if self._state.is_maximized:
+            self.showMaximized()
+
+    def _apply_operator_state_to_widgets(self) -> None:
+        self._persistence_suspended = True
+        self.source_input.setText(self._operator_state.input_path)
+        self.output_input.setText(self._operator_state.output_path)
+        self.wind_panel.set_global_options(
+            is_ground_cover=self._operator_state.is_ground_cover,
+            gust_attenuation=self._operator_state.gust_attenuation,
+        )
+        self._persistence_suspended = False
+
+    def _apply_runtime_cleanup_summary(self) -> None:
+        if not self._runtime_cleanup_summary.has_activity:
+            return
+        summary_message = f"Runtime cleanup: {self._runtime_cleanup_summary.to_message()}"
+        if self._runtime_cleanup_summary.failed_paths:
+            failed_paths = "\n".join(f"  - {failed_path}" for failed_path in self._runtime_cleanup_summary.failed_paths)
+            summary_message = f"{summary_message}\n{failed_paths}"
+        self._append_log(summary_message)
+
+    def _refresh_state_cards(self) -> None:
+        policy = self._operator_state.material_policy.value
+        if self._operator_state.material_policy.value == "single_material":
+            material_detail = f"single: {self._operator_state.single_material_path or '<none>'}"
+        else:
+            material_detail = (
+                f"bark: {self._operator_state.bark_material_path or '<none>'}\n"
+                f"leaves: {self._operator_state.leaves_material_path or '<none>'}"
+            )
+        self.materials_card_label.setText(f"Policy: {policy}\n{material_detail}")
+
+        prototype_count = len(self.geometry_panel.current_snapshot()) if self.geometry_panel.has_rows() else 0
+        wind_state = "loaded" if self._current_dynamic_wind is not None else "not loaded"
+        self.runtime_card_label.setText(
+            f"CPU profile: {self._operator_state.cpu_profile.value}\n"
+            f"Preserve temp files: {self._operator_state.preserve_temp_files}\n"
+            f"Ground cover: {self._operator_state.is_ground_cover}\n"
+            f"Gust attenuation: {self._operator_state.gust_attenuation:.2f}\n"
+            f"Prototype rows: {prototype_count}\n"
+            f"Wind groups: {wind_state}"
+        )
+
+    def _update_action_state(self) -> None:
+        has_input = bool(self.source_input.text().strip())
+        has_output = bool(self.output_input.text().strip())
+        self.convert_button.setText("Cancel" if self._conversion_running else "Convert to USDA")
+        self.convert_button.setEnabled(self._conversion_running or (has_input and has_output))
+        self.convert_mode_button.setEnabled(not self._conversion_running)
+        self.wind_panel.refresh_button.setEnabled(has_input and not self._conversion_running and not self._wind_refresh_running)
+        self.generate_button.setEnabled(
+            has_input and not self._conversion_running and not self._wind_refresh_running and not self._wind_json_running
+        )
+
+    def _handle_convert_button_clicked(self) -> None:
+        if self._conversion_running:
+            self.cancel_conversion()
+            return
+        self.run_conversion()
+
+    def _set_status(self, text: str) -> None:
+        self.status_label.setText(text)
+
+    def _set_log(self, text: str) -> None:
+        self._log_text = text.strip()
+        if self._log_dialog is not None:
+            self._log_dialog.set_text(self._log_text)
+
+    def _append_log(self, text: str) -> None:
+        text = text.strip()
+        if not text:
+            return
+        if self._log_text:
+            self._log_text = f"{self._log_text}\n\n{text}"
+        else:
+            self._log_text = text
+        if self._log_dialog is not None:
+            self._log_dialog.set_text(self._log_text)
+
+    def _startup_log_text(self) -> str:
+        return (
+            "PySide6 beta shell is alive.\n\n"
+            "- Frameless shell\n"
+            "- Background cover/crop\n"
+            "- Glass panel\n"
+            "- Shared operator settings bridge\n"
+            "- Real conversion / wind action wiring\n\n"
+            "This pass adds tabbed Wind / Geometry / Materials panels, while keeping the left-side cards reserved."
+        )
+
+    def open_log_dialog(self) -> None:
+        if self._log_dialog is None:
+            self._log_dialog = TextDialog(
+                title="Conversion Log",
+                text=self._log_text or "No log entries yet.",
+                parent=self,
+            )
+        else:
+            self._log_dialog.set_text(self._log_text or "No log entries yet.")
+        self._log_dialog.setStyleSheet(build_stylesheet(self._theme))
+        self._log_dialog.show()
+        self._log_dialog.raise_()
+        self._log_dialog.activateWindow()
+
+    def open_help_dialog(self) -> None:
+        help_text = (
+            "1. Choose a source XML file.\n"
+            "2. Review Wind / Geometry / Materials tabs.\n"
+            "3. Refresh Wind Groups inside the Wind tab when needed.\n"
+            "4. Adjust repeated-part source mode and material assignments.\n"
+            "5. Generate Dynamic Wind JSON or run Convert to USDA.\n\n"
+            "Current beta shell keeps the backend stable while the visual shell is still evolving."
+        )
+        if self._help_dialog is None:
+            self._help_dialog = TextDialog(
+                title="Quick Workflow",
+                text=help_text,
+                parent=self,
+            )
+        else:
+            self._help_dialog.set_text(help_text)
+        self._help_dialog.setStyleSheet(build_stylesheet(self._theme))
+        self._help_dialog.show()
+        self._help_dialog.raise_()
+        self._help_dialog.activateWindow()
+
+    def open_adjust_ui_dialog(self) -> None:
+        if self._adjust_ui_dialog is None:
+            self._adjust_ui_dialog = AdjustUiDialog(
+                base_theme=self._base_theme,
+                applied_overrides=self._theme_overrides,
+                current_theme=self._theme,
+                on_preview=self._preview_theme_overrides,
+                on_apply=self._apply_theme_overrides_runtime,
+                on_save=self._save_theme_overrides,
+                on_export=self._export_current_theme,
+                parent=self,
+            )
+            self._adjust_ui_dialog.finished.connect(self._handle_adjust_ui_closed)
+        self._adjust_ui_dialog.setStyleSheet(build_stylesheet(self._theme))
+        self._adjust_ui_dialog.show()
+        self._adjust_ui_dialog.raise_()
+        self._adjust_ui_dialog.activateWindow()
+
+    def _handle_adjust_ui_closed(self, _result: int) -> None:
+        self._adjust_ui_dialog = None
+
+    def _show_info(self, title: str, message: str) -> None:
+        self._append_log(f"{title}\n{message}")
+
+    def _preview_theme_overrides(self, overrides: ThemeOverrides, resolved_theme: ResolvedTheme) -> None:
+        self._apply_runtime_theme(resolved_theme)
+
+    def _apply_theme_overrides_runtime(self, overrides: ThemeOverrides, resolved_theme: ResolvedTheme) -> None:
+        self._theme_overrides = ThemeOverrides(overrides.theme_name, deepcopy(overrides.payload))
+        self._apply_runtime_theme(resolved_theme)
+
+    def _save_theme_overrides(self, overrides: ThemeOverrides, resolved_theme: ResolvedTheme) -> None:
+        self._apply_theme_overrides_runtime(overrides, resolved_theme)
+        save_ui_theme_overrides(self._theme_overrides, self._theme_overrides_path)
+        self._append_log(f"Adjust UI\nSaved theme overrides to {self._theme_overrides_path}")
+
+    def _export_current_theme(self, resolved_theme: ResolvedTheme) -> Path:
+        export_path = self._theme_export_path
+        write_theme_payload(export_path, theme_to_payload(resolved_theme))
+        self._append_log(f"Adjust UI\nExported merged theme to {export_path}")
+        return export_path
+
+    def _report_error(
+        self,
+        title: str,
+        message: str,
+        *,
+        details: str | None = None,
+        status: str | None = None,
+    ) -> None:
+        self._set_status(status or title)
+        self._append_log(details or message)
+        QMessageBox.critical(self, title, message)
+
+    def _handle_source_text_changed(self, text: str) -> None:
+        previous_input = self._operator_state.input_path
+        previous_auto_output = self._auto_output_path
+        normalized_text = text.strip()
+        self._operator_state = replace(self._operator_state, input_path=normalized_text)
+        input_changed = normalized_text != previous_input
+        if input_changed:
+            self._current_dynamic_wind = None
+            self._pending_generate_after_refresh = False
+            self._set_default_output_from_source(previous_input, previous_auto_output)
+        if not self._persistence_suspended:
+            self._reload_input_dependent_tabs()
+            self._schedule_operator_state_save()
+            if input_changed:
+                self._maybe_auto_refresh_wind_groups()
+        self._refresh_state_cards()
+        self._update_action_state()
+
+    def _handle_output_text_changed(self, text: str) -> None:
+        self._operator_state = replace(self._operator_state, output_path=text.strip())
+        if not self._persistence_suspended:
+            self._schedule_operator_state_save()
+        self._update_action_state()
+
+    def _set_default_output_from_source(
+        self,
+        previous_input: str,
+        previous_auto_output: str | None,
+        *,
+        force: bool = False,
+    ) -> None:
+        source_path = self.source_input.text().strip()
+        if not source_path:
+            self._auto_output_path = None
+            return
+        new_auto_output = str(Path(source_path).with_suffix(".usda"))
+        current_output = self.output_input.text().strip()
+        previous_default = previous_auto_output or (str(Path(previous_input).with_suffix(".usda")) if previous_input else "")
+        if force or not current_output or current_output == previous_default:
+            self._persistence_suspended = True
+            self.output_input.setText(new_auto_output)
+            self._persistence_suspended = False
+            self._operator_state = replace(self._operator_state, output_path=new_auto_output)
+        self._auto_output_path = new_auto_output
+
+    def _maybe_auto_refresh_wind_groups(self) -> None:
+        input_path = self.source_input.text().strip()
+        if not input_path or not Path(input_path).exists():
+            self._source_refresh_timer.stop()
+            return
+        if self._conversion_running or self._wind_refresh_running or self._wind_json_running:
+            return
+        self._source_refresh_timer.start()
+
+    def _schedule_operator_state_save(self) -> None:
+        self._settings_save_timer.start()
+
+    def _save_operator_state(self) -> None:
+        try:
+            self._operator_snapshot = save_nested_input_settings(
+                self._deps,
+                self._operator_state,
+                previous_snapshot=self._operator_snapshot,
+                settings_key=self._current_settings_key,
+                base_material_records=self.materials_panel.serialize_base_material_records(),
+                part_source_records=self.materials_panel.serialize_part_source_records(),
+                wind_group_records=self.wind_panel.serialize_settings(),
+                settings_path=self._operator_settings_path,
+            )
+        except OSError:
+            return
+
+    def _handle_tab_state_changed(self) -> None:
+        self._operator_state = replace(
+            self._operator_state,
+            gust_attenuation=self.wind_panel.gust_attenuation(),
+            is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
+        )
+        self._schedule_operator_state_save()
+        self._refresh_state_cards()
+
+    def _handle_geometry_state_changed(self) -> None:
+        self.materials_panel.apply_geometry_state(
+            self.geometry_panel.current_snapshot(),
+            cpu_profile=self._operator_state.cpu_profile,
+        )
+        self._handle_tab_state_changed()
+
+    def _reload_input_dependent_tabs(self) -> None:
+        input_path = self.source_input.text().strip()
+        self._current_settings_key = resolve_settings_key(self._deps, input_path)
+        if not input_path:
+            self.wind_panel.clear()
+            self.geometry_panel.clear()
+            self.materials_panel.clear()
+            return
+        if not Path(input_path).exists():
+            self.wind_panel.clear("Selected XML path is unavailable.")
+            self.geometry_panel.clear("Selected XML path is unavailable.")
+            self.materials_panel.clear("Selected XML path is unavailable.")
+            return
+
+        base_records = load_base_material_records(self._operator_snapshot, settings_key=self._current_settings_key)
+        part_records = load_part_source_records(self._operator_snapshot, settings_key=self._current_settings_key)
+        wind_records = load_wind_group_records(self._operator_snapshot, settings_key=self._current_settings_key)
+        self.wind_panel.set_persisted_settings(wind_records)
+
+        prototype_discovery = self._deps.discover_part_prototype_rows(input_path, persisted_records=part_records)
+        self.geometry_panel.load(prototype_discovery)
+        self.materials_panel.load(
+            input_path=input_path,
+            base_persisted_records=base_records,
+            part_persisted_records=part_records,
+            geometry_snapshot=self.geometry_panel.current_snapshot(),
+            cpu_profile=self._operator_state.cpu_profile,
+        )
+        self.wind_panel.clear("Click Refresh Wind Groups to inspect wind settings.")
+
+    def browse_input(self) -> None:
+        previous_input = self._operator_state.input_path
+        previous_auto_output = self._auto_output_path
+        selected, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select SpeedTree XML",
+            self.source_input.text().strip() or "",
+            "XML files (*.xml);;All files (*.*)",
+        )
+        if not selected:
+            return
+        self.source_input.setText(selected)
+        self._set_default_output_from_source(previous_input, previous_auto_output, force=True)
+        self._set_status("Source XML selected.")
+
+    def browse_output(self) -> None:
+        initial = self.output_input.text().strip() or "tree.usda"
+        selected, _ = QFileDialog.getSaveFileName(
+            self,
+            "Select USDA output",
+            initial,
+            "USDA files (*.usda *.usd);;All files (*.*)",
+        )
+        if not selected:
+            return
+        self.output_input.setText(selected)
+        self._set_status("Output USDA selected.")
+
+    def _browse_part_fbx(self, target_edit: QLineEdit) -> None:
+        selected, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select part FBX",
+            target_edit.text().strip() or "",
+            "FBX files (*.fbx);;JSON test payloads (*.json);;All files (*.*)",
+        )
+        if selected:
+            target_edit.setText(selected)
+
+    def run_conversion(self) -> None:
+        input_path = self.source_input.text().strip()
+        output_path = self.output_input.text().strip()
+        try:
+            plan = self._deps.prepare_conversion_plan(
+                input_path=input_path,
+                output_path=output_path,
+                cpu_profile=self._operator_state.cpu_profile,
+                cleanup_policy=self._current_cleanup_policy(),
+                material_policy=self._operator_state.material_policy,
+                bark_material_path=self._operator_state.bark_material_path or None,
+                leaves_material_path=self._operator_state.leaves_material_path or None,
+                single_material_path=self._operator_state.single_material_path or None,
+                base_material_overrides=self.materials_panel.collect_base_material_overrides(),
+                prototype_source_configs=self.materials_panel.collect_prototype_source_configs(),
+                use_existing_part_meshes=False,
+                part_mesh_asset_paths=(),
+                async_threshold_bytes=self.ASYNC_CONVERSION_THRESHOLD_BYTES,
+            )
+        except ValueError as exc:
+            message = str(exc)
+            if message == "Select a source XML file.":
+                self._report_error("Missing input", message)
+            elif message == "Select an output USDA path.":
+                self._report_error("Missing output", message)
+            else:
+                self._report_error("Invalid material path", message)
+            return
+        self._background_jobs.start_conversion(request=plan.request, run_async=plan.run_async)
+
+    def refresh_wind_groups(self) -> None:
+        self._source_refresh_timer.stop()
+        input_path = self.source_input.text().strip()
+        if not input_path:
+            self._report_error("Missing input", "Select a source XML file before loading wind groups.")
+            return
+        self.wind_panel.set_persisted_settings(
+            load_wind_group_records(self._operator_snapshot, settings_key=self._current_settings_key)
+        )
+        plan = self._deps.prepare_wind_inspection_plan(
+            input_path=input_path,
+            is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
+            async_threshold_bytes=self.ASYNC_WIND_REFRESH_THRESHOLD_BYTES,
+        )
+        self._background_jobs.start_wind_refresh(plan.request)
+
+    def run_generate_wind_json(self) -> None:
+        self._source_refresh_timer.stop()
+        if self._current_dynamic_wind is None:
+            self._pending_generate_after_refresh = True
+            self.refresh_wind_groups()
+            return
+        input_path = self.source_input.text().strip()
+        if not input_path:
+            self._report_error("Missing input", "Select a source XML file before generating wind JSON.")
+            return
+        output_path = self._deps.derive_wind_json_output_path(
+            input_path,
+            self.output_input.text().strip(),
+        )
+        request = self._deps.WindGenerationRequest(
+            input_path=input_path,
+            output_path=str(output_path),
+            group_settings=self.wind_panel.collect_group_settings(),
+            gust_attenuation=self.wind_panel.gust_attenuation(),
+            is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
+        )
+        self._background_jobs.start_wind_json_generation(request)
+
+    def cancel_conversion(self) -> None:
+        self._background_jobs.cancel_conversion()
+
+    def _current_cleanup_policy(self) -> CleanupPolicy:
+        return CleanupPolicy.PRESERVE_FOR_DEBUGGING if self._operator_state.preserve_temp_files else CleanupPolicy.EPHEMERAL
+
+    def _set_conversion_running(self, active: bool) -> None:
+        self._conversion_running = active
+        self._update_action_state()
+
+    def _set_wind_refresh_running(self, active: bool) -> None:
+        self._wind_refresh_running = active
+        self._update_action_state()
+
+    def _set_wind_json_running(self, active: bool) -> None:
+        self._wind_json_running = active
+        self._update_action_state()
+
+    def _clear_pending_generate_after_refresh(self) -> None:
+        self._pending_generate_after_refresh = False
+
+    def _handle_wind_data_loaded(self, dynamic_wind, *, used_retry: bool) -> None:
+        self._current_dynamic_wind = dynamic_wind
+        self.wind_panel.rebuild(dynamic_wind.simulation_groups)
+        self._set_status(f"Loaded {len(dynamic_wind.simulation_groups)} wind groups.")
+        summary = format_wind_group_summary(dynamic_wind)
+        if used_retry:
+            summary = f"{summary}\n\nBackground worker failed once and succeeded on retry."
+        self._set_log(summary)
+        self._refresh_state_cards()
+        self._update_action_state()
+        self._schedule_operator_state_save()
+        if self._pending_generate_after_refresh:
+            self._pending_generate_after_refresh = False
+            self.run_generate_wind_json()
+
+    def _handle_wind_json_result(self, result) -> None:
+        self._set_status(f"Wrote Dynamic Wind JSON to {result.output_path}")
+        self._set_log(format_wind_json_result(result))
+        self._append_log(f"Wind JSON complete\nWrote Dynamic Wind JSON to {result.output_path}")
+
+    def toggle_maximized(self) -> None:
+        if self.isMaximized():
+            self.showNormal()
+            if self._restore_geometry.width() > 0 and self._restore_geometry.height() > 0:
+                self.setGeometry(self._restore_geometry)
+        else:
+            current_geometry = self.geometry()
+            if current_geometry.width() > 0 and current_geometry.height() > 0:
+                self._restore_geometry = QRect(current_geometry)
+            self.showMaximized()
+        self._update_window_shape()
+        self._apply_native_corner_preference()
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        self._apply_native_corner_preference()
+
+    def moveEvent(self, event) -> None:  # type: ignore[override]
+        super().moveEvent(event)
+        if not self.isMaximized():
+            self._restore_geometry = QRect(self.geometry())
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        if not self.isMaximized():
+            self._restore_geometry = QRect(self.geometry())
+        self._update_panel_metrics()
+        self.panel.update()
+        self.update()
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        full_rect = QRectF(self.rect())
+        border_rect = full_rect.adjusted(0.5, 0.5, -0.5, -0.5)
+        if not self.isMaximized():
+            path = QPainterPath()
+            path.addRoundedRect(full_rect, self._theme.radii["window"], self._theme.radii["window"])
+            painter.setClipPath(path)
+        _draw_cover_pixmap(painter, self.rect(), self._assets.background)
+        if not self.isMaximized():
+            painter.setClipping(False)
+            border_color = QColor(str(self._theme.glass["border_color"]))
+            border_color.setAlphaF(border_color.alphaF() * float(self._theme.glass.get("border_opacity", 0.45)))
+            pen = QPen(border_color)
+            pen.setWidthF(float(self._theme.border_widths.get("panel", 1)))
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(border_rect, self._theme.radii["window"], self._theme.radii["window"])
+
+    def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        if not self.isMaximized():
+            self._update_cursor_for_position(event.position().toPoint())
+        super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton and not self.isMaximized():
+            edges = self._hit_test_edges(event.position().toPoint())
+            if edges != Qt.Edge(0) and self.windowHandle() is not None:
+                self._active_resize_edges = edges
+                self.windowHandle().startSystemResize(edges)
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def leaveEvent(self, event) -> None:  # type: ignore[override]
+        if not self.isMaximized():
+            self.unsetCursor()
+        super().leaveEvent(event)
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        self._source_refresh_timer.stop()
+        self._settings_save_timer.stop()
+        self._save_operator_state()
+        self._background_jobs.shutdown()
+        geometry = self.normalGeometry() if self.isMaximized() else self.geometry()
+        save_ui_shell_state(
+            UiShellState(
+                x=geometry.x(),
+                y=geometry.y(),
+                width=geometry.width(),
+                height=geometry.height(),
+                is_maximized=self.isMaximized(),
+                theme_name=self._theme.name,
+            ),
+            self._state_path,
+        )
+        super().closeEvent(event)
+
+    def _hit_test_edges(self, position: QPoint):
+        margin = self.EDGE_RESIZE_MARGIN
+        rect = self.rect()
+        edges = Qt.Edge(0)
+        if position.x() <= margin:
+            edges |= Qt.Edge.LeftEdge
+        elif position.x() >= rect.width() - margin:
+            edges |= Qt.Edge.RightEdge
+        if position.y() <= margin:
+            edges |= Qt.Edge.TopEdge
+        elif position.y() >= rect.height() - margin:
+            edges |= Qt.Edge.BottomEdge
+        return edges
+
+    def _update_cursor_for_position(self, position: QPoint) -> None:
+        edges = self._hit_test_edges(position)
+        if edges in {Qt.Edge.LeftEdge, Qt.Edge.RightEdge}:
+            self.setCursor(QCursor(Qt.CursorShape.SizeHorCursor))
+        elif edges in {Qt.Edge.TopEdge, Qt.Edge.BottomEdge}:
+            self.setCursor(QCursor(Qt.CursorShape.SizeVerCursor))
+        elif edges in {Qt.Edge.LeftEdge | Qt.Edge.TopEdge, Qt.Edge.RightEdge | Qt.Edge.BottomEdge}:
+            self.setCursor(QCursor(Qt.CursorShape.SizeFDiagCursor))
+        elif edges in {Qt.Edge.RightEdge | Qt.Edge.TopEdge, Qt.Edge.LeftEdge | Qt.Edge.BottomEdge}:
+            self.setCursor(QCursor(Qt.CursorShape.SizeBDiagCursor))
+        else:
+            self.unsetCursor()
+
+    def _update_window_shape(self) -> None:
+        maximized = self.isMaximized()
+        self.title_bar.setProperty("maximized", maximized)
+        self._apply_title_bar_style(maximized)
+        self.title_bar.style().unpolish(self.title_bar)
+        self.title_bar.style().polish(self.title_bar)
+        self.update()
+
+    def _update_panel_metrics(self) -> None:
+        horizontal_padding = int(self._theme.spacing["outer_margin"]) * 2
+        available_width = max(0, self.width() - horizontal_padding)
+        minimum_width = int(self._theme.layout.get("panel_min_width", 860))
+        preferred_width = int(self._theme.layout.get("panel_preferred_width", 1000))
+        maximum_width = int(self._theme.layout.get("panel_max_width", 1180))
+        target_width = min(preferred_width, maximum_width, available_width)
+        if available_width >= minimum_width:
+            target_width = max(minimum_width, target_width)
+        else:
+            target_width = available_width
+        if target_width > 0:
+            self.panel.setFixedWidth(target_width)
+
+    def _apply_title_bar_style(self, maximized: bool) -> None:
+        radius = 0 if maximized else self._theme.radii["window"]
+        self.title_bar.setStyleSheet(
+            "\n".join(
+                (
+                    "QFrame#TitleBar {",
+                    f"  background: {self._theme.chrome['titlebar_fill']};",
+                    f"  border-top-left-radius: {radius}px;",
+                    f"  border-top-right-radius: {radius}px;",
+                    "  border-bottom-left-radius: 0px;",
+                    "  border-bottom-right-radius: 0px;",
+                    f"  min-height: {self._theme.control_heights['titlebar']}px;",
+                    "}",
+                )
+            )
+        )
+
+    def _apply_native_corner_preference(self) -> None:
+        if os.name != "nt":
+            return
+        window_handle = self.windowHandle()
+        if window_handle is None:
+            return
+        try:
+            from ctypes import WinDLL, byref, c_int, c_void_p, sizeof
+
+            hwnd = int(window_handle.winId())
+            dwmapi = WinDLL("dwmapi", use_last_error=True)
+            preference = c_int(self._DWMWCP_DONOTROUND)
+            result = dwmapi.DwmSetWindowAttribute(
+                c_void_p(hwnd),
+                self._DWMWA_WINDOW_CORNER_PREFERENCE,
+                byref(preference),
+                sizeof(preference),
+            )
+            if result == 0:
+                self._native_corner_preference_applied = True
+        except Exception:
+            return
+
+    def _panel_background_slice(self, panel_geometry: QRect) -> QPixmap | None:
+        if self._assets.panel_blur.isNull():
+            return None
+        clipped = panel_geometry.intersected(self.rect())
+        if clipped.isEmpty() or self.width() <= 0 or self.height() <= 0:
+            return None
+        blur_window_source = self._scaled_source_rect_for_blur(self._current_background_source_rect())
+        scale_x = blur_window_source.width() / max(1, self.width())
+        scale_y = blur_window_source.height() / max(1, self.height())
+        left = blur_window_source.left() + int(round(clipped.left() * scale_x))
+        top = blur_window_source.top() + int(round(clipped.top() * scale_y))
+        width = max(1, int(round(clipped.width() * scale_x)))
+        height = max(1, int(round(clipped.height() * scale_y)))
+        right = min(self._assets.panel_blur.width(), left + width)
+        bottom = min(self._assets.panel_blur.height(), top + height)
+        source = QRect(left, top, max(1, right - left), max(1, bottom - top))
+        return self._assets.panel_blur.copy(source).scaled(
+            panel_geometry.size(),
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+
+    def _current_background_source_rect(self) -> QRect:
+        return QRect(
+            *compute_cover_source_rect(
+                self._assets.background.width(),
+                self._assets.background.height(),
+                self.width(),
+                self.height(),
+            )
+        )
+
+    def _scaled_source_rect_for_blur(self, source_rect: QRect) -> QRect:
+        if self._assets.panel_blur.isNull():
+            return QRect(0, 0, 1, 1)
+        if self._assets.background.isNull():
+            return QRect(
+                0,
+                0,
+                max(1, self._assets.panel_blur.width()),
+                max(1, self._assets.panel_blur.height()),
+            )
+        scale_x = self._assets.panel_blur.width() / max(1, self._assets.background.width())
+        scale_y = self._assets.panel_blur.height() / max(1, self._assets.background.height())
+        left = max(0, int(round(source_rect.left() * scale_x)))
+        top = max(0, int(round(source_rect.top() * scale_y)))
+        width = max(1, int(round(source_rect.width() * scale_x)))
+        height = max(1, int(round(source_rect.height() * scale_y)))
+        right = min(self._assets.panel_blur.width(), left + width)
+        bottom = min(self._assets.panel_blur.height(), top + height)
+        return QRect(left, top, max(1, right - left), max(1, bottom - top))
+
+
+def _draw_cover_pixmap(painter: QPainter, target_rect: QRect, pixmap: QPixmap) -> None:
+    if pixmap.isNull():
+        painter.fillRect(target_rect, QColor("#2C3421"))
+        return
+    source_rect = compute_cover_source_rect(
+        pixmap.width(),
+        pixmap.height(),
+        target_rect.width(),
+        target_rect.height(),
+    )
+    painter.drawPixmap(target_rect, pixmap, QRect(*source_rect))
+

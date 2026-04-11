@@ -1,0 +1,80 @@
+"""Default dependency bundle for the PySide6 beta shell.
+
+Layer: UI facade.
+
+The Qt shell should consume existing application and runtime services through a
+small injected contract instead of importing pipeline internals directly.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class QtUiDependencies:
+    prepare_conversion_plan: object
+    start_conversion_process: object
+    close_process_queue: object
+    drain_process_queue: object
+    convert_request: object
+    discover_base_material_rows: object
+    discover_part_prototype_rows: object
+    inspect_fbx_material_slot_rows: object
+    load_gui_settings: object
+    save_gui_settings: object
+    resolve_input_settings_key: object
+    prepare_wind_inspection_plan: object
+    inspect_wind_groups: object
+    WindGenerationRequest: object
+    generate_wind_json_from_request: object
+    derive_wind_json_output_path: object
+    format_wind_error: object
+    should_retry_wind_error: object
+    sys: object
+
+
+def build_default_dependencies() -> QtUiDependencies:
+    """Build the default PySide6-shell dependency bundle."""
+    import sys
+
+    from ..conversion_process import close_process_queue, drain_process_queue, start_conversion_process
+    from ..conversion_service import prepare_conversion_plan
+    from ..discovery_service import (
+        discover_base_material_rows,
+        discover_part_prototype_rows,
+        inspect_fbx_material_slot_rows,
+    )
+    from ..pipeline import convert_request
+    from ..settings_service import load_gui_settings, resolve_input_settings_key, save_gui_settings
+    from ..wind_service import (
+        WindGenerationRequest,
+        derive_wind_json_output_path,
+        format_wind_error,
+        generate_wind_json_from_request,
+        inspect_wind_groups,
+        prepare_wind_inspection_plan,
+        should_retry_wind_error,
+    )
+
+    return QtUiDependencies(
+        prepare_conversion_plan=prepare_conversion_plan,
+        start_conversion_process=start_conversion_process,
+        close_process_queue=close_process_queue,
+        drain_process_queue=drain_process_queue,
+        convert_request=convert_request,
+        discover_base_material_rows=discover_base_material_rows,
+        discover_part_prototype_rows=discover_part_prototype_rows,
+        inspect_fbx_material_slot_rows=inspect_fbx_material_slot_rows,
+        load_gui_settings=load_gui_settings,
+        save_gui_settings=save_gui_settings,
+        resolve_input_settings_key=resolve_input_settings_key,
+        prepare_wind_inspection_plan=prepare_wind_inspection_plan,
+        inspect_wind_groups=inspect_wind_groups,
+        WindGenerationRequest=WindGenerationRequest,
+        generate_wind_json_from_request=generate_wind_json_from_request,
+        derive_wind_json_output_path=derive_wind_json_output_path,
+        format_wind_error=format_wind_error,
+        should_retry_wind_error=should_retry_wind_error,
+        sys=sys,
+    )

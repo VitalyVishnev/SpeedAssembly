@@ -31,7 +31,13 @@ def build_dynamic_wind_data(
     generator_levels = _resolve_generator_levels(skeleton)
     used_generator_levels = tuple(sorted({generator_levels[joint.name] for joint in skeleton}))
     group_index_by_generator_level = {generator_level: index for index, generator_level in enumerate(used_generator_levels)}
-    trunk_group_indices = set() if is_ground_cover else {0}
+    if is_ground_cover:
+        trunk_group_indices: set[int] = set()
+    elif group_settings:
+        explicit_trunk_groups = {group.group_index for group in group_settings if group.is_trunk_group}
+        trunk_group_indices = explicit_trunk_groups or {0}
+    else:
+        trunk_group_indices = {0}
 
     joint_assignments = tuple(
         DynamicWindJointAssignment(

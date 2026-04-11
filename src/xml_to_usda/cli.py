@@ -4,6 +4,7 @@ import argparse
 import multiprocessing
 import sys
 
+from .fbx_worker_subprocess import FBX_WORKER_COMMAND, run_fbx_worker_request_file
 from .models import CleanupPolicy, CpuProfile, MaterialPolicy
 from .pipeline import convert_file, generate_wind_json, inspect_source
 from .prototype_sources import load_prototype_source_configs_from_json
@@ -51,6 +52,8 @@ def build_parser() -> argparse.ArgumentParser:
     wind_parser.add_argument("output", help="Path to the output JSON file.")
 
     subparsers.add_parser("gui", help="Launch the desktop GUI.")
+    fbx_worker_parser = subparsers.add_parser(FBX_WORKER_COMMAND, help=argparse.SUPPRESS)
+    fbx_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
     return parser
 
 
@@ -58,6 +61,8 @@ def main(argv: list[str] | None = None) -> int:
     multiprocessing.freeze_support()
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == FBX_WORKER_COMMAND:
+        return run_fbx_worker_request_file(args.request)
     runtime_paths = resolve_runtime_paths()
     _report_runtime_cleanup_summary(sweep_stale_job_workspaces(runtime_paths))
 
