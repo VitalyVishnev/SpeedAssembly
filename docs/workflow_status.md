@@ -44,6 +44,7 @@ The project has also passed automated `Phase 1` regression coverage for:
 - prototype-derived one-bone part skeleton naming
 - separate Dynamic Wind JSON generation from the normalized skeleton
 - streamed USDA writing for explicit FBX prototype payloads without returning a full in-memory USDA text blob
+- `skeletal_parts` split export coverage for one-USDA-per-prototype naming without assembly-root or base-tree fields
 
 Current Python runtime contract:
 

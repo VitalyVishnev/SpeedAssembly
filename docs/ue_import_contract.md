@@ -21,9 +21,26 @@ It consists of:
 
 Static assemblies exist in UE, but this project targets the skeletal tree path only.
 
+## Export modes
+
+The converter now has two skeletal authoring modes:
+
+- `skeletal_assembly`
+  - the validated UE import contract
+  - authors the full assembly root, base skeletal tree, main skeleton, and `PointInstancer`
+- `skeletal_parts`
+  - a reusable part-library export mode
+  - writes one USDA file per prototype
+  - each generated file uses the prototype name as both filename stem and root prim name
+  - omits the assembly root API, base skeletal tree, main skeleton, and real `PointInstancer`
+  - is valid only when prototype payloads are present
+
+Missing base mesh and missing main skeleton are hard failures only in `skeletal_assembly` mode.
+They are expected omissions in `skeletal_parts` mode.
+
 ## Current structural contract
 
-The current validated structure is:
+The current validated structure is `skeletal_assembly` mode:
 
 - root `Xform` with `NaniteAssemblyRootAPI`
 - root `unreal:naniteAssembly:meshType = "skeletalMesh"`
@@ -60,6 +77,14 @@ For exported USDA files:
 - the base `SkelAnimation` remains `animation`
 - the assembly root prim stays contract-driven, usually `Tree`, and is not derived from the output filename
 
+For `skeletal_parts` exports:
+
+- the chosen output path is treated as a container path
+- the converter writes a sibling directory using that path stem
+- each prototype writes as `<Prototype>.usda` inside that directory
+- each part file uses `defaultPrim = "<Prototype>"`
+- each part file root prim is also `<Prototype>`
+
 This is the naming rule used by the converter when an explicit output path is provided.
 It is not derived from the first bone name, and it is not derived from the XML source filename.
 
@@ -85,6 +110,18 @@ The converter must preserve the UE-facing contract that importer behavior depend
 - required skeletal arrays with matching counts where applicable
 - stable root-joint naming across base animation, base mesh binding arrays, and `Main Skeleton`
 
+For `skeletal_parts` mode, the contract is narrower:
+
+ - each file root prim is the prototype name
+ - no `NaniteAssemblyRootAPI`
+ - no assembly `unreal:naniteAssembly:meshType`
+ - no assembly relationship to a descendant `Main Skeleton`
+ - no base `SkelRoot`
+ - no real `PointInstancer`
+ - no instance arrays, bindings, or assembly root data
+ - one prototype is authored per file as a standalone skeletal subtree
+ - each part file still contains its own local `Part Skeleton`
+
 At minimum, current validated notes require:
 
 - `NaniteAssemblyRootAPI` on the root `Xform`
@@ -97,6 +134,8 @@ At minimum, current validated notes require:
 - a descendant root-to-skeleton relationship for the assembly
 - valid `Skeleton` data for the `Main Skeleton`
 - valid skeletal binding data for the Base Skeletal Tree
+
+These required fields apply to `skeletal_assembly` mode. The `skeletal_parts` mode intentionally omits the assembly-only fields.
 
 ## External reuse debugging rule
 

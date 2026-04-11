@@ -35,6 +35,12 @@ def render_output_file_name(input_path: Path, naming_template: str | None) -> st
     return f"{stem}.usda"
 
 
+def resolve_skeletal_parts_output_directory(output_path: Path) -> Path:
+    if output_path.suffix:
+        return output_path.with_suffix("")
+    return output_path
+
+
 def ensure_output_path_allowed(output_path: Path) -> None:
     if not VAULT_ROOT.exists():
         return

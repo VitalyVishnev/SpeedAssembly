@@ -4,6 +4,7 @@ from .asset_paths import is_valid_unreal_asset_path
 from .geometry_buffers import payload_face_count, payload_has_face_topology, payload_point_count, payload_sections
 from .models import (
     CanonicalTreeModel,
+    ConversionMode,
     PrototypeResolutionMode,
     PrototypeStrategy,
     ValidationIssue,
@@ -24,9 +25,23 @@ ERROR_MARKERS = {
 WARNING_MARKER_CODES = {"material_conflict", "material_policy_warning", "skeleton_object_mismatch"}
 
 
-def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
+def validate_model(
+    model: CanonicalTreeModel,
+    conversion_mode: ConversionMode | str | None = None,
+) -> tuple[ValidationIssue, ...]:
     issues: list[ValidationIssue] = []
+    mode = _resolve_conversion_mode(model, conversion_mode)
     material_ids = {material.source_id for material in model.materials}
+
+    if mode not in {ConversionMode.SKELETAL_ASSEMBLY, ConversionMode.SKELETAL_PARTS}:
+        issues.append(
+            ValidationIssue(
+                severity="error",
+                code="unsupported_conversion_mode",
+                message=f"Unsupported conversion mode: {mode.value}.",
+            )
+        )
+        return tuple(issues)
 
     if not model.source_objects:
         issues.append(
@@ -36,6 +51,60 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                 message="Object hierarchy data is required for skeletal assembly normalization.",
             )
         )
+
+    if mode == ConversionMode.SKELETAL_PARTS:
+        issues.extend(_validate_skeletal_parts_model(model, material_ids))
+    else:
+        issues.extend(_validate_skeletal_assembly_model(model, material_ids))
+
+    if model.branch_segments and model.skeleton and not any(segment.source_joint for segment in model.branch_segments):
+        issues.append(
+            ValidationIssue(
+                severity="warning",
+                code="skeleton_object_mismatch",
+                message="Branch segments were extracted, but none could be associated with a skeleton joint directly.",
+            )
+        )
+
+    for section in model.metadata.unknown_sections:
+        issues.append(
+            ValidationIssue(
+                severity="warning",
+                code="unknown_xml_section",
+                message=f"Unknown XML section detected during inspection: {section}",
+            )
+        )
+
+    for warning in model.metadata.warnings:
+        matched_code = None
+        for marker, code in ERROR_MARKERS.items():
+            if warning.startswith(marker):
+                matched_code = code
+                issues.append(
+                    ValidationIssue(
+                        severity="warning" if code in WARNING_MARKER_CODES else "error",
+                        code=code,
+                        message=warning.split(": ", 1)[1] if ": " in warning else warning,
+                    )
+                )
+                break
+        if matched_code is None:
+            issues.append(
+                ValidationIssue(
+                    severity="warning",
+                    code="metadata_warning",
+                    message=warning,
+                )
+            )
+
+    return tuple(issues)
+
+
+def _validate_skeletal_assembly_model(
+    model: CanonicalTreeModel,
+    material_ids: set[int],
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
 
     if model.base_mesh is None:
         issues.append(
@@ -65,16 +134,6 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
         issues.extend(_validate_mesh_materials(model.base_mesh, material_ids, "Base Skeletal Tree"))
 
     if model.materials and model.base_mesh is not None:
-        for prototype in model.prototypes:
-            if prototype.mesh is not None or prototype.geometry_payload is not None:
-                issues.extend(
-                    _validate_payload_materials(
-                        prototype.mesh,
-                        prototype.geometry_payload,
-                        material_ids,
-                        f"Prototype {prototype.identity.prim_name}",
-                    )
-                )
         if len(model.base_mesh.skel_joint_indices) != len(model.base_mesh.points):
             issues.append(
                 ValidationIssue(
@@ -155,6 +214,7 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                         message=f"Assembly Part instance {part.name} references missing prototype {part.prototype_key}.",
                     )
                 )
+                continue
             invalid_tokens = [token for token in part.binding.joint_tokens if token and token not in skeleton_joint_tokens]
             if invalid_tokens:
                 issues.append(
@@ -212,7 +272,10 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                     )
                 )
                 continue
-            if payload_point_count(prototype.mesh, prototype.geometry_payload) <= 0 or payload_face_count(prototype.mesh, prototype.geometry_payload) <= 0:
+            if (
+                payload_point_count(prototype.mesh, prototype.geometry_payload) <= 0
+                or payload_face_count(prototype.mesh, prototype.geometry_payload) <= 0
+            ):
                 issues.append(
                     ValidationIssue(
                         severity="error",
@@ -242,47 +305,118 @@ def validate_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
                 )
             )
 
-    if model.branch_segments and model.skeleton and not any(segment.source_joint for segment in model.branch_segments):
+    return issues
+
+
+def _validate_skeletal_parts_model(
+    model: CanonicalTreeModel,
+    material_ids: set[int],
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+
+    if not model.prototypes:
         issues.append(
             ValidationIssue(
-                severity="warning",
-                code="skeleton_object_mismatch",
-                message="Branch segments were extracted, but none could be associated with a skeleton joint directly.",
+                severity="error",
+                code="missing_prototypes",
+                message="Skeletal parts export requires at least one valid prototype payload.",
             )
         )
+        return issues
 
-    for section in model.metadata.unknown_sections:
-        issues.append(
-            ValidationIssue(
-                severity="warning",
-                code="unknown_xml_section",
-                message=f"Unknown XML section detected during inspection: {section}",
-            )
-        )
+    issues.extend(_validate_prototypes(model.prototypes, material_ids))
+    return issues
 
-    for warning in model.metadata.warnings:
-        matched_code = None
-        for marker, code in ERROR_MARKERS.items():
-            if warning.startswith(marker):
-                matched_code = code
+
+def _validate_prototypes(
+    prototypes,
+    material_ids: set[int],
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    for prototype in prototypes:
+        if prototype.resolution_mode == PrototypeResolutionMode.EXTERNAL_ASSET:
+            if not prototype.mesh_asset_path:
                 issues.append(
                     ValidationIssue(
-                        severity="warning" if code in WARNING_MARKER_CODES else "error",
-                        code=code,
-                        message=warning.split(": ", 1)[1] if ": " in warning else warning,
+                        severity="error",
+                        code="missing_prototype_asset_path",
+                        message=f"Prototype {prototype.identity.prim_name} is marked as external but has no Unreal asset path.",
                     )
                 )
-                break
-        if matched_code is None:
+                continue
+            if not is_valid_unreal_asset_path(prototype.mesh_asset_path):
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        code="invalid_prototype_asset_path",
+                        message=(
+                            f"Prototype {prototype.identity.prim_name} uses invalid Unreal asset path "
+                            f"{prototype.mesh_asset_path!r}; expected a /Game/... asset reference."
+                        ),
+                    )
+                )
+            continue
+
+        if prototype.mesh is None and prototype.geometry_payload is None:
             issues.append(
                 ValidationIssue(
-                    severity="warning",
-                    code="metadata_warning",
-                    message=warning,
+                    severity="error",
+                    code="missing_prototype_mesh",
+                    message=f"Prototype {prototype.identity.prim_name} has no resolved mesh payload.",
+                )
+            )
+            continue
+
+        if not payload_has_face_topology(prototype.mesh, prototype.geometry_payload):
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="invalid_prototype_mesh",
+                    message=(
+                        f"Prototype {prototype.identity.prim_name} must contain point and face topology payloads "
+                        "before skeletal Assembly Part authoring."
+                    ),
+                )
+            )
+            continue
+        if payload_point_count(prototype.mesh, prototype.geometry_payload) <= 0 or payload_face_count(
+            prototype.mesh, prototype.geometry_payload
+        ) <= 0:
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="invalid_prototype_mesh",
+                    message=(
+                        f"Prototype {prototype.identity.prim_name} must contain point and face topology payloads "
+                        "before skeletal Assembly Part authoring."
+                    ),
                 )
             )
 
-    return tuple(issues)
+        issues.extend(
+            _validate_payload_materials(
+                prototype.mesh,
+                prototype.geometry_payload,
+                material_ids,
+                f"Prototype {prototype.identity.prim_name}",
+            )
+        )
+
+    return issues
+
+
+def _resolve_conversion_mode(
+    model: CanonicalTreeModel,
+    conversion_mode: ConversionMode | str | None,
+) -> ConversionMode:
+    if conversion_mode is None:
+        raw_value = model.metadata.conversion_mode
+    else:
+        raw_value = conversion_mode
+    try:
+        return ConversionMode.parse(raw_value)
+    except ValueError:
+        return ConversionMode.SKELETAL_ASSEMBLY
 
 
 def _validate_mesh_materials(mesh, material_ids: set[int], label: str) -> list[ValidationIssue]:

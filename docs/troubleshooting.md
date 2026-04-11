@@ -209,6 +209,7 @@ Symptom:
 - UE imports the `Assembly Parts`
 - the `Base Skeletal Tree` is missing or appears to have been skipped
 - this often shows up first on fern-like or other multi-root plants
+- this is a `skeletal_assembly`-mode problem; in `skeletal_parts` mode the base mesh is intentionally omitted
 
 What to check first:
 

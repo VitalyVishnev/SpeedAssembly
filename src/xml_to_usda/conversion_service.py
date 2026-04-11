@@ -16,6 +16,7 @@ from .asset_paths import is_valid_unreal_asset_path, normalize_unreal_asset_path
 from .models import (
     BaseMaterialOverride,
     CleanupPolicy,
+    ConversionMode,
     ConversionRequest,
     CpuProfile,
     FbxMaterialMode,
@@ -47,6 +48,7 @@ def prepare_conversion_plan(
     prototype_source_configs: tuple[PrototypeSourceConfig, ...],
     use_existing_part_meshes: bool,
     part_mesh_asset_paths: tuple[tuple[str, str], ...],
+    conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY,
     async_threshold_bytes: int,
 ) -> ConversionLaunchPlan:
     """Build one stable conversion plan from operator-facing semantic inputs."""
@@ -66,6 +68,7 @@ def prepare_conversion_plan(
         effective_leaves_material_path = None
     else:
         effective_single_material_path = None
+    resolved_conversion_mode = ConversionMode.parse(conversion_mode)
 
     use_explicit_material_contract = _should_use_explicit_material_contract(
         base_material_overrides,
@@ -99,6 +102,7 @@ def prepare_conversion_plan(
         prototype_source_configs=prototype_source_configs,
         use_existing_part_meshes=use_existing_part_meshes,
         part_mesh_asset_paths=part_mesh_asset_paths,
+        conversion_mode=resolved_conversion_mode,
     )
     return ConversionLaunchPlan(
         request=request,

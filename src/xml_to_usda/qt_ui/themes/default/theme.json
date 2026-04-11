@@ -44,7 +44,7 @@
   "control_heights": {
     "titlebar": 26,
     "input": 34,
-    "button": 34
+    "button": 40
   },
   "border_widths": {
     "panel": 1,
@@ -58,7 +58,7 @@
     "panel_min_height": 680,
     "panel_vertical_offset": 0,
     "left_column_width": 280,
-    "action_column_width": 196,
+    "action_column_width": 240,
     "tabs_min_height": 440,
     "tab_min_width": 120,
     "file_row_gap": 8
@@ -85,7 +85,10 @@
     "title_pill_height": 24,
     "adjust_ui_button_width": 104,
     "adjust_ui_button_height": 24,
-    "file_button_width": 132
+    "file_button_width": 132,
+    "file_button_height": 34,
+    "wind_refresh_button_width": 172,
+    "wind_refresh_button_height": 28
   },
   "effects": {
     "panel_shadow_blur": 22,

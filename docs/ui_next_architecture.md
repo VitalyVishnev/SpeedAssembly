@@ -50,6 +50,40 @@ operator-state adapters will be added incrementally after visual review.
 The two shells must coexist until the PySide6 shell reaches working parity and
 passes the same real conversion validation.
 
+## Current Shell Interaction Contract
+
+The current `Next` shell uses the following operator-facing interaction rules:
+
+- the two file pickers are labeled `Input XML` and `Output USDA`
+- the output field is still derived automatically from the selected XML path by
+  replacing the suffix with `.usda`
+- file-pick buttons intentionally use a smaller size tier than the main action
+  buttons so the operator can scan file inputs without the action column
+  dominating the shell
+- the main execute control is a split action:
+  - left side runs `Convert to USDA`
+  - while conversion is active, the same control turns into `Cancel`
+  - right-side gear opens the future conversion-mode menu
+- the conversion-mode menu already exposes:
+  - `Skeletal Assembly`
+  - `Skeletal Parts`
+  - `Static Assembly`
+  - `Static Parts`
+- only `Skeletal Assembly` is currently enabled; the other entries are visible
+  placeholders so the shell structure stays stable when those backends are
+  added later
+- `Refresh Wind Groups` lives inside the `Wind` tab next to the global wind
+  controls instead of the top-right action column
+- `Refresh Wind Groups` uses a quieter secondary button style so it reads as a
+  tab-local maintenance action instead of a primary conversion command
+- the shell performs a post-show layout activation pass so size-sensitive
+  controls settle to their intended dimensions on first launch instead of only
+  after an `Adjust UI` round-trip
+
+This interaction contract is intentional and should be treated as the default
+layout baseline for future PySide6 iterations unless a later UI review replaces
+it explicitly.
+
 ## Adjust UI Mode
 
 `Adjust UI` is a development-only editor for the PySide6 shell.
@@ -79,3 +113,9 @@ Active implementation rule:
 
 If a future visual requirement needs a heavier rendering path, treat that as an
 explicit architecture decision and review it before implementation.
+
+Additional rule for future UI work:
+
+- if a behavior can be implemented in either a visually richer but heavier way
+  or a simpler but noticeably more responsive way, the simpler responsive path
+  wins by default

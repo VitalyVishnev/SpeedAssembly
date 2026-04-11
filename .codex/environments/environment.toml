@@ -14,3 +14,8 @@ command = ".\\scripts\\build_gui_exe.cmd -Package"
 name = "quick build"
 icon = "run"
 command = ".\\scripts\\build_gui_exe.cmd"
+
+[[actions]]
+name = "BeautyBuild"
+icon = "tool"
+command = "& '.\\scripts\\build_qt_gui_exe.cmd' -Package"

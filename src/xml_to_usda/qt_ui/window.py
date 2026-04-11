@@ -16,6 +16,7 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QLayout,
     QFileDialog,
     QFrame,
     QGraphicsDropShadowEffect,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QTabWidget,
     QToolButton,
     QVBoxLayout,
@@ -33,7 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..gui_formatters import format_wind_group_summary, format_wind_json_result
-from ..models import CleanupPolicy
+from ..models import CleanupPolicy, ConversionMode
 from ..runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
 from .adjust_ui import AdjustUiDialog
 from .background_jobs import QtBackgroundJobsController
@@ -79,8 +81,12 @@ class WindowAssets:
 
 
 CONVERSION_MODES: tuple[tuple[str, str, bool], ...] = (
+    # The mode switch is intentionally ahead of backend support so the future
+    # shell layout does not need another structural change when the additional
+    # assembly/parts modes land. Unsupported entries stay visible but disabled
+    # until their application-layer contracts exist.
     ("skeletal_assembly", "Skeletal Assembly", True),
-    ("skeletal_parts", "Skeletal Parts", False),
+    ("skeletal_parts", "Skeletal Parts", True),
     ("static_assembly", "Static Assembly", False),
     ("static_parts", "Static Parts", False),
 )
@@ -130,6 +136,9 @@ class PathLineEdit(QLineEdit):
 
     @staticmethod
     def _compact_path(text: str) -> str:
+        # The unfocused preview intentionally shows only the tail of the path so
+        # operators can scan the last folder + file name at a glance while the
+        # focused state still exposes the full path for copy/edit workflows.
         normalized = text.strip().replace("/", "\\")
         if not normalized:
             return ""
@@ -377,7 +386,6 @@ class MainWindow(QWidget):
         self._conversion_running = False
         self._wind_refresh_running = False
         self._wind_json_running = False
-        self._conversion_mode = "skeletal_assembly"
         self._log_text = ""
         self._log_dialog: TextDialog | None = None
         self._help_dialog: TextDialog | None = None
@@ -387,6 +395,7 @@ class MainWindow(QWidget):
             self._deps,
             settings_path=self._operator_settings_path,
         )
+        self._conversion_mode = self._operator_state.conversion_mode.value
         self._runtime_paths = resolve_runtime_paths(
             settings_dir=SETTINGS_DIR,
             settings_path=self._operator_settings_path,
@@ -515,6 +524,9 @@ class MainWindow(QWidget):
         self.output_input.setPlaceholderText("Output USDA path")
         self.output_input.pathChanged.connect(self._handle_output_text_changed)
 
+        # Convert/Cancel intentionally lives on one shared button so the action
+        # column stays compact. The gear segment is a separate future-facing mode
+        # selector, not a second execute button.
         self.convert_button = QPushButton("Convert to USDA", self)
         self.convert_button.setObjectName("SplitActionMainButton")
         self.convert_button.clicked.connect(self._handle_convert_button_clicked)
@@ -542,6 +554,7 @@ class MainWindow(QWidget):
 
         right_column = QVBoxLayout()
         self._action_column_layout = right_column
+        right_column.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
         right_column.setSpacing(max(6, spacing - 4))
         right_column.addWidget(self.convert_action_frame)
         right_column.addWidget(self.generate_button)
@@ -630,10 +643,13 @@ class MainWindow(QWidget):
 
     def _set_conversion_mode(self, mode_key: str) -> None:
         self._conversion_mode = mode_key
+        self._operator_state = replace(self._operator_state, conversion_mode=ConversionMode(mode_key))
         for key, action in self._conversion_mode_actions.items():
             action.setChecked(key == mode_key)
         selected_label = next((label for key, label, _supported in CONVERSION_MODES if key == mode_key), mode_key)
         self._append_log(f"Conversion mode selected: {selected_label}")
+        self._schedule_operator_state_save()
+        self._refresh_state_cards()
 
     def _build_info_card(self, title: str, content_label: QLabel) -> QWidget:
         card = QFrame(self)
@@ -691,32 +707,57 @@ class MainWindow(QWidget):
         self._action_column_layout.setSpacing(max(6, int(self._theme.spacing["control_gap"]) - 4))
 
         file_button_width = int(self._theme.chrome.get("file_button_width", 74))
-        self.source_button.setFixedWidth(file_button_width)
-        self.output_button.setFixedWidth(file_button_width)
+        file_button_height = int(self._theme.chrome.get("file_button_height", self._theme.control_heights["input"]))
+        self.source_button.setFixedSize(file_button_width, file_button_height)
+        self.output_button.setFixedSize(file_button_width, file_button_height)
 
         action_width = int(self._theme.layout.get("action_column_width", 148))
+        self.convert_action_frame.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.convert_action_frame.setFixedWidth(action_width)
         button_height = int(self._theme.control_heights["button"])
-        gear_width = max(34, min(52, button_height + 6))
+        gear_width = max(34, min(52, button_height + 2))
         self.convert_action_frame.setFixedHeight(button_height)
-        self.convert_button.setFixedHeight(button_height)
-        self.convert_button.setMinimumWidth(max(72, action_width - gear_width - 1))
-        self.convert_mode_button.setFixedWidth(gear_width)
-        self.convert_mode_button.setFixedHeight(button_height)
+        self.convert_button.setFixedSize(max(72, action_width - gear_width - 1), button_height)
+        self.convert_mode_button.setFixedSize(gear_width, button_height)
         for button in self._action_buttons:
-            button.setFixedWidth(action_width)
-            button.setFixedHeight(button_height)
+            button.setFixedSize(action_width, button_height)
+
+        refresh_width = int(self._theme.chrome.get("wind_refresh_button_width", 164))
+        refresh_height = int(self._theme.chrome.get("wind_refresh_button_height", 28))
+        self.wind_panel.refresh_button.setFixedSize(refresh_width, refresh_height)
 
         left_column_width = int(self._theme.layout.get("left_column_width", 280))
         self.materials_card.setFixedWidth(left_column_width)
         self.runtime_card.setFixedWidth(left_column_width)
         self.tabs.setMinimumHeight(int(self._theme.layout.get("tabs_min_height", 440)))
         self.panel.setMinimumHeight(int(self._theme.layout.get("panel_min_height", 680)))
+        for layout in (
+            self._outer_layout,
+            self._body_layout,
+            self._panel_layout,
+            self._top_rows_layout,
+            self._content_layout,
+            self._action_column_layout,
+        ):
+            layout.invalidate()
+            layout.activate()
 
     def _apply_saved_state(self) -> None:
         self.setGeometry(self._restore_geometry)
         if self._state.is_maximized:
             self.showMaximized()
+
+    def _refresh_layout_after_show(self) -> None:
+        # The first frameless layout pass on Windows can be conservative while
+        # the window is still settling. A second activation after show keeps the
+        # split action column and stacked buttons at their intended sizes.
+        self._apply_theme_to_layout()
+        self._update_panel_metrics()
+        self.panel.updateGeometry()
+        self.panel.update()
+        self.updateGeometry()
+        self.update()
+        self._update_action_state()
 
     def _apply_operator_state_to_widgets(self) -> None:
         self._persistence_suspended = True
@@ -753,6 +794,7 @@ class MainWindow(QWidget):
         self.runtime_card_label.setText(
             f"CPU profile: {self._operator_state.cpu_profile.value}\n"
             f"Preserve temp files: {self._operator_state.preserve_temp_files}\n"
+            f"Conversion mode: {self._conversion_mode}\n"
             f"Ground cover: {self._operator_state.is_ground_cover}\n"
             f"Gust attenuation: {self._operator_state.gust_attenuation:.2f}\n"
             f"Prototype rows: {prototype_count}\n"
@@ -771,6 +813,8 @@ class MainWindow(QWidget):
         )
 
     def _handle_convert_button_clicked(self) -> None:
+        # One operator-facing control handles both states. Clicking during an
+        # active conversion is semantically the same as pressing Cancel.
         if self._conversion_running:
             self.cancel_conversion()
             return
@@ -1069,6 +1113,7 @@ class MainWindow(QWidget):
                 prototype_source_configs=self.materials_panel.collect_prototype_source_configs(),
                 use_existing_part_meshes=False,
                 part_mesh_asset_paths=(),
+                conversion_mode=self._operator_state.conversion_mode,
                 async_threshold_bytes=self.ASYNC_CONVERSION_THRESHOLD_BYTES,
             )
         except ValueError as exc:
@@ -1178,6 +1223,7 @@ class MainWindow(QWidget):
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
         self._apply_native_corner_preference()
+        QTimer.singleShot(0, self._refresh_layout_after_show)
 
     def moveEvent(self, event) -> None:  # type: ignore[override]
         super().moveEvent(event)

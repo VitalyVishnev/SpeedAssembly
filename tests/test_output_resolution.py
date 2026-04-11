@@ -5,7 +5,13 @@ from pathlib import Path
 import pytest
 
 from xml_to_usda.models import ConversionRequest
-from xml_to_usda.output_resolution import REPO_ROOT, ensure_output_path_allowed, render_output_file_name, resolve_output_path
+from xml_to_usda.output_resolution import (
+    REPO_ROOT,
+    ensure_output_path_allowed,
+    render_output_file_name,
+    resolve_output_path,
+    resolve_skeletal_parts_output_directory,
+)
 
 
 def test_output_resolution_defaults_to_single_file_usda() -> None:
@@ -34,3 +40,10 @@ def test_output_resolution_rejects_writes_inside_vault() -> None:
 
     with pytest.raises(ValueError, match="immutable vault"):
         ensure_output_path_allowed(illegal_output)
+
+
+def test_skeletal_parts_output_directory_uses_output_file_stem() -> None:
+    assert resolve_skeletal_parts_output_directory(Path("D:/trees/SimpleTree_01_Branches.usda")) == Path(
+        "D:/trees/SimpleTree_01_Branches"
+    )
+    assert resolve_skeletal_parts_output_directory(Path("D:/trees/ExistingFolder")) == Path("D:/trees/ExistingFolder")

@@ -20,6 +20,7 @@ from xml_to_usda.gui_materials_panel import MaterialsPanelController
 from xml_to_usda.gui_part_sources_panel import PartSourcesPanelController
 from xml_to_usda.gui_wind_panel import WindPanelController
 from xml_to_usda.models import CpuProfile, DynamicWindSimulationGroup, FbxMaterialMode, PrototypeSourceMode
+from xml_to_usda.qt_ui.theme import build_stylesheet, load_theme
 from xml_to_usda.settings_service import BaseMaterialSettingRecord, WindGroupSettingRecord
 
 
@@ -40,6 +41,15 @@ def test_gui_public_facade_exports_compat_symbols() -> None:
     assert format_wind_group_summary is gui_module.format_wind_group_summary
     assert format_wind_json_result is gui_module.format_wind_json_result
     assert main is gui_module.main
+
+
+def test_qt_theme_styles_conversion_mode_menu_light() -> None:
+    stylesheet = build_stylesheet(load_theme())
+
+    assert "QMenu {" in stylesheet
+    assert "QMenu::item" in stylesheet
+    assert "background: #DCE5E8" in stylesheet
+    assert "color: #1A1A15" in stylesheet
 
 
 def test_materials_panel_round_trip_collects_and_serializes() -> None:

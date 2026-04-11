@@ -9,6 +9,7 @@ from xml_to_usda.conversion_service import prepare_conversion_plan
 from xml_to_usda.models import (
     BaseMaterialOverride,
     CleanupPolicy,
+    ConversionMode,
     CpuProfile,
     FbxMaterialMode,
     FbxMaterialSlotOverride,
@@ -81,6 +82,7 @@ def test_prepare_conversion_plan_builds_default_material_request() -> None:
     assert plan.request.leaves_material_path == "/Game/TestMaterials/M_Leaves_Test"
     assert plan.request.single_material_path is None
     assert plan.request.use_explicit_material_contract is False
+    assert plan.request.conversion_mode == ConversionMode.SKELETAL_ASSEMBLY
 
 
 def test_prepare_conversion_plan_builds_single_material_request() -> None:
@@ -105,6 +107,7 @@ def test_prepare_conversion_plan_builds_single_material_request() -> None:
     assert plan.request.leaves_material_path is None
     assert plan.request.single_material_path == "/Game/Assembly/Fern/M_Fern.M_Fern"
     assert plan.request.use_explicit_material_contract is False
+    assert plan.request.conversion_mode == ConversionMode.SKELETAL_ASSEMBLY
 
 
 def test_prepare_conversion_plan_marks_explicit_base_material_contract() -> None:
@@ -164,6 +167,27 @@ def test_prepare_conversion_plan_preserves_unreal_asset_part_override_request() 
     assert plan.request.use_existing_part_meshes is True
     assert plan.request.part_mesh_asset_paths == (("Twig_01", "/Game/TreeParts/SK_Twig01.SK_Twig01"),)
     assert plan.request.prototype_source_configs == (config,)
+
+
+def test_prepare_conversion_plan_keeps_explicit_conversion_mode() -> None:
+    plan = prepare_conversion_plan(
+        input_path=str(SIMPLE_TREE_01),
+        output_path="out.usda",
+        cpu_profile=CpuProfile.BALANCED,
+        cleanup_policy=CleanupPolicy.EPHEMERAL,
+        material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
+        bark_material_path=None,
+        leaves_material_path=None,
+        single_material_path=None,
+        base_material_overrides=(),
+        prototype_source_configs=(),
+        use_existing_part_meshes=False,
+        part_mesh_asset_paths=(),
+        conversion_mode=ConversionMode.SKELETAL_PARTS,
+        async_threshold_bytes=1_000_000_000,
+    )
+
+    assert plan.request.conversion_mode == ConversionMode.SKELETAL_PARTS
 
 
 def test_prepare_conversion_plan_forces_async_for_fbx_override(tmp_path: Path) -> None:

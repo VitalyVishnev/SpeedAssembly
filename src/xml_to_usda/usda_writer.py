@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 from .job_control import emit_telemetry
-from .models import ConversionPhase, ExportStats, UsdAssemblyDocument, ValidationIssue
+from .models import ConversionMode, ConversionPhase, ExportStats, UsdAssemblyDocument, ValidationIssue
 from .ue_schema import DEFAULT_UE_SCHEMA_CONTRACT, UeSchemaContract
 from .usda_authoring import (
     author_usda_stream,
@@ -29,6 +29,7 @@ def render_usda(
     diagnostics: tuple[ValidationIssue, ...],
     contract: UeSchemaContract = DEFAULT_UE_SCHEMA_CONTRACT,
     base_mesh_name: str | None = None,
+    conversion_mode: ConversionMode | str | None = None,
 ) -> UsdAssemblyDocument:
     """Render a USDA document fully in memory using the shared authoring engine."""
     context = build_authoring_context(
@@ -36,6 +37,7 @@ def render_usda(
         diagnostics,
         contract=contract,
         base_mesh_name=base_mesh_name,
+        conversion_mode=conversion_mode,
     )
     text = author_usda_text(context)
     return UsdAssemblyDocument(text=text, diagnostics=diagnostics, stats=ExportStats(streamed=False))
@@ -48,6 +50,7 @@ def write_usda_document(
     output_path: Path | None,
     contract: UeSchemaContract = DEFAULT_UE_SCHEMA_CONTRACT,
     base_mesh_name: str | None = None,
+    conversion_mode: ConversionMode | str | None = None,
     telemetry_callback=None,
     cancel_event=None,
 ) -> UsdAssemblyDocument:
@@ -57,6 +60,7 @@ def write_usda_document(
         diagnostics,
         contract=contract,
         base_mesh_name=base_mesh_name,
+        conversion_mode=conversion_mode,
     )
     if output_path is None or not model_requires_streaming_writer(model):
         text = author_usda_text(context)

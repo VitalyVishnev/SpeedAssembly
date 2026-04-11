@@ -24,6 +24,7 @@ class GuiPersistenceController:
         self.app.output_var.set(settings.last_output_path)
         self.app.cpu_profile_var.set(settings.cpu_profile.value)
         self.app.preserve_temp_files_var.set(bool(settings.preserve_temp_files))
+        self.app._persisted_conversion_mode = settings.conversion_mode
         self.app.material_policy_var.set(settings.material_policy.value)
         self.app.bark_material_var.set(settings.bark_material_path)
         self.app.leaves_material_var.set(settings.leaves_material_path)
@@ -76,6 +77,7 @@ class GuiPersistenceController:
                     last_output_path=self.app.output_var.get().strip(),
                     cpu_profile=self.app._current_cpu_profile(),
                     preserve_temp_files=bool(self.app.preserve_temp_files_var.get()),
+                    conversion_mode=self.app._persisted_conversion_mode,
                     material_policy=self.app._current_material_policy(),
                     bark_material_path=self.app.bark_material_var.get().strip(),
                     leaves_material_path=self.app.leaves_material_var.get().strip(),

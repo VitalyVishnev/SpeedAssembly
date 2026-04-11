@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..models import CpuProfile, MaterialPolicy
+from ..models import ConversionMode, CpuProfile, MaterialPolicy
 from ..settings_service import (
     BaseMaterialSettingRecord,
     GuiSettingsSnapshot,
@@ -31,6 +31,7 @@ class OperatorState:
     output_path: str = ""
     cpu_profile: CpuProfile = CpuProfile.BALANCED
     preserve_temp_files: bool = False
+    conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
     material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES
     bark_material_path: str = ""
     leaves_material_path: str = ""
@@ -53,6 +54,7 @@ def load_operator_state(
             output_path="",
             cpu_profile=snapshot.cpu_profile,
             preserve_temp_files=snapshot.preserve_temp_files,
+            conversion_mode=snapshot.conversion_mode,
             material_policy=snapshot.material_policy,
             bark_material_path=snapshot.bark_material_path,
             leaves_material_path=snapshot.leaves_material_path,
@@ -78,6 +80,7 @@ def save_operator_state(
         last_output_path=previous_snapshot.last_output_path,
         cpu_profile=state.cpu_profile,
         preserve_temp_files=bool(state.preserve_temp_files),
+        conversion_mode=state.conversion_mode,
         material_policy=state.material_policy,
         bark_material_path=state.bark_material_path,
         leaves_material_path=state.leaves_material_path,
@@ -170,6 +173,7 @@ def save_nested_input_settings(
         last_output_path=previous_snapshot.last_output_path,
         cpu_profile=state.cpu_profile,
         preserve_temp_files=bool(state.preserve_temp_files),
+        conversion_mode=state.conversion_mode,
         material_policy=state.material_policy,
         bark_material_path=state.bark_material_path,
         leaves_material_path=state.leaves_material_path,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from xml_to_usda.models import CpuProfile, MaterialPolicy
+from xml_to_usda.models import ConversionMode, CpuProfile, MaterialPolicy
 from xml_to_usda.qt_ui.operator_state import OperatorState, load_operator_state, save_operator_state
 from xml_to_usda.settings_service import (
     BaseMaterialSettingRecord,
@@ -23,6 +23,7 @@ def test_qt_operator_state_loads_shared_gui_snapshot(tmp_path) -> None:
             last_output_path="D:/trees/tree.usda",
             cpu_profile=CpuProfile.MAX_SPEED,
             preserve_temp_files=True,
+            conversion_mode=ConversionMode.SKELETAL_PARTS,
             material_policy=MaterialPolicy.SINGLE_MATERIAL,
             single_material_path="/Game/Assembly/SimpleTree/Bark1.Bark1",
             gust_attenuation=0.35,
@@ -37,6 +38,7 @@ def test_qt_operator_state_loads_shared_gui_snapshot(tmp_path) -> None:
     assert operator_state.output_path == ""
     assert operator_state.cpu_profile == CpuProfile.MAX_SPEED
     assert operator_state.preserve_temp_files is True
+    assert operator_state.conversion_mode == ConversionMode.SKELETAL_PARTS
     assert operator_state.material_policy == MaterialPolicy.SINGLE_MATERIAL
     assert operator_state.single_material_path == "/Game/Assembly/SimpleTree/Bark1.Bark1"
     assert operator_state.gust_attenuation == 0.35
@@ -50,6 +52,7 @@ def test_qt_operator_state_save_preserves_nested_records(tmp_path) -> None:
     original_snapshot = GuiSettingsSnapshot(
         last_input_path="old.xml",
         last_output_path="old.usda",
+        conversion_mode=ConversionMode.SKELETAL_PARTS,
         wind_group_settings={"0": WindGroupSettingRecord(influence=0.8)},
         wind_group_settings_by_input_path={"foo": {"1": WindGroupSettingRecord(shift_top=0.4)}},
         base_material_settings_by_input_path={
@@ -65,6 +68,7 @@ def test_qt_operator_state_save_preserves_nested_records(tmp_path) -> None:
             input_path="new.xml",
             output_path="new.usda",
             cpu_profile=CpuProfile.QUIET,
+            conversion_mode=ConversionMode.SKELETAL_ASSEMBLY,
             material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
             bark_material_path="/Game/Bark.Bark",
             leaves_material_path="/Game/Leaves.Leaves",
@@ -77,6 +81,7 @@ def test_qt_operator_state_save_preserves_nested_records(tmp_path) -> None:
     assert saved_snapshot.last_input_path == "old.xml"
     assert reloaded.last_output_path == "old.usda"
     assert reloaded.cpu_profile == CpuProfile.QUIET
+    assert reloaded.conversion_mode == ConversionMode.SKELETAL_ASSEMBLY
     assert reloaded.base_material_settings_by_input_path == original_snapshot.base_material_settings_by_input_path
     assert reloaded.part_mesh_settings_by_input_path == original_snapshot.part_mesh_settings_by_input_path
     assert reloaded.wind_group_settings_by_input_path == original_snapshot.wind_group_settings_by_input_path

@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSlider,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -125,6 +126,7 @@ class SliderSpinEditor(QWidget):
         self.slider = QSlider(Qt.Orientation.Horizontal, self)
         self.slider.setRange(self._slider_minimum, self._slider_maximum)
         self.slider.setSingleStep(max(1, int(round(step * self._scale))))
+        self.slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.slider, 1)
 
         self.spin = NoWheelDoubleSpinBox(self)
@@ -133,6 +135,7 @@ class SliderSpinEditor(QWidget):
         self.spin.setSingleStep(step)
         self.spin.setMinimumWidth(88)
         layout.addWidget(self.spin, 0)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         self.slider.valueChanged.connect(self._handle_slider_changed)
         self.spin.valueChanged.connect(self._handle_spin_changed)
@@ -215,14 +218,17 @@ class WindTabPanel(QWidget):
         self.ground_cover_checkbox.toggled.connect(lambda _checked: self._on_change())
         self.gust_spin = self._make_spin(0.0, 1.0, 0.01, 0.0)
         self.gust_spin.valueChanged.connect(lambda _value: self._on_change())
+        # Wind inspection is now owned by the Wind tab itself instead of the
+        # global action column so the operator can tweak wind globals and refresh
+        # from the same focused surface.
         self.refresh_button = QPushButton("Refresh Wind Groups", controls)
-        self.refresh_button.setObjectName("PrimaryActionButton")
+        self.refresh_button.setObjectName("WindRefreshButton")
         self.refresh_button.clicked.connect(self._on_refresh_requested)
 
         controls_layout.addWidget(self.ground_cover_checkbox, 0, 0, 1, 2)
         controls_layout.addWidget(self.refresh_button, 0, 2, 1, 1)
         controls_layout.addWidget(QLabel("Gust Attenuation", controls), 1, 0)
-        controls_layout.addWidget(self.gust_spin, 1, 1)
+        controls_layout.addWidget(self.gust_spin, 1, 1, 1, 2)
         controls_layout.setColumnStretch(1, 1)
         controls_layout.setColumnStretch(3, 1)
         outer.addWidget(controls)

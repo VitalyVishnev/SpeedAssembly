@@ -85,7 +85,7 @@
  [],
  False,
  False,
- 1775865542,
+ 1775922181,
  [('run.exe',
    'D:\\3D '
    'Personal\\VibeCode\\XMLtoUSDAconverter\\.venv310\\lib\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\run.exe',

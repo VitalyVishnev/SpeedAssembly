@@ -25,6 +25,7 @@ from xml_to_usda.models import (
     ConversionRequest,
     ConversionResult,
     ConversionTelemetry,
+    ConversionMode,
     CpuProfile,
     DynamicWindData,
     DynamicWindJointAssignment,
@@ -55,6 +56,7 @@ def _build_fake_deps(calls: dict[str, object]) -> QtUiDependencies:
             bark_material_path=kwargs["bark_material_path"],
             leaves_material_path=kwargs["leaves_material_path"],
             single_material_path=kwargs["single_material_path"],
+            conversion_mode=kwargs["conversion_mode"],
         )
         return ConversionLaunchPlan(request=request, run_async=False)
 
@@ -211,6 +213,35 @@ def test_qt_window_runs_sync_conversion_through_services(monkeypatch, qtbot, tmp
     assert "convert_request" in calls
     assert "Status: success" in window._log_text
     assert window.geometry_panel.has_rows() is True
+
+
+def test_qt_window_passes_selected_conversion_mode_to_conversion_request(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    calls: dict[str, object] = {}
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps(calls),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+    window.output_input.setText(str(tmp_path / "tree.usda"))
+    window._conversion_mode_actions["skeletal_parts"].trigger()
+    qtbot.mouseClick(window.convert_button, Qt.MouseButton.LeftButton)
+
+    qtbot.waitUntil(lambda: "Wrote USDA to" in window.status_label.text(), timeout=3000)
+
+    request = calls["convert_request"]["request"]
+    assert calls["prepare_conversion_plan"]["conversion_mode"] == ConversionMode.SKELETAL_PARTS
+    assert request.conversion_mode == ConversionMode.SKELETAL_PARTS
 
 
 def test_qt_window_refreshes_wind_and_generates_json(monkeypatch, qtbot, tmp_path) -> None:

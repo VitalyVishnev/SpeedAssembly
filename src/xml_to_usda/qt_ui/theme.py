@@ -159,6 +159,8 @@ def build_stylesheet(theme: ResolvedTheme) -> str:
     tab_text = _css_color(theme.colors["tab_text"])
     window_text = _css_color(theme.colors["window_text"])
     muted_text = _css_color(theme.colors["muted_text"])
+    menu_fill = _css_color(theme.colors["card_fill"])
+    menu_text = _css_color(theme.colors["card_text"])
     panel_radius = theme.radii["control"]
     button_radius = theme.radii["button"]
     tab_radius = theme.radii.get("tab", button_radius)
@@ -168,6 +170,9 @@ def build_stylesheet(theme: ResolvedTheme) -> str:
     input_height = theme.control_heights["input"]
     button_height = theme.control_heights["button"]
     file_button_width = int(theme.chrome.get("file_button_width", 74))
+    file_button_height = int(theme.chrome.get("file_button_height", input_height))
+    wind_refresh_button_width = int(theme.chrome.get("wind_refresh_button_width", 164))
+    wind_refresh_button_height = int(theme.chrome.get("wind_refresh_button_height", 28))
     window_button_size = int(theme.chrome.get("window_button_size", 22))
     title_pill_width = int(theme.chrome.get("title_pill_width", 78))
     title_pill_height = int(theme.chrome.get("title_pill_height", 24))
@@ -316,6 +321,8 @@ QPushButton#FileButton {{
     color: {button_text};
     min-width: {file_button_width}px;
     max-width: {file_button_width}px;
+    min-height: {file_button_height}px;
+    max-height: {file_button_height}px;
 }}
 QPushButton#FileButton:hover {{
     background: {secondary_fill_soft};
@@ -325,6 +332,23 @@ QPushButton#PrimaryActionButton {{
 }}
 QPushButton#PrimaryActionButton:hover {{
     background: {accent_fill};
+}}
+QPushButton#WindRefreshButton {{
+    background: {tab_fill};
+    color: {tab_text};
+    border-radius: {tab_radius}px;
+    min-width: {wind_refresh_button_width}px;
+    max-width: {wind_refresh_button_width}px;
+    min-height: {wind_refresh_button_height}px;
+    max-height: {wind_refresh_button_height}px;
+    padding: 4px 10px;
+}}
+QPushButton#WindRefreshButton:hover {{
+    background: {tab_hover_fill};
+}}
+QPushButton#WindRefreshButton:disabled {{
+    background: {tab_fill};
+    color: rgba(26, 26, 21, 0.58);
 }}
 QPushButton#SplitActionMainButton {{
     background: {button_fill};
@@ -358,6 +382,32 @@ QToolButton#SplitActionMenuButton {{
 QToolButton#SplitActionMenuButton::menu-indicator {{
     image: none;
     width: 0px;
+}}
+QMenu {{
+    background: {menu_fill};
+    color: {menu_text};
+    border: {theme.border_widths.get('card', 1)}px solid {card_border};
+    border-radius: {card_radius}px;
+    padding: 6px;
+}}
+QMenu::item {{
+    background: transparent;
+    color: {menu_text};
+    padding: 8px 18px;
+    border-radius: {button_radius}px;
+    min-height: 18px;
+}}
+QMenu::item:selected {{
+    background: {tab_selected_fill};
+    color: {button_text};
+}}
+QMenu::item:disabled {{
+    color: {muted_text};
+}}
+QMenu::separator {{
+    height: 1px;
+    background: {card_border};
+    margin: 6px 10px;
 }}
 QFrame#SplitActionDivider {{
     background: rgba(220, 229, 232, 0.58);

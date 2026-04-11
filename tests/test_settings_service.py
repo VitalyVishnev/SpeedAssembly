@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from xml_to_usda.models import CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode
+from xml_to_usda.models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode
 from xml_to_usda.settings_service import (
     BaseMaterialSettingRecord,
     FbxMaterialSlotSettingRecord,
@@ -56,6 +56,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
         last_output_path="tree.usda",
         cpu_profile=CpuProfile.QUIET,
         preserve_temp_files=True,
+        conversion_mode=ConversionMode.SKELETAL_PARTS,
         material_policy=MaterialPolicy.SINGLE_MATERIAL,
         bark_material_path="",
         leaves_material_path="",
@@ -112,6 +113,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     save_gui_settings(settings_path, snapshot)
 
     payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert payload["conversion_mode"] == ConversionMode.SKELETAL_PARTS.value
     assert payload["cpu_profile"] == CpuProfile.QUIET.value
     assert payload["preserve_temp_files"] is True
     assert payload["material_policy"] == MaterialPolicy.SINGLE_MATERIAL.value

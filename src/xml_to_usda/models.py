@@ -71,6 +71,22 @@ class OutputMode(StrEnum):
     EXTERNAL_REFS = "external_refs"
 
 
+class ConversionMode(StrEnum):
+    SKELETAL_ASSEMBLY = "skeletal_assembly"
+    SKELETAL_PARTS = "skeletal_parts"
+    STATIC_ASSEMBLY = "static_assembly"
+    STATIC_PARTS = "static_parts"
+
+    @classmethod
+    def parse(cls, raw: "ConversionMode | str | None") -> "ConversionMode":
+        if isinstance(raw, cls):
+            return raw
+        if raw is None:
+            return cls.SKELETAL_ASSEMBLY
+        normalized = str(raw).strip()
+        return cls(normalized)
+
+
 class MaterialPolicy(StrEnum):
     SOURCE_MATERIAL_ROLES = "source_material_roles"
     SINGLE_MATERIAL = "single_material"
@@ -504,6 +520,7 @@ class ExportMetadata:
     unknown_sections: tuple[str, ...] = ()
     output_mode: OutputMode = OutputMode.SELF_CONTAINED
     material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES
+    conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
 
 
 @dataclass(frozen=True)
@@ -617,6 +634,7 @@ class ConversionRequest:
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = ()
     use_existing_part_meshes: bool = False
     part_mesh_asset_paths: tuple[tuple[str, str], ...] = ()
+    conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
 
 
 @dataclass(frozen=True)

@@ -28,7 +28,7 @@ from .gui_models import SectionUiState
 from .gui_part_sources_panel import PartSourcesPanelController
 from .gui_persistence import GuiPersistenceController
 from .gui_wind_panel import WindPanelController
-from .models import CleanupPolicy, ConversionRequest, CpuProfile, MaterialPolicy
+from .models import CleanupPolicy, ConversionMode, ConversionRequest, CpuProfile, MaterialPolicy
 from .runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
 
 
@@ -76,6 +76,7 @@ class ConversionApp:
         self.output_var = tk.StringVar()
         self.cpu_profile_var = tk.StringVar(value=CpuProfile.BALANCED.value)
         self.preserve_temp_files_var = tk.BooleanVar(value=False)
+        self._persisted_conversion_mode = ConversionMode.SKELETAL_ASSEMBLY
         # Retained compatibility state: older tests and UI assumptions still
         # introspect this variable even though per-row source configs now drive
         # the actual repeated-part conversion semantics.

@@ -19,6 +19,7 @@ from .models import (
     BaseMaterialOverride,
     CanonicalTreeModel,
     ConversionPhase,
+    ConversionMode,
     CpuProfile,
     MaterialPolicy,
     ObservedXmlSchemaReport,
@@ -44,6 +45,7 @@ def load_canonical_model(
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = (),
     use_existing_part_meshes: bool = False,
     part_mesh_asset_paths: tuple[tuple[str, str], ...] = (),
+    conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY,
     telemetry_callback=None,
     cancel_event=None,
 ) -> tuple[ObservedXmlSchemaReport, CanonicalTreeModel, tuple]:
@@ -107,9 +109,14 @@ def load_canonical_model(
         )
     model = replace(
         model,
-        metadata=replace(model.metadata, output_mode=output_mode, material_policy=material_policy),
+        metadata=replace(
+            model.metadata,
+            output_mode=output_mode,
+            material_policy=material_policy,
+            conversion_mode=conversion_mode,
+        ),
     )
-    diagnostics = validate_model(model)
+    diagnostics = validate_model(model, conversion_mode=conversion_mode)
     return report, model, diagnostics
 
 

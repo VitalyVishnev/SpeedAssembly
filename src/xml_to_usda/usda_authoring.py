@@ -18,6 +18,7 @@ from .models import (
     CanonicalTreeModel,
     CompactMeshSection,
     ConversionPhase,
+    ConversionMode,
     GeometryBuffer,
     InstanceBinding,
     MaterialSpec,
@@ -40,6 +41,7 @@ class AuthoringContext:
     model: CanonicalTreeModel
     diagnostics: tuple[ValidationIssue, ...]
     contract: UeSchemaContract
+    conversion_mode: ConversionMode
     base_mesh_name: str | None
     resolved_base_mesh_name: str
     resolved_base_skel_root_name: str
@@ -73,12 +75,17 @@ def build_authoring_context(
     *,
     contract: UeSchemaContract = DEFAULT_UE_SCHEMA_CONTRACT,
     base_mesh_name: str | None = None,
+    conversion_mode: ConversionMode | str | None = None,
 ) -> AuthoringContext:
     error_codes = [issue.code for issue in diagnostics if issue.severity == "error"]
     if error_codes:
         raise ValueError(
             "Cannot author USDA while validation errors are present: " + ", ".join(sorted(dict.fromkeys(error_codes)))
         )
+
+    resolved_conversion_mode = ConversionMode.parse(conversion_mode or model.metadata.conversion_mode)
+    if resolved_conversion_mode not in {ConversionMode.SKELETAL_ASSEMBLY, ConversionMode.SKELETAL_PARTS}:
+        raise ValueError(f"Unsupported conversion mode: {resolved_conversion_mode.value}.")
 
     resolved_base_mesh_name = make_stable_prim_name(
         base_mesh_name or contract.base_mesh_name,
@@ -110,6 +117,7 @@ def build_authoring_context(
         model=model,
         diagnostics=diagnostics,
         contract=contract,
+        conversion_mode=resolved_conversion_mode,
         base_mesh_name=base_mesh_name,
         resolved_base_mesh_name=resolved_base_mesh_name,
         resolved_base_skel_root_name=resolved_base_skel_root_name,
@@ -152,14 +160,44 @@ def author_usda(
 ) -> None:
     contract = context.contract
     model = context.model
+    stage_root_name = _stage_root_name(context)
 
     _write_line(sink, 0, "#usda 1.0")
     _write_line(sink, 0, "(")
-    _write_line(sink, 1, f'defaultPrim = "{contract.root_prim_name}"')
     _write_line(sink, 1, f"metersPerUnit = {contract.stage_meters_per_unit:g}")
     _write_line(sink, 1, f'upAxis = "{contract.stage_up_axis}"')
+    _write_line(sink, 1, f'defaultPrim = "{stage_root_name}"')
     _write_line(sink, 0, ")")
     _write_line(sink, 0)
+    if context.conversion_mode == ConversionMode.SKELETAL_PARTS:
+        if _is_single_prototype_parts_document(context):
+            _emit_single_prototype_parts_document(sink, context)
+            return
+        single_prototype_name = _single_parts_asset_name(context)
+        if single_prototype_name:
+            _write_line(sink, 1, f'def Xform "{stage_root_name}" (')
+            _emit_asset_info_name_metadata(sink, 2, single_prototype_name)
+            _write_line(sink, 1, ")")
+        else:
+            _write_line(sink, 1, f'def Xform "{stage_root_name}"')
+        _write_line(sink, 0, "{")
+
+        materials = _render_materials_scope(model.materials, stage_root_name)
+        if materials:
+            _write_block(sink, materials, 1)
+            _write_line(sink, 0)
+
+        _emit_parts_only_prototype_scope(
+            sink,
+            context,
+            1,
+            telemetry_callback=telemetry_callback,
+            cancel_event=cancel_event,
+            started_at=started_at,
+        )
+        _write_line(sink, 0, "}")
+        return
+
     _write_line(sink, 1, f'def Xform "{contract.root_prim_name}" (')
     _write_line(sink, 2, f'prepend apiSchemas = ["{contract.root_api}"]')
     _write_line(sink, 2, f'kind = "{contract.root_kind}"')
@@ -271,7 +309,7 @@ def _emit_library_prototype(sink, prototype: Prototype, contract: UeSchemaContra
     _write_line(sink, indent_level + 1, f'def Mesh "{part_mesh_name}"')
     _write_line(sink, indent_level + 1, "{")
     _write_line(sink, indent_level + 2, 'uniform token subdivisionScheme = "none"')
-    _emit_material_binding(sink, mesh, indent_level + 2)
+    _emit_material_binding(sink, mesh, indent_level + 2, context.contract.root_prim_name)
     _emit_mesh_payload(sink, mesh, contract.mesh_orientation, indent_level + 2)
     _write_line(sink, indent_level + 1, "}")
     _write_line(sink, indent_level, "}")
@@ -298,7 +336,7 @@ def _emit_base_mesh(sink, context: AuthoringContext, indent_level: int) -> None:
         f"{context.resolved_skeleton_name}>",
     )
     _write_line(sink, indent_level + 1, 'uniform token subdivisionScheme = "none"')
-    _emit_material_binding(sink, mesh, indent_level + 1)
+    _emit_material_binding(sink, mesh, indent_level + 1, context.contract.root_prim_name)
     _emit_mesh_payload(sink, mesh, contract.mesh_orientation, indent_level + 1)
     if mesh.skel_joint_indices and mesh.skel_joint_weights:
         element_size = mesh.skel_element_size or 1
@@ -432,6 +470,73 @@ def _emit_point_instancer(
     _write_line(sink, indent_level, "}")
 
 
+def _emit_parts_only_prototype_scope(
+    sink,
+    context: AuthoringContext,
+    indent_level: int,
+    *,
+    telemetry_callback=None,
+    cancel_event=None,
+    started_at: float | None = None,
+) -> None:
+    contract = context.contract
+    prototypes = context.model.prototypes
+    if not prototypes:
+        return
+
+    _write_line(sink, indent_level, f'def Xform "{contract.assembly_parts_instancer_name}" (')
+    _write_line(sink, indent_level + 1, 'kind = "group"')
+    _write_line(sink, indent_level, ")")
+    _write_line(sink, indent_level, "{")
+    _write_line(sink, indent_level + 1, f'def Scope "{contract.prototype_scope_name}" (')
+    _write_line(sink, indent_level + 2, 'kind = "group"')
+    _write_line(sink, indent_level + 1, ")")
+    _write_line(sink, indent_level + 1, "{")
+    for index, prototype in enumerate(prototypes, start=1):
+        throw_if_cancelled(cancel_event)
+        _emit_instancer_prototype(sink, prototype, context, indent_level + 2)
+        emit_telemetry(
+            telemetry_callback,
+            ConversionPhase.USDA_WRITING,
+            completed_units=index,
+            total_units=len(prototypes),
+            message=f"Writing prototype {prototype.identity.prim_name}.",
+            started_at=started_at,
+        )
+    _write_line(sink, indent_level + 1, "}")
+    _write_line(sink, indent_level, "}")
+
+
+def _emit_single_prototype_parts_document(
+    sink,
+    context: AuthoringContext,
+) -> None:
+    prototype = context.model.prototypes[0]
+    if prototype.resolution_mode == PrototypeResolutionMode.EXTERNAL_ASSET:
+        _write_block(sink, _render_external_instancer_prototype(prototype, context.contract), 0)
+        return
+
+    root_name = prototype.identity.prim_name
+    _write_line(sink, 0, f'def Xform "{root_name}" (')
+    _emit_asset_info_name_metadata(sink, 1, root_name)
+    _write_line(sink, 0, ")")
+    _write_line(sink, 0, "{")
+
+    materials = _render_materials_scope(context.model.materials, root_name)
+    if materials:
+        _write_block(sink, materials, 1)
+        _write_line(sink, 0)
+
+    _emit_inline_part_payload(
+        sink,
+        prototype,
+        context,
+        indent_level=1,
+        material_root_prim_name=root_name,
+    )
+    _write_line(sink, 0, "}")
+
+
 def _emit_instancer_prototype(
     sink,
     prototype: Prototype,
@@ -456,6 +561,47 @@ def _emit_instancer_prototype(
         _write_line(sink, indent_level, "}")
         return
 
+    _emit_part_prim(sink, prototype, context, indent_level)
+
+
+def _emit_part_prim(
+    sink,
+    prototype: Prototype,
+    context: AuthoringContext,
+    indent_level: int,
+) -> None:
+    contract = context.contract
+    if prototype.resolution_mode == PrototypeResolutionMode.EXTERNAL_ASSET:
+        _write_block(sink, _render_external_instancer_prototype(prototype, contract), indent_level)
+        return
+
+    name = prototype.identity.prim_name
+    if context.conversion_mode == ConversionMode.SKELETAL_PARTS:
+        _write_line(sink, indent_level, f'def Xform "{name}" (')
+        _emit_asset_info_name_metadata(sink, indent_level + 1, name)
+        _write_line(sink, indent_level, ")")
+    else:
+        _write_line(sink, indent_level, f'def Xform "{name}"')
+    _write_line(sink, indent_level, "{")
+    _emit_inline_part_payload(
+        sink,
+        prototype,
+        context,
+        indent_level=indent_level + 1,
+        material_root_prim_name=_parts_material_root_name(context),
+    )
+    _write_line(sink, indent_level, "}")
+
+
+def _emit_inline_part_payload(
+    sink,
+    prototype: Prototype,
+    context: AuthoringContext,
+    *,
+    indent_level: int,
+    material_root_prim_name: str,
+) -> None:
+    contract = context.contract
     mesh = _prototype_inline_mesh(prototype)
     if mesh is None:
         raise ValueError(f"Prototype {prototype.identity.prim_name} is missing mesh payload.")
@@ -465,58 +611,64 @@ def _emit_instancer_prototype(
         prototype,
         contract,
     )
-    _write_line(sink, indent_level, f'def Xform "{name}"')
+    _write_line(sink, indent_level, f'def SkelRoot "{contract.part_skel_root_name}" (')
+    _write_line(sink, indent_level + 1, 'kind = "component"')
+    _write_line(sink, indent_level, ")")
     _write_line(sink, indent_level, "{")
-    _write_line(sink, indent_level + 1, f'def SkelRoot "{contract.part_skel_root_name}" (')
-    _write_line(sink, indent_level + 2, 'kind = "component"')
+    _write_line(sink, indent_level + 1, f'def SkelAnimation "{part_animation_name}"')
+    _write_line(sink, indent_level + 1, "{")
+    _write_line(sink, indent_level + 2, f'uniform token[] joints = ["{part_joint_name}"]')
+    _write_line(sink, indent_level + 2, f"quath[] rotations = [{_identity_quaternion()}]")
+    _write_line(sink, indent_level + 2, "half3[] scales = [(1, 1, 1)]")
+    _write_line(sink, indent_level + 2, "float3[] translations = [(0, 0, 0)]")
+    _write_line(sink, indent_level + 1, "}")
+    _write_line(sink, 0)
+    _write_line(sink, indent_level + 1, f'def Mesh "{part_mesh_name}" (')
+    _write_line(sink, indent_level + 2, f'prepend apiSchemas = ["{contract.skel_binding_api}"]')
+    if context.conversion_mode == ConversionMode.SKELETAL_PARTS:
+        _emit_asset_info_name_metadata(sink, indent_level + 2, part_mesh_name)
     _write_line(sink, indent_level + 1, ")")
     _write_line(sink, indent_level + 1, "{")
-    _write_line(sink, indent_level + 2, f'def SkelAnimation "{part_animation_name}"')
-    _write_line(sink, indent_level + 2, "{")
-    _write_line(sink, indent_level + 3, f'uniform token[] joints = ["{part_joint_name}"]')
-    _write_line(sink, indent_level + 3, f"quath[] rotations = [{_identity_quaternion()}]")
-    _write_line(sink, indent_level + 3, "half3[] scales = [(1, 1, 1)]")
-    _write_line(sink, indent_level + 3, "float3[] translations = [(0, 0, 0)]")
-    _write_line(sink, indent_level + 2, "}")
-    _write_line(sink, 0)
-    _write_line(sink, indent_level + 2, f'def Mesh "{part_mesh_name}" (')
-    _write_line(sink, indent_level + 3, f'prepend apiSchemas = ["{contract.skel_binding_api}"]')
-    _write_line(sink, indent_level + 2, ")")
-    _write_line(sink, indent_level + 2, "{")
-    _write_line(sink, indent_level + 3, f'uniform token[] skel:joints = ["{part_joint_name}"]')
-    _write_line(sink, indent_level + 3, f"uniform matrix4d primvars:skel:geomBindTransform = {_identity_matrix()}")
+    _write_line(sink, indent_level + 2, f'uniform token[] skel:joints = ["{part_joint_name}"]')
+    _write_line(sink, indent_level + 2, f"uniform matrix4d primvars:skel:geomBindTransform = {_identity_matrix()}")
     _write_line(
         sink,
-        indent_level + 3,
-        f"append rel skel:skeleton = {_part_skeleton_path(contract, name, part_skeleton_name)}",
+        indent_level + 2,
+        f"append rel skel:skeleton = {_part_skeleton_path(context, name, part_skeleton_name)}",
     )
-    _write_line(sink, indent_level + 3, 'uniform token subdivisionScheme = "none"')
-    _emit_material_binding(sink, mesh, indent_level + 3)
-    _emit_mesh_payload(sink, mesh, contract.mesh_orientation, indent_level + 3)
-    _emit_single_joint_skinning(sink, mesh, contract, indent_level + 3)
-    _write_line(sink, indent_level + 2, "}")
+    _write_line(sink, indent_level + 2, 'uniform token subdivisionScheme = "none"')
+    _emit_material_binding(sink, mesh, indent_level + 2, material_root_prim_name)
+    _emit_mesh_payload(sink, mesh, contract.mesh_orientation, indent_level + 2)
+    _emit_single_joint_skinning(sink, mesh, contract, indent_level + 2)
+    _write_line(sink, indent_level + 1, "}")
     _write_line(sink, 0)
-    _write_line(sink, indent_level + 2, f'def Skeleton "{part_skeleton_name}" (')
-    _write_line(sink, indent_level + 3, f'prepend apiSchemas = ["{contract.skel_binding_api}"]')
-    _write_line(sink, indent_level + 2, ")")
-    _write_line(sink, indent_level + 2, "{")
-    _write_line(sink, indent_level + 3, f"uniform matrix4d[] bindTransforms = [{_identity_matrix()}]")
-    _write_line(sink, indent_level + 3, f'uniform token[] jointNames = ["{part_joint_name}"]')
-    _write_line(sink, indent_level + 3, f'uniform token[] joints = ["{part_joint_name}"]')
-    _write_line(sink, indent_level + 3, 'uniform token purpose = "guide"')
-    _write_line(sink, indent_level + 3, f"uniform matrix4d[] restTransforms = [{_identity_matrix()}]")
+    _write_line(sink, indent_level + 1, f'def Skeleton "{part_skeleton_name}" (')
+    _write_line(sink, indent_level + 2, f'prepend apiSchemas = ["{contract.skel_binding_api}"]')
+    if context.conversion_mode == ConversionMode.SKELETAL_PARTS:
+        _emit_asset_info_name_metadata(sink, indent_level + 2, part_skeleton_name)
+    _write_line(sink, indent_level + 1, ")")
+    _write_line(sink, indent_level + 1, "{")
+    _write_line(sink, indent_level + 2, f"uniform matrix4d[] bindTransforms = [{_identity_matrix()}]")
+    _write_line(sink, indent_level + 2, f'uniform token[] jointNames = ["{part_joint_name}"]')
+    _write_line(sink, indent_level + 2, f'uniform token[] joints = ["{part_joint_name}"]')
+    _write_line(sink, indent_level + 2, 'uniform token purpose = "guide"')
+    _write_line(sink, indent_level + 2, f"uniform matrix4d[] restTransforms = [{_identity_matrix()}]")
     _write_line(
         sink,
-        indent_level + 3,
-        f"append rel skel:animationSource = {_part_animation_path(contract, name, part_animation_name)}",
+        indent_level + 2,
+        f"append rel skel:animationSource = {_part_animation_path(context, name, part_animation_name)}",
     )
-    _write_line(sink, indent_level + 3, 'uniform token visibility = "invisible"')
-    _write_line(sink, indent_level + 2, "}")
+    _write_line(sink, indent_level + 2, 'uniform token visibility = "invisible"')
     _write_line(sink, indent_level + 1, "}")
     _write_line(sink, indent_level, "}")
 
 
-def _emit_material_binding(sink, mesh: MeshData | GeometryBuffer, indent_level: int) -> None:
+def _emit_material_binding(
+    sink,
+    mesh: MeshData | GeometryBuffer,
+    indent_level: int,
+    root_prim_name: str | None,
+) -> None:
     sections = mesh.sections
     if not sections:
         return
@@ -524,15 +676,20 @@ def _emit_material_binding(sink, mesh: MeshData | GeometryBuffer, indent_level: 
         _write_line(
             sink,
             indent_level,
-            f"rel material:binding = </Tree/Materials/{_material_prim_name_from_id(sections[0].material_id)}>",
+            f"rel material:binding = {_material_target_path(root_prim_name, sections[0].material_id)}",
         )
         return
     _write_line(sink, indent_level, 'uniform token subsetFamily:materialBind:familyType = "nonOverlapping"')
     for section in sections:
-        _emit_geom_subset(sink, section, indent_level)
+        _emit_geom_subset(sink, section, indent_level, root_prim_name)
 
 
-def _emit_geom_subset(sink, section: MeshSection | CompactMeshSection, indent_level: int) -> None:
+def _emit_geom_subset(
+    sink,
+    section: MeshSection | CompactMeshSection,
+    indent_level: int,
+    root_prim_name: str | None,
+) -> None:
     _write_line(sink, indent_level, f'def GeomSubset "{_material_prim_name_from_id(section.material_id)}" (')
     _write_line(sink, indent_level + 1, 'prepend apiSchemas = ["MaterialBindingAPI"]')
     _write_line(sink, indent_level, ")")
@@ -548,7 +705,7 @@ def _emit_geom_subset(sink, section: MeshSection | CompactMeshSection, indent_le
     _write_line(
         sink,
         indent_level + 1,
-        f"rel material:binding = </Tree/Materials/{_material_prim_name_from_id(section.material_id)}>",
+        f"rel material:binding = {_material_target_path(root_prim_name, section.material_id)}",
     )
     _write_line(sink, indent_level, "}")
 
@@ -668,7 +825,7 @@ def _write_formatted_values(sink, values: Iterable[str], *, chunk_size: int) -> 
         sink.write(", ".join(pending))
 
 
-def _render_materials_scope(materials: tuple[MaterialSpec, ...], root_prim_name: str) -> str:
+def _render_materials_scope(materials: tuple[MaterialSpec, ...], root_prim_name: str | None) -> str:
     if not materials:
         return ""
     definitions = "\n".join(_render_material(material, root_prim_name) for material in materials)
@@ -678,15 +835,16 @@ def _render_materials_scope(materials: tuple[MaterialSpec, ...], root_prim_name:
 }}'''
 
 
-def _render_material(material: MaterialSpec, root_prim_name: str) -> str:
+def _render_material(material: MaterialSpec, root_prim_name: str | None) -> str:
     material_name = _material_prim_name(material)
     shader_name = _material_shader_name(material)
     diffuse_color = _material_diffuse_color(material)
     unreal_output = _render_unreal_material_output(material, root_prim_name)
+    material_prefix = f"/{root_prim_name}" if root_prim_name else ""
     return f'''    def Material "{material_name}"
     {{
-        token outputs:displacement.connect = </{root_prim_name}/Materials/{material_name}/{shader_name}.outputs:displacement>
-        token outputs:surface.connect = </{root_prim_name}/Materials/{material_name}/{shader_name}.outputs:surface>
+        token outputs:displacement.connect = <{material_prefix}/Materials/{material_name}/{shader_name}.outputs:displacement>
+        token outputs:surface.connect = <{material_prefix}/Materials/{material_name}/{shader_name}.outputs:surface>
 {_indent(unreal_output, 2)}
 
         def Shader "{shader_name}"
@@ -878,6 +1036,41 @@ def _material_prim_name_from_id(material_id: int, name: str | None = None) -> st
     return f"{safe_name}_{material_id}"
 
 
+def _emit_asset_info_name_metadata(sink, indent_level: int, name: str) -> None:
+    _write_line(sink, indent_level, "assetInfo = {")
+    _write_line(sink, indent_level + 1, f'string name = "{name}"')
+    _write_line(sink, indent_level, "}")
+
+
+def _single_parts_asset_name(context: AuthoringContext) -> str | None:
+    if context.conversion_mode != ConversionMode.SKELETAL_PARTS:
+        return None
+    if len(context.model.prototypes) != 1:
+        return None
+    return context.model.prototypes[0].identity.prim_name
+
+
+def _is_single_prototype_parts_document(context: AuthoringContext) -> bool:
+    return context.conversion_mode == ConversionMode.SKELETAL_PARTS and len(context.model.prototypes) == 1
+
+
+def _stage_root_name(context: AuthoringContext) -> str:
+    if _is_single_prototype_parts_document(context):
+        return context.model.prototypes[0].identity.prim_name
+    return context.contract.root_prim_name
+
+
+def _parts_material_root_name(context: AuthoringContext) -> str:
+    if _is_single_prototype_parts_document(context):
+        return context.model.prototypes[0].identity.prim_name
+    return context.contract.root_prim_name
+
+
+def _material_target_path(root_prim_name: str | None, material_id: int) -> str:
+    prefix = f"/{root_prim_name}" if root_prim_name else ""
+    return f"<{prefix}/Materials/{_material_prim_name_from_id(material_id)}>"
+
+
 def _material_shader_name(material: MaterialSpec) -> str:
     return f"{_material_prim_name(material)}_shader"
 
@@ -886,12 +1079,13 @@ def _material_unreal_shader_name(material: MaterialSpec) -> str:
     return f"{_material_prim_name(material)}_unreal_shader"
 
 
-def _render_unreal_material_output(material: MaterialSpec, root_prim_name: str) -> str:
+def _render_unreal_material_output(material: MaterialSpec, root_prim_name: str | None) -> str:
     if not material.ue_asset_path:
         return ""
     material_name = _material_prim_name(material)
     shader_name = _material_unreal_shader_name(material)
-    return f'''token outputs:unreal:surface.connect = </{root_prim_name}/Materials/{material_name}/{shader_name}.outputs:out>
+    material_prefix = f"/{root_prim_name}" if root_prim_name else ""
+    return f'''token outputs:unreal:surface.connect = <{material_prefix}/Materials/{material_name}/{shader_name}.outputs:out>
 
 def Shader "{shader_name}"
 {{
@@ -1059,14 +1253,20 @@ def _resolve_inline_part_names(
     return part_mesh_name, part_joint_name, contract.part_skeleton_name, contract.part_animation_name
 
 
-def _part_skeleton_path(contract: UeSchemaContract, prototype_name: str, skeleton_name: str) -> str:
+def _part_skeleton_path(context: AuthoringContext, prototype_name: str, skeleton_name: str) -> str:
+    contract = context.contract
+    if _is_single_prototype_parts_document(context):
+        return f"</{prototype_name}/{contract.part_skel_root_name}/{skeleton_name}>"
     return (
         f"</{contract.root_prim_name}/{contract.assembly_parts_instancer_name}/"
         f"{contract.prototype_scope_name}/{prototype_name}/{contract.part_skel_root_name}/{skeleton_name}>"
     )
 
 
-def _part_animation_path(contract: UeSchemaContract, prototype_name: str, animation_name: str) -> str:
+def _part_animation_path(context: AuthoringContext, prototype_name: str, animation_name: str) -> str:
+    contract = context.contract
+    if _is_single_prototype_parts_document(context):
+        return f"</{prototype_name}/{contract.part_skel_root_name}/{animation_name}>"
     return (
         f"</{contract.root_prim_name}/{contract.assembly_parts_instancer_name}/"
         f"{contract.prototype_scope_name}/{prototype_name}/{contract.part_skel_root_name}/{animation_name}>"

@@ -25,6 +25,7 @@ from xml_to_usda.models import (
     BaseMaterialOverride,
     Color4,
     CpuProfile,
+    ConversionMode,
     DynamicWindSimulationGroup,
     FbxMaterialMode,
     FbxMaterialSlotOverride,
@@ -1583,6 +1584,65 @@ def test_assembly_part_prototypes_are_authored_as_single_joint_skeletal_meshes()
     assert 'uniform token primvars:skel:skinningMethod = "classicLinear"' in usda.text
 
 
+def test_skeletal_parts_mode_authors_library_without_base_tree_or_instancer() -> None:
+    _, model, _ = load_canonical_model(str(SIMPLE_TREE_01), conversion_mode=ConversionMode.SKELETAL_PARTS)
+    parts_only_model = replace(model, base_mesh=None, skeleton=None, assembly_parts=())
+    diagnostics = validate_model(parts_only_model, conversion_mode=ConversionMode.SKELETAL_PARTS)
+    usda = render_usda(parts_only_model, diagnostics, conversion_mode=ConversionMode.SKELETAL_PARTS)
+
+    assert not any(issue.severity == "error" for issue in diagnostics)
+    assert 'apiSchemas = ["NaniteAssemblyRootAPI"]' not in usda.text
+    assert 'uniform token unreal:naniteAssembly:meshType = "skeletalMesh"' not in usda.text
+    assert 'rel unreal:naniteAssembly:skeleton = ' not in usda.text
+    assert 'defaultPrim = "Tree"' in usda.text
+    assert 'def Xform "Tree"' in usda.text
+    assert 'def SkelRoot "BaseTreeSkelRoot"' not in usda.text
+    assert 'def PointInstancer "AssemblyPartsInstancer"' not in usda.text
+    assert 'def Xform "AssemblyPartsInstancer" (' in usda.text
+    assert 'def Scope "Prototypes"' in usda.text
+    assert 'def Skeleton "MainSkeleton"' not in usda.text
+    assert 'def Xform "Twig_01"' in usda.text
+    assert 'def Xform "Twig_02"' in usda.text
+    assert 'def SkelRoot "PartSkelRoot"' in usda.text
+    assert 'def Mesh "Twig_01"' in usda.text
+    assert 'def Mesh "Twig_02"' in usda.text
+    assert 'def Scope "Materials"' in usda.text
+    assert 'append rel skel:skeleton = </Tree/AssemblyPartsInstancer/Prototypes/Twig_01/PartSkelRoot/PartSkeleton>' in usda.text
+    assert 'append rel skel:animationSource = </Tree/AssemblyPartsInstancer/Prototypes/Twig_01/PartSkelRoot/PartAnimation>' in usda.text
+    assert 'rel material:binding = </Tree/Materials/Material_1_1>' in usda.text
+
+
+def test_skeletal_parts_mode_preserves_external_part_reuse() -> None:
+    _, model, _ = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        use_existing_part_meshes=True,
+        part_mesh_asset_paths=(("Mesh_1", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
+        conversion_mode=ConversionMode.SKELETAL_PARTS,
+    )
+    parts_only_model = replace(model, base_mesh=None, skeleton=None, assembly_parts=())
+    diagnostics = validate_model(parts_only_model, conversion_mode=ConversionMode.SKELETAL_PARTS)
+    usda = render_usda(parts_only_model, diagnostics, conversion_mode=ConversionMode.SKELETAL_PARTS)
+
+    assert not any(issue.severity == "error" for issue in diagnostics)
+    assert 'prepend apiSchemas = ["NaniteAssemblyExternalRefAPI"]' in usda.text
+    assert 'uniform token unreal:naniteAssembly:meshAssetPath = "/Game/TreeParts/SK_Twig01.SK_Twig01"' in usda.text
+    assert 'def Xform "Tree"' in usda.text
+    assert 'def SkelRoot "BaseTreeSkelRoot"' not in usda.text
+    assert 'def PointInstancer "AssemblyPartsInstancer"' not in usda.text
+    assert 'def Xform "AssemblyPartsInstancer" (' in usda.text
+    assert 'def Scope "Prototypes"' in usda.text
+
+
+def test_skeletal_parts_mode_rejects_zero_prototype_models() -> None:
+    _, model, _ = load_canonical_model(str(SIMPLE_TREE_01), conversion_mode=ConversionMode.SKELETAL_PARTS)
+    broken_model = replace(model, prototypes=(), assembly_parts=())
+    diagnostics = validate_model(broken_model, conversion_mode=ConversionMode.SKELETAL_PARTS)
+
+    assert any(issue.code == "missing_prototypes" and issue.severity == "error" for issue in diagnostics)
+    with pytest.raises(ValueError, match="missing_prototypes"):
+        render_usda(broken_model, diagnostics, conversion_mode=ConversionMode.SKELETAL_PARTS)
+
+
 def test_referenced_prototype_strategy_is_blocked_for_skeletal_assembly_part_export() -> None:
     document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)
@@ -1593,6 +1653,143 @@ def test_referenced_prototype_strategy_is_blocked_for_skeletal_assembly_part_exp
     assert any(issue.code == "unsupported_prototype_strategy" and issue.severity == "error" for issue in diagnostics)
     with pytest.raises(ValueError, match="unsupported_prototype_strategy"):
         render_usda(broken_model, diagnostics)
+
+
+def test_skeletal_parts_mode_preserves_fbx_part_names_and_material_bindings(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(tmp_path, file_name="SM_BigBranch_01_HIGH.json")
+    _, model, _ = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_path=str(payload_path),
+            ),
+        ),
+        conversion_mode=ConversionMode.SKELETAL_PARTS,
+    )
+    parts_only_model = replace(model, base_mesh=None, skeleton=None, assembly_parts=())
+    diagnostics = validate_model(parts_only_model, conversion_mode=ConversionMode.SKELETAL_PARTS)
+    usda = render_usda(parts_only_model, diagnostics, conversion_mode=ConversionMode.SKELETAL_PARTS)
+
+    assert not any(issue.severity == "error" for issue in diagnostics)
+    assert 'def PointInstancer "AssemblyPartsInstancer"' not in usda.text
+    assert 'def Xform "AssemblyPartsInstancer" (' in usda.text
+    assert 'def Scope "Prototypes"' in usda.text
+    assert 'def Xform "SM_BigBranch_01_HIGH"' in usda.text
+    assert 'def Mesh "SM_BigBranch_01_HIGH"' in usda.text
+    assert 'def Skeleton "SM_BigBranch_01_HIGH_Skeleton"' in usda.text
+    assert (
+        'append rel skel:skeleton = '
+        '</Tree/AssemblyPartsInstancer/Prototypes/SM_BigBranch_01_HIGH/PartSkelRoot/SM_BigBranch_01_HIGH_Skeleton>'
+        in usda.text
+    )
+    assert (
+        'append rel skel:animationSource = '
+        '</Tree/AssemblyPartsInstancer/Prototypes/SM_BigBranch_01_HIGH/PartSkelRoot/SM_BigBranch_01_HIGH_Animation>'
+        in usda.text
+    )
+    assert 'def GeomSubset "Material_1_1"' in usda.text
+    assert 'def GeomSubset "Material_2_2"' in usda.text
+    assert 'rel material:binding = </Tree/Materials/Material_1_1>' in usda.text
+    assert 'rel material:binding = </Tree/Materials/Material_2_2>' in usda.text
+    assert '</Tree/SM_BigBranch_01_HIGH/PartSkelRoot/SM_BigBranch_01_HIGH_Skeleton>' not in usda.text
+
+
+def test_skeletal_parts_single_prototype_authors_asset_info_name_hints() -> None:
+    _, model, _ = load_canonical_model(str(SIMPLE_TREE_01), conversion_mode=ConversionMode.SKELETAL_PARTS)
+    single_prototype_model = replace(
+        model,
+        base_mesh=None,
+        skeleton=None,
+        assembly_parts=(),
+        prototypes=(model.prototypes[0],),
+    )
+    diagnostics = validate_model(single_prototype_model, conversion_mode=ConversionMode.SKELETAL_PARTS)
+    usda = render_usda(single_prototype_model, diagnostics, conversion_mode=ConversionMode.SKELETAL_PARTS)
+
+    assert not any(issue.severity == "error" for issue in diagnostics)
+    assert 'defaultPrim = "Twig_01"' in usda.text
+    assert 'def Xform "Twig_01" (' in usda.text
+    assert 'assetInfo = {' in usda.text
+    assert 'string name = "Twig_01"' in usda.text
+    assert 'def Xform "Tree"' not in usda.text
+    assert 'def Xform "AssemblyPartsInstancer" (' not in usda.text
+    assert 'def Scope "Prototypes"' not in usda.text
+    assert 'def Mesh "Twig_01" (' in usda.text
+    assert 'def Skeleton "PartSkeleton" (' in usda.text
+    assert 'rel material:binding = </Twig_01/Materials/Material_1_1>' in usda.text
+    assert 'append rel skel:skeleton = </Twig_01/PartSkelRoot/PartSkeleton>' in usda.text
+    assert 'append rel skel:animationSource = </Twig_01/PartSkelRoot/PartAnimation>' in usda.text
+
+
+def test_skeletal_parts_conversion_writes_one_usda_per_prototype(tmp_path: Path) -> None:
+    output_path = tmp_path / "SimpleTree_01_Branches.usda"
+
+    result = convert_file(
+        str(SIMPLE_TREE_01),
+        str(output_path),
+        conversion_mode=ConversionMode.SKELETAL_PARTS,
+    )
+
+    output_directory = tmp_path / "SimpleTree_01_Branches"
+    twig_one = output_directory / "Twig_01.usda"
+    twig_two = output_directory / "Twig_02.usda"
+
+    assert result.usda_document is not None
+    assert result.usda_document.text is None
+    assert result.output_path == str(output_directory)
+    assert output_directory.is_dir()
+    assert twig_one.exists()
+    assert twig_two.exists()
+
+    twig_one_text = twig_one.read_text(encoding="utf-8")
+    assert 'defaultPrim = "Twig_01"' in twig_one_text
+    assert 'def Xform "Twig_01" (' in twig_one_text
+    assert 'def Xform "Tree"' not in twig_one_text
+    assert 'def Xform "AssemblyPartsInstancer" (' not in twig_one_text
+    assert 'def Scope "Prototypes"' not in twig_one_text
+    assert 'def SkelRoot "PartSkelRoot"' in twig_one_text
+    assert 'def Mesh "Twig_01" (' in twig_one_text
+    assert 'def Skeleton "PartSkeleton" (' in twig_one_text
+    assert 'rel material:binding = </Twig_01/Materials/Material_1_1>' in twig_one_text
+    assert 'append rel skel:skeleton = </Twig_01/PartSkelRoot/PartSkeleton>' in twig_one_text
+
+
+def test_skeletal_parts_conversion_uses_fbx_stem_for_split_file_name_and_asset_name(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(tmp_path, file_name="spruce_branch.json")
+    output_path = tmp_path / "SpruceParts.usda"
+
+    result = convert_file(
+        str(SIMPLE_TREE_01),
+        str(output_path),
+        conversion_mode=ConversionMode.SKELETAL_PARTS,
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_path=str(payload_path),
+            ),
+        ),
+    )
+
+    output_directory = tmp_path / "SpruceParts"
+    part_path = output_directory / "spruce_branch.usda"
+
+    assert result.usda_document is not None
+    assert part_path.exists()
+
+    part_text = part_path.read_text(encoding="utf-8")
+    assert 'defaultPrim = "spruce_branch"' in part_text
+    assert 'def Xform "spruce_branch" (' in part_text
+    assert 'def Mesh "spruce_branch" (' in part_text
+    assert 'def Skeleton "spruce_branch_Skeleton" (' in part_text
+    assert 'rel material:binding = </spruce_branch/Materials/Material_1_1>' in part_text
+    assert 'rel material:binding = </spruce_branch/Materials/Material_2_2>' in part_text
+    assert 'append rel skel:skeleton = </spruce_branch/PartSkelRoot/spruce_branch_Skeleton>' in part_text
+    assert 'append rel skel:animationSource = </spruce_branch/PartSkelRoot/spruce_branch_Animation>' in part_text
 
 
 def test_leaf_references_on_trunk_normalize_without_breaking_part_binding() -> None:

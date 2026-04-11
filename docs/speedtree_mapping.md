@@ -162,6 +162,26 @@ Naming policy:
 - when two prototype names collide after USD-safe sanitization, deterministic suffixes are appended in input order
 - inline one-bone part skeleton joint names come from the sanitized prototype prim name, not from a hardcoded `root`
 
+## Skeletal parts export mode
+
+The same normalized source data also supports a parts-only library export.
+
+In `skeletal_parts` mode:
+
+- the converter still discovers `Meshes/Mesh` and `LeafReferences`
+- prototype discovery, FBX replacement, and Unreal asset reuse stay unchanged
+- the chosen output path becomes a container path for a generated parts directory
+- one USDA file is written per prototype
+- each part file is named from the resolved prototype name, such as `spruce_branch.usda`
+- each part file uses the prototype name as `defaultPrim` and root prim name
+- no base tree is authored
+- no main skeleton prim is authored
+- no real `PointInstancer` is authored
+- missing base mesh and missing main skeleton are not validation failures
+- at least one valid prototype payload is still required
+
+Use this mode when you want to import the repeated parts first and wire them into a project through already-imported part assets later.
+
 ## Current part interpretation
 
 For the current project contract:
@@ -209,7 +229,7 @@ If a part-mesh override looks configured in the UI but the imported USD still co
 
 ## Failure conditions
 
-Fail loudly when the baseline path cannot safely determine:
+Fail loudly when the baseline `skeletal_assembly` path cannot safely determine:
 
 - the regular unique tree hierarchy
 - the `Main Skeleton`

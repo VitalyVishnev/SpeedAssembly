@@ -13,7 +13,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .models import CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode
+from .models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode
 
 
 @dataclass(frozen=True)
@@ -59,6 +59,7 @@ class GuiSettingsSnapshot:
     last_output_path: str = ""
     cpu_profile: CpuProfile = CpuProfile.BALANCED
     preserve_temp_files: bool = False
+    conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
     material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES
     bark_material_path: str = ""
     leaves_material_path: str = ""
@@ -93,6 +94,7 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
         last_output_path=str(payload.get("last_output_path", "")),
         cpu_profile=_parse_cpu_profile(payload.get("cpu_profile")),
         preserve_temp_files=bool(payload.get("preserve_temp_files", False)),
+        conversion_mode=_parse_conversion_mode(payload.get("conversion_mode")),
         material_policy=_parse_gui_material_policy(
             payload.get("material_policy", MaterialPolicy.SOURCE_MATERIAL_ROLES.value)
         ),
@@ -122,6 +124,7 @@ def save_gui_settings(settings_path: str | Path, snapshot: GuiSettingsSnapshot) 
     payload: dict[str, object] = {
         "last_input_path": snapshot.last_input_path,
         "last_output_path": snapshot.last_output_path,
+        "conversion_mode": ConversionMode.parse(snapshot.conversion_mode).value,
         "material_policy": snapshot.material_policy.value,
         "bark_material_path": snapshot.bark_material_path,
         "leaves_material_path": snapshot.leaves_material_path,
@@ -154,6 +157,13 @@ def _parse_cpu_profile(raw_value) -> CpuProfile:
         return CpuProfile(str(raw_value))
     except (TypeError, ValueError):
         return CpuProfile.BALANCED
+
+
+def _parse_conversion_mode(raw_value) -> ConversionMode:
+    try:
+        return ConversionMode.parse(raw_value)
+    except ValueError:
+        return ConversionMode.SKELETAL_ASSEMBLY
 
 
 def _parse_gui_material_policy(raw_value) -> MaterialPolicy:
