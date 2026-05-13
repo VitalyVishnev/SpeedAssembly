@@ -1,0 +1,9 @@
+<SpeedTreeRaw>
+  <Bones>
+    <Bone ID="0" ParentID="-1" StartX="0" StartY="0" StartZ="0" EndX="0" EndY="0" EndZ="1" />
+    <Bone ID="1" ParentID="0" StartX="0" StartY="0" StartZ="1" EndX="0" EndY="0" EndZ="2" />
+    <Bone ID="2" ParentID="1" StartX="0" StartY="0" StartZ="2" EndX="0" EndY="0" EndZ="3" />
+    <Bone ID="3" ParentID="2" StartX="0" StartY="0" StartZ="3" EndX="0" EndY="0" EndZ="4" Generator="Branches_1" />
+    <Bone ID="4" ParentID="3" StartX="0" StartY="0" StartZ="4" EndX="0" EndY="0" EndZ="5" Generator="Branches_2" />
+  </Bones>
+</SpeedTreeRaw>

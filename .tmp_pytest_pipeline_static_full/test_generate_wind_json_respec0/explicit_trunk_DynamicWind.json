@@ -1,0 +1,52 @@
+{
+    "Joints": [
+        {
+            "JointName": "root",
+            "SimulationGroupIndex": 0
+        },
+        {
+            "JointName": "bone_001",
+            "SimulationGroupIndex": 0
+        },
+        {
+            "JointName": "bone_002",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_003",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_004",
+            "SimulationGroupIndex": 2
+        }
+    ],
+    "SimulationGroups": [
+        {
+            "bUseDualInfluence": true,
+            "Influence": 0.0,
+            "MinInfluence": 0.0,
+            "MaxInfluence": 0.0,
+            "ShiftTop": 0.0,
+            "bIsTrunkGroup": false
+        },
+        {
+            "bUseDualInfluence": true,
+            "Influence": 0.0,
+            "MinInfluence": 0.0,
+            "MaxInfluence": 0.0,
+            "ShiftTop": 0.0,
+            "bIsTrunkGroup": true
+        },
+        {
+            "bUseDualInfluence": true,
+            "Influence": 0.0,
+            "MinInfluence": 0.0,
+            "MaxInfluence": 0.0,
+            "ShiftTop": 0.0,
+            "bIsTrunkGroup": false
+        }
+    ],
+    "bIsGroundCover": false,
+    "GustAttenuation": 0.0
+}

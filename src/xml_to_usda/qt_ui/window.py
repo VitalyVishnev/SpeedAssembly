@@ -87,7 +87,7 @@ CONVERSION_MODES: tuple[tuple[str, str, bool], ...] = (
     # until their application-layer contracts exist.
     ("skeletal_assembly", "Skeletal Assembly", True),
     ("skeletal_parts", "Skeletal Parts", True),
-    ("static_assembly", "Static Assembly", False),
+    ("static_assembly", "Static Assembly", True),
     ("static_parts", "Static Parts", False),
 )
 
@@ -172,7 +172,7 @@ class TitleBar(QFrame):
         self.adjust_button.clicked.connect(window.open_adjust_ui_dialog)
         self._layout.addWidget(self.adjust_button, 0, Qt.AlignmentFlag.AlignLeft)
 
-        self.title_label = QLabel("XML to USDA Converter Next", self)
+        self.title_label = QLabel("XML to USDA Converter", self)
         self.title_label.setObjectName("TitleLabel")
         self._layout.addWidget(self.title_label)
         self._layout.addStretch(1)
@@ -417,7 +417,7 @@ class MainWindow(QWidget):
             runtime_paths=self._runtime_paths,
         )
 
-        self.setWindowTitle("XML to USDA Converter Next")
+        self.setWindowTitle("XML to USDA Converter")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -588,14 +588,14 @@ class MainWindow(QWidget):
         self.runtime_card_label = QLabel("", self)
         self.runtime_card_label.setWordWrap(True)
         self.runtime_card_label.setObjectName("MutedLabel")
-        self.runtime_card = self._build_info_card("Current beta-shell runtime state", self.runtime_card_label)
+        self.runtime_card = self._build_info_card("Current release runtime state", self.runtime_card_label)
         left_column.addWidget(self.runtime_card)
         left_column.addStretch(1)
 
         right_column = QVBoxLayout()
         self._right_column_layout = right_column
         right_column.setSpacing(spacing)
-        self.status_label = QLabel("PySide6 beta shell is ready.", self)
+        self.status_label = QLabel("XML to USDA Converter is ready.", self)
         self.status_label.setObjectName("StatusLabel")
         self.status_label.setWordWrap(True)
         right_column.addWidget(self.status_label, 0)
@@ -841,7 +841,7 @@ class MainWindow(QWidget):
 
     def _startup_log_text(self) -> str:
         return (
-            "PySide6 beta shell is alive.\n\n"
+            "XML to USDA Converter is alive.\n\n"
             "- Frameless shell\n"
             "- Background cover/crop\n"
             "- Glass panel\n"
@@ -871,7 +871,7 @@ class MainWindow(QWidget):
             "3. Refresh Wind Groups inside the Wind tab when needed.\n"
             "4. Adjust repeated-part source mode and material assignments.\n"
             "5. Generate Dynamic Wind JSON or run Convert to USDA.\n\n"
-            "Current beta shell keeps the backend stable while the visual shell is still evolving."
+            "The PySide6 shell keeps the backend stable while conversion, wind, and material workflows run."
         )
         if self._help_dialog is None:
             self._help_dialog = TextDialog(

@@ -38,6 +38,7 @@ from xml_to_usda.models import (
     MeshSection,
     PrototypeSourceConfig,
     PrototypeSourceMode,
+    PrototypeStrategy,
     SourceObject,
     PrototypeResolutionMode,
     Vector3,
@@ -1631,6 +1632,102 @@ def test_skeletal_parts_mode_preserves_external_part_reuse() -> None:
     assert 'def PointInstancer "AssemblyPartsInstancer"' not in usda.text
     assert 'def Xform "AssemblyPartsInstancer" (' in usda.text
     assert 'def Scope "Prototypes"' in usda.text
+
+
+def test_static_assembly_mode_authors_point_instancer_without_skeletal_fields() -> None:
+    _, model, diagnostics = load_canonical_model(str(SIMPLE_TREE_01), conversion_mode=ConversionMode.STATIC_ASSEMBLY)
+    assert model.prototype_strategy == PrototypeStrategy.INLINE_STATIC_PART
+    assert not any(issue.severity == "error" for issue in diagnostics)
+
+    usda = render_usda(
+        model,
+        diagnostics,
+        base_mesh_name="StaticAssembly",
+        conversion_mode=ConversionMode.STATIC_ASSEMBLY,
+    )
+
+    assert 'defaultPrim = "StaticAssembly"' not in usda.text
+    assert 'def Xform "StaticAssembly" (' in usda.text
+    assert 'apiSchemas = ["NaniteAssemblyRootAPI"]' in usda.text
+    assert 'uniform token unreal:naniteAssembly:meshType = "staticMesh"' in usda.text
+    assert 'rel unreal:naniteAssembly:skeleton = ' not in usda.text
+    assert 'def SkelRoot "BaseTreeSkelRoot"' not in usda.text
+    assert 'def Skeleton "MainSkeleton"' not in usda.text
+    assert 'def PointInstancer "AssemblyPartsInstancer"' in usda.text
+    assert 'primvars:skel:' not in usda.text
+    assert 'primvars:unreal:naniteAssembly:bindJoints' not in usda.text
+    assert 'primvars:unreal:naniteAssembly:bindJointWeights' not in usda.text
+    assert 'def Xform "StaticAssembly_BaseMesh"' in usda.text
+    assert 'def Mesh "SM_StaticAssembly_BaseMesh"' in usda.text
+    assert 'def Xform "Twig_01"' in usda.text
+    assert 'def Mesh "SM_Twig_01"' in usda.text
+    assert 'def Xform "Twig_02"' in usda.text
+    assert 'def Mesh "SM_Twig_02"' in usda.text
+
+
+def test_static_assembly_conversion_writes_single_usda_file(tmp_path: Path) -> None:
+    output_path = tmp_path / "StaticAssembly.usda"
+
+    result = convert_file(
+        str(SIMPLE_TREE_01),
+        str(output_path),
+        conversion_mode=ConversionMode.STATIC_ASSEMBLY,
+    )
+
+    assert result.usda_document is not None
+    assert result.usda_document.text is not None
+    assert result.output_path == str(output_path)
+    assert output_path.exists()
+    assert 'defaultPrim = "StaticAssembly"' not in result.usda_document.text
+    assert 'apiSchemas = ["NaniteAssemblyRootAPI"]' in result.usda_document.text
+    assert 'uniform token unreal:naniteAssembly:meshType = "staticMesh"' in result.usda_document.text
+    assert 'def PointInstancer "AssemblyPartsInstancer"' in result.usda_document.text
+    assert 'def SkelRoot' not in result.usda_document.text
+    assert 'primvars:skel:' not in result.usda_document.text
+
+
+def test_static_assembly_preserves_fbx_and_unreal_reference_prototypes(tmp_path: Path) -> None:
+    payload_path = _write_fbx_json_payload(tmp_path, file_name="spruce_branch.json")
+    _, fbx_model, fbx_diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig_01",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_path=str(payload_path),
+            ),
+        ),
+        conversion_mode=ConversionMode.STATIC_ASSEMBLY,
+    )
+    fbx_usda = render_usda(
+        fbx_model,
+        fbx_diagnostics,
+        base_mesh_name="StaticAssembly",
+        conversion_mode=ConversionMode.STATIC_ASSEMBLY,
+    )
+
+    assert 'def Xform "spruce_branch" (' in fbx_usda.text
+    assert 'def Mesh "SM_spruce_branch"' in fbx_usda.text
+    assert 'def PointInstancer "AssemblyPartsInstancer"' in fbx_usda.text
+    assert 'def SkelRoot' not in fbx_usda.text
+
+    _, unreal_model, unreal_diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        use_existing_part_meshes=True,
+        part_mesh_asset_paths=(("Mesh_1", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
+        conversion_mode=ConversionMode.STATIC_ASSEMBLY,
+    )
+    unreal_usda = render_usda(
+        unreal_model,
+        unreal_diagnostics,
+        base_mesh_name="StaticAssembly",
+        conversion_mode=ConversionMode.STATIC_ASSEMBLY,
+    )
+
+    assert 'prepend apiSchemas = ["NaniteAssemblyExternalRefAPI"]' in unreal_usda.text
+    assert 'uniform token unreal:naniteAssembly:meshAssetPath = "/Game/TreeParts/SK_Twig01.SK_Twig01"' in unreal_usda.text
+    assert 'def SkelRoot' not in unreal_usda.text
 
 
 def test_skeletal_parts_mode_rejects_zero_prototype_models() -> None:

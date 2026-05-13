@@ -134,21 +134,31 @@ Material-policy note:
 
 ## Build helpers
 
-Fast launcher build:
+Primary one-file PySide6 release build:
+
+```powershell
+.\scripts\build_qt_gui_exe.cmd -Package
+```
+
+Explicit clean rebuild for release:
+
+```powershell
+.\scripts\build_qt_gui_exe.cmd -Package -Clean
+```
+
+Release artifact:
+
+- `dist-next\XMLtoUSDAConverter.exe`
+
+The release exe is a single-file PyInstaller package. It launches the PySide6
+operator UI normally and reuses the same executable for `fbx-worker` helper
+mode during packaged FBX imports, so a sidecar `XMLtoUSDAWorker.exe` is not
+required for the primary `dist-next` release.
+
+Legacy Tk launcher/package build:
 
 ```powershell
 .\scripts\build_gui_exe.cmd
-```
-
-Standalone PyInstaller build (cleans stale PyInstaller state by default):
-
-```powershell
-.\scripts\build_gui_exe.cmd -Package
-```
-
-Explicit clean rebuild (same package result):
-
-```powershell
 .\scripts\build_gui_exe.cmd -Package -Clean
 ```
 
@@ -158,18 +168,15 @@ Watch mode for repeated rebuilds:
 .\scripts\watch_gui_exe.cmd
 ```
 
-Output exe path:
-
-- `dist\XMLtoUSDAConverter.exe`
-
 Notes:
 
-- the default build is a fast launcher copy from `.venv310\Scripts\xml-to-usda-gui.exe`
-- the fast build depends on the local `.venv310`
+- `dist-next` is the primary operator release path
+- the old `dist` / Tk build remains available as a legacy fallback
 - `-Package` removes stale build/dist state first, then runs PyInstaller with `--clean` to produce the standalone executable
-- every launcher or package build now writes `dist\build_info.json`
+- every package build writes `dist-next\build_info.json`
 - on startup the GUI writes a `Build info:` banner into the in-app `Log`, including build time, build mode, and a short git summary when available
 - on startup the GUI also writes a `Runtime info:` banner into the in-app `Log`, including whether the app is frozen, which executable launched it, and which runtime paths are active
+- the exe is portable as an app binary, but UI settings and runtime cache still live under the user's profile (`~\.xml_to_usda` and `%LOCALAPPDATA%\XMLtoUSDAConverter`)
 
 ## Docs
 

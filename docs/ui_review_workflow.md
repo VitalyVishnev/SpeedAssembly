@@ -2,14 +2,14 @@
 
 ## Role
 
-This document defines how the PySide6 beta shell is reviewed and iterated.
+This document defines how the PySide6 release shell is reviewed and iterated.
 
 ## Pairing loop
 
 The UI is developed in a screenshot-driven loop:
 
 1. implement one visual milestone
-2. launch the beta shell locally
+2. launch the PySide6 shell locally
 3. capture 1-2 screenshots
 4. review spacing, hierarchy, radius, color, font scale, and balance
 5. apply the next polish pass

@@ -182,6 +182,26 @@ In `skeletal_parts` mode:
 
 Use this mode when you want to import the repeated parts first and wire them into a project through already-imported part assets later.
 
+## Static assembly export mode
+
+The static assembly path reuses the same normalized source data but changes the authored USDA contract.
+
+In `static_assembly` mode:
+
+- the converter still discovers `Objects/Object`, `Meshes/Mesh`, and `LeafReferences`
+- the regular XML hierarchy still provides the unique base geometry
+- `LeafReferences` still provide repeated part placement
+- `LeafReferences` position, rotation, and scale data still become point-instancer placement data
+- the authoring result is a single USD file with `NaniteAssemblyRootAPI` and `meshType = "staticMesh"`
+- the root prim is the stage root itself; a `defaultPrim` is not required for this mode
+- the root `PointInstancer` carries all placed geometry, including one synthetic base prototype at the tree pivot when a base mesh exists
+- no skeleton data is authored
+- no skeletal binding arrays are authored
+- inline repeated parts become static `Xform` + `SM_`-prefixed `Mesh` prototypes when the source name does not already start with `SM_`
+- external Unreal reuse becomes static `Xform` prototypes with `NaniteAssemblyExternalRefAPI`
+
+Use this mode when the tree or vegetation should behave as rigid static Nanite assembly geometry rather than as a skeletal tree.
+
 ## Current part interpretation
 
 For the current project contract:

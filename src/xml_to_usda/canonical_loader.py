@@ -25,6 +25,7 @@ from .models import (
     ObservedXmlSchemaReport,
     OutputMode,
     PrototypeSourceConfig,
+    PrototypeStrategy,
 )
 from .normalizer import normalize_to_canonical
 from .prototype_sources import apply_prototype_source_configs, merge_legacy_part_mesh_configs
@@ -107,6 +108,8 @@ def load_canonical_model(
             leaves_material_path=leaves_material_path,
             single_material_path=single_material_path,
         )
+    if conversion_mode == ConversionMode.STATIC_ASSEMBLY:
+        model = replace(model, prototype_strategy=PrototypeStrategy.INLINE_STATIC_PART)
     model = replace(
         model,
         metadata=replace(

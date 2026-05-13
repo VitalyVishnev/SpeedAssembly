@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+
+from .models import ConversionMode
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,26 @@ class UeSchemaContract:
     root_api_allowed_prims: tuple[str, ...] = ("Xform",)
     external_ref_api_allowed_prims: tuple[str, ...] = ("Xform",)
     binding_api_allowed_prims: tuple[str, ...] = ("Xform", "Mesh", "SkelRoot", "PointInstancer")
+
+    def for_conversion_mode(
+        self,
+        conversion_mode: ConversionMode,
+        *,
+        root_prim_name: str | None = None,
+    ) -> "UeSchemaContract":
+        if conversion_mode in {ConversionMode.SKELETAL_ASSEMBLY, ConversionMode.SKELETAL_PARTS}:
+            if root_prim_name and root_prim_name != self.root_prim_name:
+                return replace(self, root_prim_name=root_prim_name)
+            return self
+        if conversion_mode == ConversionMode.STATIC_ASSEMBLY:
+            updates = {
+                "mesh_type_value": "staticMesh",
+                "root_kind": "group",
+            }
+            if root_prim_name:
+                updates["root_prim_name"] = root_prim_name
+            return replace(self, **updates)
+        raise ValueError(f"Unsupported conversion mode for UE schema contract: {conversion_mode.value}.")
 
     @property
     def main_skeleton_path(self) -> str:

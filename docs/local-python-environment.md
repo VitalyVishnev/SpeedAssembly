@@ -50,16 +50,17 @@ python -m xml_to_usda gui
 Build helpers also use `.venv310`:
 
 ```powershell
-.\scripts\build_gui_exe.cmd
-.\scripts\build_gui_exe.cmd -Package
+.\scripts\build_qt_gui_exe.cmd -Package
+.\scripts\build_qt_gui_exe.cmd -Package -Clean
 ```
 
-Each build helper run also writes `dist\build_info.json`. The GUI reads that file on startup and prints a `Build info:` banner at the top of the in-app `Log`, so launcher-build testing no longer depends on the executable file timestamp.
+The primary release artifact is `dist-next\XMLtoUSDAConverter.exe`. Each package build also writes `dist-next\build_info.json`. The GUI reads that file on startup and prints a `Build info:` banner at the top of the in-app `Log`, so package testing no longer depends on the executable file timestamp.
 
 Large-job execution note:
 
 - the GUI now launches big conversion jobs through a spawned worker subprocess
 - on Windows, that worker may itself launch additional `spawn` worker processes for parallel FBX prototype import
+- the primary `dist-next` one-file package reuses `XMLtoUSDAConverter.exe` for packaged `fbx-worker` helper mode instead of requiring a sidecar worker executable
 - this is why `.venv310`, `multiprocessing.freeze_support()`, and a real file-backed Python entry point matter for stress tests and packaged builds
 
 ## Runtime temp files and cache hygiene
@@ -70,7 +71,7 @@ Large-job execution note:
 - the GUI `Preserve temp files for debugging` switch and CLI `--preserve-temp-files` flag keep the job dir and manifest on disk for investigation
 - stale job dirs older than 24 hours are cleaned during startup sweep
 - GUI-side runtime errors are appended to `~/.xml_to_usda/gui_runtime.log` so failures can be reviewed later without relying on modal popups
-- build artifacts such as `build/` and `dist/` are not part of runtime cache hygiene and are only cleaned by build helpers
+- build artifacts such as `build/`, `build-next/`, `dist/`, and `dist-next/` are not part of runtime cache hygiene and are only cleaned by build helpers
 
 ## Recreate the environment
 

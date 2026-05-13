@@ -2,11 +2,10 @@
 
 ## Role
 
-This document describes the bootstrap architecture for the PySide6 beta shell.
+This document describes the bootstrap architecture for the PySide6 release shell.
 
-The current Tk GUI remains the stable operator fallback. The new shell is a
-parallel UI track intended for visual iteration, responsive layout work, and a
-future full migration once feature parity is reached.
+The PySide6 shell is now the primary operator release path. The old Tk GUI
+remains a legacy fallback while the release transition settles.
 
 ## Layering
 
@@ -42,13 +41,16 @@ operator-state adapters will be added incrementally after visual review.
 
 ## Rollout
 
-- stable GUI entrypoint remains `xml_to_usda.gui`
-- beta PySide6 entrypoint is `xml_to_usda.qt_ui.entry`
-- stable packaged build remains `XMLtoUSDAConverter.exe`
-- beta packaged build is `XMLtoUSDAConverterNext.exe`
+- primary release GUI entrypoint is `xml_to_usda.qt_ui.entry`
+- primary packaged build is `dist-next\XMLtoUSDAConverter.exe`
+- the PySide6 packaged exe is a one-file release artifact and also handles
+  `fbx-worker` helper mode when launched with the worker command prefix
+- legacy Tk entrypoint `xml_to_usda.gui` and the old `dist` build remain
+  available as fallback paths while the release transition settles
 
-The two shells must coexist until the PySide6 shell reaches working parity and
-passes the same real conversion validation.
+The release target is now the PySide6 shell. Any missing operator parity should
+be treated as release-blocking work for `dist-next`, not as a reason to publish
+the old Tk shell as the primary artifact.
 
 ## Current Shell Interaction Contract
 

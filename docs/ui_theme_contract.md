@@ -2,7 +2,7 @@
 
 ## Role
 
-This document defines the bundled visual-theme contract for the PySide6 beta
+This document defines the bundled visual-theme contract for the PySide6
 shell.
 
 ## Theme manifest

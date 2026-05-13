@@ -16,6 +16,51 @@ function Get-VenvExecutable([string]$RepoRoot) {
     return $pythonExe
 }
 
+function Get-GitBuildMetadata([string]$RepoRoot) {
+    $metadata = @{
+        git_branch = $null
+        git_head = $null
+        git_dirty = $null
+        change_summary = $null
+    }
+
+    try {
+        $branch = git -C $RepoRoot branch --show-current 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $metadata.git_branch = (($branch | Out-String).Trim())
+        }
+    }
+    catch {
+    }
+
+    try {
+        $head = git -C $RepoRoot rev-parse --short HEAD 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $metadata.git_head = (($head | Out-String).Trim())
+        }
+    }
+    catch {
+    }
+
+    try {
+        $statusLines = @(git -C $RepoRoot status --short 2>$null)
+        if ($LASTEXITCODE -eq 0) {
+            $metadata.git_dirty = ($statusLines.Count -gt 0)
+            $summaryItems = @($statusLines | Select-Object -First 3 | ForEach-Object { $_.Trim() })
+            if ($statusLines.Count -gt 3) {
+                $summaryItems += "(+$($statusLines.Count - 3) more)"
+            }
+            if ($summaryItems.Count -gt 0) {
+                $metadata.change_summary = ($summaryItems -join '; ')
+            }
+        }
+    }
+    catch {
+    }
+
+    return $metadata
+}
+
 function Write-BuildInfo(
     [string]$DistPath,
     [string]$ExePath,
@@ -24,23 +69,27 @@ function Write-BuildInfo(
     [string]$BuildMode
 ) {
     $buildInfoPath = Join-Path $DistPath 'build_info.json'
+    $gitMetadata = Get-GitBuildMetadata -RepoRoot $RepoRoot
     $payload = [ordered]@{
         built_at = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
         build_mode = $BuildMode
         exe_path = $ExePath
         python_exe = $PythonExe
         repo_root = $RepoRoot
+        git_branch = $gitMetadata.git_branch
+        git_head = $gitMetadata.git_head
+        git_dirty = $gitMetadata.git_dirty
+        change_summary = $gitMetadata.change_summary
     }
     $payload | ConvertTo-Json | Set-Content -Path $buildInfoPath -Encoding UTF8
+    Write-Host "Wrote build info: $buildInfoPath"
 }
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $launcherScript = Join-Path $repoRoot 'scripts\launch_qt_gui.py'
-$workerLauncherScript = Join-Path $repoRoot 'scripts\launch_fbx_worker.py'
 $distPath = Join-Path $repoRoot 'dist-next'
 $buildPath = Join-Path $repoRoot 'build-next'
-$exePath = Join-Path $distPath 'XMLtoUSDAConverterNext.exe'
-$workerExePath = Join-Path $distPath 'XMLtoUSDAWorker\XMLtoUSDAWorker.exe'
+$exePath = Join-Path $distPath 'XMLtoUSDAConverter.exe'
 
 Push-Location $repoRoot
 try {
@@ -51,7 +100,7 @@ try {
             Write-Host 'Installing UI-next build dependencies into .venv310 ...'
             & $pythonExe -m pip install -e '.[dev,ui-next]'
             if ($LASTEXITCODE -ne 0) {
-                throw 'Failed to install ui-next dependencies for beta shell build.'
+                throw 'Failed to install ui-next dependencies for PySide6 release build.'
             }
         }
     }
@@ -77,48 +126,27 @@ try {
             '--clean',
             '--onefile',
             '--windowed',
-            '--name', 'XMLtoUSDAConverterNext',
+            '--name', 'XMLtoUSDAConverter',
             '--paths', (Join-Path $repoRoot 'src'),
             '--collect-data', 'xml_to_usda.qt_ui',
             '--distpath', $distPath,
             '--workpath', $buildPath,
+            '--specpath', $buildPath,
             $launcherScript
         )
 
-        Write-Host "Building PySide6 beta shell with $pythonExe ..."
+        Write-Host "Building PySide6 release shell with $pythonExe ..."
         & $pythonExe @pyInstallerArgs
         if ($LASTEXITCODE -ne 0) {
-            throw 'PyInstaller beta-shell build failed.'
-        }
-
-        $workerPyInstallerArgs = @(
-            '-m', 'PyInstaller',
-            '--noconfirm',
-            '--clean',
-            '--console',
-            '--name', 'XMLtoUSDAWorker',
-            '--paths', (Join-Path $repoRoot 'src'),
-            '--distpath', $distPath,
-            '--workpath', (Join-Path $buildPath 'worker'),
-            $workerLauncherScript
-        )
-
-        Write-Host "Building FBX worker sidecar with $pythonExe ..."
-        & $pythonExe @workerPyInstallerArgs
-        if ($LASTEXITCODE -ne 0) {
-            throw 'PyInstaller worker build failed for beta shell.'
+            throw 'PyInstaller PySide6 release build failed.'
         }
 
         if (-not (Test-Path $exePath)) {
-            throw "Expected beta exe was not created: $exePath"
-        }
-        if (-not (Test-Path $workerExePath)) {
-            throw "Expected worker exe was not created: $workerExePath"
+            throw "Expected release exe was not created: $exePath"
         }
 
-        Write-BuildInfo -DistPath $distPath -ExePath $exePath -PythonExe $pythonExe -RepoRoot $repoRoot -BuildMode 'package-next'
+        Write-BuildInfo -DistPath $distPath -ExePath $exePath -PythonExe $pythonExe -RepoRoot $repoRoot -BuildMode 'release'
         Write-Host "Built: $exePath"
-        Write-Host "Built worker: $workerExePath"
         if ($OpenOutput) {
             Invoke-Item $distPath
         }

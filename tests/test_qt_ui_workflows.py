@@ -244,6 +244,35 @@ def test_qt_window_passes_selected_conversion_mode_to_conversion_request(monkeyp
     assert request.conversion_mode == ConversionMode.SKELETAL_PARTS
 
 
+def test_qt_window_passes_static_assembly_mode_to_conversion_request(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    calls: dict[str, object] = {}
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps(calls),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+    window.output_input.setText(str(tmp_path / "tree.usda"))
+    window._conversion_mode_actions["static_assembly"].trigger()
+    qtbot.mouseClick(window.convert_button, Qt.MouseButton.LeftButton)
+
+    qtbot.waitUntil(lambda: "Wrote USDA to" in window.status_label.text(), timeout=3000)
+
+    request = calls["convert_request"]["request"]
+    assert calls["prepare_conversion_plan"]["conversion_mode"] == ConversionMode.STATIC_ASSEMBLY
+    assert request.conversion_mode == ConversionMode.STATIC_ASSEMBLY
+
+
 def test_qt_window_refreshes_wind_and_generates_json(monkeypatch, qtbot, tmp_path) -> None:
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
     monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))

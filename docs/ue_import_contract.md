@@ -6,7 +6,10 @@ This document is normative for importer-facing USDA structure and required UE/US
 
 ## Target import shape
 
-The target asset is a **Skeletal Nanite Assembly**.
+The target asset family now has two supported UE import shapes:
+
+- a **Skeletal Nanite Assembly** baseline
+- a **Static Mesh Assembly** export mode for non-skinned vegetation and other rigid vegetation clusters
 
 It consists of:
 
@@ -19,11 +22,11 @@ It consists of:
   - an inline skeletal part subtree whose mesh payload was replaced from an explicit disk FBX file
   - an external referenced Unreal skeletal asset
 
-Static assemblies exist in UE, but this project targets the skeletal tree path only.
+Static assemblies are now part of the exporter contract, but the skeletal tree path remains the baseline import shape.
 
 ## Export modes
 
-The converter now has two skeletal authoring modes:
+The converter now has three supported authoring modes plus one disabled future mode:
 
 - `skeletal_assembly`
   - the validated UE import contract
@@ -34,11 +37,20 @@ The converter now has two skeletal authoring modes:
   - each generated file uses the prototype name as both filename stem and root prim name
   - omits the assembly root API, base skeletal tree, main skeleton, and real `PointInstancer`
   - is valid only when prototype payloads are present
+- `static_assembly`
+  - authors a single USDA file as a static Nanite Assembly
+  - uses `NaniteAssemblyRootAPI`, `meshType = "staticMesh"`, and a plain `PointInstancer`
+  - omits skeletons, binding arrays, and all `primvars:skel:*` fields
+  - writes unique base geometry as one synthetic static prototype at the assembly pivot
+- `static_parts`
+  - remains disabled for this pass
+  - is reserved for a later static part-library export shape
 
 Missing base mesh and missing main skeleton are hard failures only in `skeletal_assembly` mode.
 They are expected omissions in `skeletal_parts` mode.
+Static assemblies require renderable geometry, but they do not require a skeleton or skeletal binding.
 
-## Current structural contract
+## Current skeletal structural contract
 
 The current validated structure is `skeletal_assembly` mode:
 
@@ -84,6 +96,13 @@ For `skeletal_parts` exports:
 - each prototype writes as `<Prototype>.usda` inside that directory
 - each part file uses `defaultPrim = "<Prototype>"`
 - each part file root prim is also `<Prototype>`
+
+For `static_assembly` exports:
+
+- the generated file name is still `<stem>.usda`
+- the root prim name uses the chosen output stem or assembly stem directly
+- the synthetic base prototype name is the root stem plus a deterministic suffix such as `_BaseMesh`
+- repeated prototype prim names continue to come from source XML mesh names or resolved FBX stems, sanitized only as needed for USD validity
 
 This is the naming rule used by the converter when an explicit output path is provided.
 It is not derived from the first bone name, and it is not derived from the XML source filename.
@@ -136,6 +155,27 @@ At minimum, current validated notes require:
 - valid skeletal binding data for the Base Skeletal Tree
 
 These required fields apply to `skeletal_assembly` mode. The `skeletal_parts` mode intentionally omits the assembly-only fields.
+
+## Static mesh assembly contract
+
+For `static_assembly` mode, the required importer-facing shape is:
+
+- root `Xform` with `NaniteAssemblyRootAPI`
+- root `unreal:naniteAssembly:meshType = "staticMesh"`
+- root `kind = "group"`
+- the stage root does not require a `defaultPrim`; the root prim itself is the assembly root
+- no skeleton relationship on the root
+- no `SkelRoot`
+- no `Skeleton`
+- no `SkelBindingAPI`
+- no `primvars:skel:*` fields anywhere in the authored USDA
+- one `PointInstancer` carrying the placed assembly instances
+- prototype prims under `PointInstancer/Prototypes`
+- unique base geometry authored as a synthetic static prototype at the tree pivot when a base mesh exists
+- repeated part prototypes authored as static `Xform` + `Mesh` subtrees or as external Nanite assembly references
+- inline static `Mesh` prims use the `SM_` naming convention when the source prototype name does not already have it
+
+The static assembly root name is derived from the assembly/output stem, not from the skeletal `Tree` contract.
 
 ## External reuse debugging rule
 
@@ -230,4 +270,5 @@ Current verified state:
 - the importer accepts the current skeletal assembly structure
 - mixed inline and external prototype resolution is covered by automated regression tests
 - explicit inline FBX prototype replacement is covered by automated streaming-writer regression tests
+- static assembly export is implemented and unit-tested, but it still needs a fresh UE 5.7.x import pass before it is considered validated
 - visual fidelity is still incomplete and requires later transform and rig refinement

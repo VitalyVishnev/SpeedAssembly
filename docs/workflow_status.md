@@ -45,6 +45,7 @@ The project has also passed automated `Phase 1` regression coverage for:
 - separate Dynamic Wind JSON generation from the normalized skeleton
 - streamed USDA writing for explicit FBX prototype payloads without returning a full in-memory USDA text blob
 - `skeletal_parts` split export coverage for one-USDA-per-prototype naming without assembly-root or base-tree fields
+- `static_assembly` export coverage for single-file static Nanite Assembly authoring with a plain `PointInstancer` and `SM_`-prefixed static mesh child prims
 
 Current Python runtime contract:
 
@@ -62,6 +63,7 @@ The current naming contract used by the checked exports is:
 - the shared `Skeleton` uses `<stem>_Skeleton`
 - the skeleton name is not inferred from the first bone name
 - the XML source filename is not used to derive the main skeleton name
+- static assembly exports derive the root prim from the chosen assembly/output stem and keep unique base geometry inside the instancer prototype list
 
 The wind-group contract has also been validated on the attached grass sample:
 
@@ -122,7 +124,7 @@ Current large-job execution contract:
 - explicit FBX prototype imports are parallelized across a `spawn` process pool when more than one FBX prototype must be imported
 - this parallelism is currently prototype-level and stage-level, not "all cores inside one single FBX file"
 - packaged frozen runs use isolated helper imports through the shared FBX supervisor and start from the requested prototype-level concurrency
-- packaged builds now prefer a dedicated sidecar `XMLtoUSDAWorker` binary for helper imports when it is present next to the GUI package output
+- the primary `dist-next` package is a one-file release: `XMLtoUSDAConverter.exe` also handles `fbx-worker` helper mode when no legacy sidecar worker is present
 - if a native helper crash occurs at that concurrency, the supervisor automatically retries the remaining FBX imports with a lower helper count instead of failing the whole job immediately
 - if that worker pool cannot be created in the current environment, FBX prototype import falls back to sequential execution instead of failing outright
 - the conversion worker must not be daemonized, because parallel FBX import requires child worker processes
@@ -172,10 +174,11 @@ Grass should be checked in more than one authoring style:
 - clustered or bundled blades, with one bone per bundle if that is how the source is authored
 - a more detailed blade-level variant, if a real source export exists for that shape
 
-The standalone package build path has also been stabilized:
+The primary standalone package build path has also been stabilized:
 
-- `.\scripts\build_gui_exe.cmd -Package` now clears stale `build/` and `dist/` state before invoking PyInstaller
+- `.\scripts\build_qt_gui_exe.cmd -Package` now clears stale `build-next/` and `dist-next/` state before invoking PyInstaller
 - PyInstaller is also run with `--clean` so the package path does not reuse incremental analysis output from older runs
+- the public release artifact is `dist-next\XMLtoUSDAConverter.exe`, with no required sidecar worker executable
 - the previous "looks stuck" behavior was a stale-package-state problem, not a converter logic regression
 
 At this point, the earlier importer-facing concerns are treated as closed by the current validation set:

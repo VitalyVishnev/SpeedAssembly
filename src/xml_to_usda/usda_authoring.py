@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 
 from .job_control import emit_telemetry, throw_if_cancelled
 from .models import (
@@ -25,11 +26,14 @@ from .models import (
     MeshData,
     MeshSection,
     Prototype,
+    PrototypeIdentity,
     PrototypeResolutionMode,
     PrototypeSourceMode,
     PrototypeStrategy,
+    Quaternion,
     SkeletalSupportPrimvars,
     ValidationIssue,
+    Vector3,
 )
 from .naming import make_stable_prim_name
 from .ue_schema import DEFAULT_UE_SCHEMA_CONTRACT, UeSchemaContract
@@ -84,8 +88,25 @@ def build_authoring_context(
         )
 
     resolved_conversion_mode = ConversionMode.parse(conversion_mode or model.metadata.conversion_mode)
-    if resolved_conversion_mode not in {ConversionMode.SKELETAL_ASSEMBLY, ConversionMode.SKELETAL_PARTS}:
+    if resolved_conversion_mode == ConversionMode.STATIC_PARTS:
         raise ValueError(f"Unsupported conversion mode: {resolved_conversion_mode.value}.")
+    if resolved_conversion_mode not in {
+        ConversionMode.SKELETAL_ASSEMBLY,
+        ConversionMode.SKELETAL_PARTS,
+        ConversionMode.STATIC_ASSEMBLY,
+    }:
+        raise ValueError(f"Unsupported conversion mode: {resolved_conversion_mode.value}.")
+
+    resolved_root_prim_name = contract.root_prim_name
+    if resolved_conversion_mode == ConversionMode.STATIC_ASSEMBLY:
+        resolved_root_prim_name = make_stable_prim_name(
+            base_mesh_name or Path(model.metadata.source_path).stem or contract.root_prim_name,
+            fallback=contract.root_prim_name,
+        )
+        contract = contract.for_conversion_mode(
+            resolved_conversion_mode,
+            root_prim_name=resolved_root_prim_name,
+        )
 
     resolved_base_mesh_name = make_stable_prim_name(
         base_mesh_name or contract.base_mesh_name,
@@ -161,6 +182,16 @@ def author_usda(
     contract = context.contract
     model = context.model
     stage_root_name = _stage_root_name(context)
+
+    if context.conversion_mode == ConversionMode.STATIC_ASSEMBLY:
+        _emit_static_assembly_document(
+            sink,
+            context,
+            telemetry_callback=telemetry_callback,
+            cancel_event=cancel_event,
+            started_at=started_at,
+        )
+        return
 
     _write_line(sink, 0, "#usda 1.0")
     _write_line(sink, 0, "(")
@@ -292,15 +323,57 @@ def _emit_prototype_library(sink, context: AuthoringContext, indent_level: int) 
     _write_line(sink, indent_level, "}")
 
 
+def _emit_static_assembly_document(
+    sink,
+    context: AuthoringContext,
+    *,
+    telemetry_callback=None,
+    cancel_event=None,
+    started_at: float | None = None,
+) -> None:
+    contract = context.contract
+    model = context.model
+    prototypes = _static_assembly_prototypes(context)
+    instances = _static_assembly_instances(context, prototypes)
+
+    _write_line(sink, 0, "#usda 1.0")
+    _write_line(sink, 0, "(")
+    _write_line(sink, 1, f"metersPerUnit = {contract.stage_meters_per_unit:g}")
+    _write_line(sink, 1, f'upAxis = "{contract.stage_up_axis}"')
+    _write_line(sink, 0, ")")
+    _write_line(sink, 0)
+    _write_line(sink, 0, f'def Xform "{contract.root_prim_name}" (')
+    _write_line(sink, 1, f'apiSchemas = ["{contract.root_api}"]')
+    _write_line(sink, 1, f'kind = "{contract.root_kind}"')
+    _write_line(sink, 0, ")")
+    _write_line(sink, 0, "{")
+    _write_line(sink, 1, f'uniform token {contract.mesh_type_attr} = "{contract.mesh_type_value}"')
+    _write_line(sink, 0)
+
+    materials = _render_materials_scope(model.materials, contract.root_prim_name)
+    if materials:
+        _write_block(sink, materials, 1)
+        _write_line(sink, 0)
+
+    _emit_static_point_instancer(
+        sink,
+        context,
+        1,
+        prototypes=prototypes,
+        instances=instances,
+        telemetry_callback=telemetry_callback,
+        cancel_event=cancel_event,
+        started_at=started_at,
+    )
+    _write_line(sink, 0, "}")
+
+
 def _emit_library_prototype(sink, prototype: Prototype, contract: UeSchemaContract, indent_level: int) -> None:
     mesh = _prototype_inline_mesh(prototype)
     if mesh is None:
         raise ValueError(f"Prototype {prototype.identity.prim_name} is missing mesh payload.")
 
-    part_mesh_name = make_stable_prim_name(
-        prototype.identity.prim_name,
-        fallback=contract.part_mesh_name,
-    )
+    part_mesh_name = _static_mesh_prim_name(prototype, contract)
     _write_line(sink, indent_level, f'def Xform "{prototype.identity.prim_name}" (')
     _write_line(sink, indent_level + 1, 'kind = "component"')
     _write_line(sink, indent_level, ")")
@@ -313,6 +386,182 @@ def _emit_library_prototype(sink, prototype: Prototype, contract: UeSchemaContra
     _emit_mesh_payload(sink, mesh, contract.mesh_orientation, indent_level + 2)
     _write_line(sink, indent_level + 1, "}")
     _write_line(sink, indent_level, "}")
+
+
+def _static_assembly_prototypes(context: AuthoringContext) -> tuple[Prototype, ...]:
+    prototypes: list[Prototype] = []
+    if context.model.base_mesh is not None:
+        prototypes.append(_make_static_base_prototype(context))
+    prototypes.extend(context.model.prototypes)
+    return tuple(prototypes)
+
+
+def _static_assembly_instances(
+    context: AuthoringContext,
+    prototypes: tuple[Prototype, ...],
+) -> tuple[AssemblyPartInstance, ...]:
+    instances: list[AssemblyPartInstance] = []
+    if context.model.base_mesh is not None and prototypes:
+        instances.append(_make_static_base_instance(context, prototypes[0].identity.source_key))
+    instances.extend(context.model.assembly_parts)
+    return tuple(instances)
+
+
+def _make_static_base_prototype(context: AuthoringContext) -> Prototype:
+    root_name = context.contract.root_prim_name
+    base_name = make_stable_prim_name(f"{root_name}_BaseMesh", fallback="BaseMesh")
+    return Prototype(
+        identity=PrototypeIdentity(
+            source_key="__static_base_mesh__",
+            prim_name=base_name,
+            prototype_type="static_base_mesh",
+        ),
+        mesh=context.model.base_mesh,
+        source_key="__static_base_mesh__",
+        source_mesh_id=None,
+        source_name=root_name,
+        prototype_type="static_base_mesh",
+        resolution_mode=PrototypeResolutionMode.INLINE_MESH,
+        source_mode=PrototypeSourceMode.XML_MESH,
+        geometry_payload=None,
+    )
+
+
+def _make_static_base_instance(context: AuthoringContext, prototype_key: str) -> AssemblyPartInstance:
+    return AssemblyPartInstance(
+        name=context.contract.root_prim_name,
+        prototype_key=prototype_key,
+        position=Vector3(0.0, 0.0, 0.0),
+        orientation=Quaternion(1.0, 0.0, 0.0, 0.0),
+        scale=Vector3(1.0, 1.0, 1.0),
+        binding=InstanceBinding(joint_tokens=(), weights=()),
+        source_object_id=None,
+        source_mesh_id=None,
+    )
+
+
+def _emit_static_point_instancer(
+    sink,
+    context: AuthoringContext,
+    indent_level: int,
+    *,
+    prototypes: tuple[Prototype, ...],
+    instances: tuple[AssemblyPartInstance, ...],
+    telemetry_callback=None,
+    cancel_event=None,
+    started_at: float | None = None,
+) -> None:
+    if not instances:
+        return
+
+    contract = context.contract
+    prototype_index_map = {prototype.identity.source_key: index for index, prototype in enumerate(prototypes)}
+    prototype_paths = ", ".join(contract.prototype_root_path(prototype.identity.prim_name) for prototype in prototypes)
+    include_orientations = any(not _is_identity_quaternion(instance.orientation) for instance in instances)
+    include_scales = any(not _is_unit_scale(instance.scale) for instance in instances)
+
+    _write_line(sink, indent_level, f'def PointInstancer "{contract.assembly_parts_instancer_name}" (')
+    _write_line(sink, indent_level + 1, 'kind = "group"')
+    _write_line(sink, indent_level, ")")
+    _write_line(sink, indent_level, "{")
+    _write_line(sink, indent_level + 1, f"rel prototypes = [{prototype_paths}]")
+    _write_array_attribute(
+        sink,
+        indent_level + 1,
+        "int[] protoIndices",
+        (
+            str(_static_prototype_index(instance.prototype_key, prototype_index_map, instance.name))
+            for instance in instances
+        ),
+    )
+    _write_array_attribute(
+        sink,
+        indent_level + 1,
+        "point3f[] positions",
+        (instance.position.to_usda() for instance in instances),
+    )
+    if include_orientations:
+        _write_array_attribute(
+            sink,
+            indent_level + 1,
+            "quath[] orientations",
+            (instance.orientation.to_usda() for instance in instances),
+        )
+    if include_scales:
+        _write_array_attribute(
+            sink,
+            indent_level + 1,
+            "float3[] scales",
+            (instance.scale.to_usda() for instance in instances),
+        )
+    _write_line(sink, 0)
+    _write_line(sink, indent_level + 1, f'def Scope "{contract.prototype_scope_name}" (')
+    _write_line(sink, indent_level + 2, 'kind = "group"')
+    _write_line(sink, indent_level + 1, ")")
+    _write_line(sink, indent_level + 1, "{")
+    for index, prototype in enumerate(prototypes, start=1):
+        throw_if_cancelled(cancel_event)
+        _emit_static_instancer_prototype(sink, prototype, context, indent_level + 2)
+        emit_telemetry(
+            telemetry_callback,
+            ConversionPhase.USDA_WRITING,
+            completed_units=index,
+            total_units=len(prototypes),
+            message=f"Writing prototype {prototype.identity.prim_name}.",
+            started_at=started_at,
+        )
+    _write_line(sink, indent_level + 1, "}")
+    _write_line(sink, indent_level, "}")
+
+
+def _emit_static_instancer_prototype(
+    sink,
+    prototype: Prototype,
+    context: AuthoringContext,
+    indent_level: int,
+) -> None:
+    if prototype.resolution_mode == PrototypeResolutionMode.EXTERNAL_ASSET:
+        _write_block(sink, _render_external_instancer_prototype(prototype, context.contract), indent_level)
+        return
+
+    mesh = _prototype_inline_mesh(prototype)
+    if mesh is None:
+        raise ValueError(f"Prototype {prototype.identity.prim_name} is missing mesh payload.")
+
+    part_mesh_name = _static_mesh_prim_name(prototype, context.contract)
+    _write_line(sink, indent_level, f'def Xform "{prototype.identity.prim_name}" (')
+    _write_line(sink, indent_level + 1, 'kind = "component"')
+    _write_line(sink, indent_level, ")")
+    _write_line(sink, indent_level, "{")
+    _write_line(sink, indent_level + 1, f'def Mesh "{part_mesh_name}"')
+    _write_line(sink, indent_level + 1, "{")
+    _write_line(sink, indent_level + 2, 'uniform token subdivisionScheme = "none"')
+    _emit_material_binding(sink, mesh, indent_level + 2, context.contract.root_prim_name)
+    _emit_mesh_payload(sink, mesh, context.contract.mesh_orientation, indent_level + 2)
+    _write_line(sink, indent_level + 1, "}")
+    _write_line(sink, indent_level, "}")
+
+
+def _static_prototype_index(prototype_key: str, prototype_index_map: dict[str, int], instance_name: str) -> int:
+    try:
+        return prototype_index_map[prototype_key]
+    except KeyError as exc:
+        raise ValueError(f"Instance {instance_name} references missing prototype {prototype_key}.") from exc
+
+
+def _static_mesh_prim_name(prototype: Prototype, contract: UeSchemaContract) -> str:
+    raw_name = prototype.identity.prim_name
+    if not raw_name.startswith("SM_"):
+        raw_name = f"SM_{raw_name}"
+    return make_stable_prim_name(raw_name, fallback=f"SM_{contract.part_mesh_name}")
+
+
+def _is_identity_quaternion(value: Quaternion) -> bool:
+    return value.real == 1.0 and value.i == 0.0 and value.j == 0.0 and value.k == 0.0
+
+
+def _is_unit_scale(value: Vector3) -> bool:
+    return value.x == 1.0 and value.y == 1.0 and value.z == 1.0
 
 
 def _emit_base_mesh(sink, context: AuthoringContext, indent_level: int) -> None:

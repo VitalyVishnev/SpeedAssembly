@@ -81,7 +81,7 @@ class QtBackgroundJobsController:
         self._window._set_status("Preparing conversion job...")
         self._window._set_log(
             "Starting conversion.\n"
-            "The beta shell keeps the UI responsive while backend services normalize XML, import FBX, and write USDA."
+            "The PySide6 shell keeps the UI responsive while backend services normalize XML, import FBX, and write USDA."
         )
         if run_async:
             try:
@@ -146,7 +146,7 @@ class QtBackgroundJobsController:
         self._window._set_status("Inspecting wind groups...")
         self._window._append_log(
             "Inspecting wind groups.\n"
-            "The beta shell keeps the UI responsive while generator levels are analyzed."
+            "The PySide6 shell keeps the UI responsive while generator levels are analyzed."
         )
         self._wind_refresh_thread = threading.Thread(
             target=self._run_wind_refresh_worker,

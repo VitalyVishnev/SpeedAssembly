@@ -114,6 +114,7 @@ class MaterialPolicy(StrEnum):
 
 class PrototypeStrategy(StrEnum):
     INLINE_SKELETAL_PART = "inline_skeletal_part"
+    INLINE_STATIC_PART = "inline_static_part"
     REFERENCED_SCOPE = "referenced_scope"
 
 

@@ -30,7 +30,7 @@ def test_qt_shell_window_creation(qtbot, tmp_path) -> None:
     qtbot.addWidget(window)
     window.show()
 
-    assert window.windowTitle() == "XML to USDA Converter Next"
+    assert window.windowTitle() == "XML to USDA Converter"
     assert window.minimumWidth() >= 1100
 
 

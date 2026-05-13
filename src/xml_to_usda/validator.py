@@ -33,7 +33,11 @@ def validate_model(
     mode = _resolve_conversion_mode(model, conversion_mode)
     material_ids = {material.source_id for material in model.materials}
 
-    if mode not in {ConversionMode.SKELETAL_ASSEMBLY, ConversionMode.SKELETAL_PARTS}:
+    if mode not in {
+        ConversionMode.SKELETAL_ASSEMBLY,
+        ConversionMode.SKELETAL_PARTS,
+        ConversionMode.STATIC_ASSEMBLY,
+    }:
         issues.append(
             ValidationIssue(
                 severity="error",
@@ -48,16 +52,23 @@ def validate_model(
             ValidationIssue(
                 severity="error",
                 code="missing_object_hierarchy",
-                message="Object hierarchy data is required for skeletal assembly normalization.",
+                message="Object hierarchy data is required for assembly normalization.",
             )
         )
 
-    if mode == ConversionMode.SKELETAL_PARTS:
+    if mode == ConversionMode.STATIC_ASSEMBLY:
+        issues.extend(_validate_static_assembly_model(model, material_ids))
+    elif mode == ConversionMode.SKELETAL_PARTS:
         issues.extend(_validate_skeletal_parts_model(model, material_ids))
     else:
         issues.extend(_validate_skeletal_assembly_model(model, material_ids))
 
-    if model.branch_segments and model.skeleton and not any(segment.source_joint for segment in model.branch_segments):
+    if (
+        mode in {ConversionMode.SKELETAL_ASSEMBLY, ConversionMode.SKELETAL_PARTS}
+        and model.branch_segments
+        and model.skeleton
+        and not any(segment.source_joint for segment in model.branch_segments)
+    ):
         issues.append(
             ValidationIssue(
                 severity="warning",
@@ -267,7 +278,7 @@ def _validate_skeletal_assembly_model(
                         code="invalid_prototype_mesh",
                         message=(
                             f"Prototype {prototype.identity.prim_name} must contain point and face topology payloads "
-                            "before skeletal Assembly Part authoring."
+                            "before prototype authoring."
                         ),
                     )
                 )
@@ -282,7 +293,7 @@ def _validate_skeletal_assembly_model(
                         code="invalid_prototype_mesh",
                         message=(
                             f"Prototype {prototype.identity.prim_name} must contain point and face topology payloads "
-                            "before skeletal Assembly Part authoring."
+                            "before prototype authoring."
                         ),
                     )
                 )
@@ -325,6 +336,63 @@ def _validate_skeletal_parts_model(
         return issues
 
     issues.extend(_validate_prototypes(model.prototypes, material_ids))
+    return issues
+
+
+def _validate_static_assembly_model(
+    model: CanonicalTreeModel,
+    material_ids: set[int],
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+
+    if model.base_mesh is None and not model.assembly_parts:
+        issues.append(
+            ValidationIssue(
+                severity="error",
+                code="missing_static_instances",
+                message="Static assembly export requires a base mesh or at least one placed instance.",
+            )
+        )
+    if model.base_mesh is None and not model.prototypes:
+        issues.append(
+            ValidationIssue(
+                severity="error",
+                code="missing_prototypes",
+                message="Static assembly export requires at least one prototype payload or a base mesh.",
+            )
+        )
+    if model.base_mesh is not None:
+        if not payload_has_face_topology(model.base_mesh, None):
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="invalid_base_mesh",
+                    message="Static assembly base mesh must contain point and face topology payloads.",
+                )
+            )
+        if payload_point_count(model.base_mesh, None) <= 0 or payload_face_count(model.base_mesh, None) <= 0:
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="invalid_base_mesh",
+                    message="Static assembly base mesh must contain point and face topology payloads.",
+                )
+            )
+        issues.extend(_validate_mesh_materials(model.base_mesh, material_ids, "Static Assembly Base Mesh"))
+
+    issues.extend(_validate_prototypes(model.prototypes, material_ids))
+
+    prototypes_by_key = {prototype.source_key: prototype for prototype in model.prototypes}
+    for part in model.assembly_parts:
+        if part.prototype_key not in prototypes_by_key:
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="missing_prototype_mesh",
+                    message=f"Static assembly instance {part.name} references missing prototype {part.prototype_key}.",
+                )
+            )
+
     return issues
 
 
@@ -374,7 +442,7 @@ def _validate_prototypes(
                     code="invalid_prototype_mesh",
                     message=(
                         f"Prototype {prototype.identity.prim_name} must contain point and face topology payloads "
-                        "before skeletal Assembly Part authoring."
+                        "before prototype authoring."
                     ),
                 )
             )
@@ -388,7 +456,7 @@ def _validate_prototypes(
                     code="invalid_prototype_mesh",
                     message=(
                         f"Prototype {prototype.identity.prim_name} must contain point and face topology payloads "
-                        "before skeletal Assembly Part authoring."
+                        "before prototype authoring."
                     ),
                 )
             )
