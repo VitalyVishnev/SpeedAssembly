@@ -1,4 +1,4 @@
-"""Persistence helpers for the PySide6 beta shell."""
+"""Persistence helpers for the PySide6 shell."""
 
 from __future__ import annotations
 

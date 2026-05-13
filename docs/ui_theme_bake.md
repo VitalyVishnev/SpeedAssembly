@@ -1,6 +1,6 @@
 # UI Theme Bake Flow
 
-`Adjust UI` in the PySide6 Next shell is a development tool.
+`Adjust UI` in the PySide6 shell is a development tool.
 
 ## Runtime editing
 
@@ -17,4 +17,4 @@ Once a look is approved, bake it into the repository theme with:
 .\.venv310\Scripts\python.exe .\scripts\bake_qt_theme.py --snapshot "$env:USERPROFILE\.xml_to_usda\ui_next_theme_export.json"
 ```
 
-This overwrites the bundled `theme.json` so future `Next` builds start from the approved look without needing runtime overrides.
+This overwrites the bundled `theme.json` so future release builds start from the approved look without needing runtime overrides.

@@ -77,10 +77,11 @@ accumulate.
 
 ### UI layer
 
-Thin Tk adapters over application services and typed UI/controller state.
+Thin UI adapters over application services and typed UI/controller state.
 
 Representative modules:
 
+- `src/xml_to_usda/qt_ui/`
 - `src/xml_to_usda/gui.py`
 - `src/xml_to_usda/gui_app.py`
 - `src/xml_to_usda/gui_models.py`
@@ -96,8 +97,8 @@ state, call application services, and render results.
 
 The repository now has two UI shells:
 
-- the stable Tk fallback under `src/xml_to_usda/gui*.py`
-- the beta PySide6 shell under `src/xml_to_usda/qt_ui/`
+- the legacy Tk fallback under `src/xml_to_usda/gui*.py`
+- the primary PySide6 shell under `src/xml_to_usda/qt_ui/`
 
 Both shells must use the same application/runtime contracts instead of growing
 their own conversion rules.
@@ -111,7 +112,7 @@ These modules are intentionally retained as compatibility surfaces:
 - `src/xml_to_usda/usda_writer.py`
   Stable public writer facade over the shared authoring engine.
 - `src/xml_to_usda/gui.py`
-  Stable GUI launch facade for launcher/package/tests.
+  Legacy Tk GUI launch facade for fallback launcher/package/tests.
 
 New internal work should prefer the focused implementation modules behind these
 facades when the caller is inside the codebase and does not need the compatibility

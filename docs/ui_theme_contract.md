@@ -25,7 +25,7 @@ Each bundled theme must provide:
 
 ## Runtime override layer
 
-The `Next` shell loads theme data in 3 layers:
+The PySide6 shell loads theme data in 3 layers:
 
 1. bundled `theme.json`
 2. optional `~/.xml_to_usda/ui_next_theme_overrides.json`

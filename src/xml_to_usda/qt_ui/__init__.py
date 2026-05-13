@@ -1,1 +1,1 @@
-"""PySide6 beta UI shell for the next-generation desktop interface."""
+"""PySide6 UI shell for the primary desktop interface."""

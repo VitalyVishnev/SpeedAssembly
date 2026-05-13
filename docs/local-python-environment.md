@@ -35,7 +35,7 @@ Primary FBX-capable workflow:
 py -3.10 -m venv .venv310
 .\.venv310\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -e .[dev]
+python -m pip install -e .[dev,ui-next]
 python -m pip install "C:\Program Files\Autodesk\FBX\FBX Python SDK\2020.3.4\fbx-2020.3.4-cp310-none-win_amd64.whl"
 ```
 
@@ -45,7 +45,10 @@ After activation, run project commands through `.venv310`:
 python -m pytest
 python -m xml_to_usda inspect .\samples\speedtree\simple_tree\variants\SimpleTree_01.xml
 python -m xml_to_usda gui
+python -m xml_to_usda gui-legacy
 ```
+
+`gui` launches the primary PySide6 shell. `gui-legacy` remains available for the old Tk fallback.
 
 Build helpers also use `.venv310`:
 
@@ -83,7 +86,7 @@ Remove-Item -Recurse -Force .\.venv310
 py -3.10 -m venv .venv310
 .\.venv310\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -e .[dev]
+python -m pip install -e .[dev,ui-next]
 python -m pip install "C:\Program Files\Autodesk\FBX\FBX Python SDK\2020.3.4\fbx-2020.3.4-cp310-none-win_amd64.whl"
 ```
 

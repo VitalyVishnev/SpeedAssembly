@@ -29,7 +29,7 @@ from xml_to_usda.models import (
     ValidationIssue,
     WindJsonResult,
 )
-from xml_to_usda.cli import build_parser
+from xml_to_usda.cli import build_parser, main as cli_main
 from xml_to_usda.naming import build_prototype_identities, make_stable_prim_name
 from xml_to_usda.pipeline import REPO_ROOT, convert_file, convert_request
 
@@ -362,6 +362,31 @@ def test_cli_parser_defaults_cpu_profile_to_balanced() -> None:
     )
 
     assert args.cpu_profile == CpuProfile.BALANCED.value
+
+
+def test_cli_parser_routes_primary_and_legacy_gui_commands() -> None:
+    parser = build_parser()
+
+    assert parser.parse_args(["gui"]).command == "gui"
+    assert parser.parse_args(["gui-legacy"]).command == "gui-legacy"
+
+
+def test_cli_gui_command_launches_pyside_shell(monkeypatch: pytest.MonkeyPatch) -> None:
+    observed: list[list[str]] = []
+
+    monkeypatch.setattr("xml_to_usda.qt_ui.entry.main", lambda argv: observed.append(list(argv)) or 0)
+
+    assert cli_main(["gui"]) == 0
+    assert observed == [[]]
+
+
+def test_cli_gui_command_forwards_pyside_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    observed: list[list[str]] = []
+
+    monkeypatch.setattr("xml_to_usda.qt_ui.entry.main", lambda argv: observed.append(list(argv)) or 0)
+
+    assert cli_main(["gui", "--smoke-exit-ms", "1", "--theme", "night"]) == 0
+    assert observed == [["--smoke-exit-ms", "1", "--theme", "night"]]
 
 
 def test_convert_file_applies_baseline_material_overrides(tmp_path: Path) -> None:

@@ -1,4 +1,4 @@
-"""Interactive Adjust UI editor for the PySide6 beta shell.
+"""Interactive Adjust UI editor for the PySide6 shell.
 
 Layer: UI.
 """

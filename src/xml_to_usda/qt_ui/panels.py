@@ -1,4 +1,4 @@
-"""Qt tab panels for the next-generation beta shell.
+"""Qt tab panels for the PySide6 shell.
 
 Layer: UI.
 

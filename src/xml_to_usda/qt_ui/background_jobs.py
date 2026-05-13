@@ -1,4 +1,4 @@
-"""Background job bridge for the PySide6 beta shell.
+"""Background job bridge for the PySide6 shell.
 
 Layer: UI infrastructure.
 
@@ -31,7 +31,7 @@ class _WindErrorPayload:
 
 
 class QtBackgroundJobsController:
-    """Manage conversion and wind background work for the beta shell."""
+    """Manage conversion and wind background work for the PySide6 shell."""
 
     def __init__(self, window, *, deps, runtime_paths) -> None:
         self._window = window

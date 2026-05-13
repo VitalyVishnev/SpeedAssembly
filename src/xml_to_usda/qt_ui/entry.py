@@ -1,4 +1,4 @@
-"""Public beta entrypoint for the PySide6 next-generation GUI shell."""
+"""Public entrypoint for the primary PySide6 GUI shell."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from ..fbx_worker_subprocess import FBX_WORKER_COMMAND
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="xml-to-usda-gui-next")
+    parser = argparse.ArgumentParser(prog="xml-to-usda-gui")
     parser.add_argument("--theme", default=None, help="Bundled theme name to load for the PySide6 shell.")
     parser.add_argument("--smoke-exit-ms", type=int, default=0, help=argparse.SUPPRESS)
     return parser
@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
         from PySide6.QtWidgets import QApplication
     except ImportError:
         sys.stderr.write(
-            "PySide6 is required for the beta GUI shell. Install the 'ui-next' extra in .venv310.\n"
+            "PySide6 is required for the GUI shell. Install the 'ui-next' extra in .venv310.\n"
         )
         return 2
 

@@ -1,4 +1,4 @@
-"""Theme contract, merge logic, and asset loading for the PySide6 beta shell.
+"""Theme contract, merge logic, and asset loading for the PySide6 shell.
 
 Layer: UI.
 """

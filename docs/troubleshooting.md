@@ -2,25 +2,25 @@
 
 This page collects the fast checks for common importer dead-ends.
 
-## `build_gui_exe.cmd -Package` looks stuck or reuses stale output
+## `build_qt_gui_exe.cmd -Package` looks stuck or reuses stale output
 
 Symptom:
 
 - the package build appears to hang in PowerShell
-- `dist\XMLtoUSDAConverter.exe` still looks old after a recent code change
+- `dist-next\XMLtoUSDAConverter.exe` still looks old after a recent code change
 - PyInstaller seems to spend time in `Analysis` on repeated runs
 
 What to know:
 
-- `.\scripts\build_gui_exe.cmd -Package` now removes `build/` and `dist/` before invoking PyInstaller
+- `.\scripts\build_qt_gui_exe.cmd -Package` removes `build-next/` and `dist-next/` before invoking PyInstaller
 - the package build also passes `--clean` so stale analysis state is not reused
 - the old failure pattern was caused by incremental PyInstaller state, not by the wind-group code
 
 Practical rule:
 
-- if the standalone build ever looks suspicious, rerun `.\scripts\build_gui_exe.cmd -Package`
-- do not trust an older `dist\XMLtoUSDAConverter.exe` timestamp as proof that the current source was packaged
-- check the GUI `Log` after startup: the top `Build info:` block is sourced from `dist\build_info.json` and is now the fastest way to confirm which launcher/package build you actually launched
+- if the standalone build ever looks suspicious, rerun `.\scripts\build_qt_gui_exe.cmd -Package -Clean`
+- do not trust an older `dist-next\XMLtoUSDAConverter.exe` timestamp as proof that the current source was packaged
+- check the GUI `Log` after startup: the top `Build info:` block is sourced from `dist-next\build_info.json` and is now the fastest way to confirm which release build you actually launched
 
 ## Runtime temp files seem to accumulate
 
@@ -111,7 +111,7 @@ Symptom:
 
 What to know:
 
-- large conversions now run in a dedicated worker subprocess instead of inside the Tk process
+- large conversions now run in a dedicated worker subprocess instead of inside the UI process
 - the worker subprocess may also spawn additional worker processes for parallel FBX prototype import
 - the old failure pattern came from doing too much native FBX and huge-export work inside the GUI process
 

@@ -119,7 +119,7 @@ Current operator-facing wind-settings contract:
 
 Current large-job execution contract:
 
-- large GUI conversions are executed in a dedicated worker subprocess instead of inside the Tk UI process
+- large GUI conversions are executed in a dedicated worker subprocess instead of inside the UI process
 - the GUI process now only owns the UI and telemetry polling; the worker subprocess owns XML normalization, FBX import, material resolution, and USDA writing
 - explicit FBX prototype imports are parallelized across a `spawn` process pool when more than one FBX prototype must be imported
 - this parallelism is currently prototype-level and stage-level, not "all cores inside one single FBX file"
@@ -195,7 +195,7 @@ Recent exporter fixes that must remain stable:
 - the fern-style `single_material` path no longer depends on XML material ids being `1/2`
 - multi-root plants must keep a real `Base Skeletal Tree`; they must not regress into `Assembly Parts`-only imports because of collapsed root-joint aliases
 - inline part skeletons must not fall back to a generic `Root_Skeleton` naming pattern caused by a hardcoded local joint name
-- large GUI conversions must not reuse the Tk process for Autodesk FBX import or huge USDA writing
+- large GUI conversions must not reuse the UI process for Autodesk FBX import or huge USDA writing
 - the conversion subprocess must remain non-daemon so nested FBX worker processes can be created on Windows
 
 The remaining acceptance criterion is breadth, not a known functional blocker.

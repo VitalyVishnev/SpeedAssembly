@@ -100,7 +100,7 @@ $repoRoot = Convert-ToWinPath ([System.IO.Path]::GetFullPath((Join-Path $PSScrip
 $launcherScript = Join-Path $repoRoot 'scripts\launch_gui.py'
 $workerLauncherScript = Join-Path $repoRoot 'scripts\launch_fbx_worker.py'
 $venvScripts = Join-Path $repoRoot '.venv310\Scripts'
-$launcherExe = Join-Path $venvScripts 'xml-to-usda-gui.exe'
+$launcherExe = Join-Path $venvScripts 'xml-to-usda-gui-legacy.exe'
 $distPath = Join-Path $repoRoot 'dist'
 $buildPath = Join-Path $repoRoot 'build'
 $exePath = Join-Path $distPath 'XMLtoUSDAConverter.exe'
@@ -109,7 +109,7 @@ $workerExePath = Join-Path $distPath 'XMLtoUSDAWorker\XMLtoUSDAWorker.exe'
 Push-Location $repoRoot
 try {
     if (-not (Test-Path $launcherExe)) {
-        throw "Missing fast-build launcher: $launcherExe`nRun 'python -m pip install -e .[dev]' inside .venv310 first."
+        throw "Missing legacy fast-build launcher: $launcherExe`nRun 'python -m pip install -e .[dev]' inside .venv310 first."
     }
 
     if ($Package) {

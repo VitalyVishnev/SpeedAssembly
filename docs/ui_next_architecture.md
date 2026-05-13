@@ -1,4 +1,4 @@
-# UI Next Architecture
+# PySide6 UI Architecture
 
 ## Role
 
@@ -18,30 +18,32 @@ runtime services:
 - `wind_service`
 - `conversion_process`
 
-The new UI must not implement conversion semantics, USDA rules, FBX import
+The PySide6 UI must not implement conversion semantics, USDA rules, FBX import
 rules, or direct pipeline-specific business logic.
 
 ## Package layout
 
-The new UI lives in `src/xml_to_usda/qt_ui/` and is split into:
+The PySide6 UI lives in `src/xml_to_usda/qt_ui/` and is split into:
 
 - `entry.py`
-  Public beta entrypoint.
+  Public primary GUI entrypoint.
 - `theme.py`
   Theme token parsing, override merge, asset resolution, and stylesheet generation.
 - `persistence.py`
   UI shell state persistence plus theme override persistence.
 - `adjust_ui.py`
-  Dev-only live theme editor used to tune the `Next` shell.
+  Dev-only live theme editor used to tune the PySide6 shell.
 - `window.py`
   Frameless shell, glass panel rendering, and bootstrap layout.
 
-This is the first milestone only. Real panels, background job bridges, and
-operator-state adapters will be added incrementally after visual review.
+The shell now owns the primary operator workflow while staying thin over the
+shared application services.
 
 ## Rollout
 
 - primary release GUI entrypoint is `xml_to_usda.qt_ui.entry`
+- `python -m xml_to_usda gui` and `xml-to-usda-gui` route to the PySide6 shell
+- legacy Tk remains explicit through `python -m xml_to_usda gui-legacy` and `xml-to-usda-gui-legacy`
 - primary packaged build is `dist-next\XMLtoUSDAConverter.exe`
 - the PySide6 packaged exe is a one-file release artifact and also handles
   `fbx-worker` helper mode when launched with the worker command prefix
@@ -54,7 +56,7 @@ the old Tk shell as the primary artifact.
 
 ## Current Shell Interaction Contract
 
-The current `Next` shell uses the following operator-facing interaction rules:
+The current PySide6 shell uses the following operator-facing interaction rules:
 
 - the two file pickers are labeled `Input XML` and `Output USDA`
 - the output field is still derived automatically from the selected XML path by
@@ -92,7 +94,7 @@ it explicitly.
 
 Rules:
 
-- it lives only in `Next`, not in the stable Tk shell
+- it lives only in the PySide6 shell, not in the legacy Tk shell
 - it edits section-level layout tokens, not arbitrary per-widget drag/drop
 - it previews changes live in the running main window
 - it saves only to `~/.xml_to_usda/ui_next_theme_overrides.json`
@@ -101,7 +103,7 @@ Rules:
 
 ## Responsiveness Rule
 
-`UI Next` is intentionally a light, operator-facing shell.
+The PySide6 UI is intentionally a light, operator-facing shell.
 
 Active implementation rule:
 

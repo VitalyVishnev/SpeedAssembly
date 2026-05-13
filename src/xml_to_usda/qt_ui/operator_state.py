@@ -1,8 +1,8 @@
-"""Operator-facing settings bridge for the PySide6 beta shell.
+"""Operator-facing settings bridge for the PySide6 shell.
 
 Layer: UI/application boundary.
 
-The beta shell reuses the existing GUI settings payload so operator defaults,
+The PySide6 shell reuses the existing GUI settings payload so operator defaults,
 material policy, and wind settings survive across Tk and Qt launches.
 """
 
@@ -73,7 +73,7 @@ def save_operator_state(
     previous_snapshot: GuiSettingsSnapshot,
     settings_path: str | Path | None = None,
 ) -> GuiSettingsSnapshot:
-    """Persist shared operator defaults without overwriting stable GUI file-path history."""
+    """Persist shared operator defaults without overwriting GUI file-path history."""
     resolved_settings_path = Path(settings_path) if settings_path is not None else SETTINGS_PATH
     snapshot = GuiSettingsSnapshot(
         last_input_path=previous_snapshot.last_input_path,

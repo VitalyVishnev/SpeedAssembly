@@ -1,8 +1,8 @@
-﻿"""Frameless PySide6 shell for the next-generation UI.
+﻿"""Frameless PySide6 shell for the primary operator UI.
 
 Layer: UI.
 
-This shell keeps the new glassmorphism direction isolated from the stable Tk
+This shell keeps the glassmorphism direction isolated from the legacy Tk
 GUI while reusing the same conversion, discovery, wind, and settings services.
 """
 

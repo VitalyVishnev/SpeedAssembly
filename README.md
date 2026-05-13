@@ -39,7 +39,10 @@ python -m xml_to_usda convert path\to\tree.xml path\to\tree.usda
 python -m xml_to_usda convert path\to\tree.xml path\to\tree.usda --part-source-config part_sources.json --cpu-profile balanced
 python -m xml_to_usda convert path\to\tree.xml path\to\tree.usda --preserve-temp-files
 python -m xml_to_usda gui
+python -m xml_to_usda gui-legacy
 ```
+
+`gui` launches the primary PySide6 shell. `gui-legacy` remains available for the old Tk fallback.
 
 `part_sources.json` is a JSON object keyed by prototype name or `Mesh_<id>`, for example:
 
@@ -110,7 +113,7 @@ Huge FBX branch replacement notes:
 - `balanced` is the default and recommended profile for normal work because it prioritizes stable completion and system responsiveness
 - GUI errors are now non-modal by default: failures are written to the in-app `Log` panel and to `~/.xml_to_usda/gui_runtime.log` instead of blocking the screen with modal error popups
 - wind-group slider settings are now persisted per input XML, so different trees do not overwrite each other's wind tuning
-- the GUI runs large conversions in a dedicated worker process instead of inside the Tk process
+- the GUI runs large conversions in a dedicated worker process instead of inside the UI process
 - multiple explicit FBX prototype imports are fanned out through a `spawn` process pool, so different huge branch FBX files can import in parallel
 - `balanced` now matters most when there are multiple independent heavy stages or prototype FBX imports; one single giant FBX is still largely limited by the Autodesk SDK's own single-file import path
 - because of that, a huge job can legitimately show low total `% CPU` in Task Manager while still behaving correctly
@@ -162,7 +165,7 @@ Legacy Tk launcher/package build:
 .\scripts\build_gui_exe.cmd -Package -Clean
 ```
 
-Watch mode for repeated rebuilds:
+Legacy Tk watch mode for repeated rebuilds:
 
 ```powershell
 .\scripts\watch_gui_exe.cmd
@@ -172,7 +175,7 @@ Notes:
 
 - `dist-next` is the primary operator release path
 - the old `dist` / Tk build remains available as a legacy fallback
-- `-Package` removes stale build/dist state first, then runs PyInstaller with `--clean` to produce the standalone executable
+- the primary `-Package` build removes stale `build-next` / `dist-next` state first, then runs PyInstaller with `--clean` to produce the standalone executable
 - every package build writes `dist-next\build_info.json`
 - on startup the GUI writes a `Build info:` banner into the in-app `Log`, including build time, build mode, and a short git summary when available
 - on startup the GUI also writes a `Runtime info:` banner into the in-app `Log`, including whether the app is frozen, which executable launched it, and which runtime paths are active

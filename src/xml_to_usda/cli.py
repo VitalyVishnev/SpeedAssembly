@@ -51,7 +51,8 @@ def build_parser() -> argparse.ArgumentParser:
     wind_parser.add_argument("input", help="Path to the source XML file.")
     wind_parser.add_argument("output", help="Path to the output JSON file.")
 
-    subparsers.add_parser("gui", help="Launch the desktop GUI.")
+    subparsers.add_parser("gui", help="Launch the primary PySide6 desktop GUI.")
+    subparsers.add_parser("gui-legacy", help="Launch the legacy Tk desktop GUI.")
     fbx_worker_parser = subparsers.add_parser(FBX_WORKER_COMMAND, help=argparse.SUPPRESS)
     fbx_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
     return parser
@@ -59,8 +60,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     multiprocessing.freeze_support()
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if raw_argv[:1] == ["gui"]:
+        runtime_paths = resolve_runtime_paths()
+        _report_runtime_cleanup_summary(sweep_stale_job_workspaces(runtime_paths))
+        from .qt_ui.entry import main as gui_main
+
+        return gui_main(raw_argv[1:])
+
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw_argv)
     if args.command == FBX_WORKER_COMMAND:
         return run_fbx_worker_request_file(args.request)
     runtime_paths = resolve_runtime_paths()
@@ -89,6 +98,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "generate-wind-json":
             return _run_generate_wind_json(args.input, args.output)
         if args.command == "gui":
+            from .qt_ui.entry import main as gui_main
+
+            return gui_main([])
+        if args.command == "gui-legacy":
             from .gui import main as gui_main
 
             return gui_main()

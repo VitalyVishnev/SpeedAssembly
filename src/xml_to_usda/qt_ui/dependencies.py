@@ -1,4 +1,4 @@
-"""Default dependency bundle for the PySide6 beta shell.
+"""Default dependency bundle for the PySide6 shell.
 
 Layer: UI facade.
 
