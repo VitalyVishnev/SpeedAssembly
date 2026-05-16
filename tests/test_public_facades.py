@@ -23,4 +23,6 @@ def test_usda_writer_public_facade_exports_stable_symbols() -> None:
     from xml_to_usda import usda_writer
 
     assert callable(usda_writer.render_usda)
+    assert callable(usda_writer.render_resolved_usda)
     assert callable(usda_writer.write_usda_document)
+    assert callable(usda_writer.write_resolved_usda_document)

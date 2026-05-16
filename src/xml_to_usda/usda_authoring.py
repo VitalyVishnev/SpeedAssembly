@@ -31,6 +31,7 @@ from .models import (
     PrototypeSourceMode,
     PrototypeStrategy,
     Quaternion,
+    ResolvedAssemblyModel,
     SkeletalSupportPrimvars,
     ValidationIssue,
     Vector3,
@@ -145,6 +146,22 @@ def build_authoring_context(
         resolved_skeleton_name=resolved_skeleton_name,
         resolved_base_animation_name=resolved_base_animation_name,
         resolved_base_joint_root_name=resolved_base_joint_root_name,
+    )
+
+
+def build_resolved_authoring_context(
+    resolved: ResolvedAssemblyModel,
+    *,
+    contract: UeSchemaContract = DEFAULT_UE_SCHEMA_CONTRACT,
+    base_mesh_name: str | None = None,
+) -> AuthoringContext:
+    """Build authoring context from the preferred Resolved Assembly Model seam."""
+    return build_authoring_context(
+        resolved.authoring_model,
+        resolved.diagnostics,
+        contract=contract,
+        base_mesh_name=base_mesh_name if base_mesh_name is not None else resolved.output_stem,
+        conversion_mode=resolved.conversion_mode,
     )
 
 

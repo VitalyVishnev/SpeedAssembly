@@ -217,7 +217,9 @@ domain concept.
   Qt and legacy Tk shells should remain adapters over application modules,
   Operator State, Persisted Operator Settings, and UI Shell State.
 - USDA writing seam:
-  text and streaming sinks share the same authoring context.
+  `ResolvedAssemblyModel` is the preferred input for USDA writing. Text and
+  streaming sinks share the same authoring context; legacy writer entrypoints
+  still accept the authoring-model projection for compatibility.
 
 ## Deletion-test warnings
 

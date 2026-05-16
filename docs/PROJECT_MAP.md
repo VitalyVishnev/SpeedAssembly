@@ -119,7 +119,8 @@ Compatibility surfaces. They should remain thin.
 - Conversion path:
   `cli.py` or UI -> `conversion_service.py` -> `conversion_orchestrator.py` ->
   `canonical_loader.py` -> `normalizer.py` -> `material_resolver.py` ->
-  `validator.py` -> `usda_authoring.py`
+  `assembly_resolution.py` -> staged validation -> `usda_writer.py` ->
+  `usda_authoring.py`
 - Prototype source path:
   `discovery_service.py` -> `assembly_resolution.py` ->
   `prototype_resolution.py` -> `prototype_sources.py` ->

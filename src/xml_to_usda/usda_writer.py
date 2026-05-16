@@ -14,12 +14,21 @@ import time
 from pathlib import Path
 
 from .job_control import emit_telemetry
-from .models import ConversionMode, ConversionPhase, ExportStats, UsdAssemblyDocument, ValidationIssue
+from .models import (
+    CanonicalTreeModel,
+    ConversionMode,
+    ConversionPhase,
+    ExportStats,
+    ResolvedAssemblyModel,
+    UsdAssemblyDocument,
+    ValidationIssue,
+)
 from .ue_schema import DEFAULT_UE_SCHEMA_CONTRACT, UeSchemaContract
 from .usda_authoring import (
     author_usda_stream,
     author_usda_text,
     build_authoring_context,
+    build_resolved_authoring_context,
     model_requires_streaming_writer,
 )
 
@@ -43,6 +52,21 @@ def render_usda(
     return UsdAssemblyDocument(text=text, diagnostics=diagnostics, stats=ExportStats(streamed=False))
 
 
+def render_resolved_usda(
+    resolved: ResolvedAssemblyModel,
+    contract: UeSchemaContract = DEFAULT_UE_SCHEMA_CONTRACT,
+    base_mesh_name: str | None = None,
+) -> UsdAssemblyDocument:
+    """Render a USDA document from the preferred Resolved Assembly Model seam."""
+    context = build_resolved_authoring_context(
+        resolved,
+        contract=contract,
+        base_mesh_name=base_mesh_name,
+    )
+    text = author_usda_text(context)
+    return UsdAssemblyDocument(text=text, diagnostics=resolved.diagnostics, stats=ExportStats(streamed=False))
+
+
 def write_usda_document(
     model,
     diagnostics: tuple[ValidationIssue, ...],
@@ -62,6 +86,53 @@ def write_usda_document(
         base_mesh_name=base_mesh_name,
         conversion_mode=conversion_mode,
     )
+    return _write_authoring_context(
+        context,
+        model=model,
+        diagnostics=diagnostics,
+        output_path=output_path,
+        telemetry_callback=telemetry_callback,
+        cancel_event=cancel_event,
+    )
+
+
+def write_resolved_usda_document(
+    resolved: ResolvedAssemblyModel,
+    *,
+    output_path: Path | None,
+    contract: UeSchemaContract = DEFAULT_UE_SCHEMA_CONTRACT,
+    base_mesh_name: str | None = None,
+    telemetry_callback=None,
+    cancel_event=None,
+) -> UsdAssemblyDocument:
+    """Write USDA from the preferred Resolved Assembly Model seam."""
+    resolved_base_mesh_name = base_mesh_name
+    if resolved_base_mesh_name is None and resolved.output_stem is None and output_path is not None:
+        resolved_base_mesh_name = output_path.stem
+    context = build_resolved_authoring_context(
+        resolved,
+        contract=contract,
+        base_mesh_name=resolved_base_mesh_name,
+    )
+    return _write_authoring_context(
+        context,
+        model=resolved.authoring_model,
+        diagnostics=resolved.diagnostics,
+        output_path=output_path,
+        telemetry_callback=telemetry_callback,
+        cancel_event=cancel_event,
+    )
+
+
+def _write_authoring_context(
+    context,
+    *,
+    model: CanonicalTreeModel,
+    diagnostics: tuple[ValidationIssue, ...],
+    output_path: Path | None,
+    telemetry_callback,
+    cancel_event,
+) -> UsdAssemblyDocument:
     if output_path is None or not model_requires_streaming_writer(model):
         text = author_usda_text(context)
         document = UsdAssemblyDocument(text=text, diagnostics=diagnostics, stats=ExportStats(streamed=False))
@@ -116,4 +187,4 @@ def write_usda_document(
         raise
 
 
-__all__ = ["render_usda", "write_usda_document"]
+__all__ = ["render_usda", "render_resolved_usda", "write_usda_document", "write_resolved_usda_document"]

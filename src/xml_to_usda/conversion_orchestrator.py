@@ -34,7 +34,7 @@ from .output_resolution import (
     resolve_skeletal_parts_output_directory,
 )
 from .runtime_paths import JobWorkspace, RuntimePaths, resolve_runtime_paths
-from .usda_writer import write_usda_document
+from .usda_writer import write_resolved_usda_document, write_usda_document
 
 
 def convert_file(
@@ -177,12 +177,9 @@ def _convert_single_input(
                 cancel_event=cancel_event,
             )
         else:
-            usda_document = write_usda_document(
-                model,
-                diagnostics,
+            usda_document = write_resolved_usda_document(
+                resolved,
                 output_path=resolved_output,
-                base_mesh_name=resolved_output.stem if resolved_output is not None else None,
-                conversion_mode=request.conversion_mode,
                 telemetry_callback=runtime_telemetry,
                 cancel_event=cancel_event,
             )
