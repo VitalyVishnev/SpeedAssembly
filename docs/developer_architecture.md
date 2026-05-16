@@ -2,6 +2,16 @@
 
 ## Role
 
+This document is retained as a compatibility pointer for older references.
+
+The active architecture-review entry point is now `docs/ARCHITECTURE.md`.
+Navigation for AI-assisted architecture work starts at `docs/PROJECT_MAP.md`.
+
+The summary below remains useful historical context, but new architecture
+review decisions should be recorded in `docs/DECISIONS.md`.
+
+## Historical summary
+
 This document explains the post-refactor code layout for engineers working on
 the converter after Stage 6.
 

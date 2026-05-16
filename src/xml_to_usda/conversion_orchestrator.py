@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from .canonical_loader import load_canonical_model
+from .canonical_loader import load_resolved_assembly_model
 from .conversion_validation import validate_conversion_request
 from .job_control import ConversionCancelledError, throw_if_cancelled
 from .models import (
@@ -133,7 +133,7 @@ def _convert_single_input(
     )
     runtime_telemetry = _wrap_runtime_telemetry_callback(telemetry_callback, job_workspace)
     try:
-        _, model, diagnostics = load_canonical_model(
+        _, resolved = load_resolved_assembly_model(
             input_path,
             request.output_mode,
             material_policy=request.material_policy,
@@ -147,9 +147,12 @@ def _convert_single_input(
             use_existing_part_meshes=request.use_existing_part_meshes,
             part_mesh_asset_paths=request.part_mesh_asset_paths,
             conversion_mode=request.conversion_mode,
+            output_stem=resolved_output.stem if resolved_output is not None else None,
             telemetry_callback=runtime_telemetry,
             cancel_event=cancel_event,
         )
+        model = resolved.authoring_model
+        diagnostics = resolved.diagnostics
         errors = [issue for issue in diagnostics if issue.severity == "error"]
         if errors:
             diagnostics = _append_cleanup_warning(

@@ -22,7 +22,8 @@ It consists of:
   - an inline skeletal part subtree whose mesh payload was replaced from an explicit disk FBX file
   - an external referenced Unreal skeletal asset
 
-Static assemblies are now part of the exporter contract, but the skeletal tree path remains the baseline import shape.
+Static assemblies are now a supported exporter contract, but the skeletal tree
+path remains the primary project goal and baseline import shape.
 
 ## Export modes
 
@@ -82,10 +83,11 @@ Generated filenames and the base skeletal prim names are intentionally linked.
 For exported USDA files:
 
 - the generated file name is `<stem>.usda`
-- the `stem` of the output USDA file is the canonical authored name for the base skeletal tree
-- the base mesh prim name uses that stem directly
-- the base `SkelRoot` uses `<stem>_Geo`
-- the shared `Skeleton` uses `<stem>_Skeleton`
+- the `stem` of the output USDA file is the `Output Stem`
+- the Output Stem is the canonical Authored Asset Name for the base skeletal tree
+- the base mesh Prim Name uses that stem directly
+- the base `SkelRoot` Prim Name uses `<stem>_Geo`
+- the shared `Skeleton` Prim Name uses `<stem>_Skeleton`
 - the base `SkelAnimation` remains `animation`
 - the assembly root prim stays contract-driven, usually `Tree`, and is not derived from the output filename
 
@@ -95,17 +97,18 @@ For `skeletal_parts` exports:
 - the converter writes a sibling directory using that path stem
 - each prototype writes as `<Prototype>.usda` inside that directory
 - each part file uses `defaultPrim = "<Prototype>"`
-- each part file root prim is also `<Prototype>`
+- each part file root Prim Name is also `<Prototype>`
 
 For `static_assembly` exports:
 
 - the generated file name is still `<stem>.usda`
-- the root prim name uses the chosen output stem or assembly stem directly
+- the root Prim Name uses the chosen Output Stem or assembly stem directly
 - the synthetic base prototype name is the root stem plus a deterministic suffix such as `_BaseMesh`
 - repeated prototype prim names continue to come from source XML mesh names or resolved FBX stems, sanitized only as needed for USD validity
 
-This is the naming rule used by the converter when an explicit output path is provided.
-It is not derived from the first bone name, and it is not derived from the XML source filename.
+This is the naming rule used by the converter when an explicit output path is
+provided. It is not derived from the first bone Source Name, and it is not
+derived from the XML source filename.
 
 For example, if the output file is `SkeletalAssemblyTest_Spruce_Big_low_twoTrunkGenerators.usda`, the base skeletal prims are authored as:
 
@@ -183,7 +186,8 @@ When an external `PartMesh` override appears to be ignored, check the generated 
 
 1. if `NaniteAssemblyExternalRefAPI` is missing, the bug is in the exporter path before UE import
 2. if `meshAssetPath` is present but UE still imports the low-poly mesh, verify that UE is using the Interchange USD importer path
-3. if the path is present in USDA but not in UE, confirm the package/object path exactly matches the asset in Content Browser
+3. if the path is present in USDA but not in UE, confirm the Unreal Asset Path
+   exactly matches the package/object path in Content Browser
 
 Do not simplify away importer-relevant fields just because the USDA remains syntactically valid.
 
@@ -205,7 +209,7 @@ External asset reuse is an optional `Phase 1` mode. It exists to reuse already-i
 
 ## Material contract
 
-Material bindings must stay on real mesh prims or face subsets.
+Authored Material Bindings must stay on real mesh prims or face subsets.
 
 For the current contract:
 
@@ -250,7 +254,10 @@ Explicit FBX prototype material baseline:
   - if some slot rows are blank, one filled Unreal material path is reused with a warning
   - if all slot rows are blank, conversion fails
 
-Raw SpeedTree XML material ids must be treated as opaque source metadata. `source_material_roles` may infer bark/leaves buckets from authored source usage, but it must not treat numeric ids like `1/2` as a required contract.
+Raw SpeedTree XML material ids must be treated as opaque Source Material
+metadata. `source_material_roles` may infer bark/leaves buckets from authored
+source usage, but it must not treat numeric ids like `1/2` as a required
+contract.
 They are not semantic bark/leaves roles for the generic pipeline contract.
 
 ## Current validated defaults
@@ -270,5 +277,7 @@ Current verified state:
 - the importer accepts the current skeletal assembly structure
 - mixed inline and external prototype resolution is covered by automated regression tests
 - explicit inline FBX prototype replacement is covered by automated streaming-writer regression tests
-- static assembly export is implemented and unit-tested, but it still needs a fresh UE 5.7.x import pass before it is considered validated
+- static assembly export is implemented, unit-tested, and confirmed to import
+  normally in UE 5.7.x; keep validating it on new real vegetation structures
+  without letting it redefine the primary skeletal baseline
 - visual fidelity is still incomplete and requires later transform and rig refinement

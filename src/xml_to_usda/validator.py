@@ -6,7 +6,9 @@ from .models import (
     CanonicalTreeModel,
     ConversionMode,
     PrototypeResolutionMode,
+    PrototypeSourceMode,
     PrototypeStrategy,
+    ResolvedAssemblyModel,
     ValidationIssue,
 )
 
@@ -23,29 +25,24 @@ ERROR_MARKERS = {
     "material_policy_warning:": "material_policy_warning",
 }
 WARNING_MARKER_CODES = {"material_conflict", "material_policy_warning", "skeleton_object_mismatch"}
+SUPPORTED_AUTHORING_MODES = {
+    ConversionMode.SKELETAL_ASSEMBLY,
+    ConversionMode.SKELETAL_PARTS,
+    ConversionMode.STATIC_ASSEMBLY,
+}
 
 
 def validate_model(
     model: CanonicalTreeModel,
     conversion_mode: ConversionMode | str | None = None,
 ) -> tuple[ValidationIssue, ...]:
-    issues: list[ValidationIssue] = []
-    mode = _resolve_conversion_mode(model, conversion_mode)
-    material_ids = {material.source_id for material in model.materials}
+    """Compatibility wrapper for callers that still validate one final model."""
+    return validate_source_model(model) + validate_authoring_model(model, conversion_mode=conversion_mode)
 
-    if mode not in {
-        ConversionMode.SKELETAL_ASSEMBLY,
-        ConversionMode.SKELETAL_PARTS,
-        ConversionMode.STATIC_ASSEMBLY,
-    }:
-        issues.append(
-            ValidationIssue(
-                severity="error",
-                code="unsupported_conversion_mode",
-                message=f"Unsupported conversion mode: {mode.value}.",
-            )
-        )
-        return tuple(issues)
+
+def validate_source_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
+    """Validate source facts produced by XML normalization before operator intent."""
+    issues: list[ValidationIssue] = []
 
     if not model.source_objects:
         issues.append(
@@ -55,6 +52,87 @@ def validate_model(
                 message="Object hierarchy data is required for assembly normalization.",
             )
         )
+
+    for section in model.metadata.unknown_sections:
+        issues.append(
+            ValidationIssue(
+                severity="warning",
+                code="unknown_xml_section",
+                message=f"Unknown XML section detected during inspection: {section}",
+            )
+        )
+
+    issues.extend(_metadata_warning_issues(model.metadata.warnings))
+    return tuple(issues)
+
+
+def validate_resolution(resolved: ResolvedAssemblyModel) -> tuple[ValidationIssue, ...]:
+    """Validate source facts after operator intent has been applied."""
+    issues: list[ValidationIssue] = []
+    source_warnings = set(resolved.source_model.metadata.warnings)
+    resolution_warnings = tuple(
+        warning for warning in resolved.authoring_model.metadata.warnings if warning not in source_warnings
+    )
+    issues.extend(_metadata_warning_issues(resolution_warnings))
+
+    for prototype in resolved.authoring_model.prototypes:
+        if prototype.resolution_mode == PrototypeResolutionMode.EXTERNAL_ASSET:
+            if not prototype.mesh_asset_path:
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        code="missing_prototype_asset_path",
+                        message=(
+                            f"Resolved Prototype {prototype.identity.prim_name} is marked as external "
+                            "but has no Unreal asset path."
+                        ),
+                    )
+                )
+                continue
+            if not is_valid_unreal_asset_path(prototype.mesh_asset_path):
+                issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        code="invalid_prototype_asset_path",
+                        message=(
+                            f"Resolved Prototype {prototype.identity.prim_name} uses invalid Unreal asset path "
+                            f"{prototype.mesh_asset_path!r}; expected a /Game/... asset reference."
+                        ),
+                    )
+                )
+        if prototype.source_mode == PrototypeSourceMode.FBX_FILE and not prototype.fbx_source_path:
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="missing_fbx_source_path",
+                    message=(
+                        f"Resolved Prototype {prototype.identity.prim_name} uses FBX source mode "
+                        "but has no source FBX path."
+                    ),
+                )
+            )
+
+    return tuple(issues)
+
+
+def validate_authoring_model(
+    model: CanonicalTreeModel,
+    conversion_mode: ConversionMode | str | None = None,
+) -> tuple[ValidationIssue, ...]:
+    """Validate the USDA authoring contract for the selected export mode."""
+    issues: list[ValidationIssue] = []
+    mode = _resolve_conversion_mode(model, conversion_mode)
+    material_ids = {material.source_id for material in model.materials}
+
+    if mode not in SUPPORTED_AUTHORING_MODES:
+        issues.append(
+            ValidationIssue(
+                severity="error",
+                code="unsupported_conversion_mode",
+                message=f"Unsupported conversion mode: {mode.value}.",
+            )
+        )
+        return tuple(issues)
 
     if mode == ConversionMode.STATIC_ASSEMBLY:
         issues.extend(_validate_static_assembly_model(model, material_ids))
@@ -77,16 +155,12 @@ def validate_model(
             )
         )
 
-    for section in model.metadata.unknown_sections:
-        issues.append(
-            ValidationIssue(
-                severity="warning",
-                code="unknown_xml_section",
-                message=f"Unknown XML section detected during inspection: {section}",
-            )
-        )
+    return tuple(issues)
 
-    for warning in model.metadata.warnings:
+
+def _metadata_warning_issues(warnings: tuple[str, ...]) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    for warning in warnings:
         matched_code = None
         for marker, code in ERROR_MARKERS.items():
             if warning.startswith(marker):
@@ -108,7 +182,7 @@ def validate_model(
                 )
             )
 
-    return tuple(issues)
+    return issues
 
 
 def _validate_skeletal_assembly_model(

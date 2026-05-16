@@ -6,9 +6,9 @@
     "muted_text": "#403D30",
     "input_fill": "#DCE5E8",
     "input_text": "#10110E",
-    "button_fill": "#6D7340",
+    "button_fill": "#8F964E",
     "button_text": "#13130F",
-    "secondary_fill": "#D9BB62",
+    "secondary_fill": "#DDBB64",
     "accent_fill": "#BF8C4E",
     "danger_fill": "#A65233",
     "titlebar_fill": "#DCE5E8",
@@ -16,35 +16,35 @@
     "log_fill": "#DCE5E8",
     "card_fill": "#DCE5E8",
     "card_text": "#1A1A15",
-    "card_border": "#DCE5E8",
-    "tab_fill": "#DCE5E880",
+    "card_border": "#E0E9EC",
+    "tab_fill": "#DCE8DF80",
     "tab_selected_fill": "#D9BB62",
-    "tab_hover_fill": "#D9BB62BC",
+    "tab_hover_fill": "#BF8C4E",
     "tab_text": "#1A1A15"
   },
   "font_sizes": {
-    "title": 15,
+    "title": 11,
     "body": 13,
-    "small": 11
+    "small": 12
   },
   "radii": {
     "window": 30,
-    "panel": 34,
+    "panel": 30,
     "control": 18,
-    "button": 18,
-    "card": 20,
-    "tab": 18
+    "button": 17,
+    "card": 18,
+    "tab": 16
   },
   "spacing": {
-    "outer_margin": 28,
-    "panel_padding": 24,
-    "section_gap": 18,
-    "control_gap": 12
+    "outer_margin": 0,
+    "panel_padding": 30,
+    "section_gap": 21,
+    "control_gap": 10
   },
   "control_heights": {
-    "titlebar": 26,
-    "input": 34,
-    "button": 40
+    "titlebar": 18,
+    "input": 20,
+    "button": 44
   },
   "border_widths": {
     "panel": 1,
@@ -52,48 +52,48 @@
     "card": 1
   },
   "layout": {
-    "panel_min_width": 860,
-    "panel_preferred_width": 1000,
-    "panel_max_width": 1180,
-    "panel_min_height": 680,
+    "panel_min_width": 923,
+    "panel_preferred_width": 979,
+    "panel_max_width": 1327,
+    "panel_min_height": 506,
     "panel_vertical_offset": 0,
-    "left_column_width": 280,
-    "action_column_width": 240,
-    "tabs_min_height": 440,
-    "tab_min_width": 120,
-    "file_row_gap": 8
+    "left_column_width": 325,
+    "action_column_width": 234,
+    "tabs_min_height": 526,
+    "tab_min_width": 124,
+    "file_row_gap": -24
   },
   "glass": {
-    "tint_color": "#DCE5E8",
-    "tint_opacity": 0.22,
+    "tint_color": "#DCF6FF",
+    "tint_opacity": 0.1,
     "border_color": "#DCE5E8",
     "border_opacity": 0.45,
-    "light_gradient_opacity": 0.11,
-    "light_gradient_mid_opacity": 0.04,
-    "light_gradient_height": 0.18,
-    "dark_gradient_opacity": 0.07,
-    "dark_gradient_height": 0.13,
-    "noise_asset": "none",
-    "noise_opacity": 0.0,
-    "noise_scale": 1.0
+    "light_gradient_opacity": 0.33,
+    "light_gradient_mid_opacity": 0.17,
+    "light_gradient_height": 0.11,
+    "dark_gradient_opacity": 0.2,
+    "dark_gradient_height": 0.08,
+    "noise_asset": "assets/WhiteNoise256.png",
+    "noise_opacity": 0.11999999999999998,
+    "noise_scale": 0.5
   },
   "chrome": {
     "titlebar_fill": "#DCE5E8",
     "titlebar_text": "#13130F",
-    "window_button_size": 22,
-    "title_pill_width": 78,
-    "title_pill_height": 24,
+    "window_button_size": 28,
+    "title_pill_width": 50,
+    "title_pill_height": 10,
     "adjust_ui_button_width": 104,
-    "adjust_ui_button_height": 24,
-    "file_button_width": 132,
+    "adjust_ui_button_height": 10,
+    "file_button_width": 122,
     "file_button_height": 34,
     "wind_refresh_button_width": 172,
     "wind_refresh_button_height": 28
   },
   "effects": {
-    "panel_shadow_blur": 22,
-    "panel_shadow_alpha": 68,
-    "panel_shadow_offset_y": 6
+    "panel_shadow_blur": 64,
+    "panel_shadow_alpha": 163,
+    "panel_shadow_offset_y": 8
   },
   "assets": {
     "background_image": "assets/shishkin_oak_grove_background.jpg",

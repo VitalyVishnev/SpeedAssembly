@@ -15,7 +15,13 @@ Success means:
 4. Repeated parts import through **PointInstancer** as **Assembly Parts**, not as duplicated meshes.
 5. The result is reproducible and regression-tested.
 
-Static assemblies also exist in UE, but they are out of scope here.
+Static Mesh Assemblies are a supported secondary export mode, but the primary
+mission remains the skeletal vegetation pipeline.
+
+For `static_assembly` export mode, success means UE imports the generated USDA
+as a Static Mesh Nanite Assembly with rigid repeated parts through
+`PointInstancer`. Static mode must not redefine the skeletal baseline or weaken
+the skeletal Definition of Done.
 
 ## Document contract
 
@@ -33,6 +39,17 @@ Use the docs in this order:
    Operational setup only.
 
 If two documents disagree, this order wins.
+
+Architecture-review support docs:
+
+- `docs/PROJECT_MAP.md`
+- `docs/GLOSSARY.md`
+- `docs/ARCHITECTURE.md`
+- `docs/DECISIONS.md`
+
+These files help architecture analysis tools navigate the codebase and preserve
+domain language. They do not override the normative importer-facing documents
+listed above.
 
 ## Source of truth order
 
@@ -54,6 +71,12 @@ If theory and UE behavior disagree, UE behavior wins.
 
 A USD scene structure that UE imports as a skeletal Nanite Assembly: one main tree skeleton, one base skeletal tree for all unique geometry, and repeated skeletal parts instanced through `PointInstancer`.
 
+### `Static Mesh Assembly`
+
+A supported secondary USDA export shape that UE imports as a static Nanite Assembly:
+one assembly root, rigid renderable prototypes, and repeated static parts placed
+through `PointInstancer`, without skeletons or skeletal binding arrays.
+
 ### `Assembly Root`
 
 The root prim of the USDA scene. It marks the scene as a Nanite Assembly and points UE at the main skeleton used by the assembly.
@@ -72,7 +95,15 @@ The shared skeleton of the tree. The Base Skeletal Tree is bound to it, and Asse
 
 ### `Assembly Parts`
 
-Repeated instanced skeletal parts authored through `PointInstancer`. They may represent twigs, leaf clusters, small branches, or any other repeated detail. The term is structural, not botanical.
+Repeated geometry parts authored through `PointInstancer` inside a larger tree
+assembly. They may be skeletal or static depending on export mode, and may
+represent twigs, leaf clusters, small branches, or any other repeated detail.
+The term is structural, not botanical.
+
+### `Repeated Parts`
+
+Source-level repeated part records interpreted from SpeedTree `LeafReferences`.
+They become authored `Assembly Parts` during resolution and USDA authoring.
 
 ### `Part Skeletal Mesh`
 
@@ -88,11 +119,60 @@ The mechanism that places Assembly Parts. It stores prototypes, instance transfo
 
 ### `Prototype`
 
-One reusable Assembly Part definition used by the `PointInstancer`.
+General shorthand for reusable part identity/payload/authoring depending on
+pipeline stage. Prefer the precise terms `Source Prototype`,
+`Resolved Prototype`, or `Authored Prototype` when ambiguity matters.
+
+### `Source Prototype`
+
+A reusable repeated-part source definition from SpeedTree `Meshes/Mesh`, keyed
+by observed XML identity such as `MeshID` and source mesh name.
+
+### `Resolved Prototype`
+
+A prototype after source facts are combined with operator intent. It has a
+selected payload source such as XML mesh, Unreal asset, or explicit FBX file,
+plus resolved material behavior.
+
+### `Authored Prototype`
+
+The prototype prim or subtree written into USDA and targeted by
+`PointInstancer.prototypes`.
 
 ### `Instance`
 
-One placed occurrence of a Prototype, with transform and binding back to the Main Skeleton.
+General shorthand for one placed occurrence of a Prototype. Prefer
+`Repeated Part Instance`, `Resolved Instance`, or `Authored Instance` when
+transform, binding, or authoring stage matters.
+
+### `Repeated Part Instance`
+
+A source-level placed occurrence interpreted from SpeedTree `LeafReferences`,
+including source placement, scale, rotation, material hint, and binding source
+such as `BoneID`.
+
+### `Resolved Instance`
+
+A repeated part instance after source facts are combined with operator intent
+and a `Resolved Prototype`.
+
+### `Authored Instance`
+
+The per-instance data authored into USDA `PointInstancer` arrays, including
+prototype index, position, orientation, scale, and mode-specific binding data
+when required.
+
+### `Attachment`
+
+Source or resolved relationship that says which source skeleton object, joint,
+or placement context a Repeated Part Instance belongs to. It is not itself the
+USDA skeletal binding contract.
+
+### `Skeletal Binding`
+
+The authored skeletal USDA contract that binds the Base Skeletal Tree or
+skeletal Assembly Parts back to the Main Skeleton. Static Mesh Assembly export
+does not author Skeletal Binding.
 
 ### `Leaf References`
 
@@ -285,7 +365,8 @@ At minimum, the model must represent concepts such as:
 - `Prototype`
 - `Assembly Part`
 - `Instance`
-- `Binding`
+- `Attachment`
+- `Skeletal Binding`
 
 The internal model and surrounding modules should also preserve clean subsystem boundaries:
 
@@ -446,6 +527,13 @@ The compact project docs set is:
 3. `docs/speedtree_mapping.md`
 4. `docs/workflow_status.md`
 5. `docs/local-python-environment.md`
+
+The architecture-review docs set is:
+
+1. `docs/PROJECT_MAP.md`
+2. `docs/GLOSSARY.md`
+3. `docs/ARCHITECTURE.md`
+4. `docs/DECISIONS.md`
 
 ## Final rule
 

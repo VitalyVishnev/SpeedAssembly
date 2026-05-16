@@ -185,6 +185,14 @@ Notes:
 
 - `AGENTS.md`
   Mission, hard rules, and canonical terminology.
+- `docs/PROJECT_MAP.md`
+  Navigation entry point for architecture reviews and AI-assisted exploration.
+- `docs/GLOSSARY.md`
+  Project domain vocabulary for architecture suggestions.
+- `docs/ARCHITECTURE.md`
+  Module map, interfaces, seams, adapters, and architecture review checklist.
+- `docs/DECISIONS.md`
+  Architecture decisions that should not be re-litigated without new evidence.
 - `docs/ue_import_contract.md`
   Importer-facing USDA structure and required UE/USD contract.
 - `docs/speedtree_mapping.md`
@@ -199,7 +207,7 @@ Notes:
 ## Repo areas
 
 - `samples/` holds controlled XML inputs and generated outputs.
-- `docs/` holds the compact project documentation set.
+- `docs/` holds the normative project docs plus architecture-review entry points.
 - `vault/` holds reference USDA, UE schema, importer source, and related research artifacts.
 
 

@@ -599,6 +599,11 @@ class TreeAsset:
     def binding_element_size(self) -> int:
         return max((part.binding.element_size for part in self.assembly_parts), default=0)
 
+    @property
+    def repeated_parts(self) -> tuple[AssemblyPartInstance, ...]:
+        """Preferred source-level name for repeated part records from LeafReferences."""
+        return self.assembly_parts
+
 
 CanonicalTreeModel = TreeAsset
 
@@ -608,6 +613,22 @@ class ValidationIssue:
     severity: str
     code: str
     message: str
+
+
+@dataclass(frozen=True)
+class ResolvedAssemblyModel:
+    """Authoring-stage model: source facts plus operator intent resolution."""
+    source_model: CanonicalTreeModel
+    authoring_model: CanonicalTreeModel
+    conversion_mode: ConversionMode
+    output_stem: str | None = None
+    source_diagnostics: tuple[ValidationIssue, ...] = ()
+    resolution_diagnostics: tuple[ValidationIssue, ...] = ()
+    authoring_diagnostics: tuple[ValidationIssue, ...] = ()
+
+    @property
+    def diagnostics(self) -> tuple[ValidationIssue, ...]:
+        return self.source_diagnostics + self.resolution_diagnostics + self.authoring_diagnostics
 
 
 @dataclass(frozen=True)

@@ -47,6 +47,12 @@ The project has also passed automated `Phase 1` regression coverage for:
 - `skeletal_parts` split export coverage for one-USDA-per-prototype naming without assembly-root or base-tree fields
 - `static_assembly` export coverage for single-file static Nanite Assembly authoring with a plain `PointInstancer` and `SM_`-prefixed static mesh child prims
 
+Current export-mode priority:
+
+- `skeletal_assembly` is the primary project goal and the baseline vegetation pipeline
+- `static_assembly` is a fully supported secondary export mode and imports normally in UE 5.7.x
+- static mode must preserve its own rigid assembly contract without diluting the skeletal Definition of Done
+
 Current Python runtime contract:
 
 - `.venv310` is the primary development and validation environment
@@ -114,16 +120,16 @@ Current operator-facing part-source controls:
 
 Current operator-facing wind-settings contract:
 
-- wind-group slider values are persisted per input XML path
-- switching between different trees must restore the last saved wind values for that specific XML instead of reusing another tree's settings
+- wind-group slider values are Persisted Operator Settings keyed per input XML path
+- switching between different trees must restore the last saved Operator State for that specific XML instead of reusing another tree's settings
 
 Current large-job execution contract:
 
-- large GUI conversions are executed in a dedicated worker subprocess instead of inside the UI process
-- the GUI process now only owns the UI and telemetry polling; the worker subprocess owns XML normalization, FBX import, material resolution, and USDA writing
+- large GUI conversions run as a `Runtime Job` in a dedicated `Conversion Worker` instead of inside the UI process
+- the GUI process now only owns the UI and telemetry polling; the Conversion Worker owns XML normalization, FBX import, material resolution, and USDA writing
 - explicit FBX prototype imports are parallelized across a `spawn` process pool when more than one FBX prototype must be imported
 - this parallelism is currently prototype-level and stage-level, not "all cores inside one single FBX file"
-- packaged frozen runs use isolated helper imports through the shared FBX supervisor and start from the requested prototype-level concurrency
+- packaged frozen runs use isolated `FBX Helper` imports through the shared FBX supervisor and start from the requested prototype-level concurrency
 - the primary `dist-next` package is a one-file release: `XMLtoUSDAConverter.exe` also handles `fbx-worker` helper mode when no legacy sidecar worker is present
 - if a native helper crash occurs at that concurrency, the supervisor automatically retries the remaining FBX imports with a lower helper count instead of failing the whole job immediately
 - if that worker pool cannot be created in the current environment, FBX prototype import falls back to sequential execution instead of failing outright
@@ -156,7 +162,7 @@ Current huge-FBX contract:
 - huge FBX prototype payloads are written through the streaming USDA path using a temp file plus atomic replace on success
 - when multiple explicit FBX prototype replacements are present, their imports may overlap in parallel worker processes
 - telemetry for huge jobs now distinguishes `xml_normalization`, `prototype_resolution`, `fbx_import`, `material_resolution`, and `usda_writing`
-- runtime job manifests now also record a small `runtime_context` block so packaged-worker crashes can be compared against launcher-worker crashes after the fact
+- Runtime Job manifests now also record a small `runtime_context` block so packaged-worker crashes can be compared against launcher-worker crashes after the fact
 
 The only remaining open item before `Phase 1` can be considered complete is broader validation on multiple real SpeedTree structures with different tree and grass shapes:
 
