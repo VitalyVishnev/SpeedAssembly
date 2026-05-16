@@ -9,11 +9,15 @@ ResolvedAssemblyModel that applies operator intent for authoring.
 from __future__ import annotations
 
 import time
-from dataclasses import replace
 
+from .assembly_resolution import (
+    AssemblyResolutionOptions,
+    ResolutionRuntime,
+    resolve_assembly_model as resolve_assembly_model_from_options,
+)
 from .asset_paths import normalize_unreal_asset_path
 from .job_control import emit_telemetry, throw_if_cancelled
-from .material_resolver import apply_material_policy as resolve_material_policy, resolve_prototype_materials
+from .material_resolver import apply_material_policy as resolve_material_policy
 from .models import (
     BaseMaterialOverride,
     CanonicalTreeModel,
@@ -24,13 +28,11 @@ from .models import (
     ObservedXmlSchemaReport,
     OutputMode,
     PrototypeSourceConfig,
-    PrototypeStrategy,
     ResolvedAssemblyModel,
     ValidationIssue,
 )
 from .normalizer import normalize_to_canonical
-from .prototype_sources import apply_prototype_source_configs, merge_legacy_part_mesh_configs
-from .validator import validate_authoring_model, validate_resolution, validate_source_model
+from .source_validation import validate_source_model
 from .xml_reader import inspect_xml, read_source_xml
 
 
@@ -76,80 +78,29 @@ def resolve_assembly_model(
     telemetry_callback=None,
     cancel_event=None,
 ) -> ResolvedAssemblyModel:
-    """Apply operator intent to a source model and return authoring-ready state."""
-    started_at = time.perf_counter()
-    resolved_conversion_mode = ConversionMode.parse(conversion_mode)
-    model = source_model
-    source_configs = merge_legacy_part_mesh_configs(
-        prototype_source_configs,
-        use_existing_part_meshes,
-        part_mesh_asset_paths,
-    )
-    model = apply_prototype_source_configs(
-        model,
-        source_configs,
-        cpu_profile=cpu_profile,
-        telemetry_callback=telemetry_callback,
-        cancel_event=cancel_event,
-        started_at=started_at,
-    )
-    emit_telemetry(
-        telemetry_callback,
-        ConversionPhase.MATERIAL_RESOLUTION,
-        message="Applying material policy.",
-        started_at=started_at,
-    )
-    throw_if_cancelled(cancel_event)
-    if use_explicit_material_contract:
-        model = resolve_material_policy(
-            model,
-            material_policy=material_policy,
-            bark_material_path=bark_material_path,
-            leaves_material_path=leaves_material_path,
-            single_material_path=single_material_path,
-            normalize_asset_path=normalize_unreal_asset_path,
-            base_material_overrides=base_material_overrides,
-            explicit_part_material_contract=True,
-            cpu_profile=cpu_profile,
-            cancel_event=cancel_event,
-        )
-    else:
-        model = resolve_prototype_materials(
-            model,
-            cpu_profile=cpu_profile,
-            cancel_event=cancel_event,
-        )
-        model = _apply_material_policy(
-            model,
-            material_policy=material_policy,
-            bark_material_path=bark_material_path,
-            leaves_material_path=leaves_material_path,
-            single_material_path=single_material_path,
-        )
-    if resolved_conversion_mode == ConversionMode.STATIC_ASSEMBLY:
-        model = replace(model, prototype_strategy=PrototypeStrategy.INLINE_STATIC_PART)
-    model = replace(
-        model,
-        metadata=replace(
-            model.metadata,
+    """Compatibility wrapper over the Assembly Resolution Module."""
+    return resolve_assembly_model_from_options(
+        source_model,
+        AssemblyResolutionOptions(
             output_mode=output_mode,
             material_policy=material_policy,
-            conversion_mode=resolved_conversion_mode,
+            bark_material_path=bark_material_path,
+            leaves_material_path=leaves_material_path,
+            single_material_path=single_material_path,
+            base_material_overrides=base_material_overrides,
+            cpu_profile=cpu_profile,
+            use_explicit_material_contract=use_explicit_material_contract,
+            prototype_source_configs=prototype_source_configs,
+            use_existing_part_meshes=use_existing_part_meshes,
+            part_mesh_asset_paths=part_mesh_asset_paths,
+            conversion_mode=conversion_mode,
+            output_stem=output_stem,
         ),
-    )
-    resolved = ResolvedAssemblyModel(
-        source_model=source_model,
-        authoring_model=model,
-        conversion_mode=resolved_conversion_mode,
-        output_stem=output_stem,
-        source_diagnostics=source_diagnostics if source_diagnostics is not None else validate_source_model(source_model),
-    )
-    resolution_diagnostics = validate_resolution(resolved)
-    authoring_diagnostics = validate_authoring_model(model, conversion_mode=resolved_conversion_mode)
-    return replace(
-        resolved,
-        resolution_diagnostics=resolution_diagnostics,
-        authoring_diagnostics=authoring_diagnostics,
+        source_diagnostics=source_diagnostics,
+        runtime=ResolutionRuntime(
+            telemetry_callback=telemetry_callback,
+            cancel_event=cancel_event,
+        ),
     )
 
 

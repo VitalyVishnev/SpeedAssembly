@@ -143,30 +143,30 @@ Rationale:
 - A shared normalized model preserves locality for XML interpretation while
   keeping mode-specific importer contracts in validation and authoring.
 
-## 2026-05-16: Add a planned resolved assembly model seam
+## 2026-05-16: Add the resolved assembly model seam
 
-Status: Planned
+Status: Accepted
 
 Decision:
 
 - Keep `CanonicalTreeModel` focused on source facts from observed SpeedTree XML.
-- Introduce a later authoring-stage model, currently named
-  `Resolved Assembly Model`, for source facts plus operator intent.
-- Move mode-specific prototype replacement, explicit material overrides, output
-  naming, and authoring-ready decisions toward that seam instead of pushing them
-  deeper into XML normalization.
+- Use `ResolvedAssemblyModel` as the authoring-stage model for source facts plus
+  operator intent.
+- Keep mode-specific prototype replacement, explicit material overrides, output
+  naming, and authoring-ready decisions behind the Assembly Resolution Module
+  instead of pushing them into XML normalization.
 
 Rationale:
 
 - The project now has multiple supported export modes.
 - Source facts and operator intent have different lifecycles, tests, and failure
   modes.
-- A resolved authoring model should improve locality for validation and USDA
-  authoring without weakening deterministic source normalization.
+- A resolved authoring model improves locality for validation and USDA authoring
+  without weakening deterministic source normalization.
 
 ## 2026-05-16: Validation is staged by invariant ownership
 
-Status: Planned
+Status: Accepted
 
 Decision:
 
@@ -178,13 +178,14 @@ Decision:
   operator intent.
 - Authoring Validation owns the final USDA/importer contract that will be
   written for the selected export mode.
+- `validator.py` remains a compatibility facade; stage rules live in focused
+  validation modules.
 
 Rationale:
 
-- The current validator module may contain rules from multiple stages, but the
-  concepts have different inputs and failure modes.
-- The planned `Resolved Assembly Model` needs a clear validation role.
-- Separating stages should improve locality and make future tests less brittle.
+- The validation stages have different inputs and failure modes.
+- `ResolvedAssemblyModel` needs a clear validation role.
+- Separating stages improves locality and makes future tests less brittle.
 
 ## 2026-05-16: Repeated Part is source-level, Assembly Part is authored
 
@@ -380,13 +381,12 @@ Decision:
 - Use `UI Shell State` for visual shell state such as window geometry, theme,
   open tabs, and visual preferences.
 - Only the conversion-relevant subset of Operator State becomes Operator Intent
-  for `ConversionRequest` or the planned Resolved Assembly Model.
+  for `ConversionRequest` or `ResolvedAssemblyModel`.
 
 Rationale:
 
 - Material overrides, prototype source choices, wind sliders, UI theme, and
   window geometry have different lifecycles.
-- The planned Resolved Assembly Model must not accidentally depend on visual UI
-  preferences.
+- `ResolvedAssemblyModel` must not accidentally depend on visual UI preferences.
 - Qt and legacy Tk shells should remain adapters over shared application
   contracts, not owners of conversion semantics.

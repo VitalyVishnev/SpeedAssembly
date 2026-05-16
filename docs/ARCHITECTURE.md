@@ -48,6 +48,10 @@ Primary modules:
 - `geometry_buffers.py`
 - `material_resolver.py`
 - `dynamic_wind.py`
+- `source_validation.py`
+- `resolution_validation.py`
+- `authoring_validation.py`
+- `validation_common.py`
 - `validator.py`
 
 Expected interface shape:
@@ -70,6 +74,9 @@ Primary modules:
 - `wind_service.py`
 - `conversion_orchestrator.py`
 - `canonical_loader.py`
+- `assembly_resolution.py`
+- `prototype_resolution.py`
+- `material_assignment_resolution.py`
 - `source_analysis.py`
 
 Expected interface shape:
@@ -155,15 +162,15 @@ domain concept.
   the primary contract; `static_assembly` is supported but omits skeleton and
   binding semantics by design.
 - Canonical model seam:
-  `canonical_loader.load_canonical_model` produces the source-normalized
-  `CanonicalTreeModel` consumed by validation, authoring, discovery, and wind
-  generation. The model is not skeletal-only; `ConversionMode` chooses the
-  USDA authoring contract.
+  `canonical_loader.load_source_tree_model` produces the source-normalized
+  `CanonicalTreeModel`. `canonical_loader.load_canonical_model` remains a
+  compatibility projection that returns the resolved authoring model for older
+  callers.
 - Resolved assembly model seam:
-  Planned seam between source normalization and authoring. It should combine
-  `CanonicalTreeModel` source facts with operator intent from `ConversionRequest`
-  into one authoring-stage model. Until this seam exists in code, avoid
-  pretending request-applied behavior is a pure source-normalization rule.
+  `assembly_resolution.resolve_assembly_model` combines `CanonicalTreeModel`
+  source facts with operator intent into `ResolvedAssemblyModel`. Prototype
+  source resolution and material assignment resolution sit behind this seam;
+  source normalization should not apply request-specific behavior.
 - Attachment-to-binding seam:
   Source `Attachment` facts may come from SpeedTree fields such as `BoneID`.
   Skeletal exports resolve them into authored `Skeletal Binding`; static exports
@@ -196,12 +203,13 @@ domain concept.
 - Validation seams:
   Source validation checks source facts before operator intent. Resolution
   validation checks source facts plus operator intent. Authoring validation
-  checks the USDA contract that will be written. `validator.py` may temporarily
-  host more than one stage, but new work should name which validation stage owns
-  each rule.
+  checks the USDA contract that will be written. `source_validation.py`,
+  `resolution_validation.py`, and `authoring_validation.py` own the stage rules;
+  `validator.py` is only a compatibility facade.
 - Prototype source seam:
   XML mesh, Unreal asset reference, and FBX file source modes are adapters for
-  Prototype payload resolution.
+  Resolved Prototype payload selection. `prototype_resolution.py` owns matching
+  and projection; `prototype_sources.py` owns FBX loading infrastructure.
 - FBX backend seam:
   Autodesk FBX SDK and JSON geometry test backend satisfy the same FBX geometry
   loading role.

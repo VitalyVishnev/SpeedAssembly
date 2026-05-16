@@ -52,10 +52,10 @@ architecture terms above are more precise.
   currently an alias of `TreeAsset`. It is not a skeletal-only authoring model;
   `ConversionMode` decides which parts of it are authored.
 - **Resolved Assembly Model**
-  Planned authoring-stage model that combines `CanonicalTreeModel` source facts
-  with operator intent from `ConversionRequest`, prototype source config,
-  material overrides, export mode, and output naming. This model should become
-  the preferred input to validation and USDA authoring once implemented.
+  Authoring-stage model that combines `CanonicalTreeModel` source facts with
+  operator intent from `ConversionRequest`, prototype source config, material
+  overrides, export mode, and output naming. In code this is
+  `ResolvedAssemblyModel`, built through the Assembly Resolution Module.
 - **Source Facts**
   Data observed or derived from the SpeedTree XML itself: hierarchy, source
   skeleton, unique geometry, repeated part placements, prototype identities,

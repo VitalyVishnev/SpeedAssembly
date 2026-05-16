@@ -49,6 +49,11 @@ free of UI, process, launcher, and package-build behavior.
 - `src/xml_to_usda/models.py`
 - `src/xml_to_usda/normalizer.py`
 - `src/xml_to_usda/material_resolver.py`
+- `src/xml_to_usda/source_validation.py`
+- `src/xml_to_usda/resolution_validation.py`
+- `src/xml_to_usda/authoring_validation.py`
+- `src/xml_to_usda/validation_common.py`
+- `src/xml_to_usda/validator.py`
 - `src/xml_to_usda/skeleton_rules.py`
 - `src/xml_to_usda/source_transform.py`
 - `src/xml_to_usda/naming.py`
@@ -67,6 +72,9 @@ contracts.
 - `src/xml_to_usda/wind_service.py`
 - `src/xml_to_usda/conversion_orchestrator.py`
 - `src/xml_to_usda/canonical_loader.py`
+- `src/xml_to_usda/assembly_resolution.py`
+- `src/xml_to_usda/prototype_resolution.py`
+- `src/xml_to_usda/material_assignment_resolution.py`
 - `src/xml_to_usda/source_analysis.py`
 
 ### Infrastructure modules
@@ -113,8 +121,11 @@ Compatibility surfaces. They should remain thin.
   `canonical_loader.py` -> `normalizer.py` -> `material_resolver.py` ->
   `validator.py` -> `usda_authoring.py`
 - Prototype source path:
-  `discovery_service.py` -> `prototype_sources.py` -> `fbx_import_supervisor.py`
-  or `fbx_adapter.py` -> `material_resolver.py` -> `usda_authoring.py`
+  `discovery_service.py` -> `assembly_resolution.py` ->
+  `prototype_resolution.py` -> `prototype_sources.py` ->
+  `fbx_import_supervisor.py` or `fbx_adapter.py` ->
+  `material_assignment_resolution.py` -> `material_resolver.py` ->
+  `usda_authoring.py`
 - Wind path:
   `wind_service.py` -> `wind_pipeline.py` -> `dynamic_wind.py`
 - Qt operator path:
