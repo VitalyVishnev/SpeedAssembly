@@ -199,6 +199,9 @@ Decision:
   `PointInstancer`.
 - Treat `Assembly Part` as mode-neutral: skeletal exports author skeletal
   Assembly Parts, and static exports author static Assembly Parts.
+- In code, source repeated parts are `RepeatedPartInstance` values and USDA
+  authoring projects them into `AuthoredAssemblyPartInstance` values; the older
+  `AssemblyPartInstance` name remains a compatibility alias.
 
 Rationale:
 
@@ -229,7 +232,7 @@ Rationale:
   lifecycles and failure modes.
 - Static assembly can author synthetic base prototypes that do not come from a
   SpeedTree `Meshes/Mesh` source prototype.
-- The planned `Resolved Assembly Model` needs precise vocabulary for this seam.
+- The `Resolved Assembly Model` needs precise vocabulary for this seam.
 
 ## 2026-05-16: Instance terminology is stage-specific
 
@@ -250,8 +253,7 @@ Rationale:
 - Source transform interpretation, resolved prototype selection, and authored
   `PointInstancer` arrays fail in different ways.
 - The distinction makes transform and binding bugs easier to locate.
-- The planned `Resolved Assembly Model` needs a clear term for the middle
-  stage.
+- The `Resolved Assembly Model` needs a clear term for the middle stage.
 
 ## 2026-05-16: Attachment is source/resolution, Skeletal Binding is authored
 

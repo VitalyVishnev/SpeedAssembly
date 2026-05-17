@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from xml_to_usda.canonical_loader import load_resolved_assembly_model
+from xml_to_usda.models import AuthoredAssemblyPartInstance
 from xml_to_usda.usda_authoring import author_usda_text, build_authoring_context, build_resolved_authoring_context
 from xml_to_usda.usda_writer import render_resolved_usda, render_usda, write_resolved_usda_document, write_usda_document
 
@@ -33,6 +34,17 @@ def test_resolved_authoring_context_matches_legacy_context() -> None:
     )
 
     assert author_usda_text(resolved_context) == author_usda_text(legacy_context)
+
+
+def test_resolved_authoring_context_projects_authored_assembly_parts() -> None:
+    _report, resolved = load_resolved_assembly_model(str(SIMPLE_TREE_01), output_stem="UnifiedBaseline")
+
+    context = build_resolved_authoring_context(resolved)
+
+    assert context.assembly_parts
+    assert all(isinstance(part, AuthoredAssemblyPartInstance) for part in context.assembly_parts)
+    assert len(context.assembly_parts) == len(resolved.authoring_model.repeated_parts)
+    assert all(not hasattr(part, "source_object_id") for part in context.assembly_parts)
 
 
 def test_render_resolved_usda_matches_legacy_render() -> None:

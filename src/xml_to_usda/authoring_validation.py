@@ -137,42 +137,42 @@ def _validate_skeletal_assembly_model(
                 )
             )
 
-    if not model.assembly_parts:
+    if not model.repeated_parts:
         issues.append(
             ValidationIssue(
                 severity="warning",
                 code="missing_leaf_references",
-                message="No LeafReferences / Assembly Parts found; converter will emit a base-only USDA.",
+                message="No LeafReferences / Repeated Parts found; converter will emit a base-only USDA.",
             )
         )
 
-    if model.assembly_parts and any(not part.binding.joint_tokens for part in model.assembly_parts):
+    if model.repeated_parts and any(not part.binding.joint_tokens for part in model.repeated_parts):
         issues.append(
             ValidationIssue(
                 severity="error",
                 code="missing_leaf_binding",
-                message="Assembly Part instances must carry explicit skeletal binding data derived from the XML export.",
+                message="Repeated Part instances must carry explicit skeletal binding data derived from the XML export.",
             )
         )
-    if model.assembly_parts and model.prototype_strategy != PrototypeStrategy.INLINE_SKELETAL_PART:
+    if model.repeated_parts and model.prototype_strategy != PrototypeStrategy.INLINE_SKELETAL_PART:
         issues.append(
             ValidationIssue(
                 severity="error",
                 code="unsupported_prototype_strategy",
-                message="Skeletal Assembly Part instancing requires inline skeletal part prototypes under PointInstancer/Prototypes.",
+                message="Repeated Part instancing requires inline skeletal part prototypes under PointInstancer/Prototypes.",
             )
         )
     skeleton_joint_tokens = _valid_binding_joint_tokens(model)
-    if model.assembly_parts:
+    if model.repeated_parts:
         prototypes_by_key = {prototype.source_key: prototype for prototype in model.prototypes}
-        for part in model.assembly_parts:
+        for part in model.repeated_parts:
             prototype = prototypes_by_key.get(part.prototype_key)
             if prototype is None:
                 issues.append(
                     ValidationIssue(
                         severity="error",
                         code="missing_prototype_mesh",
-                        message=f"Assembly Part instance {part.name} references missing prototype {part.prototype_key}.",
+                        message=f"Repeated Part instance {part.name} references missing prototype {part.prototype_key}.",
                     )
                 )
                 continue
@@ -183,7 +183,7 @@ def _validate_skeletal_assembly_model(
                         severity="error",
                         code="invalid_binding_joint",
                         message=(
-                            f"Assembly Part instance {part.name} references skeletal joints that do not exist in the authored skeleton: "
+                            f"Repeated Part instance {part.name} references skeletal joints that do not exist in the authored skeleton: "
                             + ", ".join(invalid_tokens)
                         ),
                     )
@@ -248,13 +248,13 @@ def _validate_skeletal_assembly_model(
                     )
                 )
 
-    for part in model.assembly_parts:
+    for part in model.repeated_parts:
         if len(part.binding.joint_tokens) != len(part.binding.weights):
             issues.append(
                 ValidationIssue(
                     severity="error",
                     code="invalid_binding_shape",
-                    message=f"Assembly Part instance {part.name} has mismatched joint and weight counts.",
+                    message=f"Repeated Part instance {part.name} has mismatched joint and weight counts.",
                 )
             )
         if part.binding.weights and abs(sum(part.binding.weights) - 1.0) > 1e-4:
@@ -262,7 +262,7 @@ def _validate_skeletal_assembly_model(
                 ValidationIssue(
                     severity="warning",
                     code="non_normalized_binding_weights",
-                    message=f"Assembly Part instance {part.name} binding weights sum to {sum(part.binding.weights):g} instead of 1.",
+                    message=f"Repeated Part instance {part.name} binding weights sum to {sum(part.binding.weights):g} instead of 1.",
                 )
             )
 
@@ -295,7 +295,7 @@ def _validate_static_assembly_model(
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
 
-    if model.base_mesh is None and not model.assembly_parts:
+    if model.base_mesh is None and not model.repeated_parts:
         issues.append(
             ValidationIssue(
                 severity="error",
@@ -333,7 +333,7 @@ def _validate_static_assembly_model(
     issues.extend(_validate_prototypes(model.prototypes, material_ids))
 
     prototypes_by_key = {prototype.source_key: prototype for prototype in model.prototypes}
-    for part in model.assembly_parts:
+    for part in model.repeated_parts:
         if part.prototype_key not in prototypes_by_key:
             issues.append(
                 ValidationIssue(

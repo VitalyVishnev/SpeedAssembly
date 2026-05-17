@@ -249,7 +249,7 @@ def _source_role_material_id_map(model: CanonicalTreeModel) -> dict[int, int]:
 
     leaf_reference_material_ids = {
         part.source_material_id
-        for part in model.assembly_parts
+        for part in model.repeated_parts
         if part.source_material_id is not None
     }
     unresolved_ids = [material_id for material_id in source_material_ids if material_id not in role_map]

@@ -7,7 +7,6 @@ from dataclasses import replace
 
 from .naming import build_prototype_identities
 from .models import (
-    AssemblyPartInstance,
     BaseTreePart,
     Bounds,
     BranchSegment,
@@ -25,6 +24,7 @@ from .models import (
     Prototype,
     PrototypeStrategy,
     Quaternion,
+    RepeatedPartInstance,
     SkeletalSupportPrimvars,
     SourceObject,
     SpineCurve,
@@ -56,7 +56,7 @@ def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> Canonic
     )
     mesh_library = tuple(_extract_mesh_library(root, data_messages, source_transform, material_ids))
     base_mesh, base_tree_parts = _build_base_mesh(source_objects)
-    # The project contract treats LeafReferences as the source of repeated Assembly Parts.
+    # The project contract treats LeafReferences as the source of repeated Parts.
     assembly_parts = tuple(
         _extract_assembly_parts_from_leaf_references(root, data_messages, source_transform, material_ids)
     )
@@ -476,8 +476,8 @@ def _extract_assembly_parts_from_leaf_references(
     messages: list[str],
     source_transform: SourceTransform,
     material_ids: set[int],
-) -> list[AssemblyPartInstance]:
-    assembly_parts: list[AssemblyPartInstance] = []
+) -> list[RepeatedPartInstance]:
+    assembly_parts: list[RepeatedPartInstance] = []
     for obj in root.findall(".//Object"):
         leaf_ref_node = obj.find("LeafReferences")
         if leaf_ref_node is None:
@@ -521,7 +521,7 @@ def _extract_assembly_parts_from_leaf_references(
             uniform_scale = scales[index] if index < len(scales) else 1.0
             binding = _binding_from_bone_id(source_bone_id)
             assembly_parts.append(
-                AssemblyPartInstance(
+                RepeatedPartInstance(
                     name=f"AssemblyPart_{len(assembly_parts):04d}",
                     prototype_key=prototype_key,
                     position=source_transform.point_to_stage(Vector3(xs[index], ys[index], zs[index])),
@@ -586,7 +586,7 @@ def _leaf_reference_orientation_to_stage(
 
 
 def _build_prototypes(
-    assembly_parts: tuple[AssemblyPartInstance, ...],
+    assembly_parts: tuple[RepeatedPartInstance, ...],
     mesh_library: tuple[MeshLibraryEntry, ...],
     material_ids: set[int],
     messages: list[str],

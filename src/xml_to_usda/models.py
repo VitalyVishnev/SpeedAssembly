@@ -459,7 +459,7 @@ class BaseTreePart:
 
 
 @dataclass(frozen=True)
-class AssemblyPartInstance:
+class RepeatedPartInstance:
     name: str
     prototype_key: str
     position: Vector3
@@ -483,6 +483,27 @@ class AssemblyPartInstance:
     @property
     def source_bone_id(self) -> int | None:
         return self.source_bone_ids[0] if self.source_bone_ids else None
+
+# Compatibility name for older callers.
+AssemblyPartInstance = RepeatedPartInstance
+
+
+@dataclass(frozen=True)
+class AuthoredAssemblyPartInstance:
+    name: str
+    prototype_key: str
+    position: Vector3
+    orientation: Quaternion
+    scale: Vector3
+    binding: InstanceBinding
+
+    @property
+    def bind_joint(self) -> str:
+        return self.binding.joint_tokens[0] if self.binding.joint_tokens else ""
+
+    @property
+    def bind_weight(self) -> float:
+        return self.binding.weights[0] if self.binding.weights else 0.0
 
 
 @dataclass(frozen=True)
@@ -578,7 +599,7 @@ class TreeAsset:
     source_objects: tuple[SourceObject, ...]
     base_mesh: MeshData | None
     skeleton: tuple[Joint, ...]
-    assembly_parts: tuple[AssemblyPartInstance, ...]
+    assembly_parts: tuple[RepeatedPartInstance, ...]
     base_tree_parts: tuple[BaseTreePart, ...] = ()
     branch_segments: tuple[BranchSegment, ...] = ()
     mesh_library: tuple[MeshLibraryEntry, ...] = ()
@@ -590,17 +611,17 @@ class TreeAsset:
 
     @property
     def binding_mode(self) -> str:
-        if not self.assembly_parts:
+        if not self.repeated_parts:
             return "none"
-        max_width = max(part.binding.element_size for part in self.assembly_parts)
+        max_width = max(part.binding.element_size for part in self.repeated_parts)
         return "single_joint" if max_width <= 1 else "multi_joint_capable"
 
     @property
     def binding_element_size(self) -> int:
-        return max((part.binding.element_size for part in self.assembly_parts), default=0)
+        return max((part.binding.element_size for part in self.repeated_parts), default=0)
 
     @property
-    def repeated_parts(self) -> tuple[AssemblyPartInstance, ...]:
+    def repeated_parts(self) -> tuple[RepeatedPartInstance, ...]:
         """Preferred source-level name for repeated part records from LeafReferences."""
         return self.assembly_parts
 

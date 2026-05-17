@@ -33,7 +33,7 @@ def inspect_source(input_path: str) -> ObservedXmlSchemaReport:
         binding_mode=model.binding_mode,
         binding_element_size=model.binding_element_size,
         support_primvars=_support_primvars(model),
-        orientation_sample=tuple(part.orientation.to_usda() for part in model.assembly_parts[:3]),
+        orientation_sample=tuple(part.orientation.to_usda() for part in model.repeated_parts[:3]),
     )
 
 

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .job_control import emit_telemetry, throw_if_cancelled
 from .models import (
-    AssemblyPartInstance,
+    AuthoredAssemblyPartInstance,
     CanonicalTreeModel,
     CompactMeshSection,
     ConversionPhase,
@@ -42,8 +42,13 @@ from .ue_schema import DEFAULT_UE_SCHEMA_CONTRACT, UeSchemaContract
 
 @dataclass(frozen=True)
 class AuthoringContext:
-    """Resolved authoring state shared by both text and streaming sinks."""
+    """Resolved authoring state shared by both text and streaming sinks.
+
+    `model` stays source/resolution TreeAsset. `assembly_parts` is authored
+    PointInstancer input projected from source repeated parts.
+    """
     model: CanonicalTreeModel
+    assembly_parts: tuple[AuthoredAssemblyPartInstance, ...]
     diagnostics: tuple[ValidationIssue, ...]
     contract: UeSchemaContract
     conversion_mode: ConversionMode
@@ -135,8 +140,10 @@ def build_authoring_context(
         if base_mesh_name
         else None
     )
+    assembly_parts = _project_authored_assembly_parts(model)
     return AuthoringContext(
         model=model,
+        assembly_parts=assembly_parts,
         diagnostics=diagnostics,
         contract=contract,
         conversion_mode=resolved_conversion_mode,
@@ -162,6 +169,20 @@ def build_resolved_authoring_context(
         contract=contract,
         base_mesh_name=base_mesh_name if base_mesh_name is not None else resolved.output_stem,
         conversion_mode=resolved.conversion_mode,
+    )
+
+
+def _project_authored_assembly_parts(model: CanonicalTreeModel) -> tuple[AuthoredAssemblyPartInstance, ...]:
+    return tuple(
+        AuthoredAssemblyPartInstance(
+            name=part.name,
+            prototype_key=part.prototype_key,
+            position=part.position,
+            orientation=part.orientation,
+            scale=part.scale,
+            binding=part.binding,
+        )
+        for part in model.repeated_parts
     )
 
 
@@ -319,7 +340,7 @@ def author_usda(
 def model_requires_streaming_writer(model: CanonicalTreeModel) -> bool:
     if any(prototype.geometry_payload is not None for prototype in model.prototypes):
         return True
-    if len(model.assembly_parts) >= 10000:
+    if len(model.repeated_parts) >= 10000:
         return True
     base_mesh = model.base_mesh
     if base_mesh is not None:
@@ -416,11 +437,11 @@ def _static_assembly_prototypes(context: AuthoringContext) -> tuple[Prototype, .
 def _static_assembly_instances(
     context: AuthoringContext,
     prototypes: tuple[Prototype, ...],
-) -> tuple[AssemblyPartInstance, ...]:
-    instances: list[AssemblyPartInstance] = []
+) -> tuple[AuthoredAssemblyPartInstance, ...]:
+    instances: list[AuthoredAssemblyPartInstance] = []
     if context.model.base_mesh is not None and prototypes:
         instances.append(_make_static_base_instance(context, prototypes[0].identity.source_key))
-    instances.extend(context.model.assembly_parts)
+    instances.extend(context.assembly_parts)
     return tuple(instances)
 
 
@@ -444,16 +465,14 @@ def _make_static_base_prototype(context: AuthoringContext) -> Prototype:
     )
 
 
-def _make_static_base_instance(context: AuthoringContext, prototype_key: str) -> AssemblyPartInstance:
-    return AssemblyPartInstance(
+def _make_static_base_instance(context: AuthoringContext, prototype_key: str) -> AuthoredAssemblyPartInstance:
+    return AuthoredAssemblyPartInstance(
         name=context.contract.root_prim_name,
         prototype_key=prototype_key,
         position=Vector3(0.0, 0.0, 0.0),
         orientation=Quaternion(1.0, 0.0, 0.0, 0.0),
         scale=Vector3(1.0, 1.0, 1.0),
         binding=InstanceBinding(joint_tokens=(), weights=()),
-        source_object_id=None,
-        source_mesh_id=None,
     )
 
 
@@ -463,7 +482,7 @@ def _emit_static_point_instancer(
     indent_level: int,
     *,
     prototypes: tuple[Prototype, ...],
-    instances: tuple[AssemblyPartInstance, ...],
+    instances: tuple[AuthoredAssemblyPartInstance, ...],
     telemetry_callback=None,
     cancel_event=None,
     started_at: float | None = None,
@@ -643,7 +662,7 @@ def _emit_point_instancer(
     cancel_event=None,
     started_at: float | None = None,
 ) -> None:
-    assembly_parts = context.model.assembly_parts
+    assembly_parts = context.assembly_parts
     if not assembly_parts:
         return
 
@@ -1270,7 +1289,7 @@ def _prototype_target_paths(model: CanonicalTreeModel, contract: UeSchemaContrac
 
 
 def _normalized_bindings(
-    assembly_parts: tuple[AssemblyPartInstance, ...],
+    assembly_parts: tuple[AuthoredAssemblyPartInstance, ...],
     target_width: int,
 ) -> tuple[int, tuple[InstanceBinding, ...]]:
     width = max((part.binding.element_size for part in assembly_parts), default=1)
@@ -1279,7 +1298,7 @@ def _normalized_bindings(
 
 
 def _prototype_name_for_instance(
-    part: AssemblyPartInstance,
+    part: AuthoredAssemblyPartInstance,
     prototypes: tuple[Prototype, ...],
 ) -> str:
     for prototype in prototypes:

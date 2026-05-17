@@ -251,8 +251,8 @@ For each proposed deepening opportunity, answer:
 4. Which tests should exercise the new interface?
 5. Does the change preserve the UE validation loop and `vault` comparison path?
 6. Does the change contradict `docs/DECISIONS.md`?
-7. Is the change mixing source facts with operator intent before the planned
-   resolved assembly model seam?
+7. Is the change mixing source facts with operator intent before the resolved
+   assembly model seam?
 8. Which validation stage owns the new invariant: source, resolution, or
    authoring?
 9. Is the rule about source Attachment, or about authored Skeletal Binding?

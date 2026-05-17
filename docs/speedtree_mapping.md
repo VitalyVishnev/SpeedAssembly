@@ -225,6 +225,8 @@ For the current project contract:
 - repeated parts are emitted as `Assembly Parts`
 - `Repeated Parts` are the source-level records from `LeafReferences`; `Assembly
   Parts` are the authored repeated parts in the generated USDA
+- in code, source repeated parts are `RepeatedPartInstance` values and USDA
+  authoring projects them into `AuthoredAssemblyPartInstance` values
 - each inline part is authored as a skeletal part
 - each inline part has a one-bone local `Part Skeleton`
 - each inline part uses the prototype-derived one-bone joint name for its local `SkelAnimation`, `Mesh skel:joints`, and `Part Skeleton`

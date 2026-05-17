@@ -55,7 +55,8 @@ architecture terms above are more precise.
   Authoring-stage model that combines `CanonicalTreeModel` source facts with
   operator intent from `ConversionRequest`, prototype source config, material
   overrides, export mode, and output naming. In code this is
-  `ResolvedAssemblyModel`, built through the Assembly Resolution Module.
+  `ResolvedAssemblyModel`, built through the Assembly Resolution Module. It is
+  the seam between source facts and authored assembly output.
 - **Source Facts**
   Data observed or derived from the SpeedTree XML itself: hierarchy, source
   skeleton, unique geometry, repeated part placements, prototype identities,
@@ -96,10 +97,13 @@ architecture terms above are more precise.
 - **Assembly Part**
   Authored repeated geometry part emitted through `PointInstancer` inside a
   larger tree assembly. It is mode-neutral: skeletal exports author skeletal
-  Assembly Parts, static exports author static Assembly Parts.
+  Assembly Parts, static exports author static Assembly Parts. In code, USDA
+  authoring projects source repeated parts into `AuthoredAssemblyPartInstance`
+  values.
 - **Repeated Part**
   Source-level repeated part record interpreted from SpeedTree `LeafReferences`.
-  It becomes an authored Assembly Part during resolution and USDA authoring.
+  In code, it is normalized as `RepeatedPartInstance` and then projected into
+  an authored Assembly Part during resolution and USDA authoring.
 - **Static Mesh Assembly**
   Supported secondary Nanite Assembly export mode for rigid vegetation. It
   reuses normalized source data but omits skeletons, skeletal bindings, and
@@ -126,7 +130,7 @@ architecture terms above are more precise.
 - **Repeated Part Instance**
   Source-level placed occurrence interpreted from SpeedTree `LeafReferences`,
   including source placement, scale, rotation, material hint, and binding source
-  such as `BoneID`.
+  such as `BoneID`. In code, this is `RepeatedPartInstance`.
 - **Resolved Instance**
   Repeated part instance after source facts are combined with operator intent
   and a Resolved Prototype.
