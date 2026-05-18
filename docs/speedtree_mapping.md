@@ -23,6 +23,21 @@ The converter splits the source tree into two major components:
 This split is structural and explicit. It is not based on botanical names.
 Object names are treated as metadata only, not as the basis for structural decisions.
 
+## Explicit mapping decisions
+
+The converter must make these decisions explicitly in code:
+
+1. what becomes the `Base Skeletal Tree`
+2. what becomes a `Source Prototype`, `Resolved Prototype`, and `Authored Prototype`
+3. what becomes a `Repeated Part Instance`, `Resolved Instance`, and `Authored Instance`
+4. how Assembly Parts bind to the `Main Skeleton`
+5. how transforms are converted between Source Space, Stage Space, Prototype Space, Attachment Space, and PointInstancer arrays
+6. how missing source data is handled
+7. how base-tree XML material slots are resolved separately from repeated-part prototype material modes
+8. how explicit FBX repeated-part material modes (`single_material`, `vertex_color_split`, `material_slots`) are resolved
+
+No hidden heuristics.
+
 ## Section-to-concept mapping
 
 ### `Objects/Object`

@@ -44,6 +44,18 @@ architecture terms above are more precise.
 - **Observed Source XML**
   A real SpeedTree Raw XML sample. It is treated as observed schema, not as a
   stable public specification.
+- **Skeletal Nanite Assembly**
+  USD scene structure that UE imports through the skeletal Nanite Assembly path:
+  one Assembly Root, one Main Skeleton, one Base Skeletal Tree for unique
+  geometry, and repeated skeletal Assembly Parts placed through PointInstancer.
+- **Static Mesh Assembly**
+  Supported secondary USDA export shape that UE imports as a static Nanite
+  Assembly: one Assembly Root, rigid renderable prototypes, and repeated static
+  Assembly Parts placed through PointInstancer, without skeletons or skeletal
+  binding arrays.
+- **Assembly Root**
+  Root prim of the USDA scene. It marks the scene as a Nanite Assembly and, in
+  skeletal assembly mode, points UE at the descendant Main Skeleton.
 - **Canonical Tree Model**
   The source-normalized vegetation model consumed by validation and USDA
   authoring. It represents observed SpeedTree XML concepts after normalization:
@@ -92,8 +104,15 @@ architecture terms above are more precise.
   secondary `static_assembly`, reusable `skeletal_parts`, or reserved
   `static_parts`.
 - **Base Skeletal Tree**
-  Unique tree geometry bound to the Main Skeleton. It is not a trunk-only
-  placeholder.
+  Unique tree geometry bound to the Main Skeleton: trunk, major branches,
+  optional roots, and any other non-instanced tree geometry. It is not a
+  trunk-only placeholder.
+- **Base Mesh**
+  Geometry payload of the Base Skeletal Tree. It is not a trunk-only mesh and
+  not a minimal placeholder mesh.
+- **Main Skeleton**
+  Shared skeleton of the tree. The Base Skeletal Tree binds to it, and skeletal
+  Assembly Parts attach relative to it through authored Skeletal Binding.
 - **Assembly Part**
   Authored repeated geometry part emitted through `PointInstancer` inside a
   larger tree assembly. It is mode-neutral: skeletal exports author skeletal
@@ -104,10 +123,15 @@ architecture terms above are more precise.
   Source-level repeated part record interpreted from SpeedTree `LeafReferences`.
   In code, it is normalized as `RepeatedPartInstance` and then projected into
   an authored Assembly Part during resolution and USDA authoring.
-- **Static Mesh Assembly**
-  Supported secondary Nanite Assembly export mode for rigid vegetation. It
-  reuses normalized source data but omits skeletons, skeletal bindings, and
-  `primvars:skel:*` fields.
+- **Part Skeletal Mesh**
+  Skeletal mesh payload of one Assembly Part prototype.
+- **Part Skeleton**
+  Local skeleton of one Assembly Part. For the current target pipeline, each
+  inline part has one local bone at the part pivot or base.
+- **PointInstancer**
+  USD mechanism that places Assembly Parts. It stores prototype targets,
+  instance transforms, and, for skeletal assembly mode, skeletal assembly
+  binding data back to the Main Skeleton.
 - **Prototype**
   Stage-dependent shorthand for reusable repeated-part identity, payload, or
   authored USDA subtree. Prefer `Source Prototype`, `Resolved Prototype`, or
@@ -145,6 +169,19 @@ architecture terms above are more precise.
   Authored skeletal USDA contract that binds the Base Skeletal Tree or skeletal
   Assembly Parts back to the Main Skeleton. Static Mesh Assembly export does not
   author Skeletal Binding.
+- **Leaf References**
+  SpeedTree XML source section that the converter interprets as the source of
+  Repeated Parts. `LeafReferences` does not promise that the payload is
+  literally only leaves.
+- **Unique Geometry**
+  Tree geometry that stays inside the Base Skeletal Tree and is not instanced.
+- **Instanced Geometry**
+  Geometry sourced from `LeafReferences` and emitted as Assembly Parts through
+  PointInstancer.
+- **skeletal**
+  In this project, `skeletal` means the asset participates in the skeletal UE
+  import path. The Base Skeletal Tree uses the Main Skeleton, and each inline
+  Assembly Part is itself a skeletal mesh with a simple local skeleton.
 - **Prototype Source**
   The selected payload source for a Prototype: XML mesh, Unreal asset, or disk
   FBX file.
