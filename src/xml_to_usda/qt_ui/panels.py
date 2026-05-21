@@ -87,6 +87,13 @@ def _set_combo_value(combo: QComboBox, value: str) -> None:
         combo.setCurrentIndex(index)
 
 
+def _make_path_edit(text: str, parent: QWidget, *, placeholder: str) -> QLineEdit:
+    edit = QLineEdit(text, parent)
+    edit.setObjectName("PathInput")
+    edit.setPlaceholderText(placeholder)
+    return edit
+
+
 class NoWheelComboBox(QComboBox):
     def wheelEvent(self, event) -> None:  # type: ignore[override]
         event.ignore()
@@ -398,7 +405,9 @@ class GeometryRowWidgets:
     source_mesh_id: int | None
     instance_count: int
     source_mode_combo: NoWheelComboBox
+    asset_label: QLabel
     asset_edit: QLineEdit
+    fbx_label: QLabel
     fbx_edit: QLineEdit
     browse_button: QPushButton
 
@@ -460,22 +469,23 @@ class GeometryTabPanel(QWidget):
             mode_combo.addItem("Use XML Mesh", PrototypeSourceMode.XML_MESH.value)
             mode_combo.addItem("Use Unreal Reference", PrototypeSourceMode.UNREAL_ASSET.value)
             mode_combo.addItem("Use FBX File", PrototypeSourceMode.FBX_FILE.value)
+            mode_combo.setObjectName("InteractiveCombo")
             _set_combo_value(mode_combo, spec.source_mode.value)
 
-            asset_edit = QLineEdit(spec.unreal_asset_path, card)
-            asset_edit.setPlaceholderText("/Game/Path/Asset.Asset")
+            asset_edit = _make_path_edit(spec.unreal_asset_path, card, placeholder="/Game/Path/Asset.Asset")
+            asset_label = QLabel("Unreal Path", card)
 
-            fbx_edit = QLineEdit(spec.fbx_path, card)
-            fbx_edit.setPlaceholderText("Choose an FBX replacement file")
+            fbx_edit = _make_path_edit(spec.fbx_path, card, placeholder="Choose an FBX replacement file")
+            fbx_label = QLabel("FBX File", card)
 
             browse_button = QPushButton("Browse...", card)
             browse_button.clicked.connect(lambda _checked=False, edit=fbx_edit: self._browse_fbx(edit))
 
             card_layout.addWidget(QLabel("Source Mode", card), 2, 0)
             card_layout.addWidget(mode_combo, 2, 1)
-            card_layout.addWidget(QLabel("Unreal Path", card), 3, 0)
+            card_layout.addWidget(asset_label, 3, 0)
             card_layout.addWidget(asset_edit, 3, 1, 1, 3)
-            card_layout.addWidget(QLabel("FBX File", card), 4, 0)
+            card_layout.addWidget(fbx_label, 4, 0)
             card_layout.addWidget(fbx_edit, 4, 1, 1, 2)
             card_layout.addWidget(browse_button, 4, 3)
 
@@ -485,7 +495,9 @@ class GeometryTabPanel(QWidget):
                 source_mesh_id=spec.source_mesh_id,
                 instance_count=spec.instance_count,
                 source_mode_combo=mode_combo,
+                asset_label=asset_label,
                 asset_edit=asset_edit,
+                fbx_label=fbx_label,
                 fbx_edit=fbx_edit,
                 browse_button=browse_button,
             )
@@ -524,8 +536,14 @@ class GeometryTabPanel(QWidget):
     @staticmethod
     def _apply_row_mode(row: GeometryRowWidgets) -> None:
         mode = PrototypeSourceMode(row.source_mode_combo.currentData())
-        row.asset_edit.setEnabled(mode == PrototypeSourceMode.UNREAL_ASSET)
+        unreal_enabled = mode == PrototypeSourceMode.UNREAL_ASSET
+        row.asset_label.setVisible(unreal_enabled)
+        row.asset_edit.setVisible(unreal_enabled)
+        row.asset_edit.setEnabled(unreal_enabled)
         fbx_enabled = mode == PrototypeSourceMode.FBX_FILE
+        row.fbx_label.setVisible(fbx_enabled)
+        row.fbx_edit.setVisible(fbx_enabled)
+        row.browse_button.setVisible(fbx_enabled)
         row.fbx_edit.setEnabled(fbx_enabled)
         row.browse_button.setEnabled(fbx_enabled)
 
@@ -547,9 +565,13 @@ class SlotOverrideWidgets:
 class PartMaterialRowWidgets:
     source_key: str
     source_name: str
+    material_mode_label: QLabel
     material_mode_combo: NoWheelComboBox
+    single_label: QLabel
     single_edit: QLineEdit
+    black_label: QLabel
     black_edit: QLineEdit
+    white_label: QLabel
     white_edit: QLineEdit
     slots_frame: QFrame
     slots_layout: QVBoxLayout
@@ -621,15 +643,20 @@ class MaterialsTabPanel(QWidget):
             geometry = self._geometry_snapshot.get(row.source_key)
             if geometry is None:
                 row.header_label.setText(row.source_name)
-                row.single_edit.setEnabled(False)
-                row.black_edit.setEnabled(False)
-                row.white_edit.setEnabled(False)
-                row.material_mode_combo.setEnabled(False)
+                self._set_part_material_fields_visible(
+                    row,
+                    mode_visible=False,
+                    single_visible=False,
+                    split_visible=False,
+                )
                 self._refresh_slot_rows(row)
                 continue
             row.header_label.setText(f"{row.source_name}  [{geometry.source_mode.value}]")
             source_mode = geometry.source_mode
-            row.material_mode_combo.setEnabled(source_mode != PrototypeSourceMode.UNREAL_ASSET)
+            material_controls_visible = source_mode != PrototypeSourceMode.UNREAL_ASSET
+            row.material_mode_label.setVisible(material_controls_visible)
+            row.material_mode_combo.setVisible(material_controls_visible)
+            row.material_mode_combo.setEnabled(material_controls_visible)
             allowed_modes = [
                 (FbxMaterialMode.VERTEX_COLOR_SPLIT.value, "Vertex Color Split"),
                 (FbxMaterialMode.SINGLE_MATERIAL.value, "Single Material"),
@@ -647,10 +674,12 @@ class MaterialsTabPanel(QWidget):
             row.material_mode_combo.blockSignals(False)
 
             mode = FbxMaterialMode(row.material_mode_combo.currentData())
-            row.single_edit.setEnabled(source_mode != PrototypeSourceMode.UNREAL_ASSET and mode == FbxMaterialMode.SINGLE_MATERIAL)
-            split_enabled = source_mode != PrototypeSourceMode.UNREAL_ASSET and mode == FbxMaterialMode.VERTEX_COLOR_SPLIT
-            row.black_edit.setEnabled(split_enabled)
-            row.white_edit.setEnabled(split_enabled)
+            self._set_part_material_fields_visible(
+                row,
+                mode_visible=material_controls_visible,
+                single_visible=material_controls_visible and mode == FbxMaterialMode.SINGLE_MATERIAL,
+                split_visible=material_controls_visible and mode == FbxMaterialMode.VERTEX_COLOR_SPLIT,
+            )
             self._refresh_slot_rows(row)
 
     def collect_base_material_overrides(self) -> tuple[BaseMaterialOverride, ...]:
@@ -816,8 +845,7 @@ class MaterialsTabPanel(QWidget):
             row_layout.setHorizontalSpacing(10)
             row_layout.addWidget(QLabel(spec.source_name or f"Material_{spec.source_id}", row), 0, 0)
             row_layout.addWidget(QLabel(str(spec.source_id), row), 0, 1)
-            path_edit = QLineEdit(spec.ue_asset_path, row)
-            path_edit.setPlaceholderText("/Game/Path/Material.Material")
+            path_edit = _make_path_edit(spec.ue_asset_path, row, placeholder="/Game/Path/Material.Material")
             path_edit.textChanged.connect(lambda _text: self._on_change())
             row_layout.addWidget(path_edit, 0, 2)
             self._base_rows.append(
@@ -858,22 +886,24 @@ class MaterialsTabPanel(QWidget):
             mode_combo = NoWheelComboBox(row_card)
             mode_combo.addItem("Vertex Color Split", FbxMaterialMode.VERTEX_COLOR_SPLIT.value)
             mode_combo.addItem("Single Material", FbxMaterialMode.SINGLE_MATERIAL.value)
+            mode_combo.setObjectName("InteractiveCombo")
             _set_combo_value(mode_combo, spec.fbx_material_mode.value)
 
-            single_edit = QLineEdit(spec.single_material_path, row_card)
-            single_edit.setPlaceholderText("/Game/Path/Material.Material")
-            black_edit = QLineEdit(spec.black_material_path, row_card)
-            black_edit.setPlaceholderText("/Game/Path/Black.Material")
-            white_edit = QLineEdit(spec.white_material_path, row_card)
-            white_edit.setPlaceholderText("/Game/Path/White.Material")
+            single_edit = _make_path_edit(spec.single_material_path, row_card, placeholder="/Game/Path/Material.Material")
+            black_edit = _make_path_edit(spec.black_material_path, row_card, placeholder="/Game/Path/Black.Material")
+            white_edit = _make_path_edit(spec.white_material_path, row_card, placeholder="/Game/Path/White.Material")
+            material_mode_label = QLabel("Part Material Mode", row_card)
+            single_label = QLabel("Single Material", row_card)
+            black_label = QLabel("Black Material", row_card)
+            white_label = QLabel("White Material", row_card)
 
-            form.addWidget(QLabel("Part Material Mode", row_card), 0, 0)
+            form.addWidget(material_mode_label, 0, 0)
             form.addWidget(mode_combo, 0, 1)
-            form.addWidget(QLabel("Single Material", row_card), 1, 0)
+            form.addWidget(single_label, 1, 0)
             form.addWidget(single_edit, 1, 1)
-            form.addWidget(QLabel("Black Material", row_card), 2, 0)
+            form.addWidget(black_label, 2, 0)
             form.addWidget(black_edit, 2, 1)
-            form.addWidget(QLabel("White Material", row_card), 3, 0)
+            form.addWidget(white_label, 3, 0)
             form.addWidget(white_edit, 3, 1)
             row_card_layout.addLayout(form)
 
@@ -886,9 +916,13 @@ class MaterialsTabPanel(QWidget):
             row = PartMaterialRowWidgets(
                 source_key=spec.source_key,
                 source_name=spec.source_name,
+                material_mode_label=material_mode_label,
                 material_mode_combo=mode_combo,
+                single_label=single_label,
                 single_edit=single_edit,
+                black_label=black_label,
                 black_edit=black_edit,
+                white_label=white_label,
                 white_edit=white_edit,
                 slots_frame=slots_frame,
                 slots_layout=slots_layout,
@@ -903,6 +937,27 @@ class MaterialsTabPanel(QWidget):
             white_edit.textChanged.connect(lambda _text: self._on_change())
             layout.addWidget(row_card)
         return card
+
+    @staticmethod
+    def _set_part_material_fields_visible(
+        row: PartMaterialRowWidgets,
+        *,
+        mode_visible: bool,
+        single_visible: bool,
+        split_visible: bool,
+    ) -> None:
+        row.material_mode_label.setVisible(mode_visible)
+        row.material_mode_combo.setVisible(mode_visible)
+        row.material_mode_combo.setEnabled(mode_visible)
+        row.single_label.setVisible(single_visible)
+        row.single_edit.setVisible(single_visible)
+        row.single_edit.setEnabled(single_visible)
+        row.black_label.setVisible(split_visible)
+        row.black_edit.setVisible(split_visible)
+        row.black_edit.setEnabled(split_visible)
+        row.white_label.setVisible(split_visible)
+        row.white_edit.setVisible(split_visible)
+        row.white_edit.setEnabled(split_visible)
 
     def _handle_material_mode_changed(self, row: PartMaterialRowWidgets) -> None:
         self.apply_geometry_state(self._geometry_snapshot, cpu_profile=self._cpu_profile)
@@ -949,8 +1004,7 @@ class MaterialsTabPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setHorizontalSpacing(10)
         label = QLabel(f"{slot_spec.slot_name} ({slot_spec.face_count} faces)", widget)
-        edit = QLineEdit(slot_spec.ue_asset_path, widget)
-        edit.setPlaceholderText("/Game/Path/Material.Material")
+        edit = _make_path_edit(slot_spec.ue_asset_path, widget, placeholder="/Game/Path/Material.Material")
         edit.textChanged.connect(lambda _text: self._on_change())
         layout.addWidget(label, 0, 0)
         layout.addWidget(edit, 0, 1)

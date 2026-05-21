@@ -8,12 +8,13 @@ material policy, and wind settings survive across Tk and Qt launches.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..models import ConversionMode, CpuProfile, MaterialPolicy
 from ..settings_service import (
     BaseMaterialSettingRecord,
+    GuiPresetRecord,
     GuiSettingsSnapshot,
     PartSourceSettingRecord,
     WindGroupSettingRecord,
@@ -91,6 +92,8 @@ def save_operator_state(
         wind_group_settings_by_input_path=previous_snapshot.wind_group_settings_by_input_path,
         base_material_settings_by_input_path=previous_snapshot.base_material_settings_by_input_path,
         part_mesh_settings_by_input_path=previous_snapshot.part_mesh_settings_by_input_path,
+        active_preset_name=previous_snapshot.active_preset_name,
+        presets=previous_snapshot.presets,
     )
     deps.save_gui_settings(resolved_settings_path, snapshot)
     return snapshot
@@ -184,6 +187,50 @@ def save_nested_input_settings(
         wind_group_settings_by_input_path=wind_group_settings_by_input_path,
         base_material_settings_by_input_path=base_material_settings_by_input_path,
         part_mesh_settings_by_input_path=part_mesh_settings_by_input_path,
+        active_preset_name=previous_snapshot.active_preset_name,
+        presets=previous_snapshot.presets,
     )
     deps.save_gui_settings(resolved_settings_path, snapshot)
     return snapshot
+
+
+def preset_from_operator_state(
+    name: str,
+    state: OperatorState,
+    *,
+    base_material_records: tuple[BaseMaterialSettingRecord, ...],
+    part_source_records: tuple[PartSourceSettingRecord, ...],
+    wind_group_records: dict[str, WindGroupSettingRecord],
+) -> GuiPresetRecord:
+    """Capture current operator values as a reusable named preset."""
+    return GuiPresetRecord(
+        name=name,
+        cpu_profile=state.cpu_profile,
+        preserve_temp_files=bool(state.preserve_temp_files),
+        conversion_mode=state.conversion_mode,
+        material_policy=state.material_policy,
+        bark_material_path=state.bark_material_path,
+        leaves_material_path=state.leaves_material_path,
+        single_material_path=state.single_material_path,
+        gust_attenuation=float(state.gust_attenuation),
+        is_ground_cover=bool(state.is_ground_cover),
+        wind_group_settings=dict(wind_group_records),
+        base_material_settings=base_material_records,
+        part_mesh_settings=part_source_records,
+    )
+
+
+def apply_preset_to_operator_state(state: OperatorState, preset: GuiPresetRecord) -> OperatorState:
+    """Apply preset operator values while keeping the current input/output paths."""
+    return replace(
+        state,
+        cpu_profile=preset.cpu_profile,
+        preserve_temp_files=bool(preset.preserve_temp_files),
+        conversion_mode=preset.conversion_mode,
+        material_policy=preset.material_policy,
+        bark_material_path=preset.bark_material_path,
+        leaves_material_path=preset.leaves_material_path,
+        single_material_path=preset.single_material_path,
+        gust_attenuation=float(preset.gust_attenuation),
+        is_ground_cover=bool(preset.is_ground_cover),
+    )

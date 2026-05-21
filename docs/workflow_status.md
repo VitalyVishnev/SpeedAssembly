@@ -31,97 +31,12 @@ The project has passed the baseline importer gate:
 
 The project has also passed automated `Phase 1` regression coverage for:
 
-- `LeafReferences` on trunk and intermediate branch levels
-- deeper branch hierarchy before repeated parts
-- invalid leaf binding rejection
-- multi-material part authoring through `GeomSubset`
-- explicit material-policy remapping for shifted source material ids
-- single-material remapping for base mesh and part prototypes
-- vertex-color split remapping for base mesh and part prototypes
-- mixed inline plus external `PartMesh` prototype resolution
-- mixed inline, external Unreal asset, and explicit disk-FBX prototype resolution
-- multi-root main skeleton USDA naming without duplicate root aliases
-- prototype-derived one-bone part skeleton naming
-- separate Dynamic Wind JSON generation from the normalized skeleton
-- streamed USDA writing for explicit FBX prototype payloads without returning a full in-memory USDA text blob
-- `skeletal_parts` split export coverage for one-USDA-per-prototype naming without assembly-root or base-tree fields
-- `static_assembly` export coverage for single-file static Nanite Assembly authoring with a plain `PointInstancer` and `SM_`-prefixed static mesh child prims
-
-Current export-mode priority:
-
-- `skeletal_assembly` is the primary project goal and the baseline vegetation pipeline
-- `static_assembly` is a fully supported secondary export mode and imports normally in UE 5.7.x
-- static mode must preserve its own rigid assembly contract without diluting the skeletal Definition of Done
-
-Current Python runtime contract:
-
-- `.venv310` is the primary development and validation environment
-- real Autodesk FBX import is expected to run from `.venv310`
-- the known-good FBX package is Autodesk `FBX Python SDK 2020.3.4` for CPython `3.10`
-- GUI build helpers are expected to run from `.venv310`
-- future chats should assume `.venv310` first when running the converter or debugging FBX import
-
-The current naming contract used by the checked exports is:
-
-- output USDA files are named `<stem>.usda`
-- the base mesh prim uses the same `<stem>`
-- the base `SkelRoot` uses `<stem>_Geo`
-- the shared `Skeleton` uses `<stem>_Skeleton`
-- the skeleton name is not inferred from the first bone name
-- the XML source filename is not used to derive the main skeleton name
-- static assembly exports derive the root prim from the chosen assembly/output stem and keep unique base geometry inside the instancer prototype list
-
-The wind-group contract has also been validated on the attached grass sample:
-
-- `SkeletalAssemblyTest_Grass.xml` now resolves to a single wind group under the explicit generator-level rule
-- `Ground Cover` remains an explicit wind flag and does not change group count
-- when `Ground Cover` is enabled, every generated simulation group is emitted as non-trunk
-- legacy XML samples that do not provide usable generator levels are rejected by the wind path instead of being inferred
-
-Current operator-facing material controls:
-
-- the GUI now separates `Base XML materials` from repeated-part material settings
-- base XML materials are discovered from the XML source and shown as per-slot rows:
-  - source `ID`
-  - source `Name`
-  - Unreal material path
-- prototype-only material slots used only by instanced repeated parts are intentionally excluded from the base-material list
-- assigning the same Unreal material path to multiple XML rows is a supported way to intentionally collapse those XML slots to the same UE material asset
-- repeated part prototypes now carry their own stage-1 material controls in the GUI
-- current GUI part-material modes are:
-  - `vertex_color_split`
-  - `single_material`
-  - `material_slots` for `FBX file` rows
-- `vertex_color_split` for part rows is an explicit black/white split
-- `single_material` for part rows uses its own dedicated Unreal material path field
-- `material_slots` reads the FBX and shows only the slots actually used by faces in the imported payload
-- `material_slots` merges repeated FBX material names into one UI slot row
-- `material_slots` labels unnamed slot usage as `Unassigned`
-- the GUI no longer relies on `auto` as the primary interactive workflow for part materials
-- GUI settings persist per-XML base-material rows and per-XML repeated-part material settings
-- the CLI exposes:
-  - `--material-policy`
-  - `--single-material-path`
-  - `--bark-material-path`
-  - `--leaves-material-path`
-
-Current operator-facing part-source controls:
-
-- the GUI exposes a per-prototype `Source Mode` for each repeated part prototype discovered from `LeafReferences`
-- each row can keep the XML mesh, point at an existing Unreal skeletal asset, or load a disk FBX file
-- GUI settings persist the per-prototype choice per input XML
-- the GUI also exposes `CPU Profile`:
-  - `balanced`
-  - `max_speed`
-  - `quiet`
-- the CLI exposes:
-  - `--part-source-config`
-  - `--cpu-profile`
-
-Current operator-facing wind-settings contract:
-
-- wind-group slider values are Persisted Operator Settings keyed per input XML path
-- switching between different trees must restore the last saved Operator State for that specific XML instead of reusing another tree's settings
+- `LeafReferences` placement and binding edge cases
+- material-policy and prototype-resolution variants
+- multi-root naming and one-bone part-skeleton cases
+- wind JSON generation
+- streamed USDA writing
+- `skeletal_parts` and `static_assembly` export coverage
 
 Current large-job execution contract:
 
@@ -130,39 +45,17 @@ Current large-job execution contract:
 - explicit FBX prototype imports are parallelized across a `spawn` process pool when more than one FBX prototype must be imported
 - this parallelism is currently prototype-level and stage-level, not "all cores inside one single FBX file"
 - packaged frozen runs use isolated `FBX Helper` imports through the shared FBX supervisor and start from the requested prototype-level concurrency
-- the primary `dist-next` package is a one-file release: `XMLtoUSDAConverter.exe` also handles `fbx-worker` helper mode when no legacy sidecar worker is present
 - if a native helper crash occurs at that concurrency, the supervisor automatically retries the remaining FBX imports with a lower helper count instead of failing the whole job immediately
 - if that worker pool cannot be created in the current environment, FBX prototype import falls back to sequential execution instead of failing outright
 - the conversion worker must not be daemonized, because parallel FBX import requires child worker processes
 - the validated `WorldTree.xml` stress path with two huge FBX branch replacements completes successfully through the subprocess path
-- `balanced` remains the default operator-facing CPU profile for this path
 - low total CPU percentage on a monster export with only one or two huge FBX prototypes is not, by itself, a defect; the more important signal is whether the supervisor keeps safe parallel progress instead of stalling or crashing
 - the active engineering priority for huge jobs is runtime stability, recovery, diagnostics, and packaged-build reliability before deeper intra-file FBX saturation work
 
-Current huge-FBX contract:
+Current huge-FBX status:
 
-- XML `LOD/@Filename` is ignored for this workflow
-- FBX mode is explicit only through GUI/CLI prototype source config
-- v1 accepts rigid polygon payloads only
-- animated or skinned FBX payloads are rejected
-- FBX-origin pivot is treated as the attachment pivot
-- FBX prototype source config supports `fbx_material_mode`:
-  - `auto`
-  - `vertex_color_split`
-  - `single_material`
-  - `material_slots`
-- GUI repeated-part material controls expose `vertex_color_split`, `single_material`, and `material_slots` for `FBX file` rows
-- `vertex_color_split` expects exact black and exact white face buckets for part-material assignment
-- if `fbx_material_mode=auto` and FBX vertex colors are missing, incomplete, or all collapse to one bucket, the prototype falls back to one primary material section
-- if `fbx_material_mode=vertex_color_split`, the split is strict: unusable colors or Autodesk SDK vertex-color access failures now produce a detailed conversion error instead of silently degrading the prototype to one material
-- if `fbx_material_mode=material_slots`, only the slots actually used by faces are emitted
-- if multiple FBX mesh nodes share the same material name, they collapse to one logical slot row in the UI and one logical slot override contract
-- if some `material_slots` rows are blank, one filled Unreal material path is reused and a warning is emitted
-- if every `material_slots` row is blank, conversion fails loudly
-- huge FBX prototype payloads are written through the streaming USDA path using a temp file plus atomic replace on success
-- when multiple explicit FBX prototype replacements are present, their imports may overlap in parallel worker processes
-- telemetry for huge jobs now distinguishes `xml_normalization`, `prototype_resolution`, `fbx_import`, `material_resolution`, and `usda_writing`
-- Runtime Job manifests now also record a small `runtime_context` block so packaged-worker crashes can be compared against launcher-worker crashes after the fact
+- huge FBX writing uses the streamed USDA path with temp-file replacement and runtime telemetry
+- `Runtime Job` manifests now include `runtime_context` for launcher-versus-packaged crash comparison
 
 The only remaining open item before `Phase 1` can be considered complete is broader validation on multiple real SpeedTree structures with different tree and grass shapes:
 
@@ -184,17 +77,9 @@ The primary standalone package build path has also been stabilized:
 
 - `.\scripts\build_qt_gui_exe.cmd -Package` now clears stale `build-next/` and `dist-next/` state before invoking PyInstaller
 - PyInstaller is also run with `--clean` so the package path does not reuse incremental analysis output from older runs
-- the public release artifact is `dist-next\XMLtoUSDAConverter.exe`, with no required sidecar worker executable
 - the previous "looks stuck" behavior was a stale-package-state problem, not a converter logic regression
 
-At this point, the earlier importer-facing concerns are treated as closed by the current validation set:
-
-- skeletal import path
-- naming contract
-- materials
-- wind JSON
-- external `PartMesh` reuse
-- transform and instance placement sanity on the currently tested samples
+The earlier importer-facing concerns are treated as closed by the current validation set.
 
 Recent exporter fixes that must remain stable:
 

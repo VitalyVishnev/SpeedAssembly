@@ -16,6 +16,9 @@ from pathlib import Path
 from .models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode
 
 
+FACTORY_DEFAULT_PRESET_NAME = "Factory Defaults"
+
+
 @dataclass(frozen=True)
 class BaseMaterialSettingRecord:
     source_id: int
@@ -54,6 +57,23 @@ class WindGroupSettingRecord:
 
 
 @dataclass(frozen=True)
+class GuiPresetRecord:
+    name: str
+    cpu_profile: CpuProfile = CpuProfile.BALANCED
+    preserve_temp_files: bool = False
+    conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES
+    bark_material_path: str = ""
+    leaves_material_path: str = ""
+    single_material_path: str = ""
+    gust_attenuation: float = 0.0
+    is_ground_cover: bool = False
+    wind_group_settings: dict[str, WindGroupSettingRecord] = field(default_factory=dict)
+    base_material_settings: tuple[BaseMaterialSettingRecord, ...] = ()
+    part_mesh_settings: tuple[PartSourceSettingRecord, ...] = ()
+
+
+@dataclass(frozen=True)
 class GuiSettingsSnapshot:
     last_input_path: str = ""
     last_output_path: str = ""
@@ -70,6 +90,8 @@ class GuiSettingsSnapshot:
     wind_group_settings_by_input_path: dict[str, dict[str, WindGroupSettingRecord]] = field(default_factory=dict)
     base_material_settings_by_input_path: dict[str, tuple[BaseMaterialSettingRecord, ...]] = field(default_factory=dict)
     part_mesh_settings_by_input_path: dict[str, tuple[PartSourceSettingRecord, ...]] = field(default_factory=dict)
+    active_preset_name: str = FACTORY_DEFAULT_PRESET_NAME
+    presets: dict[str, GuiPresetRecord] = field(default_factory=dict)
 
 
 def resolve_input_settings_key(input_path: str) -> str:
@@ -88,6 +110,11 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
         return GuiSettingsSnapshot()
     if not isinstance(payload, dict):
         return GuiSettingsSnapshot()
+
+    presets = _parse_presets(payload.get("presets"))
+    active_preset_name = _coerce_preset_name(payload.get("active_preset_name"), FACTORY_DEFAULT_PRESET_NAME)
+    if active_preset_name != FACTORY_DEFAULT_PRESET_NAME and active_preset_name not in presets:
+        active_preset_name = FACTORY_DEFAULT_PRESET_NAME
 
     return GuiSettingsSnapshot(
         last_input_path=str(payload.get("last_input_path", "")),
@@ -113,6 +140,8 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
         part_mesh_settings_by_input_path=_parse_part_mesh_settings_by_input_path(
             payload.get("part_mesh_settings_by_input_path")
         ),
+        active_preset_name=active_preset_name,
+        presets=presets,
     )
 
 
@@ -149,7 +178,45 @@ def save_gui_settings(settings_path: str | Path, snapshot: GuiSettingsSnapshot) 
         payload["wind_group_settings_by_input_path"] = _serialize_wind_group_settings_by_input_path(
             snapshot.wind_group_settings_by_input_path
         )
+    payload["active_preset_name"] = _coerce_preset_name(snapshot.active_preset_name, FACTORY_DEFAULT_PRESET_NAME)
+    if snapshot.presets:
+        payload["presets"] = _serialize_presets(snapshot.presets)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def factory_default_preset() -> GuiPresetRecord:
+    """Return the built-in preset that is always available in the selector."""
+    return GuiPresetRecord(name=FACTORY_DEFAULT_PRESET_NAME)
+
+
+def sorted_gui_presets(snapshot: GuiSettingsSnapshot) -> tuple[GuiPresetRecord, ...]:
+    """Return factory defaults followed by user presets in deterministic order."""
+    user_presets = sorted(snapshot.presets.values(), key=lambda preset: preset.name.casefold())
+    return (factory_default_preset(), *user_presets)
+
+
+def save_gui_preset(preset_path: str | Path, preset: GuiPresetRecord) -> None:
+    """Write one preset to a portable JSON file."""
+    path = Path(preset_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _serialize_preset(preset)
+    payload["name"] = preset.name
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def load_gui_preset(preset_path: str | Path) -> GuiPresetRecord:
+    """Load one preset from a portable JSON file."""
+    path = Path(preset_path)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Preset file is not readable JSON: {path}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Preset file must contain one JSON object.")
+    name = _coerce_preset_name(payload.get("name"), path.stem)
+    if name == FACTORY_DEFAULT_PRESET_NAME:
+        raise ValueError("Imported preset must use a user preset name.")
+    return _parse_preset(name, payload)
 
 
 def _parse_cpu_profile(raw_value) -> CpuProfile:
@@ -290,6 +357,46 @@ def _parse_part_mesh_settings_by_input_path(raw_value) -> dict[str, tuple[PartSo
     return settings
 
 
+def _parse_presets(raw_value) -> dict[str, GuiPresetRecord]:
+    if not isinstance(raw_value, dict):
+        return {}
+    presets: dict[str, GuiPresetRecord] = {}
+    for raw_name, raw_preset in raw_value.items():
+        name = _coerce_preset_name(raw_name, "")
+        if not name or name == FACTORY_DEFAULT_PRESET_NAME or not isinstance(raw_preset, dict):
+            continue
+        presets[name] = _parse_preset(name, raw_preset)
+    return presets
+
+
+def _parse_preset(name: str, payload: dict) -> GuiPresetRecord:
+    return GuiPresetRecord(
+        name=name,
+        cpu_profile=_parse_cpu_profile(payload.get("cpu_profile")),
+        preserve_temp_files=bool(payload.get("preserve_temp_files", False)),
+        conversion_mode=_parse_conversion_mode(payload.get("conversion_mode")),
+        material_policy=_parse_gui_material_policy(
+            payload.get("material_policy", MaterialPolicy.SOURCE_MATERIAL_ROLES.value)
+        ),
+        bark_material_path=str(payload.get("bark_material_path", "")),
+        leaves_material_path=str(payload.get("leaves_material_path", "")),
+        single_material_path=str(payload.get("single_material_path", "")),
+        gust_attenuation=_coerce_float(payload.get("gust_attenuation", 0.0), 0.0),
+        is_ground_cover=bool(payload.get("is_ground_cover", False)),
+        wind_group_settings=_parse_wind_group_settings(payload.get("wind_group_settings")),
+        base_material_settings=_parse_base_material_settings(payload.get("base_material_settings")),
+        part_mesh_settings=_parse_part_mesh_settings(payload.get("part_mesh_settings")),
+    )
+
+
+def _parse_base_material_settings(raw_value) -> tuple[BaseMaterialSettingRecord, ...]:
+    return _parse_base_material_settings_by_input_path({"preset": raw_value}).get("preset", ())
+
+
+def _parse_part_mesh_settings(raw_value) -> tuple[PartSourceSettingRecord, ...]:
+    return _parse_part_mesh_settings_by_input_path({"preset": raw_value}).get("preset", ())
+
+
 def _parse_fbx_material_slot_overrides(raw_value) -> tuple[FbxMaterialSlotSettingRecord, ...]:
     if not isinstance(raw_value, list):
         return ()
@@ -388,6 +495,41 @@ def _serialize_wind_group_settings_by_input_path(
         str(key): _serialize_wind_group_settings(group_settings)
         for key, group_settings in settings.items()
     }
+
+
+def _serialize_presets(presets: dict[str, GuiPresetRecord]) -> dict[str, dict[str, object]]:
+    return {
+        preset.name: _serialize_preset(preset)
+        for preset in sorted(presets.values(), key=lambda value: value.name.casefold())
+        if preset.name != FACTORY_DEFAULT_PRESET_NAME
+    }
+
+
+def _serialize_preset(preset: GuiPresetRecord) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "cpu_profile": preset.cpu_profile.value,
+        "preserve_temp_files": bool(preset.preserve_temp_files),
+        "conversion_mode": ConversionMode.parse(preset.conversion_mode).value,
+        "material_policy": preset.material_policy.value,
+        "bark_material_path": preset.bark_material_path,
+        "leaves_material_path": preset.leaves_material_path,
+        "single_material_path": preset.single_material_path,
+        "gust_attenuation": round(float(preset.gust_attenuation), 4),
+        "is_ground_cover": bool(preset.is_ground_cover),
+        "wind_group_settings": _serialize_wind_group_settings(preset.wind_group_settings),
+        "base_material_settings": _serialize_base_material_settings_by_input_path(
+            {"preset": preset.base_material_settings}
+        )["preset"],
+        "part_mesh_settings": _serialize_part_mesh_settings_by_input_path({"preset": preset.part_mesh_settings}).get(
+            "preset", []
+        ),
+    }
+    return payload
+
+
+def _coerce_preset_name(raw_value, default: str) -> str:
+    name = str(raw_value).strip() if raw_value is not None else ""
+    return name or default
 
 
 def _coerce_bool(raw_value, default: bool) -> bool:

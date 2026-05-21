@@ -3,9 +3,16 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from xml_to_usda.models import ConversionMode, CpuProfile, MaterialPolicy
-from xml_to_usda.qt_ui.operator_state import OperatorState, load_operator_state, save_operator_state
+from xml_to_usda.qt_ui.operator_state import (
+    OperatorState,
+    apply_preset_to_operator_state,
+    load_operator_state,
+    preset_from_operator_state,
+    save_operator_state,
+)
 from xml_to_usda.settings_service import (
     BaseMaterialSettingRecord,
+    GuiPresetRecord,
     GuiSettingsSnapshot,
     PartSourceSettingRecord,
     WindGroupSettingRecord,
@@ -85,3 +92,45 @@ def test_qt_operator_state_save_preserves_nested_records(tmp_path) -> None:
     assert reloaded.base_material_settings_by_input_path == original_snapshot.base_material_settings_by_input_path
     assert reloaded.part_mesh_settings_by_input_path == original_snapshot.part_mesh_settings_by_input_path
     assert reloaded.wind_group_settings_by_input_path == original_snapshot.wind_group_settings_by_input_path
+
+
+def test_qt_operator_state_applies_preset_without_replacing_paths() -> None:
+    state = OperatorState(input_path="tree.xml", output_path="tree.usda")
+    preset = GuiPresetRecord(
+        name="Static",
+        conversion_mode=ConversionMode.STATIC_ASSEMBLY,
+        material_policy=MaterialPolicy.SINGLE_MATERIAL,
+        single_material_path="/Game/M_All.M_All",
+        gust_attenuation=0.2,
+        is_ground_cover=True,
+    )
+
+    applied = apply_preset_to_operator_state(state, preset)
+
+    assert applied.input_path == "tree.xml"
+    assert applied.output_path == "tree.usda"
+    assert applied.conversion_mode == ConversionMode.STATIC_ASSEMBLY
+    assert applied.material_policy == MaterialPolicy.SINGLE_MATERIAL
+    assert applied.single_material_path == "/Game/M_All.M_All"
+    assert applied.gust_attenuation == 0.2
+    assert applied.is_ground_cover is True
+
+
+def test_qt_operator_state_captures_current_rows_as_preset() -> None:
+    preset = preset_from_operator_state(
+        "Branches",
+        OperatorState(
+            conversion_mode=ConversionMode.SKELETAL_PARTS,
+            material_policy=MaterialPolicy.SINGLE_MATERIAL,
+            single_material_path="/Game/M_All.M_All",
+        ),
+        base_material_records=(BaseMaterialSettingRecord(source_id=1, source_name="Bark"),),
+        part_source_records=(PartSourceSettingRecord(source_name="Twig"),),
+        wind_group_records={"0": WindGroupSettingRecord(influence=0.4)},
+    )
+
+    assert preset.name == "Branches"
+    assert preset.conversion_mode == ConversionMode.SKELETAL_PARTS
+    assert preset.base_material_settings[0].source_name == "Bark"
+    assert preset.part_mesh_settings[0].source_name == "Twig"
+    assert preset.wind_group_settings["0"].influence == 0.4

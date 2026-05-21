@@ -492,7 +492,9 @@ imported by:
  &#8226;   <a href="#PySide6.support.deprecated">PySide6.support.deprecated</a>
  &#8226;   <a href="#launch_qt_gui.py">launch_qt_gui.py</a>
  &#8226;   <a href="#shiboken6.Shiboken">shiboken6.Shiboken</a>
+ &#8226;   <a href="#xml_to_usda.assembly_resolution">xml_to_usda.assembly_resolution</a>
  &#8226;   <a href="#xml_to_usda.asset_paths">xml_to_usda.asset_paths</a>
+ &#8226;   <a href="#xml_to_usda.authoring_validation">xml_to_usda.authoring_validation</a>
  &#8226;   <a href="#xml_to_usda.canonical_loader">xml_to_usda.canonical_loader</a>
  &#8226;   <a href="#xml_to_usda.cli">xml_to_usda.cli</a>
  &#8226;   <a href="#xml_to_usda.conversion_orchestrator">xml_to_usda.conversion_orchestrator</a>
@@ -516,6 +518,7 @@ imported by:
  &#8226;   <a href="#xml_to_usda.gui_persistence">xml_to_usda.gui_persistence</a>
  &#8226;   <a href="#xml_to_usda.gui_wind_panel">xml_to_usda.gui_wind_panel</a>
  &#8226;   <a href="#xml_to_usda.job_control">xml_to_usda.job_control</a>
+ &#8226;   <a href="#xml_to_usda.material_assignment_resolution">xml_to_usda.material_assignment_resolution</a>
  &#8226;   <a href="#xml_to_usda.material_resolver">xml_to_usda.material_resolver</a>
  &#8226;   <a href="#xml_to_usda.models">xml_to_usda.models</a>
  &#8226;   <a href="#xml_to_usda.naming">xml_to_usda.naming</a>
@@ -524,6 +527,7 @@ imported by:
  &#8226;   <a href="#xml_to_usda.payload_partition">xml_to_usda.payload_partition</a>
  &#8226;   <a href="#xml_to_usda.pipeline">xml_to_usda.pipeline</a>
  &#8226;   <a href="#xml_to_usda.prototype_keys">xml_to_usda.prototype_keys</a>
+ &#8226;   <a href="#xml_to_usda.prototype_resolution">xml_to_usda.prototype_resolution</a>
  &#8226;   <a href="#xml_to_usda.prototype_sources">xml_to_usda.prototype_sources</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.adjust_ui">xml_to_usda.qt_ui.adjust_ui</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.background_jobs">xml_to_usda.qt_ui.background_jobs</a>
@@ -535,15 +539,17 @@ imported by:
  &#8226;   <a href="#xml_to_usda.qt_ui.persistence">xml_to_usda.qt_ui.persistence</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.theme">xml_to_usda.qt_ui.theme</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.window">xml_to_usda.qt_ui.window</a>
+ &#8226;   <a href="#xml_to_usda.resolution_validation">xml_to_usda.resolution_validation</a>
  &#8226;   <a href="#xml_to_usda.runtime_paths">xml_to_usda.runtime_paths</a>
  &#8226;   <a href="#xml_to_usda.settings_service">xml_to_usda.settings_service</a>
  &#8226;   <a href="#xml_to_usda.skeleton_rules">xml_to_usda.skeleton_rules</a>
  &#8226;   <a href="#xml_to_usda.source_analysis">xml_to_usda.source_analysis</a>
  &#8226;   <a href="#xml_to_usda.source_transform">xml_to_usda.source_transform</a>
+ &#8226;   <a href="#xml_to_usda.source_validation">xml_to_usda.source_validation</a>
  &#8226;   <a href="#xml_to_usda.ue_schema">xml_to_usda.ue_schema</a>
  &#8226;   <a href="#xml_to_usda.usda_authoring">xml_to_usda.usda_authoring</a>
  &#8226;   <a href="#xml_to_usda.usda_writer">xml_to_usda.usda_writer</a>
- &#8226;   <a href="#xml_to_usda.validator">xml_to_usda.validator</a>
+ &#8226;   <a href="#xml_to_usda.validation_common">xml_to_usda.validation_common</a>
  &#8226;   <a href="#xml_to_usda.wind_pipeline">xml_to_usda.wind_pipeline</a>
  &#8226;   <a href="#xml_to_usda.wind_service">xml_to_usda.wind_service</a>
  &#8226;   <a href="#xml_to_usda.xml_reader">xml_to_usda.xml_reader</a>
@@ -2262,7 +2268,7 @@ imports:
   <div class="import">
 imported by:
     <a href="#pprint">pprint</a>
- &#8226;   <a href="#xml_to_usda.canonical_loader">xml_to_usda.canonical_loader</a>
+ &#8226;   <a href="#xml_to_usda.assembly_resolution">xml_to_usda.assembly_resolution</a>
  &#8226;   <a href="#xml_to_usda.conversion_orchestrator">xml_to_usda.conversion_orchestrator</a>
  &#8226;   <a href="#xml_to_usda.conversion_service">xml_to_usda.conversion_service</a>
  &#8226;   <a href="#xml_to_usda.discovery_service">xml_to_usda.discovery_service</a>
@@ -2273,10 +2279,12 @@ imported by:
  &#8226;   <a href="#xml_to_usda.geometry_buffers">xml_to_usda.geometry_buffers</a>
  &#8226;   <a href="#xml_to_usda.gui_app">xml_to_usda.gui_app</a>
  &#8226;   <a href="#xml_to_usda.gui_models">xml_to_usda.gui_models</a>
+ &#8226;   <a href="#xml_to_usda.material_assignment_resolution">xml_to_usda.material_assignment_resolution</a>
  &#8226;   <a href="#xml_to_usda.material_resolver">xml_to_usda.material_resolver</a>
  &#8226;   <a href="#xml_to_usda.models">xml_to_usda.models</a>
  &#8226;   <a href="#xml_to_usda.normalizer">xml_to_usda.normalizer</a>
  &#8226;   <a href="#xml_to_usda.payload_partition">xml_to_usda.payload_partition</a>
+ &#8226;   <a href="#xml_to_usda.prototype_resolution">xml_to_usda.prototype_resolution</a>
  &#8226;   <a href="#xml_to_usda.prototype_sources">xml_to_usda.prototype_sources</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.adjust_ui">xml_to_usda.qt_ui.adjust_ui</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.background_jobs">xml_to_usda.qt_ui.background_jobs</a>
@@ -7833,6 +7841,7 @@ imported by:
  &#8226;   <a href="#xml_to_usda.gui_app">xml_to_usda.gui_app</a>
  &#8226;   <a href="#xml_to_usda.gui_part_sources_panel">xml_to_usda.gui_part_sources_panel</a>
  &#8226;   <a href="#xml_to_usda.output_resolution">xml_to_usda.output_resolution</a>
+ &#8226;   <a href="#xml_to_usda.prototype_resolution">xml_to_usda.prototype_resolution</a>
  &#8226;   <a href="#xml_to_usda.prototype_sources">xml_to_usda.prototype_sources</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.adjust_ui">xml_to_usda.qt_ui.adjust_ui</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.operator_state">xml_to_usda.qt_ui.operator_state</a>
@@ -9082,6 +9091,7 @@ imported by:
  &#8226;   <a href="#threading">threading</a>
  &#8226;   <a href="#urllib.request">urllib.request</a>
  &#8226;   <a href="#uuid">uuid</a>
+ &#8226;   <a href="#xml_to_usda.assembly_resolution">xml_to_usda.assembly_resolution</a>
  &#8226;   <a href="#xml_to_usda.canonical_loader">xml_to_usda.canonical_loader</a>
  &#8226;   <a href="#xml_to_usda.fbx_import_supervisor">xml_to_usda.fbx_import_supervisor</a>
  &#8226;   <a href="#xml_to_usda.job_control">xml_to_usda.job_control</a>
@@ -9451,6 +9461,7 @@ imported by:
  &#8226;   <a href="#shiboken6">shiboken6</a>
  &#8226;   <a href="#xml_to_usda.geometry_buffers">xml_to_usda.geometry_buffers</a>
  &#8226;   <a href="#xml_to_usda.models">xml_to_usda.models</a>
+ &#8226;   <a href="#xml_to_usda.prototype_resolution">xml_to_usda.prototype_resolution</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.adjust_ui">xml_to_usda.qt_ui.adjust_ui</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.theme">xml_to_usda.qt_ui.theme</a>
 
@@ -10092,7 +10103,9 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#xml_to_usda.asset_paths">xml_to_usda.asset_paths</a>
+    <a href="#xml_to_usda.assembly_resolution">xml_to_usda.assembly_resolution</a>
+ &#8226;   <a href="#xml_to_usda.asset_paths">xml_to_usda.asset_paths</a>
+ &#8226;   <a href="#xml_to_usda.authoring_validation">xml_to_usda.authoring_validation</a>
  &#8226;   <a href="#xml_to_usda.canonical_loader">xml_to_usda.canonical_loader</a>
  &#8226;   <a href="#xml_to_usda.cli">xml_to_usda.cli</a>
  &#8226;   <a href="#xml_to_usda.conversion_orchestrator">xml_to_usda.conversion_orchestrator</a>
@@ -10116,6 +10129,7 @@ imported by:
  &#8226;   <a href="#xml_to_usda.gui_persistence">xml_to_usda.gui_persistence</a>
  &#8226;   <a href="#xml_to_usda.gui_wind_panel">xml_to_usda.gui_wind_panel</a>
  &#8226;   <a href="#xml_to_usda.job_control">xml_to_usda.job_control</a>
+ &#8226;   <a href="#xml_to_usda.material_assignment_resolution">xml_to_usda.material_assignment_resolution</a>
  &#8226;   <a href="#xml_to_usda.material_resolver">xml_to_usda.material_resolver</a>
  &#8226;   <a href="#xml_to_usda.models">xml_to_usda.models</a>
  &#8226;   <a href="#xml_to_usda.naming">xml_to_usda.naming</a>
@@ -10124,20 +10138,48 @@ imported by:
  &#8226;   <a href="#xml_to_usda.payload_partition">xml_to_usda.payload_partition</a>
  &#8226;   <a href="#xml_to_usda.pipeline">xml_to_usda.pipeline</a>
  &#8226;   <a href="#xml_to_usda.prototype_keys">xml_to_usda.prototype_keys</a>
+ &#8226;   <a href="#xml_to_usda.prototype_resolution">xml_to_usda.prototype_resolution</a>
  &#8226;   <a href="#xml_to_usda.prototype_sources">xml_to_usda.prototype_sources</a>
  &#8226;   <a href="#xml_to_usda.qt_ui">xml_to_usda.qt_ui</a>
+ &#8226;   <a href="#xml_to_usda.resolution_validation">xml_to_usda.resolution_validation</a>
  &#8226;   <a href="#xml_to_usda.runtime_paths">xml_to_usda.runtime_paths</a>
  &#8226;   <a href="#xml_to_usda.settings_service">xml_to_usda.settings_service</a>
  &#8226;   <a href="#xml_to_usda.skeleton_rules">xml_to_usda.skeleton_rules</a>
  &#8226;   <a href="#xml_to_usda.source_analysis">xml_to_usda.source_analysis</a>
  &#8226;   <a href="#xml_to_usda.source_transform">xml_to_usda.source_transform</a>
+ &#8226;   <a href="#xml_to_usda.source_validation">xml_to_usda.source_validation</a>
  &#8226;   <a href="#xml_to_usda.ue_schema">xml_to_usda.ue_schema</a>
  &#8226;   <a href="#xml_to_usda.usda_authoring">xml_to_usda.usda_authoring</a>
  &#8226;   <a href="#xml_to_usda.usda_writer">xml_to_usda.usda_writer</a>
- &#8226;   <a href="#xml_to_usda.validator">xml_to_usda.validator</a>
+ &#8226;   <a href="#xml_to_usda.validation_common">xml_to_usda.validation_common</a>
  &#8226;   <a href="#xml_to_usda.wind_pipeline">xml_to_usda.wind_pipeline</a>
  &#8226;   <a href="#xml_to_usda.wind_service">xml_to_usda.wind_service</a>
  &#8226;   <a href="#xml_to_usda.xml_reader">xml_to_usda.xml_reader</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="xml_to_usda.assembly_resolution"></a>
+  <a target="code" href="///D:/3D%20Personal/VibeCode/XMLtoUSDAconverter/src/xml_to_usda/assembly_resolution.py" type="text/plain"><tt>xml_to_usda.assembly_resolution</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#__future__">__future__</a>
+ &#8226;   <a href="#dataclasses">dataclasses</a>
+ &#8226;   <a href="#time">time</a>
+ &#8226;   <a href="#xml_to_usda">xml_to_usda</a>
+ &#8226;   <a href="#xml_to_usda.authoring_validation">xml_to_usda.authoring_validation</a>
+ &#8226;   <a href="#xml_to_usda.material_assignment_resolution">xml_to_usda.material_assignment_resolution</a>
+ &#8226;   <a href="#xml_to_usda.models">xml_to_usda.models</a>
+ &#8226;   <a href="#xml_to_usda.prototype_resolution">xml_to_usda.prototype_resolution</a>
+ &#8226;   <a href="#xml_to_usda.resolution_validation">xml_to_usda.resolution_validation</a>
+ &#8226;   <a href="#xml_to_usda.source_validation">xml_to_usda.source_validation</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#xml_to_usda.canonical_loader">xml_to_usda.canonical_loader</a>
 
   </div>
 
@@ -10154,13 +10196,35 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#xml_to_usda.canonical_loader">xml_to_usda.canonical_loader</a>
+    <a href="#xml_to_usda.authoring_validation">xml_to_usda.authoring_validation</a>
+ &#8226;   <a href="#xml_to_usda.canonical_loader">xml_to_usda.canonical_loader</a>
  &#8226;   <a href="#xml_to_usda.conversion_service">xml_to_usda.conversion_service</a>
  &#8226;   <a href="#xml_to_usda.conversion_validation">xml_to_usda.conversion_validation</a>
  &#8226;   <a href="#xml_to_usda.gui_part_sources_panel">xml_to_usda.gui_part_sources_panel</a>
- &#8226;   <a href="#xml_to_usda.prototype_sources">xml_to_usda.prototype_sources</a>
+ &#8226;   <a href="#xml_to_usda.material_assignment_resolution">xml_to_usda.material_assignment_resolution</a>
+ &#8226;   <a href="#xml_to_usda.prototype_resolution">xml_to_usda.prototype_resolution</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.panels">xml_to_usda.qt_ui.panels</a>
- &#8226;   <a href="#xml_to_usda.validator">xml_to_usda.validator</a>
+ &#8226;   <a href="#xml_to_usda.resolution_validation">xml_to_usda.resolution_validation</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="xml_to_usda.authoring_validation"></a>
+  <a target="code" href="///D:/3D%20Personal/VibeCode/XMLtoUSDAconverter/src/xml_to_usda/authoring_validation.py" type="text/plain"><tt>xml_to_usda.authoring_validation</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#__future__">__future__</a>
+ &#8226;   <a href="#xml_to_usda">xml_to_usda</a>
+ &#8226;   <a href="#xml_to_usda.asset_paths">xml_to_usda.asset_paths</a>
+ &#8226;   <a href="#xml_to_usda.geometry_buffers">xml_to_usda.geometry_buffers</a>
+ &#8226;   <a href="#xml_to_usda.models">xml_to_usda.models</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#xml_to_usda.assembly_resolution">xml_to_usda.assembly_resolution</a>
 
   </div>
 
@@ -10172,16 +10236,15 @@ imported by:
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
- &#8226;   <a href="#dataclasses">dataclasses</a>
  &#8226;   <a href="#time">time</a>
  &#8226;   <a href="#xml_to_usda">xml_to_usda</a>
+ &#8226;   <a href="#xml_to_usda.assembly_resolution">xml_to_usda.assembly_resolution</a>
  &#8226;   <a href="#xml_to_usda.asset_paths">xml_to_usda.asset_paths</a>
  &#8226;   <a href="#xml_to_usda.job_control">xml_to_usda.job_control</a>
  &#8226;   <a href="#xml_to_usda.material_resolver">xml_to_usda.material_resolver</a>
  &#8226;   <a href="#xml_to_usda.models">xml_to_usda.models</a>
  &#8226;   <a href="#xml_to_usda.normalizer">xml_to_usda.normalizer</a>
- &#8226;   <a href="#xml_to_usda.prototype_sources">xml_to_usda.prototype_sources</a>
- &#8226;   <a href="#xml_to_usda.validator">xml_to_usda.validator</a>
+ &#8226;   <a href="#xml_to_usda.source_validation">xml_to_usda.source_validation</a>
  &#8226;   <a href="#xml_to_usda.xml_reader">xml_to_usda.xml_reader</a>
 
   </div>
@@ -10479,8 +10542,8 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#xml_to_usda.material_resolver">xml_to_usda.material_resolver</a>
- &#8226;   <a href="#xml_to_usda.validator">xml_to_usda.validator</a>
+    <a href="#xml_to_usda.authoring_validation">xml_to_usda.authoring_validation</a>
+ &#8226;   <a href="#xml_to_usda.material_resolver">xml_to_usda.material_resolver</a>
 
   </div>
 
@@ -10735,10 +10798,34 @@ imported by:
  &#8226;   <a href="#xml_to_usda.conversion_process">xml_to_usda.conversion_process</a>
  &#8226;   <a href="#xml_to_usda.fbx_adapter">xml_to_usda.fbx_adapter</a>
  &#8226;   <a href="#xml_to_usda.fbx_import_supervisor">xml_to_usda.fbx_import_supervisor</a>
+ &#8226;   <a href="#xml_to_usda.material_assignment_resolution">xml_to_usda.material_assignment_resolution</a>
  &#8226;   <a href="#xml_to_usda.payload_partition">xml_to_usda.payload_partition</a>
+ &#8226;   <a href="#xml_to_usda.prototype_resolution">xml_to_usda.prototype_resolution</a>
  &#8226;   <a href="#xml_to_usda.prototype_sources">xml_to_usda.prototype_sources</a>
  &#8226;   <a href="#xml_to_usda.usda_authoring">xml_to_usda.usda_authoring</a>
  &#8226;   <a href="#xml_to_usda.usda_writer">xml_to_usda.usda_writer</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="xml_to_usda.material_assignment_resolution"></a>
+  <a target="code" href="///D:/3D%20Personal/VibeCode/XMLtoUSDAconverter/src/xml_to_usda/material_assignment_resolution.py" type="text/plain"><tt>xml_to_usda.material_assignment_resolution</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#__future__">__future__</a>
+ &#8226;   <a href="#dataclasses">dataclasses</a>
+ &#8226;   <a href="#xml_to_usda">xml_to_usda</a>
+ &#8226;   <a href="#xml_to_usda.asset_paths">xml_to_usda.asset_paths</a>
+ &#8226;   <a href="#xml_to_usda.job_control">xml_to_usda.job_control</a>
+ &#8226;   <a href="#xml_to_usda.material_resolver">xml_to_usda.material_resolver</a>
+ &#8226;   <a href="#xml_to_usda.models">xml_to_usda.models</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#xml_to_usda.assembly_resolution">xml_to_usda.assembly_resolution</a>
 
   </div>
 
@@ -10761,6 +10848,7 @@ imports:
   <div class="import">
 imported by:
     <a href="#xml_to_usda.canonical_loader">xml_to_usda.canonical_loader</a>
+ &#8226;   <a href="#xml_to_usda.material_assignment_resolution">xml_to_usda.material_assignment_resolution</a>
 
   </div>
 
@@ -10781,7 +10869,9 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#xml_to_usda.canonical_loader">xml_to_usda.canonical_loader</a>
+    <a href="#xml_to_usda.assembly_resolution">xml_to_usda.assembly_resolution</a>
+ &#8226;   <a href="#xml_to_usda.authoring_validation">xml_to_usda.authoring_validation</a>
+ &#8226;   <a href="#xml_to_usda.canonical_loader">xml_to_usda.canonical_loader</a>
  &#8226;   <a href="#xml_to_usda.cli">xml_to_usda.cli</a>
  &#8226;   <a href="#xml_to_usda.conversion_orchestrator">xml_to_usda.conversion_orchestrator</a>
  &#8226;   <a href="#xml_to_usda.conversion_process">xml_to_usda.conversion_process</a>
@@ -10800,24 +10890,28 @@ imported by:
  &#8226;   <a href="#xml_to_usda.gui_part_sources_panel">xml_to_usda.gui_part_sources_panel</a>
  &#8226;   <a href="#xml_to_usda.gui_wind_panel">xml_to_usda.gui_wind_panel</a>
  &#8226;   <a href="#xml_to_usda.job_control">xml_to_usda.job_control</a>
+ &#8226;   <a href="#xml_to_usda.material_assignment_resolution">xml_to_usda.material_assignment_resolution</a>
  &#8226;   <a href="#xml_to_usda.material_resolver">xml_to_usda.material_resolver</a>
  &#8226;   <a href="#xml_to_usda.naming">xml_to_usda.naming</a>
  &#8226;   <a href="#xml_to_usda.normalizer">xml_to_usda.normalizer</a>
  &#8226;   <a href="#xml_to_usda.output_resolution">xml_to_usda.output_resolution</a>
  &#8226;   <a href="#xml_to_usda.payload_partition">xml_to_usda.payload_partition</a>
+ &#8226;   <a href="#xml_to_usda.prototype_resolution">xml_to_usda.prototype_resolution</a>
  &#8226;   <a href="#xml_to_usda.prototype_sources">xml_to_usda.prototype_sources</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.background_jobs">xml_to_usda.qt_ui.background_jobs</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.operator_state">xml_to_usda.qt_ui.operator_state</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.panels">xml_to_usda.qt_ui.panels</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.window">xml_to_usda.qt_ui.window</a>
+ &#8226;   <a href="#xml_to_usda.resolution_validation">xml_to_usda.resolution_validation</a>
  &#8226;   <a href="#xml_to_usda.runtime_paths">xml_to_usda.runtime_paths</a>
  &#8226;   <a href="#xml_to_usda.settings_service">xml_to_usda.settings_service</a>
  &#8226;   <a href="#xml_to_usda.source_analysis">xml_to_usda.source_analysis</a>
  &#8226;   <a href="#xml_to_usda.source_transform">xml_to_usda.source_transform</a>
+ &#8226;   <a href="#xml_to_usda.source_validation">xml_to_usda.source_validation</a>
  &#8226;   <a href="#xml_to_usda.ue_schema">xml_to_usda.ue_schema</a>
  &#8226;   <a href="#xml_to_usda.usda_authoring">xml_to_usda.usda_authoring</a>
  &#8226;   <a href="#xml_to_usda.usda_writer">xml_to_usda.usda_writer</a>
- &#8226;   <a href="#xml_to_usda.validator">xml_to_usda.validator</a>
+ &#8226;   <a href="#xml_to_usda.validation_common">xml_to_usda.validation_common</a>
  &#8226;   <a href="#xml_to_usda.wind_pipeline">xml_to_usda.wind_pipeline</a>
  &#8226;   <a href="#xml_to_usda.wind_service">xml_to_usda.wind_service</a>
  &#8226;   <a href="#xml_to_usda.xml_reader">xml_to_usda.xml_reader</a>
@@ -10840,7 +10934,7 @@ imports:
   <div class="import">
 imported by:
     <a href="#xml_to_usda.normalizer">xml_to_usda.normalizer</a>
- &#8226;   <a href="#xml_to_usda.prototype_sources">xml_to_usda.prototype_sources</a>
+ &#8226;   <a href="#xml_to_usda.prototype_resolution">xml_to_usda.prototype_resolution</a>
  &#8226;   <a href="#xml_to_usda.usda_authoring">xml_to_usda.usda_authoring</a>
 
   </div>
@@ -10953,7 +11047,34 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#xml_to_usda.prototype_sources">xml_to_usda.prototype_sources</a>
+    <a href="#xml_to_usda.prototype_resolution">xml_to_usda.prototype_resolution</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="xml_to_usda.prototype_resolution"></a>
+  <a target="code" href="///D:/3D%20Personal/VibeCode/XMLtoUSDAconverter/src/xml_to_usda/prototype_resolution.py" type="text/plain"><tt>xml_to_usda.prototype_resolution</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#__future__">__future__</a>
+ &#8226;   <a href="#dataclasses">dataclasses</a>
+ &#8226;   <a href="#pathlib">pathlib</a>
+ &#8226;   <a href="#typing">typing</a>
+ &#8226;   <a href="#xml_to_usda">xml_to_usda</a>
+ &#8226;   <a href="#xml_to_usda.asset_paths">xml_to_usda.asset_paths</a>
+ &#8226;   <a href="#xml_to_usda.job_control">xml_to_usda.job_control</a>
+ &#8226;   <a href="#xml_to_usda.models">xml_to_usda.models</a>
+ &#8226;   <a href="#xml_to_usda.naming">xml_to_usda.naming</a>
+ &#8226;   <a href="#xml_to_usda.prototype_keys">xml_to_usda.prototype_keys</a>
+ &#8226;   <a href="#xml_to_usda.prototype_sources">xml_to_usda.prototype_sources</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#xml_to_usda.assembly_resolution">xml_to_usda.assembly_resolution</a>
+ &#8226;   <a href="#xml_to_usda.prototype_sources">xml_to_usda.prototype_sources</a>
 
   </div>
 
@@ -10979,20 +11100,18 @@ imports:
  &#8226;   <a href="#time">time</a>
  &#8226;   <a href="#traceback">traceback</a>
  &#8226;   <a href="#xml_to_usda">xml_to_usda</a>
- &#8226;   <a href="#xml_to_usda.asset_paths">xml_to_usda.asset_paths</a>
  &#8226;   <a href="#xml_to_usda.fbx_adapter">xml_to_usda.fbx_adapter</a>
  &#8226;   <a href="#xml_to_usda.fbx_import_supervisor">xml_to_usda.fbx_import_supervisor</a>
  &#8226;   <a href="#xml_to_usda.fbx_worker_subprocess">xml_to_usda.fbx_worker_subprocess</a>
  &#8226;   <a href="#xml_to_usda.job_control">xml_to_usda.job_control</a>
  &#8226;   <a href="#xml_to_usda.models">xml_to_usda.models</a>
- &#8226;   <a href="#xml_to_usda.naming">xml_to_usda.naming</a>
- &#8226;   <a href="#xml_to_usda.prototype_keys">xml_to_usda.prototype_keys</a>
+ &#8226;   <a href="#xml_to_usda.prototype_resolution">xml_to_usda.prototype_resolution</a>
 
   </div>
   <div class="import">
 imported by:
-    <a href="#xml_to_usda.canonical_loader">xml_to_usda.canonical_loader</a>
- &#8226;   <a href="#xml_to_usda.cli">xml_to_usda.cli</a>
+    <a href="#xml_to_usda.cli">xml_to_usda.cli</a>
+ &#8226;   <a href="#xml_to_usda.prototype_resolution">xml_to_usda.prototype_resolution</a>
 
   </div>
 
@@ -11267,11 +11386,32 @@ imports:
  &#8226;   <a href="#xml_to_usda.qt_ui.persistence">xml_to_usda.qt_ui.persistence</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.theme">xml_to_usda.qt_ui.theme</a>
  &#8226;   <a href="#xml_to_usda.runtime_paths">xml_to_usda.runtime_paths</a>
+ &#8226;   <a href="#xml_to_usda.settings_service">xml_to_usda.settings_service</a>
 
   </div>
   <div class="import">
 imported by:
     <a href="#xml_to_usda.qt_ui.entry">xml_to_usda.qt_ui.entry</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="xml_to_usda.resolution_validation"></a>
+  <a target="code" href="///D:/3D%20Personal/VibeCode/XMLtoUSDAconverter/src/xml_to_usda/resolution_validation.py" type="text/plain"><tt>xml_to_usda.resolution_validation</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#__future__">__future__</a>
+ &#8226;   <a href="#xml_to_usda">xml_to_usda</a>
+ &#8226;   <a href="#xml_to_usda.asset_paths">xml_to_usda.asset_paths</a>
+ &#8226;   <a href="#xml_to_usda.models">xml_to_usda.models</a>
+ &#8226;   <a href="#xml_to_usda.validation_common">xml_to_usda.validation_common</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#xml_to_usda.assembly_resolution">xml_to_usda.assembly_resolution</a>
 
   </div>
 
@@ -11332,6 +11472,7 @@ imported by:
  &#8226;   <a href="#xml_to_usda.qt_ui.dependencies">xml_to_usda.qt_ui.dependencies</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.operator_state">xml_to_usda.qt_ui.operator_state</a>
  &#8226;   <a href="#xml_to_usda.qt_ui.panels">xml_to_usda.qt_ui.panels</a>
+ &#8226;   <a href="#xml_to_usda.qt_ui.window">xml_to_usda.qt_ui.window</a>
 
   </div>
 
@@ -11395,6 +11536,26 @@ imports:
   <div class="import">
 imported by:
     <a href="#xml_to_usda.normalizer">xml_to_usda.normalizer</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="xml_to_usda.source_validation"></a>
+  <a target="code" href="///D:/3D%20Personal/VibeCode/XMLtoUSDAconverter/src/xml_to_usda/source_validation.py" type="text/plain"><tt>xml_to_usda.source_validation</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#__future__">__future__</a>
+ &#8226;   <a href="#xml_to_usda">xml_to_usda</a>
+ &#8226;   <a href="#xml_to_usda.models">xml_to_usda.models</a>
+ &#8226;   <a href="#xml_to_usda.validation_common">xml_to_usda.validation_common</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#xml_to_usda.assembly_resolution">xml_to_usda.assembly_resolution</a>
+ &#8226;   <a href="#xml_to_usda.canonical_loader">xml_to_usda.canonical_loader</a>
 
   </div>
 
@@ -11468,20 +11629,19 @@ imported by:
 </div>
 
 <div class="node">
-  <a name="xml_to_usda.validator"></a>
-  <a target="code" href="///D:/3D%20Personal/VibeCode/XMLtoUSDAconverter/src/xml_to_usda/validator.py" type="text/plain"><tt>xml_to_usda.validator</tt></a>
+  <a name="xml_to_usda.validation_common"></a>
+  <a target="code" href="///D:/3D%20Personal/VibeCode/XMLtoUSDAconverter/src/xml_to_usda/validation_common.py" type="text/plain"><tt>xml_to_usda.validation_common</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
  &#8226;   <a href="#xml_to_usda">xml_to_usda</a>
- &#8226;   <a href="#xml_to_usda.asset_paths">xml_to_usda.asset_paths</a>
- &#8226;   <a href="#xml_to_usda.geometry_buffers">xml_to_usda.geometry_buffers</a>
  &#8226;   <a href="#xml_to_usda.models">xml_to_usda.models</a>
 
   </div>
   <div class="import">
 imported by:
-    <a href="#xml_to_usda.canonical_loader">xml_to_usda.canonical_loader</a>
+    <a href="#xml_to_usda.resolution_validation">xml_to_usda.resolution_validation</a>
+ &#8226;   <a href="#xml_to_usda.source_validation">xml_to_usda.source_validation</a>
 
   </div>
 

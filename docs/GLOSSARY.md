@@ -75,15 +75,26 @@ architecture terms above are more precise.
   source material metadata, and source transforms.
 - **Operator Intent**
   User or caller choices that are not facts of the XML: export mode, output
-  path, material overrides, prototype replacement source, CPU profile, cleanup
-  policy, and persisted GUI settings.
+  path, material overrides, prototype replacement source, cleanup policy, and
+  persisted GUI settings. Internal runtime tuning such as CPU profile is not an
+  ordinary operator choice.
 - **Operator State**
-  Current operator-selected values in the UI for a conversion workflow. A subset
-  of Operator State becomes Operator Intent for a `ConversionRequest`.
+  Current operator-selected values in the UI for a conversion workflow. In the
+  target UX, this is remembered globally across trees and can be captured as
+  named presets. A subset of Operator State becomes Operator Intent for a
+  `ConversionRequest`.
+- **Global Remembered State**
+  The saved operator values shared across trees and sessions. It is the default
+  state restored at startup and the source for named presets.
 - **Persisted Operator Settings**
-  Saved per-user or per-input operator values such as material overrides,
-  prototype source choices, wind sliders, and CPU profile. Loading these values
-  restores Operator State; it does not change source facts.
+  Saved global operator values and named presets. Loading these values restores
+  Operator State; it does not change source facts.
+- **Named Preset**
+  A user-saved snapshot of Global Remembered State that can be selected from
+  the preset dropdown.
+- **Factory-Defaults Preset**
+  The built-in preset that represents shipped defaults and always exists in the
+  preset dropdown.
 - **UI Shell State**
   State of the UI shell itself, such as window geometry, theme overrides, open
   tabs, or visual preferences. UI Shell State is not conversion Operator Intent.
@@ -264,6 +275,13 @@ architecture terms above are more precise.
 - **Public Facade**
   A compatibility module retained for callers/tests. It should delegate to
   focused modules and avoid growing new business rules.
+- **Help Deck**
+  The in-app slide-style usage guide opened from the help affordance inside the
+  packaged exe.
+- **Diagnostics Bundle**
+  A local-only bug-report artifact containing the active preset, settings
+  snapshot, runtime log, output path, and related files needed to reproduce a
+  failure.
 
 ## Non-negotiable vocabulary
 

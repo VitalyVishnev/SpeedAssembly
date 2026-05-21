@@ -273,6 +273,110 @@ def test_qt_window_passes_static_assembly_mode_to_conversion_request(monkeypatch
     assert request.conversion_mode == ConversionMode.STATIC_ASSEMBLY
 
 
+def test_qt_window_saves_and_applies_named_preset(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    settings_path = tmp_path / "gui_settings.json"
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=settings_path,
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+    window.output_input.setText(str(tmp_path / "tree.usda"))
+    window._conversion_mode_actions["static_assembly"].trigger()
+    window.wind_panel.gust_spin.setValue(0.5)
+
+    window._save_preset_with_name("Static Grass")
+
+    saved = load_gui_settings(settings_path)
+    assert "Static Grass" in saved.presets
+    assert saved.presets["Static Grass"].conversion_mode == ConversionMode.STATIC_ASSEMBLY
+    assert saved.presets["Static Grass"].gust_attenuation == pytest.approx(0.5)
+
+    window._conversion_mode_actions["skeletal_parts"].trigger()
+    window.wind_panel.gust_spin.setValue(0.1)
+    window.preset_combo.setCurrentIndex(window.preset_combo.findData("Factory Defaults"))
+    preset_index = window.preset_combo.findData("Static Grass")
+    window.preset_combo.setCurrentIndex(preset_index)
+
+    assert window._operator_state.conversion_mode == ConversionMode.STATIC_ASSEMBLY
+    assert window.wind_panel.gust_attenuation() == pytest.approx(0.5)
+
+
+def test_qt_window_hides_irrelevant_geometry_path_fields(qtbot, tmp_path) -> None:
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+    row = window.geometry_panel._rows[0]
+
+    assert row.asset_edit.isHidden()
+    assert row.fbx_edit.isHidden()
+
+    row.source_mode_combo.setCurrentIndex(row.source_mode_combo.findData(PrototypeSourceMode.UNREAL_ASSET.value))
+    assert not row.asset_edit.isHidden()
+    assert row.fbx_edit.isHidden()
+    assert row.browse_button.isHidden()
+
+    row.source_mode_combo.setCurrentIndex(row.source_mode_combo.findData(PrototypeSourceMode.FBX_FILE.value))
+    assert row.asset_edit.isHidden()
+    assert not row.fbx_edit.isHidden()
+    assert not row.browse_button.isHidden()
+
+
+def test_qt_window_hides_irrelevant_part_material_path_fields(qtbot, tmp_path) -> None:
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+    row = window.materials_panel._part_rows[0]
+
+    assert not row.black_edit.isHidden()
+    assert not row.white_edit.isHidden()
+    assert row.single_edit.isHidden()
+
+    row.material_mode_combo.setCurrentIndex(row.material_mode_combo.findData(FbxMaterialMode.SINGLE_MATERIAL.value))
+    assert not row.single_edit.isHidden()
+    assert row.black_edit.isHidden()
+    assert row.white_edit.isHidden()
+
+    geometry_row = window.geometry_panel._rows[0]
+    geometry_row.source_mode_combo.setCurrentIndex(
+        geometry_row.source_mode_combo.findData(PrototypeSourceMode.UNREAL_ASSET.value)
+    )
+    assert row.material_mode_combo.isHidden()
+    assert row.single_edit.isHidden()
+    assert row.black_edit.isHidden()
+    assert row.white_edit.isHidden()
+
+
 def test_qt_window_refreshes_wind_and_generates_json(monkeypatch, qtbot, tmp_path) -> None:
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
     monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))

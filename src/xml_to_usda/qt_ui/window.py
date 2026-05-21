@@ -17,11 +17,13 @@ from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSignalBlocker, QSize,
 from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QLayout,
+    QComboBox,
     QFileDialog,
     QFrame,
     QGraphicsDropShadowEffect,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMenu,
@@ -37,6 +39,13 @@ from PySide6.QtWidgets import (
 from ..gui_formatters import format_wind_group_summary, format_wind_json_result
 from ..models import CleanupPolicy, ConversionMode
 from ..runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
+from ..settings_service import (
+    FACTORY_DEFAULT_PRESET_NAME,
+    factory_default_preset,
+    load_gui_preset,
+    save_gui_preset,
+    sorted_gui_presets,
+)
 from .adjust_ui import AdjustUiDialog
 from .background_jobs import QtBackgroundJobsController
 from .dependencies import QtUiDependencies
@@ -44,10 +53,12 @@ from .dialogs import TextDialog
 from .operator_state import (
     SETTINGS_DIR,
     SETTINGS_PATH,
+    apply_preset_to_operator_state,
     load_base_material_records,
     load_operator_state,
     load_part_source_records,
     load_wind_group_records,
+    preset_from_operator_state,
     resolve_settings_key,
     save_nested_input_settings,
 )
@@ -172,6 +183,13 @@ class TitleBar(QFrame):
         self.adjust_button.clicked.connect(window.open_adjust_ui_dialog)
         self._layout.addWidget(self.adjust_button, 0, Qt.AlignmentFlag.AlignLeft)
 
+        self.preset_host = QWidget(self)
+        self.preset_host.setObjectName("TitlePresetHost")
+        self.preset_layout = QHBoxLayout(self.preset_host)
+        self.preset_layout.setContentsMargins(0, 0, 0, 0)
+        self.preset_layout.setSpacing(0)
+        self._layout.addWidget(self.preset_host, 0, Qt.AlignmentFlag.AlignLeft)
+
         self.title_label = QLabel("XML to USDA Converter", self)
         self.title_label.setObjectName("TitleLabel")
         self._layout.addWidget(self.title_label)
@@ -208,6 +226,7 @@ class TitleBar(QFrame):
         self.log_button.setFixedHeight(pill_height)
         self.adjust_button.setFixedWidth(int(theme.chrome.get("adjust_ui_button_width", 104)))
         self.adjust_button.setFixedHeight(adjust_height)
+        self.preset_host.setFixedHeight(max(button_size, pill_height, adjust_height))
         for button in (self.help_button, self.minimize_button, self.maximize_button, self.close_button):
             button.setFixedSize(button_size, button_size)
 
@@ -381,6 +400,7 @@ class MainWindow(QWidget):
         self._current_settings_key: str | None = None
         self._auto_output_path: str | None = None
         self._persistence_suspended = False
+        self._preset_selector_suspended = False
         self._pending_generate_after_refresh = False
         self._current_dynamic_wind = None
         self._conversion_running = False
@@ -524,6 +544,18 @@ class MainWindow(QWidget):
         self.output_input.setPlaceholderText("Output USDA path")
         self.output_input.pathChanged.connect(self._handle_output_text_changed)
 
+        self.preset_combo = QComboBox(self.title_bar.preset_host)
+        self.preset_combo.setObjectName("TitlePresetCombo")
+        self.preset_combo.currentIndexChanged.connect(self._handle_preset_selected)
+        self.preset_menu_button = QToolButton(self.title_bar.preset_host)
+        self.preset_menu_button.setObjectName("TitlePresetMenuButton")
+        self.preset_menu_button.setText("...")
+        self.preset_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.preset_menu_button.setMenu(self._build_preset_menu())
+        self.title_bar.preset_layout.addWidget(self.preset_combo, 1)
+        self.title_bar.preset_layout.addWidget(self.preset_menu_button, 0)
+        self._refresh_preset_selector()
+
         # Convert/Cancel intentionally lives on one shared button so the action
         # column stays compact. The gear segment is a separate future-facing mode
         # selector, not a second execute button.
@@ -569,6 +601,31 @@ class MainWindow(QWidget):
         layout.setRowMinimumHeight(0, 34)
         layout.setRowMinimumHeight(1, 34)
         return layout
+
+    def _build_preset_menu(self) -> QMenu:
+        menu = QMenu(self)
+        self.save_preset_action = QAction("Save As...", menu)
+        self.save_preset_action.triggered.connect(self._save_current_as_preset)
+        self.overwrite_preset_action = QAction("Overwrite", menu)
+        self.overwrite_preset_action.triggered.connect(self._overwrite_current_preset)
+        self.delete_preset_action = QAction("Delete", menu)
+        self.delete_preset_action.triggered.connect(self._delete_current_preset)
+        self.import_preset_action = QAction("Import...", menu)
+        self.import_preset_action.triggered.connect(self._import_preset)
+        self.export_preset_action = QAction("Export...", menu)
+        self.export_preset_action.triggered.connect(self._export_current_preset)
+        self.reset_preset_action = QAction("Reset To Defaults", menu)
+        self.reset_preset_action.triggered.connect(self._reset_to_factory_defaults)
+        for action in (
+            self.save_preset_action,
+            self.overwrite_preset_action,
+            self.delete_preset_action,
+            self.import_preset_action,
+            self.export_preset_action,
+            self.reset_preset_action,
+        ):
+            menu.addAction(action)
+        return menu
 
     def _build_content_rows(self):
         spacing = self._theme.spacing["section_gap"]
@@ -651,6 +708,199 @@ class MainWindow(QWidget):
         self._schedule_operator_state_save()
         self._refresh_state_cards()
 
+    def _refresh_preset_selector(self) -> None:
+        self._preset_selector_suspended = True
+        self.preset_combo.clear()
+        active_name = self._operator_snapshot.active_preset_name or FACTORY_DEFAULT_PRESET_NAME
+        active_index = 0
+        for index, preset in enumerate(sorted_gui_presets(self._operator_snapshot)):
+            self.preset_combo.addItem(preset.name, preset.name)
+            if preset.name == active_name:
+                active_index = index
+        self.preset_combo.setCurrentIndex(active_index)
+        self._preset_selector_suspended = False
+
+    def _current_preset_name(self) -> str:
+        value = self.preset_combo.currentData()
+        return str(value or FACTORY_DEFAULT_PRESET_NAME)
+
+    def _preset_by_name(self, name: str):
+        if name == FACTORY_DEFAULT_PRESET_NAME:
+            return factory_default_preset()
+        return self._operator_snapshot.presets.get(name)
+
+    def _active_preset(self):
+        return self._preset_by_name(self._operator_snapshot.active_preset_name or FACTORY_DEFAULT_PRESET_NAME)
+
+    def _handle_preset_selected(self, _index: int) -> None:
+        if self._preset_selector_suspended:
+            return
+        preset = self._preset_by_name(self._current_preset_name())
+        if preset is None:
+            return
+        self._apply_preset(preset)
+
+    def _apply_preset(self, preset) -> None:
+        self._settings_save_timer.stop()
+        self._operator_state = apply_preset_to_operator_state(self._operator_state, preset)
+        self._conversion_mode = self._operator_state.conversion_mode.value
+        if hasattr(self, "_conversion_mode_actions"):
+            for key, action in self._conversion_mode_actions.items():
+                action.setChecked(key == self._conversion_mode)
+
+        base_by_input = dict(self._operator_snapshot.base_material_settings_by_input_path)
+        part_by_input = dict(self._operator_snapshot.part_mesh_settings_by_input_path)
+        wind_by_input = dict(self._operator_snapshot.wind_group_settings_by_input_path)
+        if self._current_settings_key:
+            if preset.base_material_settings:
+                base_by_input[self._current_settings_key] = preset.base_material_settings
+            else:
+                base_by_input.pop(self._current_settings_key, None)
+            if preset.part_mesh_settings:
+                part_by_input[self._current_settings_key] = preset.part_mesh_settings
+            else:
+                part_by_input.pop(self._current_settings_key, None)
+            if preset.wind_group_settings:
+                wind_by_input[self._current_settings_key] = dict(preset.wind_group_settings)
+            else:
+                wind_by_input.pop(self._current_settings_key, None)
+
+        self._operator_snapshot = replace(
+            self._operator_snapshot,
+            active_preset_name=preset.name,
+            wind_group_settings=dict(preset.wind_group_settings),
+            base_material_settings_by_input_path=base_by_input,
+            part_mesh_settings_by_input_path=part_by_input,
+            wind_group_settings_by_input_path=wind_by_input,
+        )
+        self._apply_operator_state_to_widgets()
+        self._reload_input_dependent_tabs()
+        self._set_status(f"Preset selected: {preset.name}")
+        self._append_log(f"Preset selected: {preset.name}")
+        self._schedule_operator_state_save()
+        self._refresh_state_cards()
+        self._update_action_state()
+
+    def _save_current_as_preset(self) -> None:
+        name, accepted = QInputDialog.getText(self, "Save Preset", "Preset name")
+        if not accepted:
+            return
+        self._save_preset_with_name(name)
+
+    def _overwrite_current_preset(self) -> None:
+        name = self._current_preset_name()
+        if name == FACTORY_DEFAULT_PRESET_NAME:
+            self._report_error("Factory preset", "Factory defaults cannot be overwritten.")
+            return
+        self._save_preset_with_name(name)
+
+    def _save_preset_with_name(self, name: str) -> None:
+        preset_name = name.strip()
+        if not preset_name:
+            self._report_error("Invalid preset", "Preset name cannot be empty.")
+            return
+        if preset_name == FACTORY_DEFAULT_PRESET_NAME:
+            self._report_error("Invalid preset", "Factory defaults is reserved.")
+            return
+        self._operator_state = replace(
+            self._operator_state,
+            gust_attenuation=self.wind_panel.gust_attenuation(),
+            is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
+        )
+        self._save_operator_state()
+        preset = preset_from_operator_state(
+            preset_name,
+            self._operator_state,
+            base_material_records=self.materials_panel.serialize_base_material_records(),
+            part_source_records=self.materials_panel.serialize_part_source_records(),
+            wind_group_records=self.wind_panel.serialize_settings(),
+        )
+        presets = dict(self._operator_snapshot.presets)
+        presets[preset_name] = preset
+        self._operator_snapshot = replace(
+            self._operator_snapshot,
+            active_preset_name=preset_name,
+            presets=presets,
+        )
+        self._deps.save_gui_settings(self._operator_settings_path, self._operator_snapshot)
+        self._refresh_preset_selector()
+        self._set_status(f"Preset saved: {preset_name}")
+        self._append_log(f"Preset saved: {preset_name}")
+        self._update_action_state()
+
+    def _delete_current_preset(self) -> None:
+        name = self._current_preset_name()
+        if name == FACTORY_DEFAULT_PRESET_NAME:
+            self._report_error("Factory preset", "Factory defaults cannot be deleted.")
+            return
+        presets = dict(self._operator_snapshot.presets)
+        presets.pop(name, None)
+        self._operator_snapshot = replace(
+            self._operator_snapshot,
+            active_preset_name=FACTORY_DEFAULT_PRESET_NAME,
+            presets=presets,
+        )
+        self._deps.save_gui_settings(self._operator_settings_path, self._operator_snapshot)
+        self._refresh_preset_selector()
+        self._apply_preset(factory_default_preset())
+        self._set_status(f"Preset deleted: {name}")
+
+    def _reset_to_factory_defaults(self) -> None:
+        self._apply_preset(factory_default_preset())
+        self._refresh_preset_selector()
+
+    def _import_preset(self) -> None:
+        selected, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Preset",
+            str(self._operator_settings_path.parent),
+            "Preset JSON (*.json);;All files (*.*)",
+        )
+        if not selected:
+            return
+        try:
+            preset = load_gui_preset(selected)
+        except ValueError as exc:
+            self._report_error("Invalid preset", str(exc))
+            return
+        presets = dict(self._operator_snapshot.presets)
+        presets[preset.name] = preset
+        self._operator_snapshot = replace(
+            self._operator_snapshot,
+            active_preset_name=preset.name,
+            presets=presets,
+        )
+        self._deps.save_gui_settings(self._operator_settings_path, self._operator_snapshot)
+        self._refresh_preset_selector()
+        self._apply_preset(preset)
+        self._set_status(f"Preset imported: {preset.name}")
+
+    def _export_current_preset(self) -> None:
+        name = self._current_preset_name()
+        if name == FACTORY_DEFAULT_PRESET_NAME:
+            self._report_error("Factory preset", "Factory defaults is built in and is not exported.")
+            return
+        preset = self._preset_by_name(name)
+        if preset is None:
+            return
+        selected, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Preset",
+            str(self._operator_settings_path.parent / f"{preset.name}.json"),
+            "Preset JSON (*.json);;All files (*.*)",
+        )
+        if not selected:
+            return
+        path = Path(selected)
+        if not path.suffix:
+            path = path.with_suffix(".json")
+        try:
+            save_gui_preset(path, preset)
+        except OSError as exc:
+            self._report_error("Export failed", str(exc))
+            return
+        self._set_status(f"Preset exported: {path}")
+
     def _build_info_card(self, title: str, content_label: QLabel) -> QWidget:
         card = QFrame(self)
         card.setObjectName("PanelCard")
@@ -710,6 +960,10 @@ class MainWindow(QWidget):
         file_button_height = int(self._theme.chrome.get("file_button_height", self._theme.control_heights["input"]))
         self.source_button.setFixedSize(file_button_width, file_button_height)
         self.output_button.setFixedSize(file_button_width, file_button_height)
+        title_preset_width = int(self._theme.chrome.get("title_preset_width", 210))
+        title_preset_height = int(self._theme.chrome.get("title_preset_height", self._theme.chrome.get("window_button_size", 28)))
+        self.preset_combo.setFixedSize(title_preset_width, title_preset_height)
+        self.preset_menu_button.setFixedSize(max(32, title_preset_height), title_preset_height)
 
         action_width = int(self._theme.layout.get("action_column_width", 148))
         self.convert_action_frame.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -767,6 +1021,10 @@ class MainWindow(QWidget):
             is_ground_cover=self._operator_state.is_ground_cover,
             gust_attenuation=self._operator_state.gust_attenuation,
         )
+        self._conversion_mode = self._operator_state.conversion_mode.value
+        if hasattr(self, "_conversion_mode_actions"):
+            for key, action in self._conversion_mode_actions.items():
+                action.setChecked(key == self._conversion_mode)
         self._persistence_suspended = False
 
     def _apply_runtime_cleanup_summary(self) -> None:
@@ -807,6 +1065,16 @@ class MainWindow(QWidget):
         self.convert_button.setText("Cancel" if self._conversion_running else "Convert to USDA")
         self.convert_button.setEnabled(self._conversion_running or (has_input and has_output))
         self.convert_mode_button.setEnabled(not self._conversion_running)
+        self.preset_combo.setEnabled(not self._conversion_running)
+        self.preset_menu_button.setEnabled(not self._conversion_running)
+        if hasattr(self, "overwrite_preset_action"):
+            selected_is_factory = self._current_preset_name() == FACTORY_DEFAULT_PRESET_NAME
+            self.save_preset_action.setEnabled(not self._conversion_running)
+            self.overwrite_preset_action.setEnabled(not self._conversion_running and not selected_is_factory)
+            self.delete_preset_action.setEnabled(not self._conversion_running and not selected_is_factory)
+            self.import_preset_action.setEnabled(not self._conversion_running)
+            self.export_preset_action.setEnabled(not self._conversion_running and not selected_is_factory)
+            self.reset_preset_action.setEnabled(not self._conversion_running)
         self.wind_panel.refresh_button.setEnabled(has_input and not self._conversion_running and not self._wind_refresh_running)
         self.generate_button.setEnabled(
             has_input and not self._conversion_running and not self._wind_refresh_running and not self._wind_json_running
@@ -1045,6 +1313,14 @@ class MainWindow(QWidget):
         base_records = load_base_material_records(self._operator_snapshot, settings_key=self._current_settings_key)
         part_records = load_part_source_records(self._operator_snapshot, settings_key=self._current_settings_key)
         wind_records = load_wind_group_records(self._operator_snapshot, settings_key=self._current_settings_key)
+        active_preset = self._active_preset()
+        if active_preset is not None:
+            if not base_records:
+                base_records = active_preset.base_material_settings
+            if not part_records:
+                part_records = active_preset.part_mesh_settings
+            if not wind_records:
+                wind_records = dict(active_preset.wind_group_settings)
         self.wind_panel.set_persisted_settings(wind_records)
 
         prototype_discovery = self._deps.discover_part_prototype_rows(input_path, persisted_records=part_records)

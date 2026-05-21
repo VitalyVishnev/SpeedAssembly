@@ -8,6 +8,131 @@ future architecture work should not re-litigate without new evidence.
 Importer-facing facts still belong in `docs/ue_import_contract.md`,
 `docs/speedtree_mapping.md`, and `docs/workflow_status.md`.
 
+## 2026-05-19: Operator settings are global, not per-XML
+
+Status: Accepted
+
+Decision:
+
+- Operator settings are remembered as one global state across trees and sessions.
+- Per-XML settings are not part of the product contract.
+- Named presets are the intentional reuse surface on top of the global state.
+
+Rationale:
+
+- Users repeat the same vegetation workflow across many trees and should not
+  have to rebuild state per file.
+- Per-XML persistence creates implicit coupling that is hard to reason about
+  when files move or are reused.
+
+## 2026-05-19: Presets are the reuse mechanism
+
+Status: Accepted
+
+Decision:
+
+- Ship a factory-defaults preset by default.
+- Allow user-saved named presets.
+- Show factory defaults and user presets in the preset dropdown.
+- Support save, overwrite, delete, import, export, and reset-to-default flows.
+
+Rationale:
+
+- Users need a stable way to capture a working setup and reuse it later.
+- A default preset gives the first-run experience a known anchor without
+  requiring a project model.
+
+## 2026-05-19: Output and folder memory are explicit
+
+Status: Accepted
+
+Decision:
+
+- Remember last-used XML folder and last-used output folder separately.
+- Auto-fill the output path from the first XML selection.
+- If the user has already edited the output path manually, later XML selections
+  preserve that chosen output path style and only update the filename stem to
+  match the new XML.
+- Overwrite decisions must be explicit user choices.
+
+Rationale:
+
+- The workflow is repeated often enough that folder memory removes real friction.
+- Auto-fill should help first use without silently taking control away once the
+  user has chosen a custom output path.
+
+## 2026-05-19: Help is bundled inside the exe
+
+Status: Accepted
+
+Decision:
+
+- The app ships with an in-app "How to use" deck.
+- The deck is slide-style, with topic navigation buttons and next/back arrows.
+- A dismissible first-launch prompt near the help affordance invites the user to
+  open the guide.
+- Everyday usage should not depend on external documents or websites.
+
+Rationale:
+
+- First-time users need help at the point of action, not in a separate browser
+  workflow.
+- The packaged app must stay self-contained for offline production use.
+
+## 2026-05-19: Release and diagnostics are local-first
+
+Status: Accepted
+
+Decision:
+
+- User-facing release is a standalone GitHub download.
+- Users do not need Python installed on their machine to run the packaged app.
+- The user-facing release targets Windows first.
+- The app remains 100% local by default; no network telemetry.
+- Diagnostics bundles are local artifacts and should include the active preset,
+  settings snapshot, runtime log, output path, and other files needed to
+  reproduce a bug.
+
+Rationale:
+
+- The release must be self-contained and easy to hand to an artist or tester.
+- Local-only diagnostics keep the bug-report path practical without adding
+  privacy risk or network dependence.
+
+## 2026-05-19: Balanced is the visible CPU profile
+
+Status: Accepted
+
+Decision:
+
+- Keep `balanced` as the visible default runtime profile.
+- Do not expose multiple CPU profiles as an ordinary operator choice.
+- Treat deeper runtime tuning as internal unless a validated need appears.
+
+Rationale:
+
+- The operator should not have to reason about concurrency knobs to run the
+  normal tree workflow.
+- Runtime tuning belongs behind the release contract, not in the core artist
+  workflow.
+
+## 2026-05-19: UV work is deferred
+
+Status: Accepted
+
+Decision:
+
+- UDIM support and second UV channel work are future work, not part of the
+  current near-term product contract.
+- When UV work is taken up, it must stay per-material-slot and importer
+  validated.
+
+Rationale:
+
+- The current product goal is stable vegetation conversion first.
+- UV expansion should not dilute the importer-facing contract until it is
+  validated against UE.
+
 ## 2026-05-16: Architecture review docs follow the skill entry-point names
 
 Status: Accepted
@@ -378,8 +503,8 @@ Status: Accepted
 Decision:
 
 - Use `Operator State` for current operator-selected UI values.
-- Use `Persisted Operator Settings` for saved per-user or per-input operator
-  values that restore Operator State.
+- Use `Persisted Operator Settings` for saved global operator values and named
+  presets that restore Operator State.
 - Use `UI Shell State` for visual shell state such as window geometry, theme,
   open tabs, and visual preferences.
 - Only the conversion-relevant subset of Operator State becomes Operator Intent

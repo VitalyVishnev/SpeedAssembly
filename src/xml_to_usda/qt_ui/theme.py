@@ -178,6 +178,8 @@ def build_stylesheet(theme: ResolvedTheme) -> str:
     title_pill_height = int(theme.chrome.get("title_pill_height", 24))
     adjust_ui_button_width = int(theme.chrome.get("adjust_ui_button_width", 104))
     adjust_ui_button_height = int(theme.chrome.get("adjust_ui_button_height", title_pill_height))
+    title_preset_width = int(theme.chrome.get("title_preset_width", 210))
+    title_preset_height = int(theme.chrome.get("title_preset_height", window_button_size))
     tab_min_width = int(theme.layout.get("tab_min_width", 120))
     button_fill_disabled = _with_alpha(theme.colors["button_fill"], 0.42)
     accent_fill_soft = _with_alpha(theme.colors["accent_fill"], 0.35)
@@ -229,6 +231,18 @@ QLineEdit {{
 }}
 QLineEdit:hover {{
     background: {input_fill};
+}}
+QLineEdit#PathInput {{
+    background: rgba(183, 197, 201, 0.72);
+    color: {input_text};
+    border-radius: {panel_radius}px;
+    padding: 8px 14px;
+    border: 1px solid rgba(64, 61, 48, 0.10);
+}}
+QLineEdit#PathInput:hover,
+QLineEdit#PathInput:focus {{
+    background: rgba(196, 213, 217, 0.86);
+    border: 1px solid rgba(143, 150, 78, 0.42);
 }}
 QPushButton {{
     background: {button_fill};
@@ -315,6 +329,48 @@ QPushButton#AdjustUiButton {{
 QPushButton#TitlePillButton:hover,
 QPushButton#AdjustUiButton:hover {{
     background: {accent_fill_soft};
+}}
+QComboBox#TitlePresetCombo {{
+    background: rgba(220, 229, 232, 0.88);
+    color: {input_text};
+    border-top-left-radius: {title_preset_height // 2}px;
+    border-bottom-left-radius: {title_preset_height // 2}px;
+    border-top-right-radius: 0px;
+    border-bottom-right-radius: 0px;
+    min-width: {title_preset_width}px;
+    max-width: {title_preset_width}px;
+    min-height: {title_preset_height}px;
+    max-height: {title_preset_height}px;
+    padding: 2px 8px 2px 12px;
+    border: none;
+}}
+QComboBox#TitlePresetCombo:hover {{
+    background: {accent_fill_soft};
+}}
+QComboBox#TitlePresetCombo::drop-down {{
+    border: none;
+    width: 22px;
+}}
+QToolButton#TitlePresetMenuButton {{
+    background: rgba(220, 229, 232, 0.88);
+    color: {button_text};
+    border-top-left-radius: 0px;
+    border-bottom-left-radius: 0px;
+    border-top-right-radius: {title_preset_height // 2}px;
+    border-bottom-right-radius: {title_preset_height // 2}px;
+    min-width: {title_preset_height}px;
+    max-width: {title_preset_height}px;
+    min-height: {title_preset_height}px;
+    max-height: {title_preset_height}px;
+    padding: 0px;
+    border: none;
+}}
+QToolButton#TitlePresetMenuButton:hover {{
+    background: {accent_fill_soft};
+}}
+QToolButton#TitlePresetMenuButton::menu-indicator {{
+    image: none;
+    width: 0px;
 }}
 QPushButton#FileButton {{
     background: {secondary_fill};
@@ -442,6 +498,26 @@ QComboBox QAbstractItemView {{
     selection-background-color: rgba(217, 187, 98, 0.92);
     selection-color: {input_text};
     outline: none;
+}}
+QComboBox#InteractiveCombo {{
+    background: {secondary_fill};
+    color: {button_text};
+    border-radius: {button_radius}px;
+    min-height: {input_height}px;
+    padding: 6px 12px;
+    border: none;
+}}
+QComboBox#InteractiveCombo:hover,
+QComboBox#InteractiveCombo:focus {{
+    background: {accent_fill};
+}}
+QComboBox#InteractiveCombo::drop-down {{
+    border: none;
+    width: 30px;
+}}
+QComboBox#InteractiveCombo::down-arrow {{
+    width: 12px;
+    height: 12px;
 }}
 QTabWidget::pane {{
     border: none;

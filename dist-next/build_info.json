@@ -1,11 +1,11 @@
 ﻿{
-    "built_at":  "2026-05-14 15:59:15 +05:00",
+    "built_at":  "2026-05-19 03:06:21 +05:00",
     "build_mode":  "release",
     "exe_path":  "D:\\3D Personal\\VibeCode\\XMLtoUSDAconverter\\dist-next\\XMLtoUSDAConverter.exe",
     "python_exe":  "D:\\3D Personal\\VibeCode\\XMLtoUSDAconverter\\.venv310\\Scripts\\python.exe",
     "repo_root":  "D:\\3D Personal\\VibeCode\\XMLtoUSDAconverter",
     "git_branch":  "master",
-    "git_head":  "d6d9a89",
+    "git_head":  "df1f1be",
     "git_dirty":  true,
-    "change_summary":  "M build-next/XMLtoUSDAConverter/Analysis-00.toc; M build-next/XMLtoUSDAConverter/EXE-00.toc; M build-next/XMLtoUSDAConverter/PKG-00.toc; (+8 more)"
+    "change_summary":  "D .tmp_pytest_pipeline_static_full/test_authoring_engine_matches_0/authoring_engine_baseline.usda; D .tmp_pytest_pipeline_static_full/test_authoring_engine_matches_1/authoring_engine_external.usda; D .tmp_pytest_pipeline_static_full/test_big_spruce_real_fixture_s0/big_spruce.usda; (+83 more)"
 }

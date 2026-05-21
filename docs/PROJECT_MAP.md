@@ -25,6 +25,8 @@ before proposing architectural changes.
   Current module map, interfaces, seams, adapters, and review rules.
 - `docs/DECISIONS.md`
   Decisions that should not be re-litigated without new evidence.
+- `docs/PRODUCT_PLAN.md`
+  Near-term implementation queue and deferred future work.
 - `docs/developer_architecture.md`
   Historical developer map kept as a compatibility pointer.
 
