@@ -609,7 +609,7 @@ def test_qt_window_uses_remembered_xml_and_output_folders_for_browse_dialogs(mon
     assert saved.last_output_path == str(selected_output)
 
 
-def test_qt_window_shows_and_persists_dismissed_first_launch_help_prompt(qtbot, tmp_path) -> None:
+def test_qt_window_shows_and_persists_dismissed_first_launch_tutorial_callout(qtbot, tmp_path) -> None:
     state_path = tmp_path / "ui_next_state.json"
     window = MainWindow(
         load_theme(),
@@ -621,11 +621,13 @@ def test_qt_window_shows_and_persists_dismissed_first_launch_help_prompt(qtbot, 
     qtbot.addWidget(window)
     window.show()
 
-    assert window.help_prompt.isVisible()
+    assert window.help_callout.isVisible()
+    assert "Start here for the tutorial" in window.help_callout_title.text()
+    assert window.help_callout.y() > window.title_bar.y()
 
-    qtbot.mouseClick(window.help_prompt_dismiss_button, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(window.help_callout_dismiss_button, Qt.MouseButton.LeftButton)
 
-    assert window.help_prompt.isHidden()
+    assert window.help_callout.isHidden()
     window.close()
     restored = load_ui_shell_state(state_path)
     assert restored.help_prompt_dismissed is True

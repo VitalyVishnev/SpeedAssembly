@@ -168,25 +168,10 @@ class TitleBar(QFrame):
 
         self._layout = QHBoxLayout(self)
 
-        self.help_button = QPushButton("?", self)
-        self.help_button.setObjectName("WindowButton")
+        self.help_button = QPushButton("How to use", self)
+        self.help_button.setObjectName("TitlePillButton")
         self.help_button.clicked.connect(window.open_help_dialog)
         self._layout.addWidget(self.help_button, 0, Qt.AlignmentFlag.AlignLeft)
-
-        self.help_prompt = QWidget(self)
-        self.help_prompt.setObjectName("HelpPrompt")
-        help_prompt_layout = QHBoxLayout(self.help_prompt)
-        help_prompt_layout.setContentsMargins(8, 0, 4, 0)
-        help_prompt_layout.setSpacing(4)
-        self.help_prompt_button = QPushButton("How to use", self.help_prompt)
-        self.help_prompt_button.setObjectName("TitlePillButton")
-        self.help_prompt_button.clicked.connect(window.open_help_dialog)
-        self.help_prompt_dismiss_button = QPushButton("x", self.help_prompt)
-        self.help_prompt_dismiss_button.setObjectName("WindowButton")
-        self.help_prompt_dismiss_button.clicked.connect(window.dismiss_help_prompt)
-        help_prompt_layout.addWidget(self.help_prompt_button)
-        help_prompt_layout.addWidget(self.help_prompt_dismiss_button)
-        self._layout.addWidget(self.help_prompt, 0, Qt.AlignmentFlag.AlignLeft)
 
         self.log_button = QPushButton("LOG", self)
         self.log_button.setObjectName("TitlePillButton")
@@ -242,17 +227,16 @@ class TitleBar(QFrame):
         adjust_height = int(theme.chrome.get("adjust_ui_button_height", pill_height))
         button_size = int(theme.chrome.get("window_button_size", 22))
         self.setFixedHeight(max(24, titlebar_height + 4, pill_height + 8, adjust_height + 8, button_size + 8))
+        self.help_button.setFixedWidth(int(theme.chrome.get("title_pill_width", 78)) + 28)
+        self.help_button.setFixedHeight(pill_height)
         self.log_button.setFixedWidth(int(theme.chrome.get("title_pill_width", 78)))
         self.log_button.setFixedHeight(pill_height)
         self.support_button.setFixedWidth(int(theme.chrome.get("title_pill_width", 78)) + 20)
         self.support_button.setFixedHeight(pill_height)
-        self.help_prompt_button.setFixedHeight(pill_height)
-        self.help_prompt_button.setFixedWidth(int(theme.chrome.get("title_pill_width", 78)) + 10)
-        self.help_prompt_dismiss_button.setFixedSize(button_size, button_size)
         self.adjust_button.setFixedWidth(int(theme.chrome.get("adjust_ui_button_width", 104)))
         self.adjust_button.setFixedHeight(adjust_height)
         self.preset_host.setFixedHeight(max(button_size, pill_height, adjust_height))
-        for button in (self.help_button, self.minimize_button, self.maximize_button, self.close_button):
+        for button in (self.minimize_button, self.maximize_button, self.close_button):
             button.setFixedSize(button_size, button_size)
 
     def mouseDoubleClickEvent(self, event) -> None:  # type: ignore[override]
@@ -482,6 +466,7 @@ class MainWindow(QWidget):
         self._refresh_state_cards()
         self._update_action_state()
         self._update_window_shape()
+        self._position_help_callout()
 
     def _build_layout(self) -> None:
         outer = QVBoxLayout(self)
@@ -491,6 +476,7 @@ class MainWindow(QWidget):
 
         self.title_bar = TitleBar(self, self._theme)
         outer.addWidget(self.title_bar, 0)
+        self._build_help_callout()
 
         body = QWidget(self)
         self._body_widget = body
@@ -509,6 +495,33 @@ class MainWindow(QWidget):
         self._update_panel_metrics()
 
         outer.addWidget(body, 1)
+
+    def _build_help_callout(self) -> None:
+        self.help_callout = QFrame(self)
+        self.help_callout.setObjectName("TutorialCallout")
+        self.help_callout.setFixedWidth(360)
+        layout = QVBoxLayout(self.help_callout)
+        layout.setContentsMargins(16, 14, 14, 14)
+        layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(8)
+        self.help_callout_title = QLabel("Start here for the tutorial", self.help_callout)
+        self.help_callout_title.setObjectName("TutorialCalloutTitle")
+        self.help_callout_title.setWordWrap(True)
+        self.help_callout_dismiss_button = QPushButton("x", self.help_callout)
+        self.help_callout_dismiss_button.setObjectName("TutorialCalloutCloseButton")
+        self.help_callout_dismiss_button.clicked.connect(self.dismiss_help_prompt)
+        header.addWidget(self.help_callout_title, 1)
+        header.addWidget(self.help_callout_dismiss_button, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(header)
+
+        self.help_callout_body = QLabel("Open How to use for the core conversion workflow.", self.help_callout)
+        self.help_callout_body.setObjectName("TutorialCalloutBody")
+        self.help_callout_body.setWordWrap(True)
+        layout.addWidget(self.help_callout_body)
+        self.help_callout.adjustSize()
 
     def _install_resize_event_filters(self) -> None:
         self.installEventFilter(self)
@@ -936,6 +949,8 @@ class MainWindow(QWidget):
         self._assets = self._load_window_assets(theme)
         self.setStyleSheet(build_stylesheet(theme))
         self.title_bar.apply_theme(theme)
+        self.help_callout.adjustSize()
+        self._position_help_callout()
         self.panel.set_theme(theme, self._assets.panel_blur, self._assets.noise)
         self._apply_theme_to_layout()
         self._update_panel_metrics()
@@ -1210,9 +1225,20 @@ class MainWindow(QWidget):
         self._apply_help_prompt_state()
 
     def _apply_help_prompt_state(self) -> None:
-        self.title_bar.help_prompt.setVisible(not self._state.help_prompt_dismissed)
-        self.help_prompt = self.title_bar.help_prompt
-        self.help_prompt_dismiss_button = self.title_bar.help_prompt_dismiss_button
+        visible = not self._state.help_prompt_dismissed
+        self.help_callout.setVisible(visible)
+        if visible:
+            self._position_help_callout()
+            self.help_callout.raise_()
+
+    def _position_help_callout(self) -> None:
+        if not hasattr(self, "help_callout") or not hasattr(self, "title_bar"):
+            return
+        anchor = self.title_bar.help_button.mapTo(self, QPoint(0, self.title_bar.help_button.height()))
+        margin = 8
+        x = max(margin, min(anchor.x(), self.width() - self.help_callout.width() - margin))
+        y = anchor.y() + margin
+        self.help_callout.move(x, y)
 
     def open_adjust_ui_dialog(self) -> None:
         if self._adjust_ui_dialog is None:
@@ -1573,6 +1599,7 @@ class MainWindow(QWidget):
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
         self._apply_native_corner_preference()
+        self._position_help_callout()
         QTimer.singleShot(0, self._refresh_layout_after_show)
 
     def moveEvent(self, event) -> None:  # type: ignore[override]
@@ -1585,6 +1612,7 @@ class MainWindow(QWidget):
         if not self.isMaximized():
             self._restore_geometry = QRect(self.geometry())
         self._update_panel_metrics()
+        self._position_help_callout()
         self.panel.update()
         self.update()
 

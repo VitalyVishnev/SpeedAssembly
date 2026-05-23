@@ -47,7 +47,7 @@ def test_qt_operator_state_loads_shared_gui_snapshot(tmp_path) -> None:
 
     assert operator_state.input_path == ""
     assert operator_state.output_path == ""
-    assert operator_state.cpu_profile == CpuProfile.MAX_SPEED
+    assert operator_state.cpu_profile == CpuProfile.BALANCED
     assert operator_state.preserve_temp_files is True
     assert operator_state.conversion_mode == ConversionMode.SKELETAL_PARTS
     assert operator_state.material_policy == MaterialPolicy.SINGLE_MATERIAL
@@ -55,6 +55,24 @@ def test_qt_operator_state_loads_shared_gui_snapshot(tmp_path) -> None:
     assert operator_state.gust_attenuation == 0.35
     assert operator_state.is_ground_cover is True
     assert snapshot.last_input_path == "D:/trees/tree.xml"
+    assert snapshot.cpu_profile == CpuProfile.MAX_SPEED
+
+
+def test_qt_operator_state_keeps_cpu_tuning_internal_for_operator_ui(tmp_path) -> None:
+    settings_path = tmp_path / "gui_settings.json"
+    save_gui_settings(
+        settings_path,
+        GuiSettingsSnapshot(
+            last_input_path="D:/trees/tree.xml",
+            last_output_path="D:/trees/tree.usda",
+            cpu_profile=CpuProfile.MAX_SPEED,
+        ),
+    )
+    deps = SimpleNamespace(load_gui_settings=load_gui_settings, save_gui_settings=save_gui_settings)
+
+    operator_state, _snapshot = load_operator_state(deps, settings_path=settings_path)
+
+    assert operator_state.cpu_profile == CpuProfile.BALANCED
 
 
 def test_qt_operator_state_save_preserves_nested_records(tmp_path) -> None:
@@ -151,6 +169,15 @@ def test_qt_operator_state_applies_preset_without_replacing_paths() -> None:
     assert applied.single_material_path == "/Game/M_All.M_All"
     assert applied.gust_attenuation == 0.2
     assert applied.is_ground_cover is True
+
+
+def test_qt_operator_state_does_not_apply_cpu_profile_from_preset() -> None:
+    state = OperatorState(cpu_profile=CpuProfile.BALANCED)
+    preset = GuiPresetRecord(name="Legacy fast preset", cpu_profile=CpuProfile.MAX_SPEED)
+
+    applied = apply_preset_to_operator_state(state, preset)
+
+    assert applied.cpu_profile == CpuProfile.BALANCED
 
 
 def test_qt_operator_state_captures_current_rows_as_preset() -> None:

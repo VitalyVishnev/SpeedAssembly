@@ -364,6 +364,31 @@ def test_cli_parser_defaults_cpu_profile_to_balanced() -> None:
     assert args.cpu_profile == CpuProfile.BALANCED.value
 
 
+def test_legacy_gui_does_not_show_deeper_cpu_profiles(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    tkinter, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
+    monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
+
+    try:
+        app = ConversionApp(root)
+        combobox_values = []
+        pending = list(app.content_frame.winfo_children())
+        while pending:
+            widget = pending.pop()
+            if isinstance(widget, tkinter.ttk.Combobox):
+                combobox_values.append(tuple(widget.cget("values")))
+            pending.extend(widget.winfo_children())
+
+        assert all(CpuProfile.QUIET.value not in values for values in combobox_values)
+        assert all(CpuProfile.MAX_SPEED.value not in values for values in combobox_values)
+        assert app._current_cpu_profile() == CpuProfile.BALANCED
+    finally:
+        root.destroy()
+
+
 def test_cli_parser_routes_primary_and_legacy_gui_commands() -> None:
     parser = build_parser()
 
@@ -714,7 +739,7 @@ def test_gui_fbx_part_override_builds_async_request_without_using_sync_path(
         "leaves_material_path": None,
         "single_material_path": None,
         "base_material_overrides": (),
-        "cpu_profile": CpuProfile.QUIET,
+        "cpu_profile": CpuProfile.BALANCED,
         "cleanup_policy": CleanupPolicy.PRESERVE_FOR_DEBUGGING,
         "use_explicit_material_contract": True,
         "source_override_semantics": (
@@ -940,7 +965,7 @@ def test_gui_part_mesh_reuse_persists_globally_and_restores_on_reload(
             pass
 
 
-def test_gui_persists_fbx_source_mode_and_cpu_profile(
+def test_gui_persists_fbx_source_mode_without_operator_cpu_profile(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _, root = _build_tk_root_or_skip()
@@ -964,7 +989,7 @@ def test_gui_persists_fbx_source_mode_and_cpu_profile(
         app._handle_window_close()
 
         payload = json.loads(settings_path.read_text(encoding="utf-8"))
-        assert payload["cpu_profile"] == "quiet"
+        assert "cpu_profile" not in payload
         assert payload["preserve_temp_files"] is True
         assert "wind_group_settings_by_input_path" not in payload
         assert payload["part_mesh_settings"][0] == {
@@ -989,7 +1014,7 @@ def test_gui_persists_fbx_source_mode_and_cpu_profile(
         app.input_var.set(str(SIMPLE_TREE_01))
         restored_row = app._part_mesh_rows[0]
 
-        assert app.cpu_profile_var.get() == CpuProfile.QUIET.value
+        assert app.cpu_profile_var.get() == CpuProfile.BALANCED.value
         assert app.preserve_temp_files_var.get() is True
         assert restored_row["source_mode_var"].get() == PrototypeSourceMode.FBX_FILE.value
         assert restored_row["fbx_var"].get() == str(fake_fbx_path)
@@ -1045,7 +1070,7 @@ def test_gui_restores_last_session_paths_and_operator_state_on_startup(
         payload = json.loads(settings_path.read_text(encoding="utf-8"))
         assert payload["last_input_path"] == str(SIMPLE_TREE_01)
         assert payload["last_output_path"] == str(restored_output_path)
-        assert payload["cpu_profile"] == CpuProfile.QUIET.value
+        assert "cpu_profile" not in payload
         assert payload["preserve_temp_files"] is True
         assert payload["base_material_settings"][0]["ue_asset_path"] == "/Game/TestMaterials/M_Bark_Test"
         assert payload["part_mesh_settings"][0]["fbx_path"] == str(fake_fbx_path)
@@ -1073,7 +1098,7 @@ def test_gui_restores_last_session_paths_and_operator_state_on_startup(
         restored_row = app._part_mesh_rows[0]
         assert app.input_var.get() == str(SIMPLE_TREE_01)
         assert app.output_var.get() == str(restored_output_path)
-        assert app.cpu_profile_var.get() == CpuProfile.QUIET.value
+        assert app.cpu_profile_var.get() == CpuProfile.BALANCED.value
         assert app.preserve_temp_files_var.get() is True
         assert app.bark_material_var.get() == "/Game/Assembly/SimpleTree/Bark1.Bark1"
         assert app.leaves_material_var.get() == "/Game/Assembly/SimpleTree/Leaves1.Leaves1"

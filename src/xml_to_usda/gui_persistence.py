@@ -28,7 +28,7 @@ class GuiPersistenceController:
         self.app._remembered_output_path = settings.last_output_path
         self.app.input_var.set(self.app._startup_restored_input_path)
         self.app.output_var.set(settings.last_output_path)
-        self.app.cpu_profile_var.set(settings.cpu_profile.value)
+        self.app.cpu_profile_var.set("balanced")
         self.app.preserve_temp_files_var.set(bool(settings.preserve_temp_files))
         self.app._persisted_conversion_mode = settings.conversion_mode
         self.app.material_policy_var.set(settings.material_policy.value)

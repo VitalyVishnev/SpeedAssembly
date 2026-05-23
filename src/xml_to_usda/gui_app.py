@@ -175,19 +175,6 @@ class ConversionApp:
         ttk.Button(self.content_frame, text="Save As...", command=self.browse_output).grid(row=row, column=2, sticky="ew", pady=(0, 8))
 
         row += 1
-        ttk.Label(self.content_frame, text="CPU Profile").grid(row=row, column=0, sticky="w", pady=(0, 8))
-        ttk.Combobox(
-            self.content_frame,
-            textvariable=self.cpu_profile_var,
-            state="readonly",
-            values=tuple(profile.value for profile in CpuProfile),
-        ).grid(row=row, column=1, sticky="ew", padx=(12, 12), pady=(0, 8))
-        ttk.Label(
-            self.content_frame,
-            text="Balanced is the default recommended profile and keeps 2 logical CPUs free during heavy export.",
-        ).grid(row=row, column=2, sticky="w", pady=(0, 8))
-
-        row += 1
         ttk.Checkbutton(
             self.content_frame,
             text="Preserve temp files for debugging",
@@ -798,7 +785,6 @@ class ConversionApp:
     def _install_persistence_hooks(self) -> None:
         self.input_var.trace_add("write", self._handle_source_path_change)
         self.output_var.trace_add("write", self._handle_persisted_field_change)
-        self.cpu_profile_var.trace_add("write", self._handle_persisted_field_change)
         self.preserve_temp_files_var.trace_add("write", self._handle_persisted_field_change)
         self.material_policy_var.trace_add("write", self._handle_material_policy_change)
         self.bark_material_var.trace_add("write", self._handle_persisted_field_change)
@@ -845,10 +831,7 @@ class ConversionApp:
             return MaterialPolicy.SOURCE_MATERIAL_ROLES
 
     def _current_cpu_profile(self) -> CpuProfile:
-        try:
-            return CpuProfile(self.cpu_profile_var.get())
-        except ValueError:
-            return CpuProfile.BALANCED
+        return CpuProfile.BALANCED
 
     def _current_cleanup_policy(self) -> CleanupPolicy:
         return CleanupPolicy.PRESERVE_FOR_DEBUGGING if bool(self.preserve_temp_files_var.get()) else CleanupPolicy.EPHEMERAL

@@ -90,6 +90,7 @@ $launcherScript = Join-Path $repoRoot 'scripts\launch_qt_gui.py'
 $distPath = Join-Path $repoRoot 'dist-next'
 $buildPath = Join-Path $repoRoot 'build-next'
 $exePath = Join-Path $distPath 'XMLtoUSDAConverter.exe'
+$iconPath = Join-Path $repoRoot 'src\xml_to_usda\qt_ui\assets\Icon.ico'
 
 Push-Location $repoRoot
 try {
@@ -113,6 +114,10 @@ try {
     }
 
     if ($Package) {
+        if (-not (Test-Path $iconPath)) {
+            throw "Missing application icon: $iconPath"
+        }
+
         if (Test-Path $buildPath) {
             Remove-Item -Recurse -Force $buildPath
         }
@@ -127,6 +132,7 @@ try {
             '--onefile',
             '--windowed',
             '--name', 'XMLtoUSDAConverter',
+            '--icon', $iconPath,
             '--paths', (Join-Path $repoRoot 'src'),
             '--collect-data', 'xml_to_usda.qt_ui',
             '--distpath', $distPath,
@@ -146,7 +152,13 @@ try {
         }
 
         Write-BuildInfo -DistPath $distPath -ExePath $exePath -PythonExe $pythonExe -RepoRoot $repoRoot -BuildMode 'release'
+        $bundlePath = Join-Path $distPath 'XMLtoUSDAConverter_release.zip'
+        & $pythonExe -m xml_to_usda.release_bundle --repo-root $repoRoot --dist-path $distPath --zip-path $bundlePath
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Release zip assembly failed.'
+        }
         Write-Host "Built: $exePath"
+        Write-Host "Release zip: $bundlePath"
         if ($OpenOutput) {
             Invoke-Item $distPath
         }

@@ -58,6 +58,7 @@ def test_qt_shell_applies_native_corner_preference_on_show(monkeypatch, qtbot, t
 
 def test_qt_entry_main_launches_and_exits_cleanly(monkeypatch) -> None:
     timer_calls: list[int] = []
+    icon_calls: list[object] = []
 
     class _FakeApp:
         def __init__(self, _args):
@@ -69,6 +70,9 @@ def test_qt_entry_main_launches_and_exits_cleanly(monkeypatch) -> None:
 
         def setApplicationName(self, _name: str) -> None:
             pass
+
+        def setWindowIcon(self, icon: object) -> None:
+            icon_calls.append(icon)
 
         def quit(self) -> None:
             pass
@@ -94,14 +98,39 @@ def test_qt_entry_main_launches_and_exits_cleanly(monkeypatch) -> None:
         def show(self) -> None:
             self.shown = True
 
+    class _FakeIcon:
+        def __init__(self, path: str):
+            self.path = path
+
+    identity_calls: list[bool] = []
+
     monkeypatch.setattr("PySide6.QtWidgets.QApplication", _FakeApp)
+    monkeypatch.setattr("PySide6.QtGui.QIcon", _FakeIcon)
     monkeypatch.setattr("PySide6.QtCore.QTimer.singleShot", lambda delay, callback: timer_calls.append(delay))
     monkeypatch.setattr("xml_to_usda.qt_ui.window.MainWindow", _FakeWindow)
+    monkeypatch.setattr(
+        "xml_to_usda.qt_ui.entry.configure_windows_taskbar_identity",
+        lambda: identity_calls.append(True),
+    )
 
     exit_code = main(["--smoke-exit-ms", "1"])
 
     assert exit_code == 0
     assert timer_calls == [1]
+    assert len(icon_calls) == 1
+    assert isinstance(icon_calls[0], _FakeIcon)
+    assert icon_calls[0].path.endswith("Icon.ico")
+    assert identity_calls == [True]
+
+
+def test_qt_entry_application_icon_is_bundled() -> None:
+    from xml_to_usda.qt_ui.entry import application_icon_path
+
+    icon_path = application_icon_path()
+
+    assert icon_path.endswith("Icon.ico")
+    with open(icon_path, "rb") as icon_file:
+        assert icon_file.read(6)[:4] == b"\x00\x00\x01\x00"
 
 
 def test_qt_shell_enables_actions_when_paths_present(qtbot, tmp_path) -> None:

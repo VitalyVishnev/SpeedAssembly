@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import multiprocessing
 import sys
+from importlib.resources import files
 
 from ..fbx_worker_subprocess import FBX_WORKER_COMMAND
+
+WINDOWS_APP_USER_MODEL_ID = "XMLtoUSDAConverter.XMLtoUSDAConverter"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -14,6 +18,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--theme", default=None, help="Bundled theme name to load for the PySide6 shell.")
     parser.add_argument("--smoke-exit-ms", type=int, default=0, help=argparse.SUPPRESS)
     return parser
+
+
+def configure_windows_taskbar_identity() -> None:
+    if sys.platform != "win32":
+        return
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(WINDOWS_APP_USER_MODEL_ID)
+
+
+def application_icon_path() -> str:
+    return str(files("xml_to_usda.qt_ui").joinpath("assets", "Icon.ico"))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -29,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         from PySide6.QtCore import QTimer
+        from PySide6.QtGui import QIcon
         from PySide6.QtWidgets import QApplication
     except ImportError:
         sys.stderr.write(
@@ -49,8 +64,10 @@ def main(argv: list[str] | None = None) -> int:
         theme_overrides = theme_overrides.__class__(theme_name=theme_name, payload=theme_overrides.payload)
     theme = merge_theme(base_theme, theme_overrides)
     deps = build_default_dependencies()
+    configure_windows_taskbar_identity()
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("XML to USDA Converter")
+    app.setWindowIcon(QIcon(application_icon_path()))
     window = MainWindow(theme, state, dependencies=deps, base_theme=base_theme, theme_overrides=theme_overrides)
     window.show()
     if args.smoke_exit_ms > 0:

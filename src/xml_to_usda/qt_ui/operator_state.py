@@ -53,7 +53,7 @@ def load_operator_state(
         OperatorState(
             input_path="",
             output_path="",
-            cpu_profile=snapshot.cpu_profile,
+            cpu_profile=CpuProfile.BALANCED,
             preserve_temp_files=snapshot.preserve_temp_files,
             conversion_mode=snapshot.conversion_mode,
             material_policy=snapshot.material_policy,
@@ -181,7 +181,6 @@ def apply_preset_to_operator_state(state: OperatorState, preset: GuiPresetRecord
     """Apply preset operator values while keeping the current input/output paths."""
     return replace(
         state,
-        cpu_profile=preset.cpu_profile,
         preserve_temp_files=bool(preset.preserve_temp_files),
         conversion_mode=preset.conversion_mode,
         material_policy=preset.material_policy,

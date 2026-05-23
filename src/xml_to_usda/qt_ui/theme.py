@@ -281,6 +281,36 @@ QFrame#EditorPanelCard {{
     border-radius: {card_radius}px;
     border: {theme.border_widths.get('card', 1)}px solid {card_border};
 }}
+QFrame#TutorialCallout {{
+    background: {accent_fill};
+    color: {button_text};
+    border-radius: {card_radius}px;
+    border: 1px solid {secondary_fill};
+}}
+QLabel#TutorialCalloutTitle {{
+    color: {button_text};
+    font-size: {theme.font_sizes['body']}px;
+    font-weight: 700;
+}}
+QLabel#TutorialCalloutBody {{
+    color: {button_text};
+    font-size: {theme.font_sizes['small']}px;
+}}
+QPushButton#TutorialCalloutCloseButton {{
+    background: rgba(255, 255, 255, 0.24);
+    color: {button_text};
+    border-radius: {window_button_size // 2}px;
+    min-width: {window_button_size}px;
+    max-width: {window_button_size}px;
+    min-height: {window_button_size}px;
+    max-height: {window_button_size}px;
+    padding: 0px;
+    font-size: 12px;
+    font-weight: 700;
+}}
+QPushButton#TutorialCalloutCloseButton:hover {{
+    background: rgba(255, 255, 255, 0.38);
+}}
 QPushButton#WindowButton {{
     background: transparent;
     border-radius: {window_button_size // 2}px;

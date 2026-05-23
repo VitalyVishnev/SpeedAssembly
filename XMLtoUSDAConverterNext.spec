@@ -39,4 +39,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='D:\\3D Personal\\VibeCode\\XMLtoUSDAconverter\\src\\xml_to_usda\\qt_ui\\assets\\Icon.ico',
 )
