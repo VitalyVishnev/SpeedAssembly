@@ -88,8 +88,8 @@ def test_qt_operator_state_save_preserves_nested_records(tmp_path) -> None:
     )
     reloaded = load_gui_settings(settings_path)
 
-    assert saved_snapshot.last_input_path == "old.xml"
-    assert reloaded.last_output_path == "old.usda"
+    assert saved_snapshot.last_input_path == "new.xml"
+    assert reloaded.last_output_path == "new.usda"
     assert reloaded.cpu_profile == CpuProfile.QUIET
     assert reloaded.conversion_mode == ConversionMode.SKELETAL_ASSEMBLY
     assert reloaded.base_material_settings == original_snapshot.base_material_settings

@@ -1579,6 +1579,86 @@ def test_gui_browse_input_auto_refreshes_wind_groups_and_shows_instance_counts(
         root.destroy()
 
 
+def test_gui_browse_dialogs_use_separate_remembered_input_and_output_folders(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    settings_path = tmp_path / "gui_settings.json"
+    remembered_xml = tmp_path / "xml_folder" / "last.xml"
+    remembered_output = tmp_path / "output_folder" / "last.usda"
+    selected_xml = tmp_path / "new_xml_folder" / "selected.xml"
+    selected_output = tmp_path / "new_output_folder" / "chosen.usda"
+    for path in (remembered_xml, remembered_output, selected_xml, selected_output):
+        path.parent.mkdir(exist_ok=True)
+    remembered_xml.write_text("<tree/>", encoding="utf-8")
+    selected_xml.write_text("<tree/>", encoding="utf-8")
+    settings_path.write_text(
+        json.dumps(
+            {
+                "last_input_path": str(remembered_xml),
+                "last_output_path": str(remembered_output),
+            }
+        ),
+        encoding="utf-8",
+    )
+    observed: dict[str, str] = {}
+
+    def fake_open(**kwargs):
+        observed["input_initialdir"] = kwargs.get("initialdir", "")
+        return str(selected_xml)
+
+    def fake_save(**kwargs):
+        observed["output_initialdir"] = kwargs.get("initialdir", "")
+        observed["output_initialfile"] = kwargs.get("initialfile", "")
+        return str(selected_output)
+
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
+    monkeypatch.setattr("xml_to_usda.gui.filedialog.askopenfilename", fake_open)
+    monkeypatch.setattr("xml_to_usda.gui.filedialog.asksaveasfilename", fake_save)
+
+    try:
+        app = ConversionApp(root)
+        app.browse_input()
+        app.browse_output()
+
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert Path(observed["input_initialdir"]) == remembered_xml.parent
+        assert Path(observed["output_initialdir"]) == remembered_output.parent
+        assert observed["output_initialfile"] == f"{selected_xml.stem}.usda"
+        assert payload["last_input_path"] == str(selected_xml)
+        assert payload["last_output_path"] == str(selected_output)
+    finally:
+        root.destroy()
+
+
+def test_gui_manual_output_path_keeps_folder_and_updates_stem_on_next_xml(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _, root = _build_tk_root_or_skip()
+    from xml_to_usda.gui import ConversionApp
+
+    settings_path = tmp_path / "gui_settings.json"
+    other_xml = Path(__file__).parent / "data" / "leafrefs_on_branch_levels.xml"
+    manual_output = tmp_path / "exports" / "custom_name.usda"
+    manual_output.parent.mkdir()
+
+    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", settings_path)
+
+    try:
+        app = ConversionApp(root)
+        app.input_var.set(str(SIMPLE_TREE_01))
+        app.output_var.set(str(manual_output))
+        app.input_var.set(str(other_xml))
+
+        assert app.output_var.get() == str(manual_output.with_name(f"{other_xml.stem}.usda"))
+    finally:
+        root.destroy()
+
+
 def test_gui_persists_material_paths_after_successful_conversion(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

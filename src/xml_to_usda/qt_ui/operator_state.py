@@ -77,8 +77,8 @@ def save_operator_state(
     """Persist shared operator defaults without overwriting GUI file-path history."""
     resolved_settings_path = Path(settings_path) if settings_path is not None else SETTINGS_PATH
     snapshot = GuiSettingsSnapshot(
-        last_input_path=previous_snapshot.last_input_path,
-        last_output_path=previous_snapshot.last_output_path,
+        last_input_path=state.input_path or previous_snapshot.last_input_path,
+        last_output_path=state.output_path or previous_snapshot.last_output_path,
         cpu_profile=state.cpu_profile,
         preserve_temp_files=bool(state.preserve_temp_files),
         conversion_mode=state.conversion_mode,
@@ -130,8 +130,8 @@ def save_nested_input_settings(
     resolved_settings_path = Path(settings_path) if settings_path is not None else SETTINGS_PATH
 
     snapshot = GuiSettingsSnapshot(
-        last_input_path=previous_snapshot.last_input_path,
-        last_output_path=previous_snapshot.last_output_path,
+        last_input_path=state.input_path or previous_snapshot.last_input_path,
+        last_output_path=state.output_path or previous_snapshot.last_output_path,
         cpu_profile=state.cpu_profile,
         preserve_temp_files=bool(state.preserve_temp_files),
         conversion_mode=state.conversion_mode,

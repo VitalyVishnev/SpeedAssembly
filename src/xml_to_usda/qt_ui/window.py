@@ -1227,10 +1227,15 @@ class MainWindow(QWidget):
         current_output = self.output_input.text().strip()
         previous_default = previous_auto_output or (str(Path(previous_input).with_suffix(".usda")) if previous_input else "")
         if force or not current_output or current_output == previous_default:
+            next_output = new_auto_output
+        else:
+            current_path = Path(current_output)
+            next_output = str(current_path.with_name(f"{Path(source_path).stem}{current_path.suffix or '.usda'}"))
+        if next_output != current_output:
             self._persistence_suspended = True
-            self.output_input.setText(new_auto_output)
+            self.output_input.setText(next_output)
             self._persistence_suspended = False
-            self._operator_state = replace(self._operator_state, output_path=new_auto_output)
+            self._operator_state = replace(self._operator_state, output_path=next_output)
         self._auto_output_path = new_auto_output
 
     def _maybe_auto_refresh_wind_groups(self) -> None:
@@ -1247,9 +1252,12 @@ class MainWindow(QWidget):
 
     def _save_operator_state(self) -> None:
         try:
+            state = self._operator_state
+            if state.output_path and state.output_path == self._auto_output_path:
+                state = replace(state, output_path=self._operator_snapshot.last_output_path)
             self._operator_snapshot = save_nested_input_settings(
                 self._deps,
-                self._operator_state,
+                state,
                 previous_snapshot=self._operator_snapshot,
                 base_material_records=self.materials_panel.serialize_base_material_records(),
                 part_source_records=self.materials_panel.serialize_part_source_records(),
@@ -1315,20 +1323,27 @@ class MainWindow(QWidget):
     def browse_input(self) -> None:
         previous_input = self._operator_state.input_path
         previous_auto_output = self._auto_output_path
+        initial = self.source_input.text().strip()
+        if not initial and self._operator_snapshot.last_input_path:
+            initial = str(Path(self._operator_snapshot.last_input_path).parent)
         selected, _ = QFileDialog.getOpenFileName(
             self,
             "Select SpeedTree XML",
-            self.source_input.text().strip() or "",
+            initial,
             "XML files (*.xml);;All files (*.*)",
         )
         if not selected:
             return
         self.source_input.setText(selected)
-        self._set_default_output_from_source(previous_input, previous_auto_output, force=True)
+        self._set_default_output_from_source(previous_input, previous_auto_output)
         self._set_status("Source XML selected.")
 
     def browse_output(self) -> None:
-        initial = self.output_input.text().strip() or "tree.usda"
+        current_output = self.output_input.text().strip()
+        if current_output and current_output != self._auto_output_path:
+            initial = current_output
+        else:
+            initial = self._operator_snapshot.last_output_path or current_output or "tree.usda"
         selected, _ = QFileDialog.getSaveFileName(
             self,
             "Select USDA output",
@@ -1339,6 +1354,7 @@ class MainWindow(QWidget):
             return
         self.output_input.setText(selected)
         self._set_status("Output USDA selected.")
+        self._save_operator_state()
 
     def _browse_part_fbx(self, target_edit: QLineEdit) -> None:
         selected, _ = QFileDialog.getOpenFileName(

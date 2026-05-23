@@ -24,6 +24,8 @@ class GuiPersistenceController:
         self.app._persisted_base_material_settings = settings.base_material_settings
         self.app._persisted_part_mesh_settings = settings.part_mesh_settings
         self.app._startup_restored_input_path = settings.last_input_path
+        self.app._current_source_path = settings.last_input_path
+        self.app._remembered_output_path = settings.last_output_path
         self.app.input_var.set(self.app._startup_restored_input_path)
         self.app.output_var.set(settings.last_output_path)
         self.app.cpu_profile_var.set(settings.cpu_profile.value)
@@ -48,12 +50,17 @@ class GuiPersistenceController:
             current_base_material_settings = self.app._materials_panel.serialize_settings()
             current_part_mesh_settings = self.app._part_sources_panel.serialize_settings()
             current_wind_group_settings = self.app._wind_panel.serialize_settings()
+            current_output_path = self.app.output_var.get().strip()
+            if current_output_path and current_output_path == self.app._auto_output_path:
+                persisted_output_path = self.app._remembered_output_path
+            else:
+                persisted_output_path = current_output_path
 
             self._save_gui_settings(
                 self.app.SETTINGS_PATH,
                 GuiSettingsSnapshot(
                     last_input_path=self.app.input_var.get().strip(),
-                    last_output_path=self.app.output_var.get().strip(),
+                    last_output_path=persisted_output_path,
                     cpu_profile=self.app._current_cpu_profile(),
                     preserve_temp_files=bool(self.app.preserve_temp_files_var.get()),
                     conversion_mode=self.app._persisted_conversion_mode,
@@ -71,6 +78,7 @@ class GuiPersistenceController:
             self.app._persisted_base_material_settings = current_base_material_settings
             self.app._persisted_part_mesh_settings = current_part_mesh_settings
             self.app._persisted_wind_group_settings = dict(current_wind_group_settings)
+            self.app._remembered_output_path = persisted_output_path
         except OSError:
             return
 

@@ -105,6 +105,9 @@ class ConversionApp:
         self._pending_settings_save_job: str | None = None
         self._suspend_settings_save = False
         self._startup_restored_input_path = ""
+        self._current_source_path = ""
+        self._auto_output_path: str | None = None
+        self._remembered_output_path = ""
         self._conversion_process = None
         self._conversion_cancel_event = None
         self._conversion_queue = None
@@ -314,30 +317,70 @@ class ConversionApp:
         self._refresh_scroll_region()
 
     def browse_input(self) -> None:
+        initial_input = self.input_var.get().strip()
+        if not initial_input and self._startup_restored_input_path:
+            initial_input = str(Path(self._startup_restored_input_path).parent)
+        elif initial_input:
+            initial_path = Path(initial_input)
+            if initial_path.suffix:
+                initial_input = str(initial_path.parent)
         selected = self._deps.filedialog.askopenfilename(
             title="Select SpeedTree XML",
+            initialdir=initial_input,
             filetypes=[("XML files", "*.xml"), ("All files", "*.*")],
         )
         if not selected:
             return
         current_input = self.input_var.get().strip()
+        previous_auto_output = self._auto_output_path
         self.status_var.set("Source XML selected. Running XML analysis...")
         self.input_var.set(selected)
-        if not self.output_var.get():
-            self.output_var.set(str(Path(selected).with_suffix(".usda")))
+        self._set_default_output_from_source(current_input, previous_auto_output)
         if current_input == selected:
             self._handle_source_path_change()
+        self._save_settings()
 
     def browse_output(self) -> None:
-        initial = self.output_var.get() or "tree.usda"
+        current_output = self.output_var.get().strip()
+        if current_output and current_output != self._auto_output_path:
+            initial = Path(current_output)
+        elif self._remembered_output_path:
+            initial = Path(self._remembered_output_path)
+        elif current_output:
+            initial = Path(current_output)
+        else:
+            initial = Path("tree.usda")
         selected = self._deps.filedialog.asksaveasfilename(
             title="Select USDA output",
             defaultextension=".usda",
-            initialfile=Path(initial).name,
+            initialdir=str(initial.parent) if str(initial.parent) != "." else "",
+            initialfile=initial.name,
             filetypes=[("USDA files", "*.usda"), ("All files", "*.*")],
         )
         if selected:
             self.output_var.set(selected)
+            self._save_settings()
+
+    def _set_default_output_from_source(self, previous_input: str, previous_auto_output: str | None) -> None:
+        source_path = self.input_var.get().strip()
+        if not source_path:
+            self._auto_output_path = None
+            return
+        new_auto_output = str(Path(source_path).with_suffix(".usda"))
+        current_output = self.output_var.get().strip()
+        previous_default = previous_auto_output or (str(Path(previous_input).with_suffix(".usda")) if previous_input else "")
+        if not current_output or current_output == previous_default:
+            next_output = new_auto_output
+        else:
+            current_path = Path(current_output)
+            next_output = str(current_path.with_name(f"{Path(source_path).stem}{current_path.suffix or '.usda'}"))
+        if next_output != current_output:
+            self._suspend_settings_save = True
+            try:
+                self.output_var.set(next_output)
+            finally:
+                self._suspend_settings_save = False
+        self._auto_output_path = new_auto_output
 
     def refresh_wind_groups(self) -> None:
         input_path = self.input_var.get().strip()
@@ -604,6 +647,11 @@ class ConversionApp:
             return
         self._active_wind_request_id += 1
         input_path = self.input_var.get().strip()
+        previous_input = self._current_source_path
+        input_changed = input_path != previous_input
+        if input_changed:
+            self._set_default_output_from_source(previous_input, self._auto_output_path)
+            self._current_source_path = input_path
         if not input_path:
             self._current_wind_settings_key = None
             self._clear_base_material_rows()
