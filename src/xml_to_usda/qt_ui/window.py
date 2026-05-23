@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..diagnostics_bundle import DiagnosticsBundleRequest, default_build_info_path, export_diagnostics_bundle
 from ..gui_formatters import format_wind_group_summary, format_wind_json_result
 from ..models import CleanupPolicy, ConversionMode
 from ..runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
@@ -49,7 +50,7 @@ from ..settings_service import (
 from .adjust_ui import AdjustUiDialog
 from .background_jobs import QtBackgroundJobsController
 from .dependencies import QtUiDependencies
-from .dialogs import TextDialog
+from .dialogs import HelpDeckDialog, SupportDialog, TextDialog
 from .operator_state import (
     SETTINGS_DIR,
     SETTINGS_PATH,
@@ -172,10 +173,30 @@ class TitleBar(QFrame):
         self.help_button.clicked.connect(window.open_help_dialog)
         self._layout.addWidget(self.help_button, 0, Qt.AlignmentFlag.AlignLeft)
 
+        self.help_prompt = QWidget(self)
+        self.help_prompt.setObjectName("HelpPrompt")
+        help_prompt_layout = QHBoxLayout(self.help_prompt)
+        help_prompt_layout.setContentsMargins(8, 0, 4, 0)
+        help_prompt_layout.setSpacing(4)
+        self.help_prompt_button = QPushButton("How to use", self.help_prompt)
+        self.help_prompt_button.setObjectName("TitlePillButton")
+        self.help_prompt_button.clicked.connect(window.open_help_dialog)
+        self.help_prompt_dismiss_button = QPushButton("x", self.help_prompt)
+        self.help_prompt_dismiss_button.setObjectName("WindowButton")
+        self.help_prompt_dismiss_button.clicked.connect(window.dismiss_help_prompt)
+        help_prompt_layout.addWidget(self.help_prompt_button)
+        help_prompt_layout.addWidget(self.help_prompt_dismiss_button)
+        self._layout.addWidget(self.help_prompt, 0, Qt.AlignmentFlag.AlignLeft)
+
         self.log_button = QPushButton("LOG", self)
         self.log_button.setObjectName("TitlePillButton")
         self.log_button.clicked.connect(window.open_log_dialog)
         self._layout.addWidget(self.log_button, 0, Qt.AlignmentFlag.AlignLeft)
+
+        self.support_button = QPushButton("Support", self)
+        self.support_button.setObjectName("TitlePillButton")
+        self.support_button.clicked.connect(window.open_support_dialog)
+        self._layout.addWidget(self.support_button, 0, Qt.AlignmentFlag.AlignLeft)
 
         self.adjust_button = QPushButton("Adjust UI", self)
         self.adjust_button.setObjectName("AdjustUiButton")
@@ -223,6 +244,11 @@ class TitleBar(QFrame):
         self.setFixedHeight(max(24, titlebar_height + 4, pill_height + 8, adjust_height + 8, button_size + 8))
         self.log_button.setFixedWidth(int(theme.chrome.get("title_pill_width", 78)))
         self.log_button.setFixedHeight(pill_height)
+        self.support_button.setFixedWidth(int(theme.chrome.get("title_pill_width", 78)) + 20)
+        self.support_button.setFixedHeight(pill_height)
+        self.help_prompt_button.setFixedHeight(pill_height)
+        self.help_prompt_button.setFixedWidth(int(theme.chrome.get("title_pill_width", 78)) + 10)
+        self.help_prompt_dismiss_button.setFixedSize(button_size, button_size)
         self.adjust_button.setFixedWidth(int(theme.chrome.get("adjust_ui_button_width", 104)))
         self.adjust_button.setFixedHeight(adjust_height)
         self.preset_host.setFixedHeight(max(button_size, pill_height, adjust_height))
@@ -406,7 +432,8 @@ class MainWindow(QWidget):
         self._wind_json_running = False
         self._log_text = ""
         self._log_dialog: TextDialog | None = None
-        self._help_dialog: TextDialog | None = None
+        self._help_dialog: HelpDeckDialog | None = None
+        self._support_dialog: SupportDialog | None = None
         self._adjust_ui_dialog: AdjustUiDialog | None = None
 
         self._operator_state, self._operator_snapshot = load_operator_state(
@@ -447,6 +474,7 @@ class MainWindow(QWidget):
         self._build_layout()
         self._install_resize_event_filters()
         self._apply_saved_state()
+        self._apply_help_prompt_state()
         self._apply_operator_state_to_widgets()
         self._set_log(self._startup_log_text())
         self._apply_runtime_cleanup_summary()
@@ -1113,26 +1141,78 @@ class MainWindow(QWidget):
         self._log_dialog.activateWindow()
 
     def open_help_dialog(self) -> None:
-        help_text = (
-            "1. Choose a source XML file.\n"
-            "2. Review Wind / Geometry / Materials tabs.\n"
-            "3. Refresh Wind Groups inside the Wind tab when needed.\n"
-            "4. Adjust repeated-part source mode and material assignments.\n"
-            "5. Generate Dynamic Wind JSON or run Convert to USDA.\n\n"
-            "The PySide6 shell keeps the backend stable while conversion, wind, and material workflows run."
-        )
         if self._help_dialog is None:
-            self._help_dialog = TextDialog(
-                title="Quick Workflow",
-                text=help_text,
-                parent=self,
-            )
-        else:
-            self._help_dialog.set_text(help_text)
+            self._help_dialog = HelpDeckDialog(parent=self)
         self._help_dialog.setStyleSheet(build_stylesheet(self._theme))
         self._help_dialog.show()
         self._help_dialog.raise_()
         self._help_dialog.activateWindow()
+
+    def open_support_dialog(self) -> None:
+        if self._support_dialog is None:
+            self._support_dialog = SupportDialog(
+                on_export_diagnostics=self.export_diagnostics_bundle,
+                parent=self,
+            )
+        self._support_dialog.setStyleSheet(build_stylesheet(self._theme))
+        self._support_dialog.show()
+        self._support_dialog.raise_()
+        self._support_dialog.activateWindow()
+
+    def export_diagnostics_bundle(self) -> None:
+        selected, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export diagnostics bundle",
+            str(self._default_diagnostics_bundle_path()),
+            "Zip files (*.zip);;All files (*.*)",
+        )
+        if not selected:
+            return
+        bundle_path = Path(selected)
+        if bundle_path.suffix.lower() != ".zip":
+            bundle_path = bundle_path.with_suffix(".zip")
+        try:
+            self._save_operator_state()
+            exported_path = export_diagnostics_bundle(self._diagnostics_bundle_request(bundle_path))
+        except OSError as exc:
+            self._report_error("Diagnostics export failed", str(exc), status="Diagnostics export failed.")
+            return
+        self._set_status(f"Diagnostics bundle exported: {exported_path}")
+        self._append_log(f"Diagnostics bundle exported\n{exported_path}")
+
+    def _diagnostics_bundle_request(self, bundle_path: Path) -> DiagnosticsBundleRequest:
+        runtime_summary = {
+            "settings_dir": str(self._runtime_paths.settings_dir),
+            "cache_root": str(self._runtime_paths.cache_root),
+            "jobs_root": str(self._runtime_paths.jobs_root),
+            "removed_stale_jobs": self._runtime_cleanup_summary.removed_jobs,
+            "removed_stale_partial_outputs": self._runtime_cleanup_summary.removed_partial_outputs,
+            "failed_cleanup_jobs": self._runtime_cleanup_summary.failed_jobs,
+        }
+        return DiagnosticsBundleRequest(
+            bundle_path=bundle_path,
+            settings_path=self._operator_settings_path,
+            runtime_log_path=self._runtime_paths.settings_dir / "gui_runtime.log",
+            build_info_path=default_build_info_path(),
+            jobs_root=self._runtime_paths.jobs_root,
+            active_preset_name=self._current_preset_name(),
+            selected_input_path=self.source_input.text().strip(),
+            selected_output_path=self.output_input.text().strip(),
+            in_app_log_text=self._log_text,
+            runtime_summary=runtime_summary,
+        )
+
+    def _default_diagnostics_bundle_path(self) -> Path:
+        return self._runtime_paths.settings_dir / "XMLtoUSDA_diagnostics.zip"
+
+    def dismiss_help_prompt(self) -> None:
+        self._state = replace(self._state, help_prompt_dismissed=True)
+        self._apply_help_prompt_state()
+
+    def _apply_help_prompt_state(self) -> None:
+        self.title_bar.help_prompt.setVisible(not self._state.help_prompt_dismissed)
+        self.help_prompt = self.title_bar.help_prompt
+        self.help_prompt_dismiss_button = self.title_bar.help_prompt_dismiss_button
 
     def open_adjust_ui_dialog(self) -> None:
         if self._adjust_ui_dialog is None:
@@ -1564,6 +1644,7 @@ class MainWindow(QWidget):
                 height=geometry.height(),
                 is_maximized=self.isMaximized(),
                 theme_name=self._theme.name,
+                help_prompt_dismissed=self._state.help_prompt_dismissed,
             ),
             self._state_path,
         )

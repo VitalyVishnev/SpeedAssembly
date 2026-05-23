@@ -530,3 +530,196 @@ def test_qt_window_autofills_output_path_from_selected_xml(qtbot, tmp_path) -> N
     window.source_input.setText(str(tree_xml))
 
     assert window.output_input.text() == str(tree_xml.with_suffix(".usda"))
+
+
+def test_qt_window_preserves_manual_output_folder_and_updates_stem(qtbot, tmp_path) -> None:
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    first_xml = tmp_path / "inputs" / "spruce.xml"
+    second_xml = tmp_path / "other_inputs" / "cedar.xml"
+    output_path = tmp_path / "exports" / "custom_name.usda"
+    first_xml.parent.mkdir()
+    second_xml.parent.mkdir()
+    output_path.parent.mkdir()
+    first_xml.write_text("<tree/>", encoding="utf-8")
+    second_xml.write_text("<tree/>", encoding="utf-8")
+
+    window.source_input.setText(str(first_xml))
+    window.output_input.setText(str(output_path))
+    window.source_input.setText(str(second_xml))
+
+    assert window.output_input.text() == str(output_path.with_name("cedar.usda"))
+
+
+def test_qt_window_uses_remembered_xml_and_output_folders_for_browse_dialogs(monkeypatch, qtbot, tmp_path) -> None:
+    settings_path = tmp_path / "gui_settings.json"
+    remembered_xml = tmp_path / "xml_folder" / "last.xml"
+    remembered_output = tmp_path / "output_folder" / "last.usda"
+    selected_xml = tmp_path / "new_xml_folder" / "selected.xml"
+    selected_output = tmp_path / "new_output_folder" / "chosen.usda"
+    for path in (remembered_xml, remembered_output, selected_xml, selected_output):
+        path.parent.mkdir(exist_ok=True)
+    remembered_xml.write_text("<tree/>", encoding="utf-8")
+    selected_xml.write_text("<tree/>", encoding="utf-8")
+    save_gui_settings(
+        settings_path,
+        GuiSettingsSnapshot(
+            last_input_path=str(remembered_xml),
+            last_output_path=str(remembered_output),
+        ),
+    )
+    observed: dict[str, str] = {}
+
+    def fake_open_file_name(parent, title, directory, filters):
+        observed["input_directory"] = directory
+        return str(selected_xml), ""
+
+    def fake_save_file_name(parent, title, directory, filters):
+        observed["output_directory"] = directory
+        return str(selected_output), ""
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(fake_open_file_name))
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(fake_save_file_name))
+
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=settings_path,
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    window.browse_input()
+    window.browse_output()
+    saved = load_gui_settings(settings_path)
+
+    assert Path(observed["input_directory"]) == remembered_xml.parent
+    assert Path(observed["output_directory"]) == remembered_output
+    assert saved.last_input_path == str(selected_xml)
+    assert saved.last_output_path == str(selected_output)
+
+
+def test_qt_window_shows_and_persists_dismissed_first_launch_help_prompt(qtbot, tmp_path) -> None:
+    state_path = tmp_path / "ui_next_state.json"
+    window = MainWindow(
+        load_theme(),
+        UiShellState(help_prompt_dismissed=False),
+        dependencies=_build_fake_deps({}),
+        state_path=state_path,
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    assert window.help_prompt.isVisible()
+
+    qtbot.mouseClick(window.help_prompt_dismiss_button, Qt.MouseButton.LeftButton)
+
+    assert window.help_prompt.isHidden()
+    window.close()
+    restored = load_ui_shell_state(state_path)
+    assert restored.help_prompt_dismissed is True
+
+
+def test_qt_window_opens_slide_style_help_deck_with_topics_and_arrows(qtbot, tmp_path) -> None:
+    window = MainWindow(
+        load_theme(),
+        UiShellState(help_prompt_dismissed=True),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    window.open_help_dialog()
+    dialog = window._help_dialog
+
+    assert dialog is not None
+    assert dialog.windowTitle() == "How to use"
+    assert [button.text() for button in dialog.topic_buttons] == ["Start", "Presets", "Materials", "Run"]
+    assert dialog.slide_title_label.text() == "Start"
+    assert dialog.previous_button.isEnabled() is False
+    assert dialog.next_button.isEnabled() is True
+
+    qtbot.mouseClick(dialog.next_button, Qt.MouseButton.LeftButton)
+    assert dialog.slide_title_label.text() == "Presets"
+    assert dialog.previous_button.isEnabled() is True
+
+    qtbot.mouseClick(dialog.topic_buttons[2], Qt.MouseButton.LeftButton)
+    assert dialog.slide_title_label.text() == "Materials"
+
+    qtbot.mouseClick(dialog.previous_button, Qt.MouseButton.LeftButton)
+    assert dialog.slide_title_label.text() == "Presets"
+
+
+def test_qt_window_support_dialog_exports_diagnostics_bundle(monkeypatch, qtbot, tmp_path) -> None:
+    settings_dir = tmp_path / "settings"
+    cache_root = tmp_path / "cache"
+    jobs_root = cache_root / "jobs"
+    settings_path = settings_dir / "gui_settings.json"
+    runtime_log_path = settings_dir / "gui_runtime.log"
+    build_info_path = tmp_path / "dist-next" / "build_info.json"
+    selected_bundle_stem = tmp_path / "operator_support_bundle"
+    settings_dir.mkdir()
+    jobs_root.mkdir(parents=True)
+    build_info_path.parent.mkdir()
+    runtime_log_path.write_text("Runtime traceback", encoding="utf-8")
+    build_info_path.write_text('{"build_mode": "package"}', encoding="utf-8")
+    latest_job = jobs_root / "20260523-090000-latest"
+    latest_job.mkdir()
+    (latest_job / "job_manifest.json").write_text('{"job_id": "latest"}', encoding="utf-8")
+    runtime_paths = RuntimePaths(
+        settings_dir=settings_dir,
+        settings_path=settings_path,
+        cache_root=cache_root,
+        jobs_root=jobs_root,
+    )
+
+    monkeypatch.setattr("xml_to_usda.qt_ui.window.resolve_runtime_paths", lambda **kwargs: runtime_paths)
+    monkeypatch.setattr("xml_to_usda.qt_ui.window.default_build_info_path", lambda: build_info_path)
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: (str(selected_bundle_stem), "")))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    window = MainWindow(
+        load_theme(),
+        UiShellState(help_prompt_dismissed=True),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=settings_path,
+    )
+    qtbot.addWidget(window)
+    window.show()
+    tree_xml = tmp_path / "oak.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+    window.output_input.setText(str(tmp_path / "oak.usda"))
+    window._append_log("Operator-visible failure context.")
+
+    qtbot.mouseClick(window.title_bar.support_button, Qt.MouseButton.LeftButton)
+    dialog = window._support_dialog
+
+    assert dialog is not None
+    assert dialog.windowTitle() == "Support / About"
+    assert "Diagnostics are local-only" in dialog.summary_label.text()
+
+    qtbot.mouseClick(dialog.export_button, Qt.MouseButton.LeftButton)
+
+    exported_bundle = selected_bundle_stem.with_suffix(".zip")
+    assert exported_bundle.exists()
+    assert "Diagnostics bundle exported" in window.status_label.text()
+    with zipfile.ZipFile(exported_bundle) as archive:
+        assert "settings/gui_settings.json" in archive.namelist()
+        assert b"Runtime traceback" in archive.read("logs/gui_runtime.log")
+        assert b"Operator-visible failure context." in archive.read("logs/in_app_log.txt")
+        assert b'"job_id": "latest"' in archive.read("runtime/latest_job_manifest.json")

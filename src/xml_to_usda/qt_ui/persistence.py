@@ -17,6 +17,7 @@ class UiShellState:
     height: int = 860
     is_maximized: bool = False
     theme_name: str = "default"
+    help_prompt_dismissed: bool = False
 
 
 def default_ui_state_path() -> Path:
@@ -46,6 +47,7 @@ def load_ui_shell_state(path: str | Path | None = None) -> UiShellState:
         height=max(640, int(payload.get("height", 860))),
         is_maximized=bool(payload.get("is_maximized", False)),
         theme_name=str(payload.get("theme_name", "default")),
+        help_prompt_dismissed=bool(payload.get("help_prompt_dismissed", False)),
     )
 
 
