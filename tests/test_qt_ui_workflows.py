@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,7 @@ pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from xml_to_usda.conversion_service import ConversionLaunchPlan
 from xml_to_usda.discovery_service import (
@@ -37,10 +38,18 @@ from xml_to_usda.models import (
     WindJsonResult,
 )
 from xml_to_usda.qt_ui.dependencies import QtUiDependencies
-from xml_to_usda.qt_ui.persistence import UiShellState
+from xml_to_usda.qt_ui.persistence import UiShellState, load_ui_shell_state
 from xml_to_usda.qt_ui.theme import load_theme
 from xml_to_usda.qt_ui.window import MainWindow
-from xml_to_usda.settings_service import load_gui_settings, save_gui_settings
+from xml_to_usda.runtime_paths import RuntimePaths
+from xml_to_usda.settings_service import (
+    GuiPresetRecord,
+    GuiSettingsSnapshot,
+    load_gui_preset,
+    load_gui_settings,
+    save_gui_preset,
+    save_gui_settings,
+)
 from xml_to_usda.wind_service import WindGenerationRequest, WindInspectionPlan, WindInspectionRequest
 
 
@@ -310,6 +319,92 @@ def test_qt_window_saves_and_applies_named_preset(monkeypatch, qtbot, tmp_path) 
 
     assert window._operator_state.conversion_mode == ConversionMode.STATIC_ASSEMBLY
     assert window.wind_panel.gust_attenuation() == pytest.approx(0.5)
+
+
+def test_qt_window_overwrites_deletes_and_resets_presets(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    settings_path = tmp_path / "gui_settings.json"
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=settings_path,
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    window._conversion_mode_actions["static_assembly"].trigger()
+    window.wind_panel.gust_spin.setValue(0.5)
+    window._save_preset_with_name("Reusable")
+
+    window._conversion_mode_actions["skeletal_parts"].trigger()
+    window.wind_panel.gust_spin.setValue(0.25)
+    window._overwrite_current_preset()
+
+    overwritten = load_gui_settings(settings_path).presets["Reusable"]
+    assert overwritten.conversion_mode == ConversionMode.SKELETAL_PARTS
+    assert overwritten.gust_attenuation == pytest.approx(0.25)
+
+    window._reset_to_factory_defaults()
+
+    assert window._current_preset_name() == "Factory Defaults"
+    assert window._operator_state.conversion_mode == ConversionMode.SKELETAL_ASSEMBLY
+    assert window.wind_panel.gust_attenuation() == pytest.approx(0.0)
+
+    window.preset_combo.setCurrentIndex(window.preset_combo.findData("Reusable"))
+    window._delete_current_preset()
+    saved = load_gui_settings(settings_path)
+
+    assert "Reusable" not in saved.presets
+    assert saved.active_preset_name == "Factory Defaults"
+    assert window._current_preset_name() == "Factory Defaults"
+
+
+def test_qt_window_imports_and_exports_presets(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    import_path = tmp_path / "imported.json"
+    export_stem_path = tmp_path / "exported_preset"
+    imported = GuiPresetRecord(
+        name="Imported Branches",
+        conversion_mode=ConversionMode.SKELETAL_PARTS,
+        material_policy=MaterialPolicy.SINGLE_MATERIAL,
+        single_material_path="/Game/M_All.M_All",
+        gust_attenuation=0.75,
+    )
+    save_gui_preset(import_path, imported)
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *args, **kwargs: (str(import_path), "")))
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: (str(export_stem_path), "")))
+
+    settings_path = tmp_path / "gui_settings.json"
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=settings_path,
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    window._import_preset()
+
+    saved = load_gui_settings(settings_path)
+    assert saved.presets["Imported Branches"] == imported
+    assert window._current_preset_name() == "Imported Branches"
+    assert window._operator_state.conversion_mode == ConversionMode.SKELETAL_PARTS
+    assert window.wind_panel.gust_attenuation() == pytest.approx(0.75)
+
+    window._export_current_preset()
+
+    exported_path = export_stem_path.with_suffix(".json")
+    assert exported_path.exists()
+    assert load_gui_preset(exported_path) == imported
 
 
 def test_qt_window_hides_irrelevant_geometry_path_fields(qtbot, tmp_path) -> None:
