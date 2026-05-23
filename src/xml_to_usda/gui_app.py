@@ -97,11 +97,10 @@ class ConversionApp:
         self._wind_group_rows = []
         self._persisted_wind_group_settings = {}
         self._legacy_wind_group_settings = {}
-        self._persisted_wind_group_settings_by_input_path = {}
+        self._persisted_base_material_settings = ()
+        self._persisted_part_mesh_settings = ()
         self._current_wind_settings_key: str | None = None
-        self._persisted_base_material_settings_by_input_path = {}
         self._current_base_material_settings_key: str | None = None
-        self._persisted_part_mesh_settings_by_input_path = {}
         self._current_part_mesh_settings_key: str | None = None
         self._pending_settings_save_job: str | None = None
         self._suspend_settings_save = False
@@ -638,14 +637,10 @@ class ConversionApp:
         try:
             self._current_base_material_settings_key = self._materials_panel.refresh(
                 input_path,
-                persisted_records=self._persisted_base_material_settings_by_input_path.get(
-                    self._deps.resolve_input_settings_key(input_path),
-                    (),
-                ),
+                persisted_records=self._persisted_base_material_settings,
             )
         finally:
             self._suspend_settings_save = False
-        self._save_settings()
 
     def _rebuild_base_material_rows(self, discovery) -> None:
         self._materials_panel.rebuild(discovery)
@@ -667,14 +662,10 @@ class ConversionApp:
         try:
             self._current_part_mesh_settings_key = self._part_sources_panel.refresh(
                 input_path,
-                persisted_records=self._persisted_part_mesh_settings_by_input_path.get(
-                    self._deps.resolve_input_settings_key(input_path),
-                    (),
-                ),
+                persisted_records=self._persisted_part_mesh_settings,
             )
         finally:
             self._suspend_settings_save = False
-        self._save_settings()
 
     def _rebuild_part_mesh_rows(self, discovery) -> None:
         self._part_sources_panel.rebuild(discovery)

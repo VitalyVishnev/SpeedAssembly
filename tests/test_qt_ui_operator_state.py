@@ -6,8 +6,12 @@ from xml_to_usda.models import ConversionMode, CpuProfile, MaterialPolicy
 from xml_to_usda.qt_ui.operator_state import (
     OperatorState,
     apply_preset_to_operator_state,
+    load_base_material_records,
     load_operator_state,
+    load_part_source_records,
+    load_wind_group_records,
     preset_from_operator_state,
+    save_nested_input_settings,
     save_operator_state,
 )
 from xml_to_usda.settings_service import (
@@ -61,11 +65,10 @@ def test_qt_operator_state_save_preserves_nested_records(tmp_path) -> None:
         last_output_path="old.usda",
         conversion_mode=ConversionMode.SKELETAL_PARTS,
         wind_group_settings={"0": WindGroupSettingRecord(influence=0.8)},
-        wind_group_settings_by_input_path={"foo": {"1": WindGroupSettingRecord(shift_top=0.4)}},
-        base_material_settings_by_input_path={
-            "foo": (BaseMaterialSettingRecord(source_id=7, source_name="Bark", ue_asset_path="/Game/Bark.Bark"),)
-        },
-        part_mesh_settings_by_input_path={"foo": (PartSourceSettingRecord(source_name="Twig"),)},
+        base_material_settings=(
+            BaseMaterialSettingRecord(source_id=7, source_name="Bark", ue_asset_path="/Game/Bark.Bark"),
+        ),
+        part_mesh_settings=(PartSourceSettingRecord(source_name="Twig"),),
     )
     save_gui_settings(settings_path, original_snapshot)
 
@@ -89,9 +92,43 @@ def test_qt_operator_state_save_preserves_nested_records(tmp_path) -> None:
     assert reloaded.last_output_path == "old.usda"
     assert reloaded.cpu_profile == CpuProfile.QUIET
     assert reloaded.conversion_mode == ConversionMode.SKELETAL_ASSEMBLY
-    assert reloaded.base_material_settings_by_input_path == original_snapshot.base_material_settings_by_input_path
-    assert reloaded.part_mesh_settings_by_input_path == original_snapshot.part_mesh_settings_by_input_path
-    assert reloaded.wind_group_settings_by_input_path == original_snapshot.wind_group_settings_by_input_path
+    assert reloaded.base_material_settings == original_snapshot.base_material_settings
+    assert reloaded.part_mesh_settings == original_snapshot.part_mesh_settings
+    assert reloaded.wind_group_settings == original_snapshot.wind_group_settings
+
+
+def test_qt_operator_state_loads_global_tab_records_without_input_key() -> None:
+    snapshot = GuiSettingsSnapshot(
+        wind_group_settings={"0": WindGroupSettingRecord(influence=0.4)},
+        base_material_settings=(BaseMaterialSettingRecord(source_id=1, source_name="Bark"),),
+        part_mesh_settings=(PartSourceSettingRecord(source_name="Twig"),),
+    )
+
+    assert load_base_material_records(snapshot) == snapshot.base_material_settings
+    assert load_part_source_records(snapshot) == snapshot.part_mesh_settings
+    assert load_wind_group_records(snapshot) == snapshot.wind_group_settings
+
+
+def test_qt_operator_state_saves_tab_records_as_global_state(tmp_path) -> None:
+    settings_path = tmp_path / "gui_settings.json"
+    deps = SimpleNamespace(load_gui_settings=load_gui_settings, save_gui_settings=save_gui_settings)
+    previous_snapshot = GuiSettingsSnapshot(last_input_path="old.xml", last_output_path="old.usda")
+
+    snapshot = save_nested_input_settings(
+        deps,
+        OperatorState(conversion_mode=ConversionMode.STATIC_ASSEMBLY),
+        previous_snapshot=previous_snapshot,
+        base_material_records=(BaseMaterialSettingRecord(source_id=2, source_name="Leaf"),),
+        part_source_records=(PartSourceSettingRecord(source_name="Branch"),),
+        wind_group_records={"1": WindGroupSettingRecord(shift_top=0.2)},
+        settings_path=settings_path,
+    )
+    reloaded = load_gui_settings(settings_path)
+
+    assert snapshot.base_material_settings == (BaseMaterialSettingRecord(source_id=2, source_name="Leaf"),)
+    assert snapshot.part_mesh_settings == (PartSourceSettingRecord(source_name="Branch"),)
+    assert snapshot.wind_group_settings == {"1": WindGroupSettingRecord(shift_top=0.2)}
+    assert reloaded == snapshot
 
 
 def test_qt_operator_state_applies_preset_without_replacing_paths() -> None:

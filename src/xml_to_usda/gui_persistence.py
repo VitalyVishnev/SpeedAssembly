@@ -19,6 +19,10 @@ class GuiPersistenceController:
 
     def load_settings(self) -> None:
         settings = self._load_gui_settings(self.app.SETTINGS_PATH)
+        self.app._legacy_wind_group_settings = dict(settings.wind_group_settings)
+        self.app._persisted_wind_group_settings = dict(self.app._legacy_wind_group_settings)
+        self.app._persisted_base_material_settings = settings.base_material_settings
+        self.app._persisted_part_mesh_settings = settings.part_mesh_settings
         self.app._startup_restored_input_path = settings.last_input_path
         self.app.input_var.set(self.app._startup_restored_input_path)
         self.app.output_var.set(settings.last_output_path)
@@ -31,11 +35,6 @@ class GuiPersistenceController:
         self.app.single_material_var.set(settings.single_material_path)
         self.app.gust_attenuation_var.set(float(settings.gust_attenuation))
         self.app.is_ground_cover_var.set(bool(settings.is_ground_cover))
-        self.app._legacy_wind_group_settings = dict(settings.wind_group_settings)
-        self.app._persisted_wind_group_settings = dict(self.app._legacy_wind_group_settings)
-        self.app._persisted_wind_group_settings_by_input_path = dict(settings.wind_group_settings_by_input_path)
-        self.app._persisted_base_material_settings_by_input_path = dict(settings.base_material_settings_by_input_path)
-        self.app._persisted_part_mesh_settings_by_input_path = dict(settings.part_mesh_settings_by_input_path)
 
     def save_settings(self) -> None:
         try:
@@ -46,29 +45,9 @@ class GuiPersistenceController:
                     pass
                 self.app._pending_settings_save_job = None
 
-            base_material_settings_by_input_path = dict(self.app._persisted_base_material_settings_by_input_path)
-            part_mesh_settings_by_input_path = dict(self.app._persisted_part_mesh_settings_by_input_path)
-            wind_group_settings_by_input_path = dict(self.app._persisted_wind_group_settings_by_input_path)
-
             current_base_material_settings = self.app._materials_panel.serialize_settings()
             current_part_mesh_settings = self.app._part_sources_panel.serialize_settings()
             current_wind_group_settings = self.app._wind_panel.serialize_settings()
-
-            if self.app._current_base_material_settings_key is not None:
-                if current_base_material_settings:
-                    base_material_settings_by_input_path[self.app._current_base_material_settings_key] = current_base_material_settings
-                else:
-                    base_material_settings_by_input_path.pop(self.app._current_base_material_settings_key, None)
-            if self.app._current_part_mesh_settings_key is not None:
-                if current_part_mesh_settings:
-                    part_mesh_settings_by_input_path[self.app._current_part_mesh_settings_key] = current_part_mesh_settings
-                else:
-                    part_mesh_settings_by_input_path.pop(self.app._current_part_mesh_settings_key, None)
-            if self.app._current_wind_settings_key is not None:
-                if current_wind_group_settings:
-                    wind_group_settings_by_input_path[self.app._current_wind_settings_key] = current_wind_group_settings
-                else:
-                    wind_group_settings_by_input_path.pop(self.app._current_wind_settings_key, None)
 
             self._save_gui_settings(
                 self.app.SETTINGS_PATH,
@@ -85,14 +64,13 @@ class GuiPersistenceController:
                     gust_attenuation=float(self.app.gust_attenuation_var.get()),
                     is_ground_cover=bool(self.app.is_ground_cover_var.get()),
                     wind_group_settings=current_wind_group_settings,
-                    wind_group_settings_by_input_path=wind_group_settings_by_input_path,
-                    base_material_settings_by_input_path=base_material_settings_by_input_path,
-                    part_mesh_settings_by_input_path=part_mesh_settings_by_input_path,
+                    base_material_settings=current_base_material_settings,
+                    part_mesh_settings=current_part_mesh_settings,
                 ),
             )
-            self.app._persisted_base_material_settings_by_input_path = base_material_settings_by_input_path
-            self.app._persisted_part_mesh_settings_by_input_path = part_mesh_settings_by_input_path
-            self.app._persisted_wind_group_settings_by_input_path = wind_group_settings_by_input_path
+            self.app._persisted_base_material_settings = current_base_material_settings
+            self.app._persisted_part_mesh_settings = current_part_mesh_settings
+            self.app._persisted_wind_group_settings = dict(current_wind_group_settings)
         except OSError:
             return
 
@@ -111,8 +89,4 @@ class GuiPersistenceController:
         self.save_settings()
 
     def resolve_persisted_wind_settings_for_key(self, settings_key: str):
-        if settings_key in self.app._persisted_wind_group_settings_by_input_path:
-            return dict(self.app._persisted_wind_group_settings_by_input_path[settings_key])
-        if not self.app._persisted_wind_group_settings_by_input_path:
-            return dict(self.app._legacy_wind_group_settings)
-        return {}
+        return dict(self.app._persisted_wind_group_settings)

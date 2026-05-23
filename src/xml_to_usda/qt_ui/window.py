@@ -59,7 +59,6 @@ from .operator_state import (
     load_part_source_records,
     load_wind_group_records,
     preset_from_operator_state,
-    resolve_settings_key,
     save_nested_input_settings,
 )
 from .panels import GeometryTabPanel, MaterialsTabPanel, WindTabPanel
@@ -397,7 +396,6 @@ class MainWindow(QWidget):
         self._native_corner_preference_applied = False
         self._restore_geometry = QRect(state.x, state.y, state.width, state.height)
         self._active_resize_edges = Qt.Edge(0)
-        self._current_settings_key: str | None = None
         self._auto_output_path: str | None = None
         self._persistence_suspended = False
         self._preset_selector_suspended = False
@@ -748,30 +746,12 @@ class MainWindow(QWidget):
             for key, action in self._conversion_mode_actions.items():
                 action.setChecked(key == self._conversion_mode)
 
-        base_by_input = dict(self._operator_snapshot.base_material_settings_by_input_path)
-        part_by_input = dict(self._operator_snapshot.part_mesh_settings_by_input_path)
-        wind_by_input = dict(self._operator_snapshot.wind_group_settings_by_input_path)
-        if self._current_settings_key:
-            if preset.base_material_settings:
-                base_by_input[self._current_settings_key] = preset.base_material_settings
-            else:
-                base_by_input.pop(self._current_settings_key, None)
-            if preset.part_mesh_settings:
-                part_by_input[self._current_settings_key] = preset.part_mesh_settings
-            else:
-                part_by_input.pop(self._current_settings_key, None)
-            if preset.wind_group_settings:
-                wind_by_input[self._current_settings_key] = dict(preset.wind_group_settings)
-            else:
-                wind_by_input.pop(self._current_settings_key, None)
-
         self._operator_snapshot = replace(
             self._operator_snapshot,
             active_preset_name=preset.name,
             wind_group_settings=dict(preset.wind_group_settings),
-            base_material_settings_by_input_path=base_by_input,
-            part_mesh_settings_by_input_path=part_by_input,
-            wind_group_settings_by_input_path=wind_by_input,
+            base_material_settings=preset.base_material_settings,
+            part_mesh_settings=preset.part_mesh_settings,
         )
         self._apply_operator_state_to_widgets()
         self._reload_input_dependent_tabs()
@@ -1271,7 +1251,6 @@ class MainWindow(QWidget):
                 self._deps,
                 self._operator_state,
                 previous_snapshot=self._operator_snapshot,
-                settings_key=self._current_settings_key,
                 base_material_records=self.materials_panel.serialize_base_material_records(),
                 part_source_records=self.materials_panel.serialize_part_source_records(),
                 wind_group_records=self.wind_panel.serialize_settings(),
@@ -1298,7 +1277,6 @@ class MainWindow(QWidget):
 
     def _reload_input_dependent_tabs(self) -> None:
         input_path = self.source_input.text().strip()
-        self._current_settings_key = resolve_settings_key(self._deps, input_path)
         if not input_path:
             self.wind_panel.clear()
             self.geometry_panel.clear()
@@ -1310,9 +1288,9 @@ class MainWindow(QWidget):
             self.materials_panel.clear("Selected XML path is unavailable.")
             return
 
-        base_records = load_base_material_records(self._operator_snapshot, settings_key=self._current_settings_key)
-        part_records = load_part_source_records(self._operator_snapshot, settings_key=self._current_settings_key)
-        wind_records = load_wind_group_records(self._operator_snapshot, settings_key=self._current_settings_key)
+        base_records = load_base_material_records(self._operator_snapshot)
+        part_records = load_part_source_records(self._operator_snapshot)
+        wind_records = load_wind_group_records(self._operator_snapshot)
         active_preset = self._active_preset()
         if active_preset is not None:
             if not base_records:
@@ -1410,7 +1388,7 @@ class MainWindow(QWidget):
             self._report_error("Missing input", "Select a source XML file before loading wind groups.")
             return
         self.wind_panel.set_persisted_settings(
-            load_wind_group_records(self._operator_snapshot, settings_key=self._current_settings_key)
+            load_wind_group_records(self._operator_snapshot)
         )
         plan = self._deps.prepare_wind_inspection_plan(
             input_path=input_path,

@@ -171,9 +171,6 @@ def test_qt_shell_starts_with_blank_paths_even_when_shared_settings_exist(qtbot,
             gust_attenuation=0.6,
             is_ground_cover=False,
             wind_group_settings={},
-            wind_group_settings_by_input_path={},
-            base_material_settings_by_input_path={},
-            part_mesh_settings_by_input_path={},
         ),
     )
     theme = load_theme()

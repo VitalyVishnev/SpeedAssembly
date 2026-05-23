@@ -890,7 +890,7 @@ def test_gui_refresh_base_material_rows_autoloads_xml_materials(
         root.destroy()
 
 
-def test_gui_part_mesh_reuse_persists_per_xml_and_restores_on_reload(
+def test_gui_part_mesh_reuse_persists_globally_and_restores_on_reload(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _, root = _build_tk_root_or_skip()
@@ -909,8 +909,8 @@ def test_gui_part_mesh_reuse_persists_per_xml_and_restores_on_reload(
         app._handle_window_close()
 
         payload = json.loads(settings_path.read_text(encoding="utf-8"))
-        key = str(SIMPLE_TREE_01.resolve())
-        assert payload["part_mesh_settings_by_input_path"][key][0] == {
+        assert "part_mesh_settings_by_input_path" not in payload
+        assert payload["part_mesh_settings"][0] == {
             "source_name": "Twig_01",
             "source_key": "Mesh_1",
             "use_unreal_reference": True,
@@ -964,11 +964,10 @@ def test_gui_persists_fbx_source_mode_and_cpu_profile(
         app._handle_window_close()
 
         payload = json.loads(settings_path.read_text(encoding="utf-8"))
-        key = str(SIMPLE_TREE_01.resolve())
         assert payload["cpu_profile"] == "quiet"
         assert payload["preserve_temp_files"] is True
-        assert "wind_group_settings_by_input_path" in payload
-        assert payload["part_mesh_settings_by_input_path"][key][0] == {
+        assert "wind_group_settings_by_input_path" not in payload
+        assert payload["part_mesh_settings"][0] == {
             "source_name": "Twig_01",
             "source_key": "Mesh_1",
             "source_mode": "fbx_file",
@@ -1044,14 +1043,13 @@ def test_gui_restores_last_session_paths_and_operator_state_on_startup(
         app._handle_window_close()
 
         payload = json.loads(settings_path.read_text(encoding="utf-8"))
-        key = str(SIMPLE_TREE_01.resolve())
         assert payload["last_input_path"] == str(SIMPLE_TREE_01)
         assert payload["last_output_path"] == str(restored_output_path)
         assert payload["cpu_profile"] == CpuProfile.QUIET.value
         assert payload["preserve_temp_files"] is True
-        assert payload["base_material_settings_by_input_path"][key][0]["ue_asset_path"] == "/Game/TestMaterials/M_Bark_Test"
-        assert payload["part_mesh_settings_by_input_path"][key][0]["fbx_path"] == str(fake_fbx_path)
-        assert payload["wind_group_settings_by_input_path"][key]["0"]["influence"] == 0.35
+        assert payload["base_material_settings"][0]["ue_asset_path"] == "/Game/TestMaterials/M_Bark_Test"
+        assert payload["part_mesh_settings"][0]["fbx_path"] == str(fake_fbx_path)
+        assert payload["wind_group_settings"]["0"]["influence"] == 0.35
     finally:
         try:
             root.destroy()
@@ -1284,9 +1282,8 @@ def test_gui_persists_fbx_material_slot_overrides(
         app._handle_window_close()
 
         payload = json.loads(settings_path.read_text(encoding="utf-8"))
-        key = str(SIMPLE_TREE_01.resolve())
-        assert payload["part_mesh_settings_by_input_path"][key][0]["fbx_material_mode"] == "material_slots"
-        assert payload["part_mesh_settings_by_input_path"][key][0]["fbx_material_slot_overrides"] == [
+        assert payload["part_mesh_settings"][0]["fbx_material_mode"] == "material_slots"
+        assert payload["part_mesh_settings"][0]["fbx_material_slot_overrides"] == [
             {"slot_name": "Bark", "ue_asset_path": "/Game/TreeParts/M_Bark.M_Bark"},
             {"slot_name": "Needles", "ue_asset_path": ""},
         ]
@@ -1297,7 +1294,7 @@ def test_gui_persists_fbx_material_slot_overrides(
             pass
 
 
-def test_gui_persists_wind_group_settings_per_xml(
+def test_gui_persists_wind_group_settings_globally(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -1330,10 +1327,8 @@ def test_gui_persists_wind_group_settings_per_xml(
         app._handle_window_close()
 
         payload = json.loads(settings_path.read_text(encoding="utf-8"))
-        first_key = str(SIMPLE_TREE_01.resolve())
-        second_key = str(other_xml.resolve())
-        assert payload["wind_group_settings_by_input_path"][first_key]["0"]["influence"] == 0.35
-        assert payload["wind_group_settings_by_input_path"][second_key]["0"]["influence"] == 0.75
+        assert "wind_group_settings_by_input_path" not in payload
+        assert payload["wind_group_settings"]["0"]["influence"] == 0.75
     finally:
         try:
             root.destroy()
@@ -1350,7 +1345,7 @@ def test_gui_persists_wind_group_settings_per_xml(
         app = ConversionApp(root)
         app.input_var.set(str(SIMPLE_TREE_01))
         app.refresh_wind_groups()
-        assert app._wind_group_rows[0]["influence_var"].get() == pytest.approx(0.35)
+        assert app._wind_group_rows[0]["influence_var"].get() == pytest.approx(0.75)
 
         app.input_var.set(str(other_xml))
         app.refresh_wind_groups()
@@ -1362,7 +1357,7 @@ def test_gui_persists_wind_group_settings_per_xml(
             pass
 
 
-def test_gui_part_mesh_settings_do_not_cross_contaminate_between_xml_files(
+def test_gui_part_mesh_settings_are_remembered_across_xml_files(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _, root = _build_tk_root_or_skip()
@@ -1395,9 +1390,8 @@ def test_gui_part_mesh_settings_do_not_cross_contaminate_between_xml_files(
         app._handle_source_path_change()
 
         assert len(app._part_mesh_rows) >= 1
-        assert all(row["asset_var"].get() == "" for row in app._part_mesh_rows)
-        assert app._part_mesh_rows[0]["use_unreal_var"].get() is False
-        assert app._part_mesh_rows[0]["asset_var"].get() == ""
+        assert app._part_mesh_rows[0]["use_unreal_var"].get() is True
+        assert app._part_mesh_rows[0]["asset_var"].get() == "/Game/TreeParts/SK_Twig01.SK_Twig01"
     finally:
         try:
             root.destroy()

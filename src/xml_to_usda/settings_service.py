@@ -87,9 +87,8 @@ class GuiSettingsSnapshot:
     gust_attenuation: float = 0.0
     is_ground_cover: bool = False
     wind_group_settings: dict[str, WindGroupSettingRecord] = field(default_factory=dict)
-    wind_group_settings_by_input_path: dict[str, dict[str, WindGroupSettingRecord]] = field(default_factory=dict)
-    base_material_settings_by_input_path: dict[str, tuple[BaseMaterialSettingRecord, ...]] = field(default_factory=dict)
-    part_mesh_settings_by_input_path: dict[str, tuple[PartSourceSettingRecord, ...]] = field(default_factory=dict)
+    base_material_settings: tuple[BaseMaterialSettingRecord, ...] = ()
+    part_mesh_settings: tuple[PartSourceSettingRecord, ...] = ()
     active_preset_name: str = FACTORY_DEFAULT_PRESET_NAME
     presets: dict[str, GuiPresetRecord] = field(default_factory=dict)
 
@@ -116,8 +115,23 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
     if active_preset_name != FACTORY_DEFAULT_PRESET_NAME and active_preset_name not in presets:
         active_preset_name = FACTORY_DEFAULT_PRESET_NAME
 
+    last_input_path = str(payload.get("last_input_path", ""))
+    legacy_wind_by_input = _parse_wind_group_settings_by_input_path(payload.get("wind_group_settings_by_input_path"))
+    legacy_base_by_input = _parse_base_material_settings_by_input_path(payload.get("base_material_settings_by_input_path"))
+    legacy_part_by_input = _parse_part_mesh_settings_by_input_path(payload.get("part_mesh_settings_by_input_path"))
+
+    wind_group_settings = _parse_wind_group_settings(payload.get("wind_group_settings"))
+    if not wind_group_settings:
+        wind_group_settings = _select_legacy_input_settings(legacy_wind_by_input, last_input_path, default={})
+    base_material_settings = _parse_base_material_settings(payload.get("base_material_settings"))
+    if not base_material_settings:
+        base_material_settings = _select_legacy_input_settings(legacy_base_by_input, last_input_path, default=())
+    part_mesh_settings = _parse_part_mesh_settings(payload.get("part_mesh_settings"))
+    if not part_mesh_settings:
+        part_mesh_settings = _select_legacy_input_settings(legacy_part_by_input, last_input_path, default=())
+
     return GuiSettingsSnapshot(
-        last_input_path=str(payload.get("last_input_path", "")),
+        last_input_path=last_input_path,
         last_output_path=str(payload.get("last_output_path", "")),
         cpu_profile=_parse_cpu_profile(payload.get("cpu_profile")),
         preserve_temp_files=bool(payload.get("preserve_temp_files", False)),
@@ -130,16 +144,9 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
         single_material_path=str(payload.get("single_material_path", "")),
         gust_attenuation=_coerce_float(payload.get("gust_attenuation", 0.0), 0.0),
         is_ground_cover=bool(payload.get("is_ground_cover", False)),
-        wind_group_settings=_parse_wind_group_settings(payload.get("wind_group_settings")),
-        wind_group_settings_by_input_path=_parse_wind_group_settings_by_input_path(
-            payload.get("wind_group_settings_by_input_path")
-        ),
-        base_material_settings_by_input_path=_parse_base_material_settings_by_input_path(
-            payload.get("base_material_settings_by_input_path")
-        ),
-        part_mesh_settings_by_input_path=_parse_part_mesh_settings_by_input_path(
-            payload.get("part_mesh_settings_by_input_path")
-        ),
+        wind_group_settings=wind_group_settings,
+        base_material_settings=base_material_settings,
+        part_mesh_settings=part_mesh_settings,
         active_preset_name=active_preset_name,
         presets=presets,
     )
@@ -161,23 +168,13 @@ def save_gui_settings(settings_path: str | Path, snapshot: GuiSettingsSnapshot) 
         "gust_attenuation": round(float(snapshot.gust_attenuation), 4),
         "is_ground_cover": bool(snapshot.is_ground_cover),
         "wind_group_settings": _serialize_wind_group_settings(snapshot.wind_group_settings),
+        "base_material_settings": _serialize_base_material_settings(snapshot.base_material_settings),
+        "part_mesh_settings": _serialize_part_mesh_settings(snapshot.part_mesh_settings),
     }
     if snapshot.cpu_profile != CpuProfile.BALANCED:
         payload["cpu_profile"] = snapshot.cpu_profile.value
     if snapshot.preserve_temp_files:
         payload["preserve_temp_files"] = True
-    if snapshot.part_mesh_settings_by_input_path:
-        payload["part_mesh_settings_by_input_path"] = _serialize_part_mesh_settings_by_input_path(
-            snapshot.part_mesh_settings_by_input_path
-        )
-    if snapshot.base_material_settings_by_input_path:
-        payload["base_material_settings_by_input_path"] = _serialize_base_material_settings_by_input_path(
-            snapshot.base_material_settings_by_input_path
-        )
-    if snapshot.wind_group_settings_by_input_path:
-        payload["wind_group_settings_by_input_path"] = _serialize_wind_group_settings_by_input_path(
-            snapshot.wind_group_settings_by_input_path
-        )
     payload["active_preset_name"] = _coerce_preset_name(snapshot.active_preset_name, FACTORY_DEFAULT_PRESET_NAME)
     if snapshot.presets:
         payload["presets"] = _serialize_presets(snapshot.presets)
@@ -397,6 +394,20 @@ def _parse_part_mesh_settings(raw_value) -> tuple[PartSourceSettingRecord, ...]:
     return _parse_part_mesh_settings_by_input_path({"preset": raw_value}).get("preset", ())
 
 
+def _select_legacy_input_settings(settings: dict, last_input_path: str, *, default):
+    if not settings:
+        return default
+    if last_input_path:
+        try:
+            last_key = resolve_input_settings_key(last_input_path)
+        except (OSError, RuntimeError, ValueError):
+            last_key = str(Path(last_input_path).expanduser())
+        if last_key in settings:
+            return settings[last_key]
+    first_key = sorted(settings)[0]
+    return settings[first_key]
+
+
 def _parse_fbx_material_slot_overrides(raw_value) -> tuple[FbxMaterialSlotSettingRecord, ...]:
     if not isinstance(raw_value, list):
         return ()
@@ -472,6 +483,14 @@ def _serialize_part_mesh_settings_by_input_path(
     return serialized
 
 
+def _serialize_base_material_settings(records: tuple[BaseMaterialSettingRecord, ...]) -> list[dict[str, object]]:
+    return _serialize_base_material_settings_by_input_path({"global": records})["global"]
+
+
+def _serialize_part_mesh_settings(records: tuple[PartSourceSettingRecord, ...]) -> list[dict[str, object]]:
+    return _serialize_part_mesh_settings_by_input_path({"global": records}).get("global", [])
+
+
 def _serialize_wind_group_settings(
     settings: dict[str, WindGroupSettingRecord]
 ) -> dict[str, dict[str, object]]:
@@ -485,15 +504,6 @@ def _serialize_wind_group_settings(
             "shift_top": round(float(record.shift_top), 4),
         }
         for key, record in settings.items()
-    }
-
-
-def _serialize_wind_group_settings_by_input_path(
-    settings: dict[str, dict[str, WindGroupSettingRecord]]
-) -> dict[str, dict[str, dict[str, object]]]:
-    return {
-        str(key): _serialize_wind_group_settings(group_settings)
-        for key, group_settings in settings.items()
     }
 
 
