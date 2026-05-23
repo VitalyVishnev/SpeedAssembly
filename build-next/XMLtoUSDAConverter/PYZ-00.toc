@@ -463,6 +463,10 @@
    'D:\\3D '
    'Personal\\VibeCode\\XMLtoUSDAconverter\\src\\xml_to_usda\\conversion_validation.py',
    'PYMODULE'),
+  ('xml_to_usda.diagnostics_bundle',
+   'D:\\3D '
+   'Personal\\VibeCode\\XMLtoUSDAconverter\\src\\xml_to_usda\\diagnostics_bundle.py',
+   'PYMODULE'),
   ('xml_to_usda.discovery_service',
    'D:\\3D '
    'Personal\\VibeCode\\XMLtoUSDAconverter\\src\\xml_to_usda\\discovery_service.py',
@@ -595,6 +599,10 @@
   ('xml_to_usda.qt_ui.entry',
    'D:\\3D '
    'Personal\\VibeCode\\XMLtoUSDAconverter\\src\\xml_to_usda\\qt_ui\\entry.py',
+   'PYMODULE'),
+  ('xml_to_usda.qt_ui.help_deck',
+   'D:\\3D '
+   'Personal\\VibeCode\\XMLtoUSDAconverter\\src\\xml_to_usda\\qt_ui\\help_deck.py',
    'PYMODULE'),
   ('xml_to_usda.qt_ui.operator_state',
    'D:\\3D '
