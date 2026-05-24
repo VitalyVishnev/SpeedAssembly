@@ -689,6 +689,53 @@ def test_qt_window_persists_wind_settings_for_next_session(monkeypatch, qtbot, t
     assert restored_row.influence_spin.value() == pytest.approx(0.75)
 
 
+def test_qt_window_keeps_live_wind_changes_in_snapshot_before_refresh(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    settings_path = tmp_path / "gui_settings.json"
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=settings_path,
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    window.source_input.setText(str(tree_xml))
+    qtbot.mouseClick(window.wind_panel.refresh_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: bool(window.wind_panel._rows), timeout=3000)
+
+    row = window.wind_panel._rows[0]
+    row.trunk_checkbox.setChecked(False)
+    row.dual_checkbox.setChecked(False)
+    row.influence_spin.setValue(0.75)
+    window.wind_panel.ground_cover_checkbox.setChecked(True)
+
+    window.refresh_wind_groups()
+    qtbot.waitUntil(
+        lambda: (
+            bool(window.wind_panel._rows)
+            and window.wind_panel._rows[0].trunk_checkbox.isChecked() is False
+            and window.wind_panel._rows[0].dual_checkbox.isChecked() is False
+            and window.wind_panel._rows[0].influence_spin.value() == pytest.approx(0.75)
+        ),
+        timeout=3000,
+    )
+
+    window._save_operator_state()
+    saved = load_gui_settings(settings_path)
+
+    assert saved.wind_group_settings["0"].is_trunk_group is False
+    assert saved.wind_group_settings["0"].use_dual_influence is False
+    assert saved.wind_group_settings["0"].influence == pytest.approx(0.75)
+    assert saved.is_ground_cover is True
+
+
 def test_qt_window_shows_and_persists_dismissed_first_launch_tutorial_callout(qtbot, tmp_path) -> None:
     state_path = tmp_path / "ui_next_state.json"
     window = MainWindow(

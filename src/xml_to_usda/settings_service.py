@@ -53,9 +53,9 @@ class WindGroupSettingRecord:
     is_trunk_group: bool = False
     use_dual_influence: bool = True
     influence: float = 1.0
-    min_influence: float = 0.0
-    max_influence: float = 0.0
-    shift_top: float = 0.0
+    min_influence: float = 0.5
+    max_influence: float = 1.0
+    shift_top: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -294,9 +294,9 @@ def _parse_wind_group_settings(raw_value) -> dict[str, WindGroupSettingRecord]:
             is_trunk_group=_coerce_bool(value.get("is_trunk_group"), False),
             use_dual_influence=_coerce_bool(value.get("use_dual_influence"), True),
             influence=_coerce_float(value.get("influence", 1.0), 1.0),
-            min_influence=_coerce_float(value.get("min_influence", 0.0), 0.0),
-            max_influence=_coerce_float(value.get("max_influence", 0.0), 0.0),
-            shift_top=_coerce_float(value.get("shift_top", 0.0), 0.0),
+            min_influence=_coerce_float(value.get("min_influence", 0.5), 0.5),
+            max_influence=_coerce_float(value.get("max_influence", 1.0), 1.0),
+            shift_top=_coerce_float(value.get("shift_top", 0.5), 0.5),
         )
     return settings
 

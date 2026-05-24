@@ -8,9 +8,11 @@ from .models import DynamicWindData, DynamicWindJointAssignment, DynamicWindSimu
 
 
 DEFAULT_TRUNK_INFLUENCE = 0.2
-DEFAULT_TRUNK_SHIFT_TOP = 0.0
+DEFAULT_TRUNK_SHIFT_TOP = 0.5
 DEFAULT_BRANCH_INFLUENCE = 1.0
-DEFAULT_BRANCH_SHIFT_TOP = 0.0
+DEFAULT_BRANCH_SHIFT_TOP = 0.5
+DEFAULT_DUAL_MIN_INFLUENCE = 0.5
+DEFAULT_DUAL_MAX_INFLUENCE = 1.0
 
 
 def build_dynamic_wind_data(
@@ -97,8 +99,8 @@ def default_group_settings(branch_orders: tuple[int, ...]) -> tuple[DynamicWindS
             shift_top=DEFAULT_TRUNK_SHIFT_TOP if index == 0 else DEFAULT_BRANCH_SHIFT_TOP,
             is_trunk_group=index == 0,
             use_dual_influence=True,
-            min_influence=0.0,
-            max_influence=DEFAULT_TRUNK_INFLUENCE if index == 0 else DEFAULT_BRANCH_INFLUENCE,
+            min_influence=DEFAULT_DUAL_MIN_INFLUENCE,
+            max_influence=DEFAULT_DUAL_MAX_INFLUENCE,
         )
         for index, branch_order in enumerate(branch_orders)
     )

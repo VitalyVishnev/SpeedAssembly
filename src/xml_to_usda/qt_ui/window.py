@@ -1386,6 +1386,10 @@ class MainWindow(QWidget):
             return
 
     def _handle_tab_state_changed(self) -> None:
+        self._operator_snapshot = replace(
+            self._operator_snapshot,
+            wind_group_settings=self.wind_panel.serialize_settings(),
+        )
         self._operator_state = replace(
             self._operator_state,
             gust_attenuation=self.wind_panel.gust_attenuation(),

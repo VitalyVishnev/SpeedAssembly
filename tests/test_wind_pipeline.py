@@ -34,6 +34,13 @@ def test_wind_pipeline_inspects_generator_level_groups(tmp_path: Path) -> None:
     assert len(dynamic_wind.simulation_groups) == 3
     assert [group.branch_order for group in dynamic_wind.simulation_groups] == [0, 1, 2]
     assert dynamic_wind.simulation_groups[0].is_trunk_group is True
+    assert dynamic_wind.simulation_groups[0].use_dual_influence is True
+    assert dynamic_wind.simulation_groups[0].min_influence == pytest.approx(0.5)
+    assert dynamic_wind.simulation_groups[0].max_influence == pytest.approx(1.0)
+    assert dynamic_wind.simulation_groups[0].shift_top == pytest.approx(0.5)
+    assert dynamic_wind.simulation_groups[1].min_influence == pytest.approx(0.5)
+    assert dynamic_wind.simulation_groups[1].max_influence == pytest.approx(1.0)
+    assert dynamic_wind.simulation_groups[1].shift_top == pytest.approx(0.5)
 
 
 def test_wind_pipeline_clears_trunk_groups_for_ground_cover(tmp_path: Path) -> None:
