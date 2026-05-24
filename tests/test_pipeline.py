@@ -2163,7 +2163,7 @@ def test_fbx_part_source_config_replaces_inline_prototype_with_geometry_payload(
     }
 
 
-def test_frozen_runtime_uses_isolated_fbx_import_for_multiple_prototypes(
+def test_prototype_source_fbx_loading_uses_supervisor_adapter_for_multiple_prototypes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2172,19 +2172,12 @@ def test_frozen_runtime_uses_isolated_fbx_import_for_multiple_prototypes(
 
     payload_path = _write_fbx_json_payload(tmp_path, file_name="SM_BigBranch_01_HIGH.json")
     payload = load_fbx_geometry(str(payload_path), "SM_BigBranch_01_HIGH")
-    isolated_parallel_calls: list[tuple[str, ...]] = []
+    supervisor_calls: list[tuple[str, ...]] = []
 
-    class _ForbiddenExecutor:
-        def __init__(self, *args, **kwargs):
-            raise AssertionError("ProcessPoolExecutor should not be created in frozen package mode.")
-
-    monkeypatch.setattr(prototype_sources_module.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(prototype_sources_module, "ProcessPoolExecutor", _ForbiddenExecutor)
-    monkeypatch.setattr(prototype_sources_module, "cpu_worker_count", lambda _profile: 4)
     monkeypatch.setattr(
         prototype_sources_module,
         "import_fbx_payloads",
-        lambda tasks, **kwargs: isolated_parallel_calls.append(
+        lambda tasks, **kwargs: supervisor_calls.append(
             tuple(task.display_name for task in tasks)
         )
         or {
@@ -2213,51 +2206,7 @@ def test_frozen_runtime_uses_isolated_fbx_import_for_multiple_prototypes(
 
     assert not any(issue.severity == "error" for issue in diagnostics)
     assert all(prototype.geometry_payload is not None for prototype in model.prototypes)
-    assert isolated_parallel_calls == [("SM_BigBranch_01_HIGH", "SM_BigBranch_01_HIGH")]
-
-
-def test_isolated_fbx_worker_writes_payload_to_file_instead_of_queue(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import xml_to_usda.prototype_sources as prototype_sources_module
-
-    written_payload = {"points": [1, 2, 3]}
-    written_messages: list[tuple[str, object]] = []
-    result_path = tmp_path / "isolated_payload.pkl"
-    prepared_import = prototype_sources_module._PreparedFbxImport(
-        prototype_index=0,
-        original_prototype=object(),
-        config=PrototypeSourceConfig(
-            source_key="Mesh_1",
-            source_name="Twig_01",
-            mode=PrototypeSourceMode.FBX_FILE,
-            fbx_path=str(tmp_path / "dummy.fbx"),
-        ),
-        resolved_identity=type("Identity", (), {"prim_name": "SM_BigBranch_01_HIGH"})(),
-        resolved_source_name="SM_BigBranch_01_HIGH",
-    )
-
-    class _Queue:
-        def put(self, item):
-            written_messages.append(item)
-
-    monkeypatch.setattr(
-        prototype_sources_module,
-        "_load_fbx_payload_worker",
-        lambda *args, **kwargs: written_payload,
-    )
-
-    prototype_sources_module._fbx_payload_process_entry(
-        prepared_import=prepared_import,
-        cpu_profile_value=CpuProfile.BALANCED.value,
-        message_queue=_Queue(),
-        result_path=str(result_path),
-    )
-
-    assert written_messages == []
-    assert prototype_sources_module._load_isolated_fbx_payload_file(result_path) == written_payload
-    assert not result_path.exists()
+    assert supervisor_calls == [("SM_BigBranch_01_HIGH", "SM_BigBranch_01_HIGH")]
 
 
 def test_cli_fbx_worker_command_writes_payload_pickle_and_returns_zero(

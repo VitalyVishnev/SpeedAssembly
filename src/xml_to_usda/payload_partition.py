@@ -58,15 +58,17 @@ def _partition_fbx_material_faces_sequential(payload: GeometryBuffer) -> tuple[C
     bark_faces = array("i")
     leaves_faces = array("i")
     offset = 0
+    index_count = len(payload.face_vertex_indices)
+    color_count = len(payload.vertex_color_components)
     for face_index, face_count in enumerate(payload.face_vertex_counts):
-        face_indices = payload.face_vertex_indices[offset:offset + face_count]
-        offset += face_count
-        if len(face_indices) != face_count:
+        end_offset = offset + face_count
+        if end_offset > index_count:
             return None
         material_id = 2
-        for point_index in face_indices:
+        for face_offset in range(offset, end_offset):
+            point_index = payload.face_vertex_indices[face_offset]
             color_offset = point_index * 4
-            if color_offset + 2 >= len(payload.vertex_color_components):
+            if point_index < 0 or color_offset + 2 >= color_count:
                 return None
             if not (
                 payload.vertex_color_components[color_offset] == 0.0
@@ -75,6 +77,7 @@ def _partition_fbx_material_faces_sequential(payload: GeometryBuffer) -> tuple[C
             ):
                 material_id = 1
                 break
+        offset = end_offset
         if material_id == 1:
             bark_faces.append(face_index)
         else:
@@ -98,10 +101,13 @@ def _partition_fbx_material_faces_parallel(
     if len(chunks) <= 1:
         return _partition_fbx_material_faces_sequential(payload)
 
-    counts_memory = shared_memory.SharedMemory(create=True, size=len(payload.face_vertex_counts) * payload.face_vertex_counts.itemsize)
-    indices_memory = shared_memory.SharedMemory(create=True, size=len(payload.face_vertex_indices) * payload.face_vertex_indices.itemsize)
-    colors_memory = shared_memory.SharedMemory(create=True, size=len(payload.vertex_color_components) * payload.vertex_color_components.itemsize)
+    counts_memory = None
+    indices_memory = None
+    colors_memory = None
     try:
+        counts_memory = shared_memory.SharedMemory(create=True, size=len(payload.face_vertex_counts) * payload.face_vertex_counts.itemsize)
+        indices_memory = shared_memory.SharedMemory(create=True, size=len(payload.face_vertex_indices) * payload.face_vertex_indices.itemsize)
+        colors_memory = shared_memory.SharedMemory(create=True, size=len(payload.vertex_color_components) * payload.vertex_color_components.itemsize)
         counts_memory.buf[: len(payload.face_vertex_counts) * payload.face_vertex_counts.itemsize] = payload.face_vertex_counts.tobytes()
         indices_memory.buf[: len(payload.face_vertex_indices) * payload.face_vertex_indices.itemsize] = payload.face_vertex_indices.tobytes()
         colors_memory.buf[: len(payload.vertex_color_components) * payload.vertex_color_components.itemsize] = payload.vertex_color_components.tobytes()
@@ -131,12 +137,11 @@ def _partition_fbx_material_faces_parallel(
                 bark_faces.extend(bark_chunk)
                 leaves_faces.extend(leaves_chunk)
     finally:
-        counts_memory.close()
-        counts_memory.unlink()
-        indices_memory.close()
-        indices_memory.unlink()
-        colors_memory.close()
-        colors_memory.unlink()
+        for memory in (counts_memory, indices_memory, colors_memory):
+            if memory is None:
+                continue
+            memory.close()
+            memory.unlink()
 
     sections: list[CompactMeshSection] = []
     if bark_faces:
@@ -178,7 +183,7 @@ def _partition_face_chunk_worker(
             for face_offset in range(offset, end_offset):
                 point_index = indices[face_offset]
                 color_offset = point_index * 4
-                if color_offset + 2 >= colors_length:
+                if point_index < 0 or color_offset + 2 >= colors_length:
                     raise ValueError("Vertex color payload is shorter than the indexed point range.")
                 if not (
                     colors[color_offset] == 0.0
