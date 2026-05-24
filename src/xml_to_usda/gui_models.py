@@ -32,7 +32,11 @@ class BaseMaterialRowUi(CompatUiState):
     source_id: int
     source_name: str
     material_path_var: tk.StringVar
+    udim_mode_var: tk.StringVar
+    udim_id_var: tk.IntVar
     entry: ttk.Entry
+    udim_mode_combo: ttk.Combobox
+    udim_id_spin: ttk.Spinbox
 
 
 @dataclass
@@ -40,7 +44,11 @@ class PartMaterialSlotRowUi(CompatUiState):
     slot_name: str
     face_count: int
     path_var: tk.StringVar
+    udim_mode_var: tk.StringVar
+    udim_id_var: tk.IntVar
     entry: ttk.Entry
+    udim_mode_combo: ttk.Combobox
+    udim_id_spin: ttk.Spinbox
 
 
 @dataclass
@@ -55,14 +63,26 @@ class PartSourceRowUi(CompatUiState):
     fbx_var: tk.StringVar
     fbx_material_mode_var: tk.StringVar
     single_material_var: tk.StringVar
+    single_material_udim_mode_var: tk.StringVar
+    single_material_udim_id_var: tk.IntVar
     black_material_var: tk.StringVar
+    black_material_udim_mode_var: tk.StringVar
+    black_material_udim_id_var: tk.IntVar
     white_material_var: tk.StringVar
+    white_material_udim_mode_var: tk.StringVar
+    white_material_udim_id_var: tk.IntVar
     asset_entry: ttk.Entry
     fbx_entry: ttk.Entry
     fbx_material_mode_combo: ttk.Combobox
     single_material_entry: ttk.Entry
+    single_material_udim_mode_combo: ttk.Combobox
+    single_material_udim_id_spin: ttk.Spinbox
     black_material_entry: ttk.Entry
+    black_material_udim_mode_combo: ttk.Combobox
+    black_material_udim_id_spin: ttk.Spinbox
     white_material_entry: ttk.Entry
+    white_material_udim_mode_combo: ttk.Combobox
+    white_material_udim_id_spin: ttk.Spinbox
     browse_button: ttk.Button
     source_mode_combo: ttk.Combobox
     material_slot_container: ttk.Frame

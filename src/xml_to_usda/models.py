@@ -242,6 +242,8 @@ class FbxMaterialSlotSpec:
 class FbxMaterialSlotOverride:
     slot_name: str
     ue_asset_path: str | None = None
+    udim_mode: UdimMode = UdimMode.OFF
+    udim_id: int = 1001
 
 
 @dataclass(frozen=True)
@@ -336,8 +338,14 @@ class Prototype:
     mesh_asset_path: str | None = None
     fbx_source_path: str | None = None
     single_material_path: str | None = None
+    single_material_udim_mode: UdimMode = UdimMode.OFF
+    single_material_udim_id: int = 1001
     black_material_path: str | None = None
+    black_material_udim_mode: UdimMode = UdimMode.OFF
+    black_material_udim_id: int = 1001
     white_material_path: str | None = None
+    white_material_udim_mode: UdimMode = UdimMode.OFF
+    white_material_udim_id: int = 1001
     fbx_material_slot_overrides: tuple["FbxMaterialSlotOverride", ...] = ()
     geometry_payload: "GeometryBuffer | None" = None
 
@@ -392,8 +400,14 @@ class PrototypeSourceConfig:
     asset_path: str | None = None
     fbx_path: str | None = None
     single_material_path: str | None = None
+    single_material_udim_mode: UdimMode = UdimMode.OFF
+    single_material_udim_id: int = 1001
     black_material_path: str | None = None
+    black_material_udim_mode: UdimMode = UdimMode.OFF
+    black_material_udim_id: int = 1001
     white_material_path: str | None = None
+    white_material_udim_mode: UdimMode = UdimMode.OFF
+    white_material_udim_id: int = 1001
     fbx_material_slot_overrides: tuple["FbxMaterialSlotOverride", ...] = ()
 
 

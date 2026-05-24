@@ -45,10 +45,9 @@ After activation, run project commands through `.venv310`:
 python -m pytest
 python -m xml_to_usda inspect .\samples\speedtree\simple_tree\variants\SimpleTree_01.xml
 python -m xml_to_usda gui
-python -m xml_to_usda gui-legacy
 ```
 
-`gui` launches the primary PySide6 shell. `gui-legacy` remains available for the old Tk fallback.
+`gui` launches the supported PySide6 shell. The old Tk launcher is retired.
 
 Build helpers also use `.venv310`:
 

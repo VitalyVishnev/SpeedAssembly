@@ -48,7 +48,10 @@ def load_operator_state(
 ) -> tuple[OperatorState, GuiSettingsSnapshot]:
     """Load shared operator defaults for the Qt shell."""
     resolved_settings_path = Path(settings_path) if settings_path is not None else SETTINGS_PATH
-    snapshot = deps.load_gui_settings(resolved_settings_path)
+    try:
+        snapshot = deps.load_gui_settings(resolved_settings_path)
+    except ValueError:
+        snapshot = GuiSettingsSnapshot()
     return (
         OperatorState(
             input_path=snapshot.last_input_path,

@@ -1,4 +1,4 @@
-"""Public compatibility facade for conversion and inspection entry points.
+"""Public facade for conversion and inspection entry points.
 
 Layer: application facade.
 

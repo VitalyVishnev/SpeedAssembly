@@ -18,7 +18,10 @@ from .models import (
     MeshSection,
     PrototypeResolutionMode,
     PrototypeSourceMode,
+    UdimMaterialSetting,
+    UdimMode,
 )
+from .udim_resolver import apply_udim_material_settings
 from .payload_partition import partition_fbx_material_faces
 
 
@@ -96,6 +99,7 @@ def _apply_explicit_material_contract(
     next_material_id = max((material.source_id for material in materials), default=0) + 1
     prototypes = []
     warnings: list[str] = []
+    udim_settings: list[UdimMaterialSetting] = []
 
     for prototype in model.prototypes:
         if prototype.resolution_mode == PrototypeResolutionMode.EXTERNAL_ASSET:
@@ -109,6 +113,14 @@ def _apply_explicit_material_contract(
         if material_mode == FbxMaterialMode.SINGLE_MATERIAL:
             material_id = next_material_id
             next_material_id += 1
+            if prototype.single_material_udim_mode != UdimMode.OFF:
+                udim_settings.append(
+                    UdimMaterialSetting(
+                        material_id=material_id,
+                        mode=prototype.single_material_udim_mode,
+                        udim_id=prototype.single_material_udim_id,
+                    )
+                )
             materials.append(
                 MaterialSpec(
                     source_id=material_id,
@@ -123,13 +135,14 @@ def _apply_explicit_material_contract(
             continue
 
         if material_mode == FbxMaterialMode.MATERIAL_SLOTS:
-            sections, slot_material_specs, slot_warnings = _explicit_fbx_material_slot_sections_for_prototype(
+            sections, slot_material_specs, slot_udim_settings, slot_warnings = _explicit_fbx_material_slot_sections_for_prototype(
                 prototype,
                 normalize_asset_path=normalize_asset_path,
                 starting_material_id=next_material_id,
             )
             next_material_id += len(slot_material_specs)
             materials.extend(slot_material_specs)
+            udim_settings.extend(slot_udim_settings)
             warnings.extend(slot_warnings)
             prototypes.append(_replace_prototype_sections(prototype, sections))
             continue
@@ -148,6 +161,22 @@ def _apply_explicit_material_contract(
         black_material_id = next_material_id
         white_material_id = next_material_id + 1
         next_material_id += 2
+        if prototype.black_material_udim_mode != UdimMode.OFF:
+            udim_settings.append(
+                UdimMaterialSetting(
+                    material_id=black_material_id,
+                    mode=prototype.black_material_udim_mode,
+                    udim_id=prototype.black_material_udim_id,
+                )
+            )
+        if prototype.white_material_udim_mode != UdimMode.OFF:
+            udim_settings.append(
+                UdimMaterialSetting(
+                    material_id=white_material_id,
+                    mode=prototype.white_material_udim_mode,
+                    udim_id=prototype.white_material_udim_id,
+                )
+            )
         materials.extend(
             (
                 MaterialSpec(
@@ -178,7 +207,10 @@ def _apply_explicit_material_contract(
     metadata = model.metadata
     if warnings:
         metadata = replace(metadata, warnings=metadata.warnings + tuple(warnings))
-    return replace(model, materials=tuple(materials), prototypes=tuple(prototypes), metadata=metadata)
+    resolved_model = replace(model, materials=tuple(materials), prototypes=tuple(prototypes), metadata=metadata)
+    if udim_settings:
+        resolved_model = apply_udim_material_settings(resolved_model, tuple(udim_settings))
+    return resolved_model
 
 
 def _prototype_uses_explicit_part_material_contract(prototype) -> bool:
@@ -874,7 +906,7 @@ def _explicit_fbx_material_slot_sections_for_prototype(
     *,
     normalize_asset_path,
     starting_material_id: int,
-) -> tuple[tuple[CompactMeshSection, ...], tuple[MaterialSpec, ...], tuple[str, ...]]:
+) -> tuple[tuple[CompactMeshSection, ...], tuple[MaterialSpec, ...], tuple[UdimMaterialSetting, ...], tuple[str, ...]]:
     payload = prototype.geometry_payload
     if payload is None or not payload.sections or not payload.fbx_material_slots:
         raise ValueError(
@@ -904,6 +936,7 @@ def _explicit_fbx_material_slot_sections_for_prototype(
 
     slot_material_ids: dict[int, int] = {}
     materials: list[MaterialSpec] = []
+    udim_settings: list[UdimMaterialSetting] = []
     warnings: list[str] = []
     next_material_id = starting_material_id
     for slot_spec in payload.fbx_material_slots:
@@ -924,6 +957,18 @@ def _explicit_fbx_material_slot_sections_for_prototype(
                 source_material_ids=(slot_spec.source_id,),
             )
         )
+        override = next(
+            (override for override in prototype.fbx_material_slot_overrides if override.slot_name == slot_spec.name),
+            None,
+        )
+        if override is not None and override.udim_mode != UdimMode.OFF:
+            udim_settings.append(
+                UdimMaterialSetting(
+                    material_id=next_material_id,
+                    mode=override.udim_mode,
+                    udim_id=override.udim_id,
+                )
+            )
         next_material_id += 1
 
     remapped_sections = tuple(
@@ -939,4 +984,4 @@ def _explicit_fbx_material_slot_sections_for_prototype(
             "Prototype "
             f"{prototype.identity.prim_name} requested FBX material_slots but none of the imported faces were assigned to the discovered slots."
         )
-    return remapped_sections, tuple(materials), tuple(warnings)
+    return remapped_sections, tuple(materials), tuple(udim_settings), tuple(warnings)

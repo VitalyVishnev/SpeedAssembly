@@ -142,7 +142,7 @@ Current material-policy baseline:
 Supported exporter material policies:
 
 - `source_material_roles`
-  - compatibility mode only
+  - CLI/JSON mode only
   - keeps the old semantic expectation that material id `1` is primary and id `2` is leaves
   - keeps the old missing-role validation only in this mode
 - `single_material`

@@ -57,7 +57,6 @@ def build_parser() -> argparse.ArgumentParser:
     wind_parser.add_argument("output", help="Path to the output JSON file.")
 
     subparsers.add_parser("gui", help="Launch the primary PySide6 desktop GUI.")
-    subparsers.add_parser("gui-legacy", help="Launch the legacy Tk desktop GUI.")
     fbx_worker_parser = subparsers.add_parser(FBX_WORKER_COMMAND, help=argparse.SUPPRESS)
     fbx_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
     return parser
@@ -107,10 +106,6 @@ def main(argv: list[str] | None = None) -> int:
             from .qt_ui.entry import main as gui_main
 
             return gui_main([])
-        if args.command == "gui-legacy":
-            from .gui import main as gui_main
-
-            return gui_main()
     except ValueError as exc:
         sys.stderr.write(f"error: {exc}\n")
         return 2

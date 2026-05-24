@@ -1,11 +1,10 @@
-"""Public GUI facade for launcher, package, and tests.
+"""Retired Tk GUI module kept only for historical imports and tests.
 
 Layer: UI facade.
 
-The real Tk application shell lives in `gui_app`. This module intentionally
-re-exports a stable `ConversionApp`, formatter helpers, and `main()` entrypoint
-so packaged builds, tests, and monkeypatched launcher flows do not depend on
-internal GUI module layout.
+The supported desktop UI now lives in `qt_ui`. This module remains only so old
+imports and tests can keep resolving the retired Tk code without growing new
+behavior.
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ if _IS_FBX_WORKER_MODE:
     ConversionApp = None  # type: ignore[assignment]
 
     def main() -> int:
-        """Dispatch helper-subprocess invocations without importing the Tk shell."""
+        """Dispatch helper-subprocess invocations without importing the GUI facade."""
         multiprocessing.freeze_support()
         return cli_main(sys.argv[1:])
 
@@ -83,13 +82,9 @@ else:
             super().__init__(root, dependencies=_build_gui_dependencies())
 
 
-    def main() -> int:
-        """Launch the Tk GUI entrypoint used by the project package/launcher."""
-        multiprocessing.freeze_support()
-        root = tk.Tk()
-        ConversionApp(root)
-        root.mainloop()
-        return 0
+def main() -> int:
+    """Launch the Tk GUI entrypoint used by the project package/launcher."""
+    raise RuntimeError("The Tk GUI is retired. Use `python -m xml_to_usda gui` for the supported PySide6 shell.")
 
 
 __all__ = [

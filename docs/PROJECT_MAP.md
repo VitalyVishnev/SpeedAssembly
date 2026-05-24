@@ -28,7 +28,7 @@ before proposing architectural changes.
 - `docs/PRODUCT_PLAN.md`
   Near-term implementation queue and deferred future work.
 - `docs/developer_architecture.md`
-  Historical developer map kept as a compatibility pointer.
+  Historical developer map kept for reference only.
 
 ## Source of truth roots
 
@@ -101,12 +101,14 @@ environment-facing implementation details.
 Operator-facing adapters over application contracts.
 
 - `src/xml_to_usda/qt_ui/`
-- `src/xml_to_usda/gui.py`
 - `src/xml_to_usda/gui_app.py`
 - `src/xml_to_usda/gui_models.py`
 - `src/xml_to_usda/gui_*_panel.py`
 - `src/xml_to_usda/gui_persistence.py`
 - `src/xml_to_usda/gui_background_jobs.py`
+
+The supported UI path is PySide6. The old Tk code path is retired and should
+not receive new feature work.
 
 ### Public facades
 
@@ -114,7 +116,6 @@ Compatibility surfaces. They should remain thin.
 
 - `src/xml_to_usda/pipeline.py`
 - `src/xml_to_usda/usda_writer.py`
-- `src/xml_to_usda/gui.py`
 
 ## High-value exploration paths
 

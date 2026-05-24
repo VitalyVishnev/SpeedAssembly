@@ -97,6 +97,23 @@ def _make_path_edit(text: str, parent: QWidget, *, placeholder: str) -> QLineEdi
     return edit
 
 
+def _make_udim_controls(parent: QWidget, *, mode: UdimMode, udim_id: int) -> tuple[NoWheelComboBox, QSpinBox]:
+    mode_combo = NoWheelComboBox(parent)
+    mode_combo.setObjectName("InteractiveCombo")
+    for label, value in (
+        ("UDIM Off", UdimMode.OFF.value),
+        ("Shift UV", UdimMode.SHIFT_PRIMARY_UV.value),
+        ("Write UV1 Offset", UdimMode.WRITE_SECONDARY_UV_OFFSET.value),
+    ):
+        mode_combo.addItem(label, value)
+    _set_combo_value(mode_combo, mode.value)
+    udim_id_spin = QSpinBox(parent)
+    udim_id_spin.setRange(1001, 1999)
+    udim_id_spin.setValue(int(udim_id))
+    udim_id_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+    return mode_combo, udim_id_spin
+
+
 class NoWheelComboBox(QComboBox):
     def wheelEvent(self, event) -> None:  # type: ignore[override]
         event.ignore()
@@ -564,6 +581,8 @@ class BaseMaterialRowWidgets:
 class SlotOverrideWidgets:
     slot_name: str
     path_edit: QLineEdit
+    udim_mode_combo: NoWheelComboBox
+    udim_id_spin: QSpinBox
 
 
 @dataclass
@@ -574,10 +593,22 @@ class PartMaterialRowWidgets:
     material_mode_combo: NoWheelComboBox
     single_label: QLabel
     single_edit: QLineEdit
+    single_udim_label: QLabel
+    single_udim_mode_combo: NoWheelComboBox
+    single_udim_id_label: QLabel
+    single_udim_id_spin: QSpinBox
     black_label: QLabel
     black_edit: QLineEdit
+    black_udim_label: QLabel
+    black_udim_mode_combo: NoWheelComboBox
+    black_udim_id_label: QLabel
+    black_udim_id_spin: QSpinBox
     white_label: QLabel
     white_edit: QLineEdit
+    white_udim_label: QLabel
+    white_udim_mode_combo: NoWheelComboBox
+    white_udim_id_label: QLabel
+    white_udim_id_spin: QSpinBox
     slots_frame: QFrame
     slots_layout: QVBoxLayout
     slot_rows: list[SlotOverrideWidgets]
@@ -721,12 +752,20 @@ class MaterialsTabPanel(QWidget):
             source_mode = geometry.source_mode
             material_mode = FbxMaterialMode(row.material_mode_combo.currentData())
             single_material_path = row.single_edit.text().strip() or None
+            single_material_udim_mode = UdimMode.parse(row.single_udim_mode_combo.currentData())
+            single_material_udim_id = row.single_udim_id_spin.value()
             black_material_path = row.black_edit.text().strip() or None
+            black_material_udim_mode = UdimMode.parse(row.black_udim_mode_combo.currentData())
+            black_material_udim_id = row.black_udim_id_spin.value()
             white_material_path = row.white_edit.text().strip() or None
+            white_material_udim_mode = UdimMode.parse(row.white_udim_mode_combo.currentData())
+            white_material_udim_id = row.white_udim_id_spin.value()
             slot_overrides = tuple(
                 FbxMaterialSlotOverride(
                     slot_name=slot_row.slot_name,
                     ue_asset_path=slot_row.path_edit.text().strip() or None,
+                    udim_mode=UdimMode.parse(slot_row.udim_mode_combo.currentData()),
+                    udim_id=slot_row.udim_id_spin.value(),
                 )
                 for slot_row in row.slot_rows
                 if slot_row.slot_name.strip()
@@ -746,8 +785,14 @@ class MaterialsTabPanel(QWidget):
                             mode=source_mode,
                             fbx_material_mode=material_mode,
                             single_material_path=single_material_path,
+                            single_material_udim_mode=single_material_udim_mode,
+                            single_material_udim_id=single_material_udim_id,
                             black_material_path=black_material_path,
+                            black_material_udim_mode=black_material_udim_mode,
+                            black_material_udim_id=black_material_udim_id,
                             white_material_path=white_material_path,
+                            white_material_udim_mode=white_material_udim_mode,
+                            white_material_udim_id=white_material_udim_id,
                         )
                     )
                 continue
@@ -778,8 +823,14 @@ class MaterialsTabPanel(QWidget):
                     fbx_material_mode=material_mode,
                     fbx_path=str(resolved),
                     single_material_path=single_material_path,
+                    single_material_udim_mode=single_material_udim_mode,
+                    single_material_udim_id=single_material_udim_id,
                     black_material_path=black_material_path,
+                    black_material_udim_mode=black_material_udim_mode,
+                    black_material_udim_id=black_material_udim_id,
                     white_material_path=white_material_path,
+                    white_material_udim_mode=white_material_udim_mode,
+                    white_material_udim_id=white_material_udim_id,
                     fbx_material_slot_overrides=slot_overrides,
                 )
             )
@@ -812,12 +863,20 @@ class MaterialsTabPanel(QWidget):
             source_mode = geometry.source_mode
             fbx_material_mode = FbxMaterialMode(row.material_mode_combo.currentData())
             single_material_path = row.single_edit.text().strip()
+            single_material_udim_mode = UdimMode.parse(row.single_udim_mode_combo.currentData())
+            single_material_udim_id = row.single_udim_id_spin.value()
             black_material_path = row.black_edit.text().strip()
+            black_material_udim_mode = UdimMode.parse(row.black_udim_mode_combo.currentData())
+            black_material_udim_id = row.black_udim_id_spin.value()
             white_material_path = row.white_edit.text().strip()
+            white_material_udim_mode = UdimMode.parse(row.white_udim_mode_combo.currentData())
+            white_material_udim_id = row.white_udim_id_spin.value()
             slot_records = tuple(
                 FbxMaterialSlotSettingRecord(
                     slot_name=slot_row.slot_name,
                     ue_asset_path=slot_row.path_edit.text().strip(),
+                    udim_mode=UdimMode.parse(slot_row.udim_mode_combo.currentData()),
+                    udim_id=slot_row.udim_id_spin.value(),
                 )
                 for slot_row in row.slot_rows
                 if slot_row.slot_name.strip()
@@ -842,8 +901,14 @@ class MaterialsTabPanel(QWidget):
                     fbx_path=geometry.fbx_path.strip(),
                     fbx_material_mode=fbx_material_mode,
                     single_material_path=single_material_path,
+                    single_material_udim_mode=single_material_udim_mode,
+                    single_material_udim_id=single_material_udim_id,
                     black_material_path=black_material_path,
+                    black_material_udim_mode=black_material_udim_mode,
+                    black_material_udim_id=black_material_udim_id,
                     white_material_path=white_material_path,
+                    white_material_udim_mode=white_material_udim_mode,
+                    white_material_udim_id=white_material_udim_id,
                     fbx_material_slot_overrides=slot_records,
                 )
             )
@@ -929,21 +994,54 @@ class MaterialsTabPanel(QWidget):
             _set_combo_value(mode_combo, spec.fbx_material_mode.value)
 
             single_edit = _make_path_edit(spec.single_material_path, row_card, placeholder="/Game/Path/Material.Material")
+            single_udim_mode_combo, single_udim_id_spin = _make_udim_controls(
+                row_card,
+                mode=spec.single_material_udim_mode,
+                udim_id=spec.single_material_udim_id,
+            )
             black_edit = _make_path_edit(spec.black_material_path, row_card, placeholder="/Game/Path/Black.Material")
+            black_udim_mode_combo, black_udim_id_spin = _make_udim_controls(
+                row_card,
+                mode=spec.black_material_udim_mode,
+                udim_id=spec.black_material_udim_id,
+            )
             white_edit = _make_path_edit(spec.white_material_path, row_card, placeholder="/Game/Path/White.Material")
+            white_udim_mode_combo, white_udim_id_spin = _make_udim_controls(
+                row_card,
+                mode=spec.white_material_udim_mode,
+                udim_id=spec.white_material_udim_id,
+            )
             material_mode_label = QLabel("Part Material Mode", row_card)
             single_label = QLabel("Single Material", row_card)
+            single_udim_label = QLabel("UDIM", row_card)
+            single_udim_id_label = QLabel("ID", row_card)
             black_label = QLabel("Black Material", row_card)
+            black_udim_label = QLabel("UDIM", row_card)
+            black_udim_id_label = QLabel("ID", row_card)
             white_label = QLabel("White Material", row_card)
+            white_udim_label = QLabel("UDIM", row_card)
+            white_udim_id_label = QLabel("ID", row_card)
 
             form.addWidget(material_mode_label, 0, 0)
             form.addWidget(mode_combo, 0, 1)
             form.addWidget(single_label, 1, 0)
             form.addWidget(single_edit, 1, 1)
+            form.addWidget(single_udim_label, 1, 2)
+            form.addWidget(single_udim_mode_combo, 1, 3)
+            form.addWidget(single_udim_id_label, 1, 4)
+            form.addWidget(single_udim_id_spin, 1, 5)
             form.addWidget(black_label, 2, 0)
             form.addWidget(black_edit, 2, 1)
+            form.addWidget(black_udim_label, 2, 2)
+            form.addWidget(black_udim_mode_combo, 2, 3)
+            form.addWidget(black_udim_id_label, 2, 4)
+            form.addWidget(black_udim_id_spin, 2, 5)
             form.addWidget(white_label, 3, 0)
             form.addWidget(white_edit, 3, 1)
+            form.addWidget(white_udim_label, 3, 2)
+            form.addWidget(white_udim_mode_combo, 3, 3)
+            form.addWidget(white_udim_id_label, 3, 4)
+            form.addWidget(white_udim_id_spin, 3, 5)
             row_card_layout.addLayout(form)
 
             slots_frame = QFrame(row_card)
@@ -959,10 +1057,22 @@ class MaterialsTabPanel(QWidget):
                 material_mode_combo=mode_combo,
                 single_label=single_label,
                 single_edit=single_edit,
+                single_udim_label=single_udim_label,
+                single_udim_mode_combo=single_udim_mode_combo,
+                single_udim_id_label=single_udim_id_label,
+                single_udim_id_spin=single_udim_id_spin,
                 black_label=black_label,
                 black_edit=black_edit,
+                black_udim_label=black_udim_label,
+                black_udim_mode_combo=black_udim_mode_combo,
+                black_udim_id_label=black_udim_id_label,
+                black_udim_id_spin=black_udim_id_spin,
                 white_label=white_label,
                 white_edit=white_edit,
+                white_udim_label=white_udim_label,
+                white_udim_mode_combo=white_udim_mode_combo,
+                white_udim_id_label=white_udim_id_label,
+                white_udim_id_spin=white_udim_id_spin,
                 slots_frame=slots_frame,
                 slots_layout=slots_layout,
                 slot_rows=[],
@@ -972,8 +1082,14 @@ class MaterialsTabPanel(QWidget):
             self._part_rows.append(row)
             mode_combo.currentIndexChanged.connect(lambda _index, current=row: self._handle_material_mode_changed(current))
             single_edit.textChanged.connect(lambda _text: self._on_change())
+            single_udim_mode_combo.currentIndexChanged.connect(lambda _index: self._on_change())
+            single_udim_id_spin.valueChanged.connect(lambda _value: self._on_change())
             black_edit.textChanged.connect(lambda _text: self._on_change())
+            black_udim_mode_combo.currentIndexChanged.connect(lambda _index: self._on_change())
+            black_udim_id_spin.valueChanged.connect(lambda _value: self._on_change())
             white_edit.textChanged.connect(lambda _text: self._on_change())
+            white_udim_mode_combo.currentIndexChanged.connect(lambda _index: self._on_change())
+            white_udim_id_spin.valueChanged.connect(lambda _value: self._on_change())
             layout.addWidget(row_card)
         return card
 
@@ -991,12 +1107,30 @@ class MaterialsTabPanel(QWidget):
         row.single_label.setVisible(single_visible)
         row.single_edit.setVisible(single_visible)
         row.single_edit.setEnabled(single_visible)
+        row.single_udim_label.setVisible(single_visible)
+        row.single_udim_mode_combo.setVisible(single_visible)
+        row.single_udim_mode_combo.setEnabled(single_visible)
+        row.single_udim_id_label.setVisible(single_visible)
+        row.single_udim_id_spin.setVisible(single_visible)
+        row.single_udim_id_spin.setEnabled(single_visible)
         row.black_label.setVisible(split_visible)
         row.black_edit.setVisible(split_visible)
         row.black_edit.setEnabled(split_visible)
+        row.black_udim_label.setVisible(split_visible)
+        row.black_udim_mode_combo.setVisible(split_visible)
+        row.black_udim_mode_combo.setEnabled(split_visible)
+        row.black_udim_id_label.setVisible(split_visible)
+        row.black_udim_id_spin.setVisible(split_visible)
+        row.black_udim_id_spin.setEnabled(split_visible)
         row.white_label.setVisible(split_visible)
         row.white_edit.setVisible(split_visible)
         row.white_edit.setEnabled(split_visible)
+        row.white_udim_label.setVisible(split_visible)
+        row.white_udim_mode_combo.setVisible(split_visible)
+        row.white_udim_mode_combo.setEnabled(split_visible)
+        row.white_udim_id_label.setVisible(split_visible)
+        row.white_udim_id_spin.setVisible(split_visible)
+        row.white_udim_id_spin.setEnabled(split_visible)
 
     def _handle_material_mode_changed(self, row: PartMaterialRowWidgets) -> None:
         self.apply_geometry_state(self._geometry_snapshot, cpu_profile=self._cpu_profile)
@@ -1044,8 +1178,20 @@ class MaterialsTabPanel(QWidget):
         layout.setHorizontalSpacing(10)
         label = QLabel(f"{slot_spec.slot_name} ({slot_spec.face_count} faces)", widget)
         edit = _make_path_edit(slot_spec.ue_asset_path, widget, placeholder="/Game/Path/Material.Material")
+        udim_mode_combo, udim_id_spin = _make_udim_controls(widget, mode=slot_spec.udim_mode, udim_id=slot_spec.udim_id)
         edit.textChanged.connect(lambda _text: self._on_change())
+        udim_mode_combo.currentIndexChanged.connect(lambda _index: self._on_change())
+        udim_id_spin.valueChanged.connect(lambda _value: self._on_change())
         layout.addWidget(label, 0, 0)
         layout.addWidget(edit, 0, 1)
-        row.slot_rows.append(SlotOverrideWidgets(slot_name=slot_spec.slot_name, path_edit=edit))
+        layout.addWidget(udim_mode_combo, 0, 2)
+        layout.addWidget(udim_id_spin, 0, 3)
+        row.slot_rows.append(
+            SlotOverrideWidgets(
+                slot_name=slot_spec.slot_name,
+                path_edit=edit,
+                udim_mode_combo=udim_mode_combo,
+                udim_id_spin=udim_id_spin,
+            )
+        )
         return widget

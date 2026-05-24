@@ -104,7 +104,7 @@ architecture terms above are more precise.
   identity, source bindings, and source geometry.
 - **Resolution Validation**
   Validation of source facts combined with operator intent: export mode
-  compatibility, prototype source replacement, Unreal asset paths, material
+  contract, prototype source replacement, Unreal asset paths, material
   overrides, FBX material slot choices, and output naming.
 - **Authoring Validation**
   Validation of the USDA contract that will be written: required schemas,
@@ -273,7 +273,7 @@ architecture terms above are more precise.
   Exported wind-group assignment and simulation settings derived from the
   normalized skeleton, not from UI-only state.
 - **Public Facade**
-  A compatibility module retained for callers/tests. It should delegate to
+  A stable entry module retained for callers/tests. It should delegate to
   focused modules and avoid growing new business rules.
 - **Help Deck**
   The in-app slide-style usage guide opened from the help affordance inside the

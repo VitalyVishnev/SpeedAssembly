@@ -39,10 +39,9 @@ python -m xml_to_usda convert path\to\tree.xml path\to\tree.usda
 python -m xml_to_usda convert path\to\tree.xml path\to\tree.usda --part-source-config part_sources.json --cpu-profile balanced
 python -m xml_to_usda convert path\to\tree.xml path\to\tree.usda --preserve-temp-files
 python -m xml_to_usda gui
-python -m xml_to_usda gui-legacy
 ```
 
-`gui` launches the primary PySide6 shell. `gui-legacy` remains available for the old Tk fallback.
+`gui` launches the supported PySide6 shell. The old Tk launcher is retired and no longer supported.
 
 `part_sources.json` is a JSON object keyed by prototype name or `Mesh_<id>`, for example:
 
@@ -93,7 +92,7 @@ Huge FBX branch replacement notes:
   - `vertex_color_split`
   - `single_material`
   - `material_slots`
-- the GUI workflow intentionally exposes explicit repeated-part material modes instead of `auto`; `auto` remains a compatibility/config mode, not the recommended interactive workflow
+- the GUI workflow intentionally exposes explicit repeated-part material modes instead of `auto`; `auto` stays in CLI/JSON workflows, not the recommended interactive workflow
 - `auto` uses vertex-color split only when vertex colors exist and produce more than one bucket
 - if vertex colors are missing, incomplete, or effectively uniform, `auto` falls back to a single material section
 - explicit `vertex_color_split` is strict: it must produce a usable split or the conversion fails with a detailed reason
@@ -158,23 +157,10 @@ operator UI normally and reuses the same executable for `fbx-worker` helper
 mode during packaged FBX imports, so a sidecar `XMLtoUSDAWorker.exe` is not
 required for the primary `dist-next` release.
 
-Legacy Tk launcher/package build:
-
-```powershell
-.\scripts\build_gui_exe.cmd
-.\scripts\build_gui_exe.cmd -Package -Clean
-```
-
-Legacy Tk watch mode for repeated rebuilds:
-
-```powershell
-.\scripts\watch_gui_exe.cmd
-```
-
 Notes:
 
 - `dist-next` is the primary operator release path
-- the old `dist` / Tk build remains available as a legacy fallback
+- the old Tk release path is retired and not supported
 - the primary `-Package` build removes stale `build-next` / `dist-next` state first, then runs PyInstaller with `--clean` to produce the standalone executable
 - every package build writes `dist-next\build_info.json`
 - on startup the GUI writes a `Build info:` banner into the in-app `Log`, including build time, build mode, and a short git summary when available

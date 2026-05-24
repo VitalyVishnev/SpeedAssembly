@@ -36,6 +36,7 @@ from xml_to_usda.models import (
     PrototypeSourceMode,
     UsdAssemblyDocument,
     WindJsonResult,
+    UdimMode,
 )
 from xml_to_usda.qt_ui.dependencies import QtUiDependencies
 from xml_to_usda.qt_ui.persistence import UiShellState, load_ui_shell_state
@@ -456,11 +457,23 @@ def test_qt_window_hides_irrelevant_part_material_path_fields(qtbot, tmp_path) -
     assert not row.black_edit.isHidden()
     assert not row.white_edit.isHidden()
     assert row.single_edit.isHidden()
+    assert not row.black_udim_mode_combo.isHidden()
+    assert not row.black_udim_id_spin.isHidden()
+    assert not row.white_udim_mode_combo.isHidden()
+    assert not row.white_udim_id_spin.isHidden()
+    assert row.single_udim_mode_combo.isHidden()
+    assert row.single_udim_id_spin.isHidden()
 
     row.material_mode_combo.setCurrentIndex(row.material_mode_combo.findData(FbxMaterialMode.SINGLE_MATERIAL.value))
     assert not row.single_edit.isHidden()
     assert row.black_edit.isHidden()
     assert row.white_edit.isHidden()
+    assert not row.single_udim_mode_combo.isHidden()
+    assert not row.single_udim_id_spin.isHidden()
+    assert row.black_udim_mode_combo.isHidden()
+    assert row.black_udim_id_spin.isHidden()
+    assert row.white_udim_mode_combo.isHidden()
+    assert row.white_udim_id_spin.isHidden()
 
     geometry_row = window.geometry_panel._rows[0]
     geometry_row.source_mode_combo.setCurrentIndex(
@@ -470,6 +483,94 @@ def test_qt_window_hides_irrelevant_part_material_path_fields(qtbot, tmp_path) -
     assert row.single_edit.isHidden()
     assert row.black_edit.isHidden()
     assert row.white_edit.isHidden()
+    assert row.single_udim_mode_combo.isHidden()
+    assert row.single_udim_id_spin.isHidden()
+    assert row.black_udim_mode_combo.isHidden()
+    assert row.black_udim_id_spin.isHidden()
+    assert row.white_udim_mode_combo.isHidden()
+    assert row.white_udim_id_spin.isHidden()
+
+
+def test_qt_window_serializes_udim_settings_for_part_material_rows(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+    row = window.materials_panel._part_rows[0]
+
+    row.single_edit.setText("/Game/Test/M_Single.M_Single")
+    row.single_udim_mode_combo.setCurrentIndex(row.single_udim_mode_combo.findData(UdimMode.SHIFT_PRIMARY_UV.value))
+    row.single_udim_id_spin.setValue(1003)
+    row.black_edit.setText("/Game/Test/M_Black.M_Black")
+    row.black_udim_mode_combo.setCurrentIndex(row.black_udim_mode_combo.findData(UdimMode.WRITE_SECONDARY_UV_OFFSET.value))
+    row.black_udim_id_spin.setValue(1028)
+    row.white_edit.setText("/Game/Test/M_White.M_White")
+    row.white_udim_mode_combo.setCurrentIndex(row.white_udim_mode_combo.findData(UdimMode.OFF.value))
+    row.white_udim_id_spin.setValue(1001)
+
+    records = window.materials_panel.serialize_part_source_records()
+    assert records[0].single_material_path == "/Game/Test/M_Single.M_Single"
+    assert records[0].single_material_udim_mode == UdimMode.SHIFT_PRIMARY_UV
+    assert records[0].single_material_udim_id == 1003
+    assert records[0].black_material_path == "/Game/Test/M_Black.M_Black"
+    assert records[0].black_material_udim_mode == UdimMode.WRITE_SECONDARY_UV_OFFSET
+    assert records[0].black_material_udim_id == 1028
+    assert records[0].white_material_path == "/Game/Test/M_White.M_White"
+    assert records[0].white_material_udim_mode == UdimMode.OFF
+    assert records[0].white_material_udim_id == 1001
+
+
+def test_qt_window_serializes_udim_settings_for_fbx_material_slot_rows(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    fake_fbx = tmp_path / "branch.fbx"
+    fake_fbx.write_text("", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+
+    geometry_row = window.geometry_panel._rows[0]
+    geometry_row.fbx_edit.setText(str(fake_fbx))
+    geometry_row.source_mode_combo.setCurrentIndex(
+        geometry_row.source_mode_combo.findData(PrototypeSourceMode.FBX_FILE.value)
+    )
+
+    row = window.materials_panel._part_rows[0]
+    row.material_mode_combo.setCurrentIndex(row.material_mode_combo.findData(FbxMaterialMode.MATERIAL_SLOTS.value))
+    qtbot.waitUntil(lambda: len(row.slot_rows) == 1, timeout=3000)
+    slot_row = row.slot_rows[0]
+    slot_row.path_edit.setText("/Game/Test/M_Slot.M_Slot")
+    slot_row.udim_mode_combo.setCurrentIndex(slot_row.udim_mode_combo.findData(UdimMode.WRITE_SECONDARY_UV_OFFSET.value))
+    slot_row.udim_id_spin.setValue(1028)
+
+    records = window.materials_panel.serialize_part_source_records()
+    assert records[0].fbx_material_mode == FbxMaterialMode.MATERIAL_SLOTS
+    assert records[0].fbx_material_slot_overrides[0].ue_asset_path == "/Game/Test/M_Slot.M_Slot"
+    assert records[0].fbx_material_slot_overrides[0].udim_mode == UdimMode.WRITE_SECONDARY_UV_OFFSET
+    assert records[0].fbx_material_slot_overrides[0].udim_id == 1028
 
 
 def test_qt_window_refreshes_wind_and_generates_json(monkeypatch, qtbot, tmp_path) -> None:

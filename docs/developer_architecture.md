@@ -2,7 +2,7 @@
 
 ## Role
 
-This document is retained as a compatibility pointer for older references.
+This document is retained for older references.
 
 The active architecture-review entry point is now `docs/ARCHITECTURE.md`.
 Navigation for AI-assisted architecture work starts at `docs/PROJECT_MAP.md`.
@@ -105,44 +105,25 @@ Representative modules:
 UI code should not hold core conversion semantics. It should gather operator
 state, call application services, and render results.
 
-The repository now has two UI shells:
-
-- the legacy Tk fallback under `src/xml_to_usda/gui*.py`
-- the primary PySide6 shell under `src/xml_to_usda/qt_ui/`
+The repository's supported UI shell is the primary PySide6 shell under
+`src/xml_to_usda/qt_ui/`. The older Tk code path is retired and is not a
+supported operator surface.
 
 Both shells must use the same application/runtime contracts instead of growing
 their own conversion rules.
 
 ## Stable public facades
 
-These modules are intentionally retained as compatibility surfaces:
+These modules are intentionally retained as public surfaces:
 
 - `src/xml_to_usda/pipeline.py`
-  Stable conversion/inspection facade for tests, CLI glue, and older imports.
+  Stable conversion/inspection facade for tests and CLI glue.
 - `src/xml_to_usda/usda_writer.py`
   Stable public writer facade over the shared authoring engine.
-- `src/xml_to_usda/gui.py`
-  Legacy Tk GUI launch facade for fallback launcher/package/tests.
 
 New internal work should prefer the focused implementation modules behind these
-facades when the caller is inside the codebase and does not need the compatibility
+facades when the caller is inside the codebase and does not need the public
 surface.
-
-## Retained compatibility paths
-
-These compatibility paths are intentionally still present:
-
-- legacy persisted GUI `material_policy` value `legacy_role_ids`
-  Retained only as a settings-load migration into `source_material_roles`.
-- legacy GUI settings payloads for `wind_group_settings`
-  Retained so packaged or launcher upgrades do not discard saved operator state.
-- legacy settings boolean `use_unreal_reference`
-  Retained so older persisted part-source settings still reopen correctly.
-- legacy `part_mesh_asset_paths` request bridge
-  Retained so older request shapes still map into `PrototypeSourceConfig`.
-
-These are not the preferred new authoring paths. They exist to preserve working
-operator workflows and backward compatibility.
 
 ## Boundary rules
 
@@ -150,5 +131,5 @@ operator workflows and backward compatibility.
 - Public facades should stay thin and should not regrow business logic.
 - Runtime strategy differences are allowed, but they must not create separate
   business systems.
-- If a compatibility path remains, document why it exists and keep a regression
-  test for it.
+- Keep the current canonical settings and runtime contracts documented and
+  covered by regression tests.

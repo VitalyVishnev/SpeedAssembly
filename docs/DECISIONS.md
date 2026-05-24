@@ -152,6 +152,21 @@ Rationale:
 - Full-size second UV data avoids malformed per-face-varying payloads when only part of a mesh uses UDIM.
 - External Unreal asset prototypes do not expose inline geometry in USDA, so unmatched settings must fail loudly instead of pretending to edit them.
 
+## 2026-05-24: Tk shell is retired
+
+Status: Accepted
+
+Decision:
+
+- The Tk GUI is no longer a supported operator surface.
+- The supported desktop UI path is the PySide6 shell.
+- Any remaining Tk code in the repository is retired code only and should not receive new feature work.
+
+Rationale:
+
+- The PySide6 shell now covers the supported operator workflow.
+- Maintaining two supported desktop shells dilutes locality and release confidence without a current product benefit.
+
 ## 2026-05-16: Architecture review docs follow the skill entry-point names
 
 Status: Accepted
@@ -160,7 +175,7 @@ Decision:
 
 - Keep `docs/PROJECT_MAP.md`, `docs/GLOSSARY.md`, `docs/ARCHITECTURE.md`, and
   `docs/DECISIONS.md` as the main architecture-review inputs.
-- Keep `docs/developer_architecture.md` as a compatibility pointer, not a
+- Keep `docs/developer_architecture.md` as a reference document, not a
   separate source of architectural truth.
 
 Rationale:
@@ -205,7 +220,7 @@ Status: Accepted
 
 Decision:
 
-- Qt and legacy Tk shells must share application/runtime contracts.
+- Qt is the supported UI contract; the retired Tk path must not receive new feature work.
 - UI modules collect operator state and render diagnostics; they do not own core
   conversion semantics.
 
@@ -322,7 +337,7 @@ Decision:
   operator intent.
 - Authoring Validation owns the final USDA/importer contract that will be
   written for the selected export mode.
-- `validator.py` remains a compatibility facade; stage rules live in focused
+- `validator.py` remains a public facade; stage rules live in focused
   validation modules.
 
 Rationale:
@@ -345,7 +360,7 @@ Decision:
   Assembly Parts, and static exports author static Assembly Parts.
 - In code, source repeated parts are `RepeatedPartInstance` values and USDA
   authoring projects them into `AuthoredAssemblyPartInstance` values; the older
-  `AssemblyPartInstance` name remains a compatibility alias.
+  `AssemblyPartInstance` name remains an alias for older callers.
 
 Rationale:
 
@@ -534,5 +549,5 @@ Rationale:
 - Material overrides, prototype source choices, wind sliders, UI theme, and
   window geometry have different lifecycles.
 - `ResolvedAssemblyModel` must not accidentally depend on visual UI preferences.
-- Qt and legacy Tk shells should remain adapters over shared application
-  contracts, not owners of conversion semantics.
+- Qt should remain an adapter over shared application contracts, not an owner
+  of conversion semantics.

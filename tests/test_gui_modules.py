@@ -19,7 +19,7 @@ from xml_to_usda.gui_background_jobs import GuiBackgroundJobsBridge
 from xml_to_usda.gui_materials_panel import MaterialsPanelController
 from xml_to_usda.gui_part_sources_panel import PartSourcesPanelController
 from xml_to_usda.gui_wind_panel import WindPanelController
-from xml_to_usda.models import CpuProfile, DynamicWindSimulationGroup, FbxMaterialMode, PrototypeSourceMode
+from xml_to_usda.models import CpuProfile, DynamicWindSimulationGroup, FbxMaterialMode, PrototypeSourceMode, UdimMode
 from xml_to_usda.qt_ui.theme import build_stylesheet, load_theme
 from xml_to_usda.settings_service import BaseMaterialSettingRecord, WindGroupSettingRecord
 
@@ -72,6 +72,8 @@ def test_materials_panel_round_trip_collects_and_serializes() -> None:
         )
 
         controller.rows[0]["material_path_var"].set("/Game/Test/M_Bark.M_Bark")
+        controller.rows[0]["udim_mode_var"].set(UdimMode.WRITE_SECONDARY_UV_OFFSET.value)
+        controller.rows[0]["udim_id_var"].set(1028)
 
         assert controller.collect_overrides()[0].ue_asset_path == "/Game/Test/M_Bark.M_Bark"
         assert controller.serialize_settings() == (
@@ -79,8 +81,64 @@ def test_materials_panel_round_trip_collects_and_serializes() -> None:
                 source_id=7,
                 source_name="Bark",
                 ue_asset_path="/Game/Test/M_Bark.M_Bark",
+                udim_mode=UdimMode.WRITE_SECONDARY_UV_OFFSET,
+                udim_id=1028,
             ),
         )
+    finally:
+        root.destroy()
+
+
+def test_part_sources_panel_collects_udim_settings_for_xml_mesh_material_rows(tmp_path: Path) -> None:
+    root = _build_tk_root_or_skip()
+    try:
+        container = ttk.Frame(root)
+        summary_var = tk.StringVar()
+        controller = PartSourcesPanelController(
+            summary_var=summary_var,
+            rows_container=container,
+            refresh_scroll_region=lambda: None,
+            on_persisted_field_change=lambda *_args: None,
+            cpu_profile_getter=lambda: CpuProfile.BALANCED,
+            inspect_fbx_material_slot_rows_fn=lambda *_args, **_kwargs: (),
+        )
+
+        controller.rebuild(
+            PrototypeDiscovery(
+                summary="Found 13 repeated branch instances across 1 prototype(s).",
+                rows=(
+                    PrototypeRowSpec(
+                        source_key="Mesh_1",
+                        source_name="Twig_01",
+                        source_mesh_id=1,
+                        instance_count=13,
+                    ),
+                ),
+            )
+        )
+
+        row = controller.rows[0]
+        row["single_material_var"].set("/Game/Test/M_Single.M_Single")
+        row["single_material_udim_mode_var"].set(UdimMode.SHIFT_PRIMARY_UV.value)
+        row["single_material_udim_id_var"].set(1003)
+        row["black_material_var"].set("/Game/Test/M_Black.M_Black")
+        row["black_material_udim_mode_var"].set(UdimMode.WRITE_SECONDARY_UV_OFFSET.value)
+        row["black_material_udim_id_var"].set(1001)
+        row["white_material_var"].set("/Game/Test/M_White.M_White")
+        row["white_material_udim_mode_var"].set(UdimMode.SHIFT_PRIMARY_UV.value)
+        row["white_material_udim_id_var"].set(1022)
+
+        configs = controller.collect_part_source_configs()
+        assert len(configs) == 1
+        assert configs[0].single_material_path == "/Game/Test/M_Single.M_Single"
+        assert configs[0].single_material_udim_mode == UdimMode.SHIFT_PRIMARY_UV
+        assert configs[0].single_material_udim_id == 1003
+        assert configs[0].black_material_path == "/Game/Test/M_Black.M_Black"
+        assert configs[0].black_material_udim_mode == UdimMode.WRITE_SECONDARY_UV_OFFSET
+        assert configs[0].black_material_udim_id == 1001
+        assert configs[0].white_material_path == "/Game/Test/M_White.M_White"
+        assert configs[0].white_material_udim_mode == UdimMode.SHIFT_PRIMARY_UV
+        assert configs[0].white_material_udim_id == 1022
     finally:
         root.destroy()
 
@@ -126,12 +184,16 @@ def test_part_sources_panel_restores_modes_and_collects_slot_overrides(tmp_path:
 
         assert len(row["material_slot_rows"]) == 2
         row["material_slot_rows"][0]["path_var"].set("/Game/Test/M_Bark.M_Bark")
+        row["material_slot_rows"][0]["udim_mode_var"].set(UdimMode.WRITE_SECONDARY_UV_OFFSET.value)
+        row["material_slot_rows"][0]["udim_id_var"].set(1028)
 
         configs = controller.collect_part_source_configs()
         assert configs[0].mode == PrototypeSourceMode.FBX_FILE
         assert configs[0].fbx_material_mode == FbxMaterialMode.MATERIAL_SLOTS
         assert configs[0].fbx_material_slot_overrides[0].slot_name == "Bark"
         assert configs[0].fbx_material_slot_overrides[0].ue_asset_path == "/Game/Test/M_Bark.M_Bark"
+        assert configs[0].fbx_material_slot_overrides[0].udim_mode == UdimMode.WRITE_SECONDARY_UV_OFFSET
+        assert configs[0].fbx_material_slot_overrides[0].udim_id == 1028
 
         row["source_mode_var"].set(PrototypeSourceMode.UNREAL_ASSET.value)
         row["asset_var"].set("/Game/TreeParts/SK_Twig01.SK_Twig01")

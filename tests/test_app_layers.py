@@ -32,6 +32,7 @@ from xml_to_usda.models import (
 from xml_to_usda.cli import build_parser, main as cli_main
 from xml_to_usda.naming import build_prototype_identities, make_stable_prim_name
 from xml_to_usda.pipeline import REPO_ROOT, convert_file, convert_request
+from xml_to_usda.settings_service import GUI_SETTINGS_SCHEMA_VERSION
 
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -216,7 +217,10 @@ def _capture_sync_conversion_semantics(monkeypatch: pytest.MonkeyPatch, tmp_path
         assert len(calls) == 1
         return _normalize_sync_conversion_semantics(calls[0])
     finally:
-        root.destroy()
+        try:
+            root.destroy()
+        except Exception:
+            pass
 
 
 def _capture_async_request_semantics(
@@ -260,7 +264,10 @@ def _capture_async_request_semantics(
         assert "request" in captured
         return _normalize_async_request_semantics(captured["request"])
     finally:
-        root.destroy()
+        try:
+            root.destroy()
+        except Exception:
+            pass
 
 
 def test_gui_smoke_builds_window() -> None:
@@ -380,36 +387,10 @@ def test_cli_parser_defaults_cpu_profile_to_balanced() -> None:
     assert args.cpu_profile == CpuProfile.BALANCED.value
 
 
-def test_legacy_gui_does_not_show_deeper_cpu_profiles(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tkinter, root = _build_tk_root_or_skip()
-    from xml_to_usda.gui import ConversionApp
-
-    monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
-    monkeypatch.setattr(ConversionApp, "SETTINGS_PATH", tmp_path / "gui_settings.json")
-    monkeypatch.setattr(ConversionApp, "RUNTIME_LOG_PATH", tmp_path / "gui_runtime.log")
-
-    try:
-        app = ConversionApp(root)
-        combobox_values = []
-        pending = list(app.content_frame.winfo_children())
-        while pending:
-            widget = pending.pop()
-            if isinstance(widget, tkinter.ttk.Combobox):
-                combobox_values.append(tuple(widget.cget("values")))
-            pending.extend(widget.winfo_children())
-
-        assert all(CpuProfile.QUIET.value not in values for values in combobox_values)
-        assert all(CpuProfile.MAX_SPEED.value not in values for values in combobox_values)
-        assert app._current_cpu_profile() == CpuProfile.BALANCED
-    finally:
-        root.destroy()
-
-
-def test_cli_parser_routes_primary_and_legacy_gui_commands() -> None:
+def test_cli_parser_routes_primary_gui_command() -> None:
     parser = build_parser()
 
     assert parser.parse_args(["gui"]).command == "gui"
-    assert parser.parse_args(["gui-legacy"]).command == "gui-legacy"
 
 
 def test_cli_gui_command_launches_pyside_shell(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -928,7 +909,10 @@ def test_gui_refresh_base_material_rows_autoloads_xml_materials(
             (1, "Bark_Mat"),
         ]
     finally:
-        root.destroy()
+        try:
+            root.destroy()
+        except Exception:
+            pass
 
 
 def test_gui_part_mesh_reuse_persists_globally_and_restores_on_reload(
@@ -948,14 +932,20 @@ def test_gui_part_mesh_reuse_persists_globally_and_restores_on_reload(
         row["use_unreal_var"].set(True)
         row["asset_var"].set("/Game/TreeParts/SK_Twig01.SK_Twig01")
         app._handle_window_close()
-
         payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert payload["schema_version"] == GUI_SETTINGS_SCHEMA_VERSION
         assert "part_mesh_settings_by_input_path" not in payload
         assert payload["part_mesh_settings"][0] == {
             "source_name": "Twig_01",
             "source_key": "Mesh_1",
-            "use_unreal_reference": True,
+            "source_mode": "unreal_asset",
             "unreal_asset_path": "/Game/TreeParts/SK_Twig01.SK_Twig01",
+            "single_material_udim_mode": "off",
+            "single_material_udim_id": 1001,
+            "black_material_udim_mode": "off",
+            "black_material_udim_id": 1001,
+            "white_material_udim_mode": "off",
+            "white_material_udim_id": 1001,
         }
     finally:
         try:
@@ -1014,6 +1004,12 @@ def test_gui_persists_fbx_source_mode_without_operator_cpu_profile(
             "source_mode": "fbx_file",
             "fbx_path": str(fake_fbx_path),
             "fbx_material_mode": "single_material",
+            "single_material_udim_mode": "off",
+            "single_material_udim_id": 1001,
+            "black_material_udim_mode": "off",
+            "black_material_udim_id": 1001,
+            "white_material_udim_mode": "off",
+            "white_material_udim_id": 1001,
         }
     finally:
         try:
@@ -1325,8 +1321,18 @@ def test_gui_persists_fbx_material_slot_overrides(
         payload = json.loads(settings_path.read_text(encoding="utf-8"))
         assert payload["part_mesh_settings"][0]["fbx_material_mode"] == "material_slots"
         assert payload["part_mesh_settings"][0]["fbx_material_slot_overrides"] == [
-            {"slot_name": "Bark", "ue_asset_path": "/Game/TreeParts/M_Bark.M_Bark"},
-            {"slot_name": "Needles", "ue_asset_path": ""},
+            {
+                "slot_name": "Bark",
+                "ue_asset_path": "/Game/TreeParts/M_Bark.M_Bark",
+                "udim_mode": "off",
+                "udim_id": 1001,
+            },
+            {
+                "slot_name": "Needles",
+                "ue_asset_path": "",
+                "udim_mode": "off",
+                "udim_id": 1001,
+            },
         ]
     finally:
         try:
@@ -1482,7 +1488,7 @@ def test_gui_loads_persisted_material_paths(monkeypatch: pytest.MonkeyPatch, tmp
 
     settings_path = tmp_path / "gui_settings.json"
     settings_path.write_text(
-        '{"material_policy": "legacy_role_ids", "bark_material_path": "/Game/TestMaterials/M_Bark_Test", "leaves_material_path": "/Game/TestMaterials/M_Leaves_Test", "single_material_path": "", "gust_attenuation": 0.25, "is_ground_cover": true, "wind_group_settings": {"0": {"influence": 1.4, "shift_top": 0.1}}}',
+        '{"schema_version": 1, "material_policy": "source_material_roles", "bark_material_path": "/Game/TestMaterials/M_Bark_Test", "leaves_material_path": "/Game/TestMaterials/M_Leaves_Test", "single_material_path": "", "gust_attenuation": 0.25, "is_ground_cover": true, "wind_group_settings": {"0": {"influence": 1.4, "shift_top": 0.1}}}',
         encoding="utf-8",
     )
     monkeypatch.setattr(ConversionApp, "SETTINGS_DIR", tmp_path)
@@ -1638,6 +1644,7 @@ def test_gui_browse_dialogs_use_separate_remembered_input_and_output_folders(
     settings_path.write_text(
         json.dumps(
             {
+                "schema_version": GUI_SETTINGS_SCHEMA_VERSION,
                 "last_input_path": str(remembered_xml),
                 "last_output_path": str(remembered_output),
             }
@@ -1992,7 +1999,7 @@ def test_gui_shows_startup_build_banner_when_build_info_exists(
                 "git_branch": "codex/test",
                 "git_head": "abc1234",
                 "git_dirty": True,
-                "change_summary": "M src/xml_to_usda/gui.py; M scripts/build_gui_exe.ps1",
+                "change_summary": "M src/xml_to_usda/qt_ui/entry.py; M scripts/build_qt_gui_exe.cmd",
             }
         ),
         encoding="utf-8",
@@ -2012,7 +2019,7 @@ def test_gui_shows_startup_build_banner_when_build_info_exists(
         assert "built_at: 2026-04-04 12:34:56 +05:00" in log_text
         assert "mode: launcher" in log_text
         assert "git_head: abc1234" in log_text
-        assert "changes: M src/xml_to_usda/gui.py; M scripts/build_gui_exe.ps1" in log_text
+        assert "changes: M src/xml_to_usda/qt_ui/entry.py; M scripts/build_qt_gui_exe.cmd" in log_text
         assert "Build banner" in (tmp_path / "gui_runtime.log").read_text(encoding="utf-8")
     finally:
         root.destroy()

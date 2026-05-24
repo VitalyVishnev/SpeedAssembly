@@ -7,8 +7,19 @@ from tkinter import filedialog, ttk
 from .asset_paths import is_valid_unreal_asset_path
 from .discovery_service import discover_part_prototype_rows, inspect_fbx_material_slot_rows
 from .gui_models import PartMaterialSlotRowUi, PartSourceRowUi
-from .models import FbxMaterialMode, FbxMaterialSlotOverride, PrototypeSourceConfig, PrototypeSourceMode
+from .models import FbxMaterialMode, FbxMaterialSlotOverride, PrototypeSourceConfig, PrototypeSourceMode, UdimMode
 from .settings_service import FbxMaterialSlotSettingRecord, PartSourceSettingRecord, resolve_input_settings_key
+
+
+UDIM_MODE_VALUES = tuple(mode.value for mode in UdimMode)
+
+
+def _make_udim_controls(parent: ttk.Frame, *, mode: UdimMode, udim_id: int) -> tuple[tk.StringVar, tk.IntVar, ttk.Combobox, ttk.Spinbox]:
+    udim_mode_var = tk.StringVar(value=mode.value)
+    udim_id_var = tk.IntVar(value=udim_id)
+    udim_mode_combo = ttk.Combobox(parent, textvariable=udim_mode_var, values=UDIM_MODE_VALUES, state="readonly", width=24)
+    udim_id_spin = ttk.Spinbox(parent, from_=1001, to=1999, textvariable=udim_id_var, width=8)
+    return udim_mode_var, udim_id_var, udim_mode_combo, udim_id_spin
 
 
 class PartSourcesPanelController:
@@ -73,7 +84,25 @@ class PartSourcesPanelController:
         self.rows_container.columnconfigure(0, weight=1)
         header = ttk.Frame(self.rows_container)
         header.grid(row=0, column=0, sticky="ew", pady=(0, 6))
-        for column, weight in ((0, 2), (1, 0), (2, 0), (3, 1), (4, 4), (5, 4), (6, 2), (7, 3), (8, 3), (9, 3), (10, 0)):
+        for column, weight in (
+            (0, 2),
+            (1, 0),
+            (2, 0),
+            (3, 1),
+            (4, 4),
+            (5, 4),
+            (6, 2),
+            (7, 4),
+            (8, 0),
+            (9, 0),
+            (10, 4),
+            (11, 0),
+            (12, 0),
+            (13, 4),
+            (14, 0),
+            (15, 0),
+            (16, 0),
+        ):
             header.columnconfigure(column, weight=weight)
         ttk.Label(header, text="XML Mesh").grid(row=0, column=0, sticky="w")
         ttk.Label(header, text="Mesh ID").grid(row=0, column=1, sticky="w", padx=(12, 12))
@@ -83,14 +112,20 @@ class PartSourcesPanelController:
         ttk.Label(header, text="FBX File").grid(row=0, column=5, sticky="w")
         ttk.Label(header, text="Part Materials").grid(row=0, column=6, sticky="w", padx=(12, 12))
         ttk.Label(header, text="Single Material").grid(row=0, column=7, sticky="w")
-        ttk.Label(header, text="Black Material").grid(row=0, column=8, sticky="w", padx=(12, 0))
-        ttk.Label(header, text="White Material").grid(row=0, column=9, sticky="w", padx=(12, 0))
+        ttk.Label(header, text="UDIM").grid(row=0, column=8, sticky="w", padx=(12, 12))
+        ttk.Label(header, text="ID").grid(row=0, column=9, sticky="w")
+        ttk.Label(header, text="Black Material").grid(row=0, column=10, sticky="w", padx=(12, 0))
+        ttk.Label(header, text="UDIM").grid(row=0, column=11, sticky="w", padx=(12, 12))
+        ttk.Label(header, text="ID").grid(row=0, column=12, sticky="w")
+        ttk.Label(header, text="White Material").grid(row=0, column=13, sticky="w", padx=(12, 0))
+        ttk.Label(header, text="UDIM").grid(row=0, column=14, sticky="w", padx=(12, 12))
+        ttk.Label(header, text="ID").grid(row=0, column=15, sticky="w")
 
         row_index = 1
         for prototype in discovery.rows:
             row_frame = ttk.Frame(self.rows_container)
             row_frame.grid(row=row_index, column=0, sticky="ew", pady=(0, 6))
-            for column, weight in ((0, 2), (3, 1), (4, 4), (5, 4), (6, 2), (7, 3), (8, 3), (9, 3)):
+            for column, weight in ((0, 2), (3, 1), (4, 4), (5, 4), (6, 2), (7, 3), (10, 3), (13, 3)):
                 row_frame.columnconfigure(column, weight=weight)
 
             mesh_id_text = f"Mesh_{prototype.source_mesh_id}" if prototype.source_mesh_id is not None else "<none>"
@@ -105,8 +140,23 @@ class PartSourcesPanelController:
             fbx_var = tk.StringVar(value=prototype.fbx_path)
             fbx_material_mode_var = tk.StringVar(value=prototype.fbx_material_mode.value)
             single_material_var = tk.StringVar(value=prototype.single_material_path)
+            single_material_udim_mode_var, single_material_udim_id_var, single_material_udim_mode_combo, single_material_udim_id_spin = _make_udim_controls(
+                row_frame,
+                mode=prototype.single_material_udim_mode,
+                udim_id=prototype.single_material_udim_id,
+            )
             black_material_var = tk.StringVar(value=prototype.black_material_path)
+            black_material_udim_mode_var, black_material_udim_id_var, black_material_udim_mode_combo, black_material_udim_id_spin = _make_udim_controls(
+                row_frame,
+                mode=prototype.black_material_udim_mode,
+                udim_id=prototype.black_material_udim_id,
+            )
             white_material_var = tk.StringVar(value=prototype.white_material_path)
+            white_material_udim_mode_var, white_material_udim_id_var, white_material_udim_mode_combo, white_material_udim_id_spin = _make_udim_controls(
+                row_frame,
+                mode=prototype.white_material_udim_mode,
+                udim_id=prototype.white_material_udim_id,
+            )
 
             source_mode_combo = ttk.Combobox(
                 row_frame,
@@ -129,8 +179,14 @@ class PartSourcesPanelController:
                 width=18,
             )
             single_material_entry = ttk.Entry(row_frame, textvariable=single_material_var)
+            single_material_udim_mode_combo.grid(row=0, column=8, sticky="ew", padx=(12, 12))
+            single_material_udim_id_spin.grid(row=0, column=9, sticky="w")
             black_material_entry = ttk.Entry(row_frame, textvariable=black_material_var)
+            black_material_udim_mode_combo.grid(row=0, column=11, sticky="ew", padx=(12, 12))
+            black_material_udim_id_spin.grid(row=0, column=12, sticky="w")
             white_material_entry = ttk.Entry(row_frame, textvariable=white_material_var)
+            white_material_udim_mode_combo.grid(row=0, column=14, sticky="ew", padx=(12, 12))
+            white_material_udim_id_spin.grid(row=0, column=15, sticky="w")
             browse_button = ttk.Button(
                 row_frame,
                 text="Browse...",
@@ -142,9 +198,9 @@ class PartSourcesPanelController:
             fbx_entry.grid(row=0, column=5, sticky="ew", padx=(12, 8))
             fbx_material_mode_combo.grid(row=0, column=6, sticky="ew", padx=(0, 12))
             single_material_entry.grid(row=0, column=7, sticky="ew")
-            black_material_entry.grid(row=0, column=8, sticky="ew", padx=(12, 0))
-            white_material_entry.grid(row=0, column=9, sticky="ew", padx=(12, 12))
-            browse_button.grid(row=0, column=10, sticky="ew")
+            black_material_entry.grid(row=0, column=10, sticky="ew", padx=(12, 0))
+            white_material_entry.grid(row=0, column=13, sticky="ew", padx=(12, 12))
+            browse_button.grid(row=0, column=16, sticky="ew", padx=(12, 0))
 
             material_slot_container = ttk.Frame(row_frame)
             material_slot_container.grid(row=1, column=4, columnspan=7, sticky="ew", pady=(4, 0))
@@ -166,14 +222,26 @@ class PartSourcesPanelController:
                 fbx_var=fbx_var,
                 fbx_material_mode_var=fbx_material_mode_var,
                 single_material_var=single_material_var,
+                single_material_udim_mode_var=single_material_udim_mode_var,
+                single_material_udim_id_var=single_material_udim_id_var,
                 black_material_var=black_material_var,
+                black_material_udim_mode_var=black_material_udim_mode_var,
+                black_material_udim_id_var=black_material_udim_id_var,
                 white_material_var=white_material_var,
+                white_material_udim_mode_var=white_material_udim_mode_var,
+                white_material_udim_id_var=white_material_udim_id_var,
                 asset_entry=asset_entry,
                 fbx_entry=fbx_entry,
                 fbx_material_mode_combo=fbx_material_mode_combo,
                 single_material_entry=single_material_entry,
+                single_material_udim_mode_combo=single_material_udim_mode_combo,
+                single_material_udim_id_spin=single_material_udim_id_spin,
                 black_material_entry=black_material_entry,
+                black_material_udim_mode_combo=black_material_udim_mode_combo,
+                black_material_udim_id_spin=black_material_udim_id_spin,
                 white_material_entry=white_material_entry,
+                white_material_udim_mode_combo=white_material_udim_mode_combo,
+                white_material_udim_id_spin=white_material_udim_id_spin,
                 browse_button=browse_button,
                 source_mode_combo=source_mode_combo,
                 material_slot_container=material_slot_container,
@@ -188,8 +256,14 @@ class PartSourcesPanelController:
             fbx_var.trace_add("write", lambda *_args, row=row_ui: self.handle_part_source_mode_change(row))
             fbx_material_mode_var.trace_add("write", self._on_persisted_field_change)
             single_material_var.trace_add("write", self._on_persisted_field_change)
+            single_material_udim_mode_var.trace_add("write", self._on_persisted_field_change)
+            single_material_udim_id_var.trace_add("write", self._on_persisted_field_change)
             black_material_var.trace_add("write", self._on_persisted_field_change)
+            black_material_udim_mode_var.trace_add("write", self._on_persisted_field_change)
+            black_material_udim_id_var.trace_add("write", self._on_persisted_field_change)
             white_material_var.trace_add("write", self._on_persisted_field_change)
+            white_material_udim_mode_var.trace_add("write", self._on_persisted_field_change)
+            white_material_udim_id_var.trace_add("write", self._on_persisted_field_change)
             source_mode_var.trace_add("write", self._on_persisted_field_change)
             source_mode_var.trace_add(
                 "write",
@@ -258,9 +332,19 @@ class PartSourcesPanelController:
         row.single_material_entry.configure(
             state="normal" if material_controls_enabled and material_mode == FbxMaterialMode.SINGLE_MATERIAL else "disabled"
         )
+        row.single_material_udim_mode_combo.configure(
+            state="readonly" if material_controls_enabled and material_mode == FbxMaterialMode.SINGLE_MATERIAL else "disabled"
+        )
+        row.single_material_udim_id_spin.configure(
+            state="normal" if material_controls_enabled and material_mode == FbxMaterialMode.SINGLE_MATERIAL else "disabled"
+        )
         split_state = "normal" if material_controls_enabled and material_mode == FbxMaterialMode.VERTEX_COLOR_SPLIT else "disabled"
         row.black_material_entry.configure(state=split_state)
         row.white_material_entry.configure(state=split_state)
+        row.black_material_udim_mode_combo.configure(state="readonly" if split_state == "normal" else "disabled")
+        row.black_material_udim_id_spin.configure(state=split_state)
+        row.white_material_udim_mode_combo.configure(state="readonly" if split_state == "normal" else "disabled")
+        row.white_material_udim_id_spin.configure(state=split_state)
         self.refresh_part_row_material_slot_controls(row)
 
     def refresh_part_row_material_slot_controls(self, row: PartSourceRowUi) -> None:
@@ -302,21 +386,36 @@ class PartSourcesPanelController:
         container.columnconfigure(1, weight=1)
         ttk.Label(container, text="FBX Material Slots").grid(row=0, column=0, sticky="w", pady=(0, 4))
         ttk.Label(container, text="Unreal Material Path").grid(row=0, column=1, sticky="w", pady=(0, 4))
+        ttk.Label(container, text="UDIM Mode").grid(row=0, column=2, sticky="w", padx=(12, 12), pady=(0, 4))
+        ttk.Label(container, text="UDIM ID").grid(row=0, column=3, sticky="w", pady=(0, 4))
         for slot_index, slot_spec in enumerate(slot_specs, start=1):
             path_var = tk.StringVar(value=slot_spec.ue_asset_path)
+            udim_mode_var, udim_id_var, udim_mode_combo, udim_id_spin = _make_udim_controls(
+                container,
+                mode=slot_spec.udim_mode,
+                udim_id=slot_spec.udim_id,
+            )
             path_var.trace_add("write", self._on_persisted_field_change)
+            udim_mode_var.trace_add("write", self._on_persisted_field_change)
+            udim_id_var.trace_add("write", self._on_persisted_field_change)
             ttk.Label(
                 container,
                 text=f"{slot_spec.slot_name} ({slot_spec.face_count} faces)",
             ).grid(row=slot_index, column=0, sticky="w", padx=(0, 12), pady=(0, 4))
             entry = ttk.Entry(container, textvariable=path_var)
             entry.grid(row=slot_index, column=1, sticky="ew", pady=(0, 4))
+            udim_mode_combo.grid(row=slot_index, column=2, sticky="ew", padx=(12, 12), pady=(0, 4))
+            udim_id_spin.grid(row=slot_index, column=3, sticky="w", pady=(0, 4))
             row.material_slot_rows.append(
                 PartMaterialSlotRowUi(
                     slot_name=slot_spec.slot_name,
                     face_count=slot_spec.face_count,
                     path_var=path_var,
+                    udim_mode_var=udim_mode_var,
+                    udim_id_var=udim_id_var,
                     entry=entry,
+                    udim_mode_combo=udim_mode_combo,
+                    udim_id_spin=udim_id_spin,
                 )
             )
         row.restored_slot_override_records = ()
@@ -331,7 +430,14 @@ class PartSourcesPanelController:
             ue_asset_path = str(slot_row.path_var.get()).strip() or None
             if not slot_name:
                 continue
-            overrides.append(FbxMaterialSlotOverride(slot_name=slot_name, ue_asset_path=ue_asset_path))
+            overrides.append(
+                FbxMaterialSlotOverride(
+                    slot_name=slot_name,
+                    ue_asset_path=ue_asset_path,
+                    udim_mode=UdimMode.parse(slot_row.udim_mode_var.get()),
+                    udim_id=int(slot_row.udim_id_var.get()),
+                )
+            )
         return tuple(overrides)
 
     def collect_part_source_configs(self) -> tuple[PrototypeSourceConfig, ...]:
@@ -345,8 +451,14 @@ class PartSourcesPanelController:
             source_key = str(row.source_key)
             part_material_mode = FbxMaterialMode(str(row.fbx_material_mode_var.get()))
             single_material_path = str(row.single_material_var.get()).strip() or None
+            single_material_udim_mode = UdimMode.parse(row.single_material_udim_mode_var.get())
+            single_material_udim_id = int(row.single_material_udim_id_var.get())
             black_material_path = str(row.black_material_var.get()).strip() or None
+            black_material_udim_mode = UdimMode.parse(row.black_material_udim_mode_var.get())
+            black_material_udim_id = int(row.black_material_udim_id_var.get())
             white_material_path = str(row.white_material_var.get()).strip() or None
+            white_material_udim_mode = UdimMode.parse(row.white_material_udim_mode_var.get())
+            white_material_udim_id = int(row.white_material_udim_id_var.get())
             material_slot_overrides = self.collect_part_row_material_slot_overrides(row)
             if mode == PrototypeSourceMode.XML_MESH:
                 if (
@@ -362,8 +474,14 @@ class PartSourcesPanelController:
                             mode=mode,
                             fbx_material_mode=part_material_mode,
                             single_material_path=single_material_path,
+                            single_material_udim_mode=single_material_udim_mode,
+                            single_material_udim_id=single_material_udim_id,
                             black_material_path=black_material_path,
+                            black_material_udim_mode=black_material_udim_mode,
+                            black_material_udim_id=black_material_udim_id,
                             white_material_path=white_material_path,
+                            white_material_udim_mode=white_material_udim_mode,
+                            white_material_udim_id=white_material_udim_id,
                         )
                     )
                 continue
@@ -397,8 +515,14 @@ class PartSourcesPanelController:
                     fbx_material_mode=part_material_mode,
                     fbx_path=str(resolved),
                     single_material_path=single_material_path,
+                    single_material_udim_mode=single_material_udim_mode,
+                    single_material_udim_id=single_material_udim_id,
                     black_material_path=black_material_path,
+                    black_material_udim_mode=black_material_udim_mode,
+                    black_material_udim_id=black_material_udim_id,
                     white_material_path=white_material_path,
+                    white_material_udim_mode=white_material_udim_mode,
+                    white_material_udim_id=white_material_udim_id,
                     fbx_material_slot_overrides=material_slot_overrides,
                 )
             )
@@ -419,17 +543,23 @@ class PartSourcesPanelController:
         serialized: list[PartSourceSettingRecord] = []
         for row in self.rows:
             source_mode = PrototypeSourceMode(str(row.source_mode_var.get()))
-            use_unreal_reference = bool(row.use_unreal_var.get())
+            use_unreal_asset = bool(row.use_unreal_var.get())
             asset_path = str(row.asset_var.get()).strip()
             fbx_path = str(row.fbx_var.get()).strip()
             fbx_material_mode = FbxMaterialMode(str(row.fbx_material_mode_var.get()))
             single_material_path = str(row.single_material_var.get()).strip()
+            single_material_udim_mode = UdimMode.parse(row.single_material_udim_mode_var.get())
+            single_material_udim_id = int(row.single_material_udim_id_var.get())
             black_material_path = str(row.black_material_var.get()).strip()
+            black_material_udim_mode = UdimMode.parse(row.black_material_udim_mode_var.get())
+            black_material_udim_id = int(row.black_material_udim_id_var.get())
             white_material_path = str(row.white_material_var.get()).strip()
+            white_material_udim_mode = UdimMode.parse(row.white_material_udim_mode_var.get())
+            white_material_udim_id = int(row.white_material_udim_id_var.get())
             material_slot_overrides = self.collect_part_row_material_slot_overrides(row)
             if (
                 source_mode == PrototypeSourceMode.XML_MESH
-                and not use_unreal_reference
+                and not use_unreal_asset
                 and not asset_path
                 and not fbx_path
                 and fbx_material_mode == FbxMaterialMode.VERTEX_COLOR_SPLIT
@@ -439,7 +569,7 @@ class PartSourcesPanelController:
                 and not material_slot_overrides
             ):
                 continue
-            if use_unreal_reference and source_mode != PrototypeSourceMode.UNREAL_ASSET:
+            if use_unreal_asset and source_mode != PrototypeSourceMode.UNREAL_ASSET:
                 source_mode = PrototypeSourceMode.UNREAL_ASSET
             serialized.append(
                 PartSourceSettingRecord(
@@ -450,12 +580,20 @@ class PartSourcesPanelController:
                     fbx_path=fbx_path,
                     fbx_material_mode=fbx_material_mode,
                     single_material_path=single_material_path,
+                    single_material_udim_mode=single_material_udim_mode,
+                    single_material_udim_id=single_material_udim_id,
                     black_material_path=black_material_path,
+                    black_material_udim_mode=black_material_udim_mode,
+                    black_material_udim_id=black_material_udim_id,
                     white_material_path=white_material_path,
+                    white_material_udim_mode=white_material_udim_mode,
+                    white_material_udim_id=white_material_udim_id,
                     fbx_material_slot_overrides=tuple(
                         FbxMaterialSlotSettingRecord(
                             slot_name=override.slot_name,
                             ue_asset_path=override.ue_asset_path or "",
+                            udim_mode=override.udim_mode,
+                            udim_id=override.udim_id,
                         )
                         for override in material_slot_overrides
                     ),

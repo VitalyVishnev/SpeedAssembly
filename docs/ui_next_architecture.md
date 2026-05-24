@@ -4,8 +4,8 @@
 
 This document describes the bootstrap architecture for the PySide6 release shell.
 
-The PySide6 shell is now the primary operator release path. The old Tk GUI
-remains a legacy fallback while the release transition settles.
+The PySide6 shell is the supported operator release path. The old Tk GUI is
+retired and no longer part of the supported contract.
 
 ## Layering
 
@@ -43,16 +43,13 @@ shared application services.
 
 - primary release GUI entrypoint is `xml_to_usda.qt_ui.entry`
 - `python -m xml_to_usda gui` and `xml-to-usda-gui` route to the PySide6 shell
-- legacy Tk remains explicit through `python -m xml_to_usda gui-legacy` and `xml-to-usda-gui-legacy`
 - primary packaged build is `dist-next\XMLtoUSDAConverter.exe`
 - the PySide6 packaged exe is a one-file release artifact and also handles
   `fbx-worker` helper mode when launched with the worker command prefix
-- legacy Tk entrypoint `xml_to_usda.gui` and the old `dist` build remain
-  available as fallback paths while the release transition settles
 
 The release target is now the PySide6 shell. Any missing operator parity should
-be treated as release-blocking work for `dist-next`, not as a reason to publish
-the old Tk shell as the primary artifact.
+be treated as release-blocking work for `dist-next`, not as a reason to revive
+the old Tk shell.
 
 ## Current Shell Interaction Contract
 
@@ -94,7 +91,7 @@ it explicitly.
 
 Rules:
 
-- it lives only in the PySide6 shell, not in the legacy Tk shell
+- it lives only in the PySide6 shell
 - it edits section-level layout tokens, not arbitrary per-widget drag/drop
 - it previews changes live in the running main window
 - it saves only to `~/.xml_to_usda/ui_next_theme_overrides.json`

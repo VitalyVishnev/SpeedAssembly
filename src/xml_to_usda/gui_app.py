@@ -4,7 +4,7 @@ Layer: UI.
 
 This module owns the real `ConversionApp` implementation, top-level widget
 layout, and wiring between UI controllers, persistence, and background job
-bridges. Public launch compatibility stays in `gui.py`.
+bridges. The supported public launch entry remains `gui.py`.
 """
 
 from __future__ import annotations
@@ -77,9 +77,8 @@ class ConversionApp:
         self.cpu_profile_var = tk.StringVar(value=CpuProfile.BALANCED.value)
         self.preserve_temp_files_var = tk.BooleanVar(value=False)
         self._persisted_conversion_mode = ConversionMode.SKELETAL_ASSEMBLY
-        # Retained compatibility state: older tests and UI assumptions still
-        # introspect this variable even though per-row source configs now drive
-        # the actual repeated-part conversion semantics.
+        # Kept for the current UI workflow; per-row source configs drive the
+        # repeated-part conversion semantics.
         self.use_existing_part_meshes_var = tk.BooleanVar(value=False)
         self.material_policy_var = tk.StringVar(value=MaterialPolicy.SOURCE_MATERIAL_ROLES.value)
         self.bark_material_var = tk.StringVar()
@@ -397,6 +396,7 @@ class ConversionApp:
         output_path = self.output_var.get().strip()
         try:
             base_material_overrides = self._collect_base_material_overrides()
+            udim_material_settings = self._collect_udim_material_settings()
             prototype_source_configs = self._collect_part_source_configs()
             use_existing_part_meshes, part_mesh_asset_paths = self._collect_part_mesh_overrides()
         except ValueError as exc:
@@ -413,6 +413,7 @@ class ConversionApp:
                 leaves_material_path=self.leaves_material_var.get().strip() or None,
                 single_material_path=self.single_material_var.get().strip() or None,
                 base_material_overrides=base_material_overrides,
+                udim_material_settings=udim_material_settings,
                 prototype_source_configs=prototype_source_configs,
                 use_existing_part_meshes=use_existing_part_meshes,
                 part_mesh_asset_paths=part_mesh_asset_paths,
@@ -622,6 +623,9 @@ class ConversionApp:
 
     def _collect_base_material_overrides(self):
         return self._materials_panel.collect_overrides()
+
+    def _collect_udim_material_settings(self):
+        return self._materials_panel.collect_udim_material_settings()
 
     def _collect_part_mesh_overrides(self):
         return self._part_sources_panel.collect_existing_part_overrides()

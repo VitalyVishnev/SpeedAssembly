@@ -1,6 +1,6 @@
-"""Prototype Source infrastructure adapters and retained compatibility bridges.
+"""Prototype Source infrastructure adapters.
 
-Layer: infrastructure with light application-facing compatibility helpers.
+Layer: infrastructure with light application-facing helpers.
 
 This module owns Prototype Source config loading and FBX payload loading.
 Resolved Prototype matching lives in `prototype_resolution`.

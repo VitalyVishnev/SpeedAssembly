@@ -19,7 +19,7 @@ useful only when it improves one of these outcomes:
 - source XML interpretation is easier to inspect and test
 - transform, material, prototype, and binding rules gain locality
 - large conversions remain diagnosable and stable
-- UI shells reuse the same conversion contracts
+- the supported UI shell reuses the same conversion contracts
 
 `static_assembly` is a supported secondary export mode. It may share normalized
 source data and authoring infrastructure, but it must not force the primary
@@ -138,15 +138,12 @@ Expected interface shape:
 
 ## Stable public facades
 
-These modules are compatibility facades and should stay thin:
+These modules are public facades and should stay thin:
 
 - `pipeline.py`
-  Conversion and inspection facade for CLI glue, tests, subprocess workers, and
-  older imports.
+  Conversion and inspection facade for CLI glue, tests, and subprocess workers.
 - `usda_writer.py`
   Public writer facade over the shared authoring implementation.
-- `gui.py`
-  Legacy Tk launch facade.
 
 Adding behavior to a facade is suspicious unless the behavior protects the
 facade's interface. Prefer placing rules behind the focused module that owns the
@@ -163,9 +160,8 @@ domain concept.
   binding semantics by design.
 - Canonical model seam:
   `canonical_loader.load_source_tree_model` produces the source-normalized
-  `CanonicalTreeModel`. `canonical_loader.load_canonical_model` remains a
-  compatibility projection that returns the resolved authoring model for older
-  callers.
+  `CanonicalTreeModel`. `canonical_loader.load_canonical_model` returns the
+  resolved authoring model projection for callers that need the authored view.
 - Resolved assembly model seam:
   `assembly_resolution.resolve_assembly_model` combines `CanonicalTreeModel`
   source facts with operator intent into `ResolvedAssemblyModel`. Prototype
@@ -205,7 +201,7 @@ domain concept.
   validation checks source facts plus operator intent. Authoring validation
   checks the USDA contract that will be written. `source_validation.py`,
   `resolution_validation.py`, and `authoring_validation.py` own the stage rules;
-  `validator.py` is only a compatibility facade.
+  `validator.py` is a public facade over staged validation modules.
 - Prototype source seam:
   XML mesh, Unreal asset reference, and FBX file source modes are adapters for
   Resolved Prototype payload selection. `prototype_resolution.py` owns matching
@@ -214,12 +210,12 @@ domain concept.
   Autodesk FBX SDK and JSON geometry test backend satisfy the same FBX geometry
   loading role.
 - UI shell seam:
-  Qt and legacy Tk shells should remain adapters over application modules,
-  Operator State, Persisted Operator Settings, and UI Shell State.
+  The supported Qt shell should remain an adapter over application modules,
+  Operator State, Persisted Operator Settings, and UI Shell State. The retired
+  Tk code path must not acquire new behavior.
 - USDA writing seam:
   `ResolvedAssemblyModel` is the preferred input for USDA writing. Text and
-  streaming sinks share the same authoring context; legacy writer entrypoints
-  still accept the authoring-model projection for compatibility.
+  streaming sinks share the same authoring context.
 
 ## Deletion-test warnings
 
@@ -265,7 +261,7 @@ For each proposed deepening opportunity, answer:
     PointInstancer Transform?
 13. Is the rule about caller intent, Runtime Job execution, Job Workspace
     lifecycle, Conversion Worker behavior, FBX Helper behavior, or Runtime
-    Adapter compatibility?
+    Adapter note?
 14. Is the state Operator State, Persisted Operator Settings, UI Shell State, or
     actual conversion Operator Intent?
 

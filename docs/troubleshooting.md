@@ -98,7 +98,7 @@ Practical rule:
 - FBX mode is explicit, rigid-only, and vertex-color-driven in v1
 - if the error mentions missing SDK bindings, fix the local FBX SDK install before debugging the XML or USDA path
 - the GUI workflow does not rely on `auto`; it exposes explicit `vertex_color_split`, `single_material`, and `material_slots` instead
-- `auto` is still supported in CLI/JSON config as a compatibility mode and may degrade to single-material fallback when vertex colors are unusable
+- `auto` is still supported in CLI/JSON config and may degrade to single-material fallback when vertex colors are unusable
 - explicit `vertex_color_split` should now either succeed, or fail with a detailed reason that mentions missing/unusable colors or an Autodesk SDK vertex-color access failure
 - for strict `vertex_color_split`, the converter now performs one retry in a fresh worker process before surfacing the final error
 
@@ -187,7 +187,7 @@ GUI material interpretation, stage 1:
 Legacy/CLI material-policy interpretation:
 
 - `source_material_roles`
-  - compatibility mode only
+  - CLI/JSON mode only
   - resolves source XML material references through semantic bark/leaves roles
   - does not require source ids to be `1/2`
 - `single_material`

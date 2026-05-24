@@ -1,10 +1,9 @@
-"""Typed GUI settings persistence and legacy-settings compatibility parsing.
+"""Typed GUI settings persistence.
 
 Layer: application/infrastructure boundary.
 
-The current GUI persists one typed settings snapshot, but this module also
-retains compatibility with earlier payload shapes so existing operator settings
-continue to load after packaged or launcher upgrades.
+The current GUI persists one typed settings snapshot with one canonical schema.
+Older payload shapes are rejected instead of migrated.
 """
 
 from __future__ import annotations
@@ -16,6 +15,7 @@ from pathlib import Path
 from .models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode, UdimMode
 
 
+GUI_SETTINGS_SCHEMA_VERSION = 1
 FACTORY_DEFAULT_PRESET_NAME = "Factory Defaults"
 
 
@@ -32,6 +32,8 @@ class BaseMaterialSettingRecord:
 class FbxMaterialSlotSettingRecord:
     slot_name: str
     ue_asset_path: str = ""
+    udim_mode: UdimMode = UdimMode.OFF
+    udim_id: int = 1001
 
 
 @dataclass(frozen=True)
@@ -43,8 +45,14 @@ class PartSourceSettingRecord:
     fbx_path: str = ""
     fbx_material_mode: FbxMaterialMode = FbxMaterialMode.VERTEX_COLOR_SPLIT
     single_material_path: str = ""
+    single_material_udim_mode: UdimMode = UdimMode.OFF
+    single_material_udim_id: int = 1001
     black_material_path: str = ""
+    black_material_udim_mode: UdimMode = UdimMode.OFF
+    black_material_udim_id: int = 1001
     white_material_path: str = ""
+    white_material_udim_mode: UdimMode = UdimMode.OFF
+    white_material_udim_id: int = 1001
     fbx_material_slot_overrides: tuple[FbxMaterialSlotSettingRecord, ...] = ()
 
 
@@ -101,7 +109,7 @@ def resolve_input_settings_key(input_path: str) -> str:
 
 
 def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
-    """Load GUI settings, accepting retained legacy payload fields when present."""
+    """Load GUI settings using the current canonical payload shape."""
     path = Path(settings_path)
     if not path.exists():
         return GuiSettingsSnapshot()
@@ -111,36 +119,24 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
         return GuiSettingsSnapshot()
     if not isinstance(payload, dict):
         return GuiSettingsSnapshot()
+    _require_schema_version(payload, context="GUI settings")
 
     presets = _parse_presets(payload.get("presets"))
     active_preset_name = _coerce_preset_name(payload.get("active_preset_name"), FACTORY_DEFAULT_PRESET_NAME)
     if active_preset_name != FACTORY_DEFAULT_PRESET_NAME and active_preset_name not in presets:
         active_preset_name = FACTORY_DEFAULT_PRESET_NAME
 
-    last_input_path = str(payload.get("last_input_path", ""))
-    legacy_wind_by_input = _parse_wind_group_settings_by_input_path(payload.get("wind_group_settings_by_input_path"))
-    legacy_base_by_input = _parse_base_material_settings_by_input_path(payload.get("base_material_settings_by_input_path"))
-    legacy_part_by_input = _parse_part_mesh_settings_by_input_path(payload.get("part_mesh_settings_by_input_path"))
-
     wind_group_settings = _parse_wind_group_settings(payload.get("wind_group_settings"))
-    if not wind_group_settings:
-        wind_group_settings = _select_legacy_input_settings(legacy_wind_by_input, last_input_path, default={})
     base_material_settings = _parse_base_material_settings(payload.get("base_material_settings"))
-    if not base_material_settings:
-        base_material_settings = _select_legacy_input_settings(legacy_base_by_input, last_input_path, default=())
     part_mesh_settings = _parse_part_mesh_settings(payload.get("part_mesh_settings"))
-    if not part_mesh_settings:
-        part_mesh_settings = _select_legacy_input_settings(legacy_part_by_input, last_input_path, default=())
 
     return GuiSettingsSnapshot(
-        last_input_path=last_input_path,
+        last_input_path=str(payload.get("last_input_path", "")),
         last_output_path=str(payload.get("last_output_path", "")),
         cpu_profile=_parse_cpu_profile(payload.get("cpu_profile")),
         preserve_temp_files=bool(payload.get("preserve_temp_files", False)),
         conversion_mode=_parse_conversion_mode(payload.get("conversion_mode")),
-        material_policy=_parse_gui_material_policy(
-            payload.get("material_policy", MaterialPolicy.SOURCE_MATERIAL_ROLES.value)
-        ),
+        material_policy=_parse_gui_material_policy(payload.get("material_policy", MaterialPolicy.SOURCE_MATERIAL_ROLES.value)),
         bark_material_path=str(payload.get("bark_material_path", "")),
         leaves_material_path=str(payload.get("leaves_material_path", "")),
         single_material_path=str(payload.get("single_material_path", "")),
@@ -160,6 +156,7 @@ def save_gui_settings(settings_path: str | Path, snapshot: GuiSettingsSnapshot) 
     path.parent.mkdir(parents=True, exist_ok=True)
 
     payload: dict[str, object] = {
+        "schema_version": GUI_SETTINGS_SCHEMA_VERSION,
         "last_input_path": snapshot.last_input_path,
         "last_output_path": snapshot.last_output_path,
         "conversion_mode": ConversionMode.parse(snapshot.conversion_mode).value,
@@ -212,6 +209,7 @@ def load_gui_preset(preset_path: str | Path) -> GuiPresetRecord:
         raise ValueError(f"Preset file is not readable JSON: {path}") from exc
     if not isinstance(payload, dict):
         raise ValueError("Preset file must contain one JSON object.")
+    _require_schema_version(payload, context="preset")
     name = _coerce_preset_name(payload.get("name"), path.stem)
     if name == FACTORY_DEFAULT_PRESET_NAME:
         raise ValueError("Imported preset must use a user preset name.")
@@ -233,25 +231,10 @@ def _parse_conversion_mode(raw_value) -> ConversionMode:
 
 
 def _parse_gui_material_policy(raw_value) -> MaterialPolicy:
-    """Parse persisted GUI material policy values, including retired aliases."""
-    normalized = str(raw_value).strip() if raw_value is not None else ""
-    if normalized == "legacy_role_ids":
-        return MaterialPolicy.SOURCE_MATERIAL_ROLES
     try:
-        return MaterialPolicy.parse(normalized or MaterialPolicy.SOURCE_MATERIAL_ROLES.value)
+        return MaterialPolicy.parse(raw_value)
     except ValueError:
         return MaterialPolicy.SOURCE_MATERIAL_ROLES
-
-
-def _parse_prototype_source_mode(raw_value, *, use_unreal_reference: bool = False) -> PrototypeSourceMode:
-    # Retained for older settings payloads that stored Unreal mode as a boolean
-    # instead of the newer explicit `source_mode` enum string.
-    if use_unreal_reference:
-        return PrototypeSourceMode.UNREAL_ASSET
-    try:
-        return PrototypeSourceMode(str(raw_value))
-    except (TypeError, ValueError):
-        return PrototypeSourceMode.XML_MESH
 
 
 def _parse_fbx_material_mode(raw_value) -> FbxMaterialMode:
@@ -259,6 +242,13 @@ def _parse_fbx_material_mode(raw_value) -> FbxMaterialMode:
         return FbxMaterialMode(str(raw_value))
     except (TypeError, ValueError):
         return FbxMaterialMode.VERTEX_COLOR_SPLIT
+
+
+def _parse_prototype_source_mode(raw_value) -> PrototypeSourceMode:
+    try:
+        return PrototypeSourceMode(str(raw_value))
+    except (TypeError, ValueError):
+        return PrototypeSourceMode.XML_MESH
 
 
 def _parse_udim_mode(raw_value) -> UdimMode:
@@ -301,76 +291,27 @@ def _parse_wind_group_settings(raw_value) -> dict[str, WindGroupSettingRecord]:
     return settings
 
 
-def _parse_wind_group_settings_by_input_path(raw_value) -> dict[str, dict[str, WindGroupSettingRecord]]:
-    if not isinstance(raw_value, dict):
-        return {}
-    settings: dict[str, dict[str, WindGroupSettingRecord]] = {}
-    for key, value in raw_value.items():
-        parsed = _parse_wind_group_settings(value)
-        if parsed:
-            settings[str(key)] = parsed
-    return settings
-
-
-def _parse_base_material_settings_by_input_path(raw_value) -> dict[str, tuple[BaseMaterialSettingRecord, ...]]:
-    if not isinstance(raw_value, dict):
-        return {}
-    settings: dict[str, tuple[BaseMaterialSettingRecord, ...]] = {}
-    for key, value in raw_value.items():
-        if not isinstance(value, list):
+def _parse_base_material_settings(raw_value) -> tuple[BaseMaterialSettingRecord, ...]:
+    if not isinstance(raw_value, list):
+        return ()
+    records: list[BaseMaterialSettingRecord] = []
+    for record in raw_value:
+        if not isinstance(record, dict):
             continue
-        records: list[BaseMaterialSettingRecord] = []
-        for record in value:
-            if not isinstance(record, dict):
-                continue
-            source_id = record.get("source_id")
-            if not str(source_id).lstrip("-").isdigit():
-                continue
-            records.append(
-                BaseMaterialSettingRecord(
-                    source_id=int(source_id),
-                    source_name=str(record.get("source_name", "")),
-                    ue_asset_path=str(record.get("ue_asset_path", "")),
-                    udim_mode=_parse_udim_mode(record.get("udim_mode")),
-                    udim_id=_parse_udim_id(record.get("udim_id")),
-                )
-            )
-        settings[str(key)] = tuple(records)
-    return settings
-
-
-def _parse_part_mesh_settings_by_input_path(raw_value) -> dict[str, tuple[PartSourceSettingRecord, ...]]:
-    if not isinstance(raw_value, dict):
-        return {}
-    settings: dict[str, tuple[PartSourceSettingRecord, ...]] = {}
-    for key, value in raw_value.items():
-        if not isinstance(value, list):
+        try:
+            source_id = int(record.get("source_id"))
+        except (TypeError, ValueError):
             continue
-        records: list[PartSourceSettingRecord] = []
-        for record in value:
-            if not isinstance(record, dict):
-                continue
-            records.append(
-                PartSourceSettingRecord(
-                    source_name=str(record.get("source_name", "")),
-                    source_key=str(record.get("source_key", "")),
-                    source_mode=_parse_prototype_source_mode(
-                        record.get("source_mode"),
-                        use_unreal_reference=bool(record.get("use_unreal_reference", False)),
-                    ),
-                    unreal_asset_path=str(record.get("unreal_asset_path", "")),
-                    fbx_path=str(record.get("fbx_path", "")),
-                    fbx_material_mode=_parse_fbx_material_mode(record.get("fbx_material_mode")),
-                    single_material_path=str(record.get("single_material_path", "")),
-                    black_material_path=str(record.get("black_material_path", "")),
-                    white_material_path=str(record.get("white_material_path", "")),
-                    fbx_material_slot_overrides=_parse_fbx_material_slot_overrides(
-                        record.get("fbx_material_slot_overrides")
-                    ),
-                )
+        records.append(
+            BaseMaterialSettingRecord(
+                source_id=source_id,
+                source_name=str(record.get("source_name", "")),
+                ue_asset_path=str(record.get("ue_asset_path", "")),
+                udim_mode=_parse_udim_mode(record.get("udim_mode")),
+                udim_id=_parse_udim_id(record.get("udim_id")),
             )
-        settings[str(key)] = tuple(records)
-    return settings
+        )
+    return tuple(records)
 
 
 def _parse_presets(raw_value) -> dict[str, GuiPresetRecord]:
@@ -385,7 +326,44 @@ def _parse_presets(raw_value) -> dict[str, GuiPresetRecord]:
     return presets
 
 
+def _parse_part_mesh_settings(raw_value) -> tuple[PartSourceSettingRecord, ...]:
+    if not isinstance(raw_value, list):
+        return ()
+    records: list[PartSourceSettingRecord] = []
+    for record in raw_value:
+        if not isinstance(record, dict):
+            continue
+        source_name = str(record.get("source_name", ""))
+        source_key = str(record.get("source_key", ""))
+        if not source_name and not source_key:
+            continue
+        records.append(
+            PartSourceSettingRecord(
+                source_name=source_name,
+                source_key=source_key,
+                source_mode=_parse_prototype_source_mode(record.get("source_mode")),
+                unreal_asset_path=str(record.get("unreal_asset_path", "")),
+                fbx_path=str(record.get("fbx_path", "")),
+                fbx_material_mode=_parse_fbx_material_mode(record.get("fbx_material_mode")),
+                single_material_path=str(record.get("single_material_path", "")),
+                single_material_udim_mode=_parse_udim_mode(record.get("single_material_udim_mode")),
+                single_material_udim_id=_parse_udim_id(record.get("single_material_udim_id")),
+                black_material_path=str(record.get("black_material_path", "")),
+                black_material_udim_mode=_parse_udim_mode(record.get("black_material_udim_mode")),
+                black_material_udim_id=_parse_udim_id(record.get("black_material_udim_id")),
+                white_material_path=str(record.get("white_material_path", "")),
+                white_material_udim_mode=_parse_udim_mode(record.get("white_material_udim_mode")),
+                white_material_udim_id=_parse_udim_id(record.get("white_material_udim_id")),
+                fbx_material_slot_overrides=_parse_fbx_material_slot_overrides(
+                    record.get("fbx_material_slot_overrides")
+                ),
+            )
+        )
+    return tuple(records)
+
+
 def _parse_preset(name: str, payload: dict) -> GuiPresetRecord:
+    _require_schema_version(payload, context="preset")
     return GuiPresetRecord(
         name=name,
         cpu_profile=_parse_cpu_profile(payload.get("cpu_profile")),
@@ -405,26 +383,15 @@ def _parse_preset(name: str, payload: dict) -> GuiPresetRecord:
     )
 
 
-def _parse_base_material_settings(raw_value) -> tuple[BaseMaterialSettingRecord, ...]:
-    return _parse_base_material_settings_by_input_path({"preset": raw_value}).get("preset", ())
-
-
-def _parse_part_mesh_settings(raw_value) -> tuple[PartSourceSettingRecord, ...]:
-    return _parse_part_mesh_settings_by_input_path({"preset": raw_value}).get("preset", ())
-
-
-def _select_legacy_input_settings(settings: dict, last_input_path: str, *, default):
-    if not settings:
-        return default
-    if last_input_path:
-        try:
-            last_key = resolve_input_settings_key(last_input_path)
-        except (OSError, RuntimeError, ValueError):
-            last_key = str(Path(last_input_path).expanduser())
-        if last_key in settings:
-            return settings[last_key]
-    first_key = sorted(settings)[0]
-    return settings[first_key]
+def _require_schema_version(payload: dict, *, context: str) -> None:
+    try:
+        schema_version = int(payload.get("schema_version"))
+    except (TypeError, ValueError):
+        raise ValueError(f"{context} file uses an unsupported schema version.") from None
+    if schema_version != GUI_SETTINGS_SCHEMA_VERSION:
+        raise ValueError(
+            f"{context} file uses schema version {schema_version}, expected {GUI_SETTINGS_SCHEMA_VERSION}."
+        )
 
 
 def _parse_fbx_material_slot_overrides(raw_value) -> tuple[FbxMaterialSlotSettingRecord, ...]:
@@ -441,6 +408,8 @@ def _parse_fbx_material_slot_overrides(raw_value) -> tuple[FbxMaterialSlotSettin
             FbxMaterialSlotSettingRecord(
                 slot_name=slot_name,
                 ue_asset_path=str(record.get("ue_asset_path", "")),
+                udim_mode=_parse_udim_mode(record.get("udim_mode")),
+                udim_id=_parse_udim_id(record.get("udim_id")),
             )
         )
     return tuple(records)
@@ -476,7 +445,7 @@ def _serialize_part_mesh_settings_by_input_path(
                 "source_key": record.source_key,
             }
             if record.source_mode == PrototypeSourceMode.UNREAL_ASSET:
-                payload["use_unreal_reference"] = True
+                payload["source_mode"] = PrototypeSourceMode.UNREAL_ASSET.value
                 payload["unreal_asset_path"] = record.unreal_asset_path
             elif record.source_mode == PrototypeSourceMode.FBX_FILE:
                 payload["source_mode"] = PrototypeSourceMode.FBX_FILE.value
@@ -487,15 +456,23 @@ def _serialize_part_mesh_settings_by_input_path(
                 payload["fbx_material_mode"] = record.fbx_material_mode.value
             if record.single_material_path:
                 payload["single_material_path"] = record.single_material_path
+            payload["single_material_udim_mode"] = record.single_material_udim_mode.value
+            payload["single_material_udim_id"] = record.single_material_udim_id
             if record.black_material_path:
                 payload["black_material_path"] = record.black_material_path
+            payload["black_material_udim_mode"] = record.black_material_udim_mode.value
+            payload["black_material_udim_id"] = record.black_material_udim_id
             if record.white_material_path:
                 payload["white_material_path"] = record.white_material_path
+            payload["white_material_udim_mode"] = record.white_material_udim_mode.value
+            payload["white_material_udim_id"] = record.white_material_udim_id
             if record.fbx_material_slot_overrides:
                 payload["fbx_material_slot_overrides"] = [
                     {
                         "slot_name": override.slot_name,
                         "ue_asset_path": override.ue_asset_path,
+                        "udim_mode": override.udim_mode.value,
+                        "udim_id": override.udim_id,
                     }
                     for override in record.fbx_material_slot_overrides
                 ]
@@ -538,6 +515,7 @@ def _serialize_presets(presets: dict[str, GuiPresetRecord]) -> dict[str, dict[st
 
 def _serialize_preset(preset: GuiPresetRecord) -> dict[str, object]:
     payload: dict[str, object] = {
+        "schema_version": GUI_SETTINGS_SCHEMA_VERSION,
         "cpu_profile": preset.cpu_profile.value,
         "preserve_temp_files": bool(preset.preserve_temp_files),
         "conversion_mode": ConversionMode.parse(preset.conversion_mode).value,

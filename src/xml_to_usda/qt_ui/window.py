@@ -2,7 +2,7 @@
 
 Layer: UI.
 
-This shell keeps the glassmorphism direction isolated from the legacy Tk
+This shell keeps the glassmorphism direction isolated from the retired Tk
 GUI while reusing the same conversion, discovery, wind, and settings services.
 """
 

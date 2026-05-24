@@ -43,6 +43,8 @@ class PrototypeMaterialSlotRowSpec:
     slot_name: str
     face_count: int
     ue_asset_path: str = ""
+    udim_mode: UdimMode = UdimMode.OFF
+    udim_id: int = 1001
 
 
 @dataclass(frozen=True)
@@ -56,8 +58,14 @@ class PrototypeRowSpec:
     fbx_path: str = ""
     fbx_material_mode: FbxMaterialMode = FbxMaterialMode.VERTEX_COLOR_SPLIT
     single_material_path: str = ""
+    single_material_udim_mode: UdimMode = UdimMode.OFF
+    single_material_udim_id: int = 1001
     black_material_path: str = ""
+    black_material_udim_mode: UdimMode = UdimMode.OFF
+    black_material_udim_id: int = 1001
     white_material_path: str = ""
+    white_material_udim_mode: UdimMode = UdimMode.OFF
+    white_material_udim_id: int = 1001
     fbx_material_slot_overrides: tuple[FbxMaterialSlotSettingRecord, ...] = ()
 
 
@@ -131,8 +139,14 @@ def discover_part_prototype_rows(
         unreal_asset_path = ""
         fbx_path = ""
         single_material_path = ""
+        single_material_udim_mode = UdimMode.OFF
+        single_material_udim_id = 1001
         black_material_path = ""
+        black_material_udim_mode = UdimMode.OFF
+        black_material_udim_id = 1001
         white_material_path = ""
+        white_material_udim_mode = UdimMode.OFF
+        white_material_udim_id = 1001
         slot_overrides: tuple[FbxMaterialSlotSettingRecord, ...] = ()
         if persisted is not None:
             source_mode = _normalize_source_mode(persisted.source_mode)
@@ -140,8 +154,14 @@ def discover_part_prototype_rows(
             unreal_asset_path = persisted.unreal_asset_path
             fbx_path = persisted.fbx_path
             single_material_path = persisted.single_material_path
+            single_material_udim_mode = persisted.single_material_udim_mode
+            single_material_udim_id = persisted.single_material_udim_id
             black_material_path = persisted.black_material_path
+            black_material_udim_mode = persisted.black_material_udim_mode
+            black_material_udim_id = persisted.black_material_udim_id
             white_material_path = persisted.white_material_path
+            white_material_udim_mode = persisted.white_material_udim_mode
+            white_material_udim_id = persisted.white_material_udim_id
             slot_overrides = persisted.fbx_material_slot_overrides
         rows.append(
             PrototypeRowSpec(
@@ -154,8 +174,14 @@ def discover_part_prototype_rows(
                 fbx_path=fbx_path,
                 fbx_material_mode=fbx_material_mode,
                 single_material_path=single_material_path,
+                single_material_udim_mode=single_material_udim_mode,
+                single_material_udim_id=single_material_udim_id,
                 black_material_path=black_material_path,
+                black_material_udim_mode=black_material_udim_mode,
+                black_material_udim_id=black_material_udim_id,
                 white_material_path=white_material_path,
+                white_material_udim_mode=white_material_udim_mode,
+                white_material_udim_id=white_material_udim_id,
                 fbx_material_slot_overrides=slot_overrides,
             )
         )
@@ -179,6 +205,8 @@ def inspect_fbx_material_slot_rows(
             slot_name=slot.name,
             face_count=slot.face_count,
             ue_asset_path=persisted_by_name.get(slot.name, ""),
+            udim_mode=next((record.udim_mode for record in persisted_records if record.slot_name == slot.name), UdimMode.OFF),
+            udim_id=next((record.udim_id for record in persisted_records if record.slot_name == slot.name), 1001),
         )
         for slot in slots
     )

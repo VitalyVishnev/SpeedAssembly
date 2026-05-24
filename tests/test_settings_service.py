@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from xml_to_usda.models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode, UdimMode
 from xml_to_usda.settings_service import (
     BaseMaterialSettingRecord,
+    GUI_SETTINGS_SCHEMA_VERSION,
     FACTORY_DEFAULT_PRESET_NAME,
     FbxMaterialSlotSettingRecord,
     GuiPresetRecord,
@@ -15,7 +18,6 @@ from xml_to_usda.settings_service import (
     factory_default_preset,
     load_gui_settings,
     load_gui_preset,
-    resolve_input_settings_key,
     save_gui_settings,
     save_gui_preset,
     sorted_gui_presets,
@@ -28,13 +30,12 @@ def test_load_gui_settings_returns_defaults_for_missing_file(tmp_path: Path) -> 
     assert snapshot == GuiSettingsSnapshot()
 
 
-def test_load_gui_settings_parses_legacy_payload_shape(tmp_path: Path) -> None:
+def test_load_gui_settings_rejects_payload_without_schema_version(tmp_path: Path) -> None:
     settings_path = tmp_path / "gui_settings.json"
     settings_path.write_text(
         json.dumps(
             {
                 "last_input_path": "tree.xml",
-                "material_policy": "legacy_role_ids",
                 "wind_group_settings": {
                     "0": {
                         "influence": 0.35,
@@ -46,12 +47,8 @@ def test_load_gui_settings_parses_legacy_payload_shape(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    snapshot = load_gui_settings(settings_path)
-
-    assert snapshot.last_input_path == "tree.xml"
-    assert snapshot.material_policy == MaterialPolicy.SOURCE_MATERIAL_ROLES
-    assert snapshot.wind_group_settings["0"].influence == 0.35
-    assert snapshot.wind_group_settings["0"].shift_top == 0.1
+    with pytest.raises(ValueError, match="unsupported schema version"):
+        load_gui_settings(settings_path)
 
 
 def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) -> None:
@@ -109,6 +106,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     save_gui_settings(settings_path, snapshot)
 
     payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == GUI_SETTINGS_SCHEMA_VERSION
     assert payload["conversion_mode"] == ConversionMode.SKELETAL_PARTS.value
     assert payload["cpu_profile"] == CpuProfile.QUIET.value
     assert payload["preserve_temp_files"] is True
@@ -119,12 +117,41 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert "wind_group_settings_by_input_path" not in payload
     assert payload["part_mesh_settings"][0]["fbx_material_mode"] == "material_slots"
     assert payload["part_mesh_settings"][0]["fbx_material_slot_overrides"] == [
-        {"slot_name": "Bark", "ue_asset_path": "/Game/TreeParts/M_Bark.M_Bark"},
-        {"slot_name": "Needles", "ue_asset_path": ""},
+        {
+            "slot_name": "Bark",
+            "ue_asset_path": "/Game/TreeParts/M_Bark.M_Bark",
+            "udim_mode": UdimMode.OFF.value,
+            "udim_id": 1001,
+        },
+        {
+            "slot_name": "Needles",
+            "ue_asset_path": "",
+            "udim_mode": UdimMode.OFF.value,
+            "udim_id": 1001,
+        },
     ]
 
     restored = load_gui_settings(settings_path)
-    assert restored == snapshot
+    assert restored.last_input_path == snapshot.last_input_path
+    assert restored.last_output_path == snapshot.last_output_path
+    assert restored.cpu_profile == snapshot.cpu_profile
+    assert restored.preserve_temp_files is True
+    assert restored.conversion_mode == snapshot.conversion_mode
+    assert restored.material_policy == snapshot.material_policy
+    assert restored.single_material_path == snapshot.single_material_path
+    assert restored.wind_group_settings == snapshot.wind_group_settings
+    assert restored.base_material_settings == snapshot.base_material_settings
+    assert len(restored.part_mesh_settings) == 1
+    restored_part = restored.part_mesh_settings[0]
+    assert restored_part.source_name == "Twig_01"
+    assert restored_part.source_key == "Mesh_1"
+    assert restored_part.source_mode == PrototypeSourceMode.FBX_FILE
+    assert restored_part.fbx_path == str(tmp_path / "spruce_branch.fbx")
+    assert restored_part.fbx_material_mode == FbxMaterialMode.MATERIAL_SLOTS
+    assert len(restored_part.fbx_material_slot_overrides) == 2
+    assert restored_part.fbx_material_slot_overrides[0].slot_name == "Bark"
+    assert restored_part.fbx_material_slot_overrides[0].udim_mode == UdimMode.OFF
+    assert restored_part.fbx_material_slot_overrides[0].udim_id == 1001
 
 
 def test_save_gui_settings_preserves_base_material_udim_settings(tmp_path: Path) -> None:
@@ -146,50 +173,6 @@ def test_save_gui_settings_preserves_base_material_udim_settings(tmp_path: Path)
     assert payload["base_material_settings"][0]["udim_mode"] == UdimMode.WRITE_SECONDARY_UV_OFFSET.value
     assert payload["base_material_settings"][0]["udim_id"] == 1003
     assert load_gui_settings(settings_path).base_material_settings == snapshot.base_material_settings
-
-
-def test_load_gui_settings_migrates_legacy_per_input_records_to_global_state(tmp_path: Path) -> None:
-    settings_path = tmp_path / "gui_settings.json"
-    tree_key = resolve_input_settings_key(str(tmp_path / "tree.xml"))
-    settings_path.write_text(
-        json.dumps(
-            {
-                "last_input_path": str(tmp_path / "tree.xml"),
-                "wind_group_settings_by_input_path": {
-                    tree_key: {"0": {"influence": 0.25}},
-                },
-                "base_material_settings_by_input_path": {
-                    tree_key: [
-                        {
-                            "source_id": 1,
-                            "source_name": "Bark",
-                            "ue_asset_path": "/Game/M_Bark.M_Bark",
-                        }
-                    ],
-                },
-                "part_mesh_settings_by_input_path": {
-                    tree_key: [
-                        {
-                            "source_name": "Branch",
-                            "source_key": "Mesh_1",
-                            "source_mode": "fbx_file",
-                            "fbx_path": str(tmp_path / "branch.fbx"),
-                        }
-                    ],
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    snapshot = load_gui_settings(settings_path)
-
-    assert snapshot.wind_group_settings["0"].influence == 0.25
-    assert snapshot.base_material_settings == (
-        BaseMaterialSettingRecord(source_id=1, source_name="Bark", ue_asset_path="/Game/M_Bark.M_Bark"),
-    )
-    assert snapshot.part_mesh_settings[0].source_name == "Branch"
-    assert snapshot.part_mesh_settings[0].source_mode == PrototypeSourceMode.FBX_FILE
 
 
 def test_gui_settings_round_trips_named_presets(tmp_path: Path) -> None:
@@ -246,4 +229,6 @@ def test_gui_preset_import_export_round_trips_one_preset(tmp_path: Path) -> None
 
     save_gui_preset(preset_path, preset)
 
+    payload = json.loads(preset_path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == GUI_SETTINGS_SCHEMA_VERSION
     assert load_gui_preset(preset_path) == preset

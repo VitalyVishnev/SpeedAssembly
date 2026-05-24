@@ -224,7 +224,7 @@ For the current contract:
 The exporter now has explicit material-policy modes:
 
 - `source_material_roles`
-  - compatibility mode only
+  - CLI/JSON mode only
   - raw XML material ids `1` and `2` are still interpreted as primary/leaves semantic slots
   - the old missing-role validation remains active only in this mode
 - `single_material`

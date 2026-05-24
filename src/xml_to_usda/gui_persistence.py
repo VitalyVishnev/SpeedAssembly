@@ -18,7 +18,10 @@ class GuiPersistenceController:
         self._save_gui_settings = save_gui_settings
 
     def load_settings(self) -> None:
-        settings = self._load_gui_settings(self.app.SETTINGS_PATH)
+        try:
+            settings = self._load_gui_settings(self.app.SETTINGS_PATH)
+        except ValueError:
+            settings = GuiSettingsSnapshot()
         self.app._legacy_wind_group_settings = dict(settings.wind_group_settings)
         self.app._persisted_wind_group_settings = dict(self.app._legacy_wind_group_settings)
         self.app._persisted_base_material_settings = settings.base_material_settings
