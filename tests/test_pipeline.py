@@ -28,6 +28,7 @@ from xml_to_usda.models import (
     CpuProfile,
     ConversionMode,
     DynamicWindSimulationGroup,
+    ExportMetadata,
     FbxMaterialMode,
     FbxMaterialSlotOverride,
     Joint,
@@ -42,6 +43,10 @@ from xml_to_usda.models import (
     PrototypeStrategy,
     SourceObject,
     PrototypeResolutionMode,
+    TreeAsset,
+    UdimMaterialSetting,
+    UdimMode,
+    Vector2,
     Vector3,
 )
 from xml_to_usda.job_control import ConversionCancelledError, cpu_worker_count, reserved_cpu_count
@@ -55,11 +60,14 @@ from xml_to_usda.pipeline import (
     inspect_source,
     inspect_wind_data,
     load_canonical_model,
+    load_resolved_assembly_model,
 )
 from xml_to_usda.prototype_sources import load_prototype_source_configs_from_json
 from xml_to_usda.runtime_paths import resolve_runtime_paths
 from xml_to_usda.source_transform import build_source_transform
 from xml_to_usda.ue_schema import DEFAULT_UE_SCHEMA_CONTRACT
+from xml_to_usda.udim_resolver import apply_udim_material_settings
+from xml_to_usda.udim_settings import load_udim_material_settings_from_json
 from xml_to_usda.usda_authoring import author_usda_stream, author_usda_text, build_authoring_context
 from xml_to_usda.usda_writer import render_usda, write_usda_document
 from xml_to_usda.validator import validate_model
@@ -1370,6 +1378,156 @@ def test_usda_output_contains_ue_first_structure() -> None:
         'int[] primvars:unreal:naniteAssembly:bindJoints:indices = None',
     )
     assert '"Tree_point_' not in bind_joints_payload
+
+
+def test_udim_primary_shift_moves_only_selected_resolved_material_uvs() -> None:
+    _, baseline = load_resolved_assembly_model(str(SIMPLE_TREE_01))
+    _, resolved = load_resolved_assembly_model(
+        str(SIMPLE_TREE_01),
+        udim_material_settings=(
+            UdimMaterialSetting(
+                material_id=1,
+                mode=UdimMode.SHIFT_PRIMARY_UV,
+                udim_id=1003,
+            ),
+        ),
+    )
+
+    baseline_mesh = baseline.authoring_model.base_mesh
+    resolved_mesh = resolved.authoring_model.base_mesh
+
+    assert baseline_mesh is not None
+    assert resolved_mesh is not None
+    assert baseline_mesh.sections == resolved_mesh.sections
+    assert len(baseline_mesh.uv_coords) == len(resolved_mesh.uv_coords)
+
+    for before, after in zip(baseline_mesh.uv_coords, resolved_mesh.uv_coords, strict=True):
+        assert after.x == pytest.approx(before.x + 2.0)
+        assert after.y == pytest.approx(before.y)
+
+
+def test_udim_secondary_mode_writes_offset_without_changing_primary_uvs(tmp_path: Path) -> None:
+    _, baseline = load_resolved_assembly_model(str(SIMPLE_TREE_01))
+    result = convert_file(
+        str(SIMPLE_TREE_01),
+        str(tmp_path / "tree.usda"),
+        udim_material_settings=(
+            UdimMaterialSetting(
+                material_id=1,
+                mode=UdimMode.WRITE_SECONDARY_UV_OFFSET,
+                udim_id=1003,
+            ),
+        ),
+        runtime_paths=_test_runtime_paths(tmp_path),
+    )
+    _, resolved = load_resolved_assembly_model(
+        str(SIMPLE_TREE_01),
+        udim_material_settings=(
+            UdimMaterialSetting(
+                material_id=1,
+                mode=UdimMode.WRITE_SECONDARY_UV_OFFSET,
+                udim_id=1003,
+            ),
+        ),
+    )
+
+    assert result.usda_document is not None
+    assert "texCoord2f[] primvars:st1 = [" in result.usda_document.text
+    assert "(2.5, 0.5)" in result.usda_document.text
+    assert baseline.authoring_model.base_mesh is not None
+    assert resolved.authoring_model.base_mesh is not None
+    assert resolved.authoring_model.base_mesh.uv_coords == baseline.authoring_model.base_mesh.uv_coords
+    assert resolved.authoring_model.base_mesh.secondary_uv_coords
+    assert resolved.authoring_model.base_mesh.secondary_uv_coords[0].x == pytest.approx(2.5)
+    assert resolved.authoring_model.base_mesh.secondary_uv_coords[0].y == pytest.approx(0.5)
+
+
+def test_udim_secondary_mode_defaults_untouched_material_faces_to_first_udim() -> None:
+    mesh = MeshData(
+        name="TwoMaterialMesh",
+        points=(Vector3(0.0, 0.0, 0.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0)),
+        face_vertex_counts=(3, 3),
+        face_vertex_indices=(0, 1, 2, 0, 2, 1),
+        uv_coords=(
+            Vector2(0.0, 0.0),
+            Vector2(1.0, 0.0),
+            Vector2(0.0, 1.0),
+            Vector2(0.0, 0.0),
+            Vector2(0.0, 1.0),
+            Vector2(1.0, 0.0),
+        ),
+        sections=(
+            MeshSection(material_id=1, face_indices=(0,)),
+            MeshSection(material_id=2, face_indices=(1,)),
+        ),
+    )
+    model = TreeAsset(
+        metadata=ExportMetadata(source_path="synthetic.xml", source_version=None),
+        materials=(),
+        source_objects=(),
+        base_mesh=mesh,
+        skeleton=(),
+        assembly_parts=(),
+    )
+
+    resolved = apply_udim_material_settings(
+        model,
+        (
+            UdimMaterialSetting(
+                material_id=1,
+                mode=UdimMode.WRITE_SECONDARY_UV_OFFSET,
+                udim_id=1003,
+            ),
+        ),
+    )
+
+    assert resolved.base_mesh is not None
+    assert len(resolved.base_mesh.secondary_uv_coords) == len(mesh.uv_coords)
+    assert [(uv.x, uv.y) for uv in resolved.base_mesh.secondary_uv_coords[:3]] == pytest.approx(
+        [(2.5, 0.5), (2.5, 0.5), (2.5, 0.5)]
+    )
+    assert [(uv.x, uv.y) for uv in resolved.base_mesh.secondary_uv_coords[3:]] == pytest.approx(
+        [(0.5, 0.5), (0.5, 0.5), (0.5, 0.5)]
+    )
+
+
+def test_udim_setting_that_matches_no_inline_material_is_resolution_error() -> None:
+    _, resolved = load_resolved_assembly_model(
+        str(SIMPLE_TREE_01),
+        udim_material_settings=(
+            UdimMaterialSetting(
+                material_id=999,
+                mode=UdimMode.SHIFT_PRIMARY_UV,
+                udim_id=1003,
+            ),
+        ),
+    )
+
+    assert any(issue.code == "unmatched_udim_material" for issue in resolved.resolution_diagnostics)
+
+
+def test_udim_settings_json_loads_material_targets(tmp_path: Path) -> None:
+    path = tmp_path / "udim_settings.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "material_id": 1,
+                    "mode": UdimMode.WRITE_SECONDARY_UV_OFFSET.value,
+                    "udim_id": 1003,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_udim_material_settings_from_json(path) == (
+        UdimMaterialSetting(
+            material_id=1,
+            mode=UdimMode.WRITE_SECONDARY_UV_OFFSET,
+            udim_id=1003,
+        ),
+    )
 
 
 def test_material_bindings_stay_on_mesh_prims_only() -> None:

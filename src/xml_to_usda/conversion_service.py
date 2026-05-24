@@ -24,6 +24,7 @@ from .models import (
     OutputMode,
     PrototypeSourceConfig,
     PrototypeSourceMode,
+    UdimMaterialSetting,
 )
 
 
@@ -48,8 +49,9 @@ def prepare_conversion_plan(
     prototype_source_configs: tuple[PrototypeSourceConfig, ...],
     use_existing_part_meshes: bool,
     part_mesh_asset_paths: tuple[tuple[str, str], ...],
-    conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY,
     async_threshold_bytes: int,
+    conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY,
+    udim_material_settings: tuple[UdimMaterialSetting, ...] = (),
 ) -> ConversionLaunchPlan:
     """Build one stable conversion plan from operator-facing semantic inputs."""
     resolved_input_path = input_path.strip()
@@ -96,6 +98,7 @@ def prepare_conversion_plan(
         leaves_material_path=effective_leaves_material_path,
         single_material_path=effective_single_material_path,
         base_material_overrides=base_material_overrides,
+        udim_material_settings=udim_material_settings,
         cpu_profile=cpu_profile,
         cleanup_policy=cleanup_policy,
         use_explicit_material_contract=use_explicit_material_contract,

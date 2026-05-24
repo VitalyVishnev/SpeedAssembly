@@ -27,6 +27,10 @@ def geometry_buffer_from_mesh(mesh: MeshData) -> GeometryBuffer:
     for uv in mesh.uv_coords:
         uv_components.extend((uv.x, uv.y))
 
+    secondary_uv_components = array("f")
+    for uv in mesh.secondary_uv_coords:
+        secondary_uv_components.extend((uv.x, uv.y))
+
     vertex_color_components = array("f")
     for color in mesh.vertex_colors:
         vertex_color_components.extend((color.r, color.g, color.b, color.a))
@@ -43,6 +47,7 @@ def geometry_buffer_from_mesh(mesh: MeshData) -> GeometryBuffer:
         face_vertex_counts=face_vertex_counts,
         face_vertex_indices=face_vertex_indices,
         uv_components=uv_components,
+        secondary_uv_components=secondary_uv_components,
         vertex_color_components=vertex_color_components,
         sections=sections,
         skel_joint_indices=skel_joint_indices,
@@ -72,6 +77,13 @@ def geometry_buffer_to_mesh(buffer: GeometryBuffer, max_points: int = 250_000) -
         )
         for index in range(0, len(buffer.uv_components), 2)
     )
+    secondary_uv_coords = tuple(
+        Vector2(
+            buffer.secondary_uv_components[index],
+            buffer.secondary_uv_components[index + 1],
+        )
+        for index in range(0, len(buffer.secondary_uv_components), 2)
+    )
     vertex_colors = tuple(
         Color4(
             buffer.vertex_color_components[index],
@@ -91,6 +103,7 @@ def geometry_buffer_to_mesh(buffer: GeometryBuffer, max_points: int = 250_000) -
         face_vertex_counts=tuple(buffer.face_vertex_counts),
         face_vertex_indices=tuple(buffer.face_vertex_indices),
         uv_coords=uv_coords,
+        secondary_uv_coords=secondary_uv_coords,
         vertex_colors=vertex_colors,
         sections=sections,
         skel_joint_indices=tuple(buffer.skel_joint_indices),
@@ -159,4 +172,3 @@ def iter_face_ranges(face_vertex_counts: Iterable[int]) -> Iterator[tuple[int, i
     for face_index, face_count in enumerate(face_vertex_counts):
         yield face_index, offset, offset + face_count
         offset += face_count
-

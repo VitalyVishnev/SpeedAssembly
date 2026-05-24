@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .asset_paths import is_valid_unreal_asset_path, normalize_unreal_asset_path
-from .models import ConversionRequest, MaterialPolicy
+from .models import ConversionRequest, MaterialPolicy, UdimMode
 
 
 def validate_conversion_request(request: ConversionRequest) -> None:
@@ -11,6 +11,14 @@ def validate_conversion_request(request: ConversionRequest) -> None:
         raise ValueError("Explicit output_path is only valid for single-file conversion.")
     if request.part_mesh_asset_paths and not request.use_existing_part_meshes and not request.prototype_source_configs:
         raise ValueError("part_mesh_asset_paths require use_existing_part_meshes=True.")
+    for setting in request.udim_material_settings:
+        mode = UdimMode.parse(setting.mode)
+        if mode == UdimMode.OFF:
+            continue
+        if setting.material_id <= 0:
+            raise ValueError("UDIM material id must be a positive integer.")
+        if setting.udim_id < 1001:
+            raise ValueError("UDIM id must be greater than or equal to 1001.")
 
     checks: list[tuple[str, str | None]]
     if request.material_policy == MaterialPolicy.SINGLE_MATERIAL:

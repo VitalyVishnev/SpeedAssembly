@@ -350,6 +350,22 @@ def test_cli_parser_accepts_part_source_config_and_cpu_profile() -> None:
     assert args.preserve_temp_files is True
 
 
+def test_cli_parser_accepts_udim_settings_path() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "convert",
+            "input.xml",
+            "output.usda",
+            "--udim-settings",
+            "udim_settings.json",
+        ]
+    )
+
+    assert args.udim_settings == "udim_settings.json"
+
+
 def test_cli_parser_defaults_cpu_profile_to_balanced() -> None:
     parser = build_parser()
 

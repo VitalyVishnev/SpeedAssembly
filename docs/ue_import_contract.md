@@ -252,7 +252,27 @@ Explicit FBX prototype material baseline:
   - only FBX material slots actually used by faces are surfaced
   - repeated FBX material names are merged into one logical slot override row
   - if some slot rows are blank, one filled Unreal material path is reused with a warning
-  - if all slot rows are blank, conversion fails
+- if all slot rows are blank, conversion fails
+
+## UDIM UV contract
+
+UDIM support is an explicit per-material operator choice and is disabled by default.
+
+Supported modes:
+
+- `off`
+  - leaves authored UVs unchanged
+- `shift_primary_uv`
+  - offsets primary face-varying `primvars:st` for faces assigned to the selected resolved material id
+  - uses fixed `base_udim = 1001`
+- `write_secondary_uv_offset`
+  - preserves primary `primvars:st`
+  - writes a second full-size face-varying UV channel with the selected UDIM tile offset plus `0.5`
+  - untouched material faces receive `(0.5, 0.5)`, representing the first UDIM tile
+
+Current authoring uses `texCoord2f[] primvars:st1` for the second UV channel.
+This name is covered by automated USDA regression tests but still requires UE
+5.7.x import validation before being treated as importer-proven.
 
 Raw SpeedTree XML material ids must be treated as opaque Source Material
 metadata. `source_material_roles` may infer bark/leaves buckets from authored

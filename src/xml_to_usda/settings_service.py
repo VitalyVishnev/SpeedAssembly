@@ -13,7 +13,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode
+from .models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode, UdimMode
 
 
 FACTORY_DEFAULT_PRESET_NAME = "Factory Defaults"
@@ -24,6 +24,8 @@ class BaseMaterialSettingRecord:
     source_id: int
     source_name: str = ""
     ue_asset_path: str = ""
+    udim_mode: UdimMode = UdimMode.OFF
+    udim_id: int = 1001
 
 
 @dataclass(frozen=True)
@@ -259,6 +261,21 @@ def _parse_fbx_material_mode(raw_value) -> FbxMaterialMode:
         return FbxMaterialMode.VERTEX_COLOR_SPLIT
 
 
+def _parse_udim_mode(raw_value) -> UdimMode:
+    try:
+        return UdimMode.parse(raw_value)
+    except (TypeError, ValueError):
+        return UdimMode.OFF
+
+
+def _parse_udim_id(raw_value) -> int:
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return 1001
+    return value if value >= 1001 else 1001
+
+
 def _coerce_float(raw_value, default: float) -> float:
     try:
         return float(raw_value)
@@ -314,6 +331,8 @@ def _parse_base_material_settings_by_input_path(raw_value) -> dict[str, tuple[Ba
                     source_id=int(source_id),
                     source_name=str(record.get("source_name", "")),
                     ue_asset_path=str(record.get("ue_asset_path", "")),
+                    udim_mode=_parse_udim_mode(record.get("udim_mode")),
+                    udim_id=_parse_udim_id(record.get("udim_id")),
                 )
             )
         settings[str(key)] = tuple(records)
@@ -436,6 +455,8 @@ def _serialize_base_material_settings_by_input_path(
                 "source_id": record.source_id,
                 "source_name": record.source_name,
                 "ue_asset_path": record.ue_asset_path,
+                "udim_mode": record.udim_mode.value,
+                "udim_id": record.udim_id,
             }
             for record in records
         ]

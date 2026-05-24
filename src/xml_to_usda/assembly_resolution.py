@@ -26,6 +26,7 @@ from .models import (
     PrototypeSourceConfig,
     PrototypeStrategy,
     ResolvedAssemblyModel,
+    UdimMaterialSetting,
     ValidationIssue,
 )
 from .prototype_resolution import (
@@ -36,6 +37,7 @@ from .prototype_resolution import (
 from .authoring_validation import validate_authoring_model
 from .resolution_validation import validate_resolution
 from .source_validation import validate_source_model
+from .udim_resolver import apply_udim_material_settings
 
 
 @dataclass(frozen=True)
@@ -46,6 +48,7 @@ class AssemblyResolutionOptions:
     leaves_material_path: str | None = None
     single_material_path: str | None = None
     base_material_overrides: tuple[BaseMaterialOverride, ...] = ()
+    udim_material_settings: tuple[UdimMaterialSetting, ...] = ()
     cpu_profile: CpuProfile = CpuProfile.BALANCED
     use_explicit_material_contract: bool = False
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = ()
@@ -110,6 +113,7 @@ def resolve_assembly_model(
             started_at=runtime.started_at,
         ),
     )
+    authoring_model = apply_udim_material_settings(authoring_model, options.udim_material_settings)
     if resolved_conversion_mode == ConversionMode.STATIC_ASSEMBLY:
         authoring_model = replace(authoring_model, prototype_strategy=PrototypeStrategy.INLINE_STATIC_PART)
     authoring_model = replace(
@@ -126,6 +130,7 @@ def resolve_assembly_model(
         authoring_model=authoring_model,
         conversion_mode=resolved_conversion_mode,
         output_stem=options.output_stem,
+        udim_material_settings=options.udim_material_settings,
         source_diagnostics=source_diagnostics if source_diagnostics is not None else validate_source_model(source_model),
     )
     resolution_diagnostics = validate_resolution(resolved)

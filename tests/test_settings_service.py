@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from xml_to_usda.models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode
+from xml_to_usda.models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode, UdimMode
 from xml_to_usda.settings_service import (
     BaseMaterialSettingRecord,
     FACTORY_DEFAULT_PRESET_NAME,
@@ -125,6 +125,27 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
 
     restored = load_gui_settings(settings_path)
     assert restored == snapshot
+
+
+def test_save_gui_settings_preserves_base_material_udim_settings(tmp_path: Path) -> None:
+    settings_path = tmp_path / "gui_settings.json"
+    snapshot = GuiSettingsSnapshot(
+        base_material_settings=(
+            BaseMaterialSettingRecord(
+                source_id=1,
+                source_name="Bark",
+                udim_mode=UdimMode.WRITE_SECONDARY_UV_OFFSET,
+                udim_id=1003,
+            ),
+        )
+    )
+
+    save_gui_settings(settings_path, snapshot)
+
+    payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert payload["base_material_settings"][0]["udim_mode"] == UdimMode.WRITE_SECONDARY_UV_OFFSET.value
+    assert payload["base_material_settings"][0]["udim_id"] == 1003
+    assert load_gui_settings(settings_path).base_material_settings == snapshot.base_material_settings
 
 
 def test_load_gui_settings_migrates_legacy_per_input_records_to_global_state(tmp_path: Path) -> None:

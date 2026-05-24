@@ -9,6 +9,7 @@ from .models import CleanupPolicy, CpuProfile, MaterialPolicy
 from .pipeline import convert_file, generate_wind_json, inspect_source
 from .prototype_sources import load_prototype_source_configs_from_json
 from .runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
+from .udim_settings import load_udim_material_settings_from_json
 from .xml_reader import render_inspect_report
 
 
@@ -34,6 +35,10 @@ def build_parser() -> argparse.ArgumentParser:
     convert_parser.add_argument(
         "--part-source-config",
         help="Path to a JSON object keyed by prototype name or Mesh_<id> with per-prototype source mode config.",
+    )
+    convert_parser.add_argument(
+        "--udim-settings",
+        help="Path to a JSON array with per-material UDIM mode and udim_id settings.",
     )
     convert_parser.add_argument(
         "--cpu-profile",
@@ -87,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
                 leaves_material_path=args.leaves_material_path,
                 single_material_path=args.single_material_path,
                 part_source_config_path=args.part_source_config,
+                udim_settings_path=args.udim_settings,
                 cpu_profile=CpuProfile(args.cpu_profile),
                 cleanup_policy=(
                     CleanupPolicy.PRESERVE_FOR_DEBUGGING
@@ -127,6 +133,7 @@ def _run_convert(
     leaves_material_path: str | None = None,
     single_material_path: str | None = None,
     part_source_config_path: str | None = None,
+    udim_settings_path: str | None = None,
     cpu_profile: CpuProfile = CpuProfile.BALANCED,
     cleanup_policy: CleanupPolicy = CleanupPolicy.EPHEMERAL,
     runtime_paths=None,
@@ -134,6 +141,11 @@ def _run_convert(
     prototype_source_configs = (
         load_prototype_source_configs_from_json(part_source_config_path)
         if part_source_config_path
+        else ()
+    )
+    udim_material_settings = (
+        load_udim_material_settings_from_json(udim_settings_path)
+        if udim_settings_path
         else ()
     )
     result = convert_file(
@@ -146,6 +158,7 @@ def _run_convert(
         cpu_profile=cpu_profile,
         cleanup_policy=cleanup_policy,
         prototype_source_configs=prototype_source_configs,
+        udim_material_settings=udim_material_settings,
         runtime_paths=runtime_paths,
     )
     for issue in result.diagnostics:

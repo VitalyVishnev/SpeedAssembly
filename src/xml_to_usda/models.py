@@ -112,6 +112,21 @@ class MaterialPolicy(StrEnum):
         )
 
 
+class UdimMode(StrEnum):
+    OFF = "off"
+    SHIFT_PRIMARY_UV = "shift_primary_uv"
+    WRITE_SECONDARY_UV_OFFSET = "write_secondary_uv_offset"
+
+    @classmethod
+    def parse(cls, raw: "UdimMode | str | None") -> "UdimMode":
+        if isinstance(raw, cls):
+            return raw
+        if raw is None:
+            return cls.OFF
+        normalized = str(raw).strip()
+        return cls(normalized)
+
+
 class PrototypeStrategy(StrEnum):
     INLINE_SKELETAL_PART = "inline_skeletal_part"
     INLINE_STATIC_PART = "inline_static_part"
@@ -184,6 +199,7 @@ class MeshData:
     face_vertex_counts: tuple[int, ...]
     face_vertex_indices: tuple[int, ...]
     uv_coords: tuple[Vector2, ...] = ()
+    secondary_uv_coords: tuple[Vector2, ...] = ()
     vertex_colors: tuple[Color4, ...] = ()
     sections: tuple["MeshSection", ...] = ()
     skel_joint_indices: tuple[int, ...] = ()
@@ -206,6 +222,13 @@ class BaseMaterialOverride:
     source_id: int
     source_name: str = ""
     ue_asset_path: str | None = None
+
+
+@dataclass(frozen=True)
+class UdimMaterialSetting:
+    material_id: int
+    mode: UdimMode = UdimMode.OFF
+    udim_id: int = 1001
 
 
 @dataclass(frozen=True)
@@ -326,6 +349,7 @@ class GeometryBuffer:
     face_vertex_counts: array
     face_vertex_indices: array
     uv_components: array = field(default_factory=lambda: array("f"))
+    secondary_uv_components: array = field(default_factory=lambda: array("f"))
     vertex_color_components: array = field(default_factory=lambda: array("f"))
     vertex_color_warning: str | None = None
     fbx_material_slots: tuple["FbxMaterialSlotSpec", ...] = ()
@@ -345,6 +369,10 @@ class GeometryBuffer:
     @property
     def uv_count(self) -> int:
         return len(self.uv_components) // 2
+
+    @property
+    def secondary_uv_count(self) -> int:
+        return len(self.secondary_uv_components) // 2
 
     @property
     def vertex_color_count(self) -> int:
@@ -643,6 +671,7 @@ class ResolvedAssemblyModel:
     authoring_model: CanonicalTreeModel
     conversion_mode: ConversionMode
     output_stem: str | None = None
+    udim_material_settings: tuple[UdimMaterialSetting, ...] = ()
     source_diagnostics: tuple[ValidationIssue, ...] = ()
     resolution_diagnostics: tuple[ValidationIssue, ...] = ()
     authoring_diagnostics: tuple[ValidationIssue, ...] = ()
@@ -671,6 +700,7 @@ class ConversionRequest:
     leaves_material_path: str | None = None
     single_material_path: str | None = None
     base_material_overrides: tuple[BaseMaterialOverride, ...] = ()
+    udim_material_settings: tuple[UdimMaterialSetting, ...] = ()
     cpu_profile: CpuProfile = CpuProfile.BALANCED
     cleanup_policy: CleanupPolicy = CleanupPolicy.EPHEMERAL
     use_explicit_material_contract: bool = False

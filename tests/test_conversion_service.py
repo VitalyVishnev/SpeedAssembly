@@ -16,6 +16,8 @@ from xml_to_usda.models import (
     MaterialPolicy,
     PrototypeSourceConfig,
     PrototypeSourceMode,
+    UdimMaterialSetting,
+    UdimMode,
 )
 from xml_to_usda.prototype_keys import normalize_prototype_source_key
 from xml_to_usda.skeleton_rules import joint_name_from_bone_id, parse_generator_label
@@ -83,6 +85,35 @@ def test_prepare_conversion_plan_builds_default_material_request() -> None:
     assert plan.request.single_material_path is None
     assert plan.request.use_explicit_material_contract is False
     assert plan.request.conversion_mode == ConversionMode.SKELETAL_ASSEMBLY
+
+
+def test_prepare_conversion_plan_preserves_udim_operator_intent() -> None:
+    udim_settings = (
+        UdimMaterialSetting(
+            material_id=1,
+            mode=UdimMode.WRITE_SECONDARY_UV_OFFSET,
+            udim_id=1003,
+        ),
+    )
+
+    plan = prepare_conversion_plan(
+        input_path=str(SIMPLE_TREE_01),
+        output_path="out.usda",
+        cpu_profile=CpuProfile.BALANCED,
+        cleanup_policy=CleanupPolicy.EPHEMERAL,
+        material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
+        bark_material_path=None,
+        leaves_material_path=None,
+        single_material_path=None,
+        base_material_overrides=(),
+        prototype_source_configs=(),
+        use_existing_part_meshes=False,
+        part_mesh_asset_paths=(),
+        async_threshold_bytes=1_000_000_000,
+        udim_material_settings=udim_settings,
+    )
+
+    assert plan.request.udim_material_settings == udim_settings
 
 
 def test_prepare_conversion_plan_builds_single_material_request() -> None:

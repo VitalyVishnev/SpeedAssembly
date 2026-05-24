@@ -153,7 +153,7 @@ Run this checklist for every real `Phase 1` sample:
 
 1. keep the baseline skeletal assembly path stable
 2. validate the current contract on multiple real structural variants
-3. only then generalize to later features such as UV modification
+3. keep newly added UDIM UV modification importer-validated as real UE 5.7 samples are exercised
 
 ## Troubleshooting shortcut
 

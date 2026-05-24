@@ -14,7 +14,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from .fbx_adapter import inspect_fbx_material_slots
-from .models import CpuProfile, FbxMaterialMode, PrototypeSourceMode
+from .models import CpuProfile, FbxMaterialMode, PrototypeSourceMode, UdimMode
 from .settings_service import (
     BaseMaterialSettingRecord,
     FbxMaterialSlotSettingRecord,
@@ -28,6 +28,8 @@ class BaseMaterialRowSpec:
     source_id: int
     source_name: str
     ue_asset_path: str = ""
+    udim_mode: UdimMode = UdimMode.OFF
+    udim_id: int = 1001
 
 
 @dataclass(frozen=True)
@@ -78,16 +80,22 @@ def discover_base_material_rows(
         )
     persisted_by_id = {record.source_id: record for record in persisted_records}
     rows = tuple(
-        BaseMaterialRowSpec(
-            source_id=material.source_id,
-            source_name=material.source_name,
-            ue_asset_path=persisted_by_id.get(material.source_id, BaseMaterialSettingRecord(material.source_id)).ue_asset_path,
-        )
+        _base_material_row_spec(material, persisted_by_id.get(material.source_id))
         for material in materials
     )
     return BaseMaterialDiscovery(
         summary=f"Found {len(rows)} base XML material slot(s).",
         rows=rows,
+    )
+
+
+def _base_material_row_spec(material, persisted: BaseMaterialSettingRecord | None) -> BaseMaterialRowSpec:
+    return BaseMaterialRowSpec(
+        source_id=material.source_id,
+        source_name=material.source_name,
+        ue_asset_path=persisted.ue_asset_path if persisted is not None else "",
+        udim_mode=persisted.udim_mode if persisted is not None else UdimMode.OFF,
+        udim_id=persisted.udim_id if persisted is not None else 1001,
     )
 
 

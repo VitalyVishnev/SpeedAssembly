@@ -51,9 +51,8 @@ It does not override `AGENTS.md`, `docs/ue_import_contract.md`, or
 
 ## Deferred future work
 
-- UDIM support.
-- Second UV channel support.
+- UE 5.7 validation of the authored UDIM second UV primvar name.
 - Batch conversion.
 - Broader validation on additional real SpeedTree sample families.
-- Detailed per-material-slot UV offset rules once the importer contract is
-  settled.
+- GUI coverage for repeated-part and FBX material-slot UDIM rows once those
+  rows expose explicit resolved material ids.

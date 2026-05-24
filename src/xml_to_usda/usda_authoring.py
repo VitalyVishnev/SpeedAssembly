@@ -1030,6 +1030,15 @@ def _emit_mesh_payload(sink, mesh: MeshData | GeometryBuffer, mesh_orientation: 
             mesh,
             metadata_lines=('interpolation = "faceVarying"',),
         )
+    if _payload_has_secondary_uvs(mesh):
+        _write_uv_array_attribute(
+            sink,
+            indent_level,
+            "texCoord2f[] primvars:st1",
+            mesh,
+            uv_set="secondary",
+            metadata_lines=('interpolation = "faceVarying"',),
+        )
 
 
 def _emit_single_joint_skinning(
@@ -1098,6 +1107,7 @@ def _write_uv_array_attribute(
     attribute_decl: str,
     mesh: MeshData | GeometryBuffer,
     *,
+    uv_set: str = "primary",
     metadata_lines: tuple[str, ...] = (),
     chunk_size: int = 4096,
 ) -> None:
@@ -1105,7 +1115,7 @@ def _write_uv_array_attribute(
         sink,
         indent_level,
         attribute_decl,
-        _iter_payload_uv_strings(mesh),
+        _iter_payload_uv_strings(mesh, uv_set=uv_set),
         metadata_lines=metadata_lines,
         chunk_size=chunk_size,
     )
@@ -1519,17 +1529,19 @@ def _iter_payload_face_index_strings(mesh: MeshData | GeometryBuffer):
     return map(str, mesh.face_vertex_indices)
 
 
-def _iter_payload_uv_strings(mesh: MeshData | GeometryBuffer):
+def _iter_payload_uv_strings(mesh: MeshData | GeometryBuffer, *, uv_set: str = "primary"):
     if isinstance(mesh, GeometryBuffer):
-        if _uv_components_should_cache_format(mesh.uv_components):
-            yield from _iter_cached_uv_component_strings(mesh.uv_components)
+        uv_components = mesh.secondary_uv_components if uv_set == "secondary" else mesh.uv_components
+        if _uv_components_should_cache_format(uv_components):
+            yield from _iter_cached_uv_component_strings(uv_components)
             return
-        yield from _iter_uv_component_strings(mesh.uv_components)
+        yield from _iter_uv_component_strings(uv_components)
         return
-    if _uv_coords_should_cache_format(mesh.uv_coords):
-        yield from _iter_cached_uv_coord_strings(mesh.uv_coords)
+    uv_coords = mesh.secondary_uv_coords if uv_set == "secondary" else mesh.uv_coords
+    if _uv_coords_should_cache_format(uv_coords):
+        yield from _iter_cached_uv_coord_strings(uv_coords)
         return
-    yield from _iter_uv_coord_strings(mesh.uv_coords)
+    yield from _iter_uv_coord_strings(uv_coords)
 
 
 def _iter_uv_component_strings(uv_components):
@@ -1593,6 +1605,12 @@ def _payload_has_uvs(mesh: MeshData | GeometryBuffer) -> bool:
     if isinstance(mesh, GeometryBuffer):
         return bool(mesh.uv_components)
     return bool(mesh.uv_coords)
+
+
+def _payload_has_secondary_uvs(mesh: MeshData | GeometryBuffer) -> bool:
+    if isinstance(mesh, GeometryBuffer):
+        return bool(mesh.secondary_uv_components)
+    return bool(mesh.secondary_uv_coords)
 
 
 def _resolve_inline_part_names(

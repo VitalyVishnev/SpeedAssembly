@@ -1502,6 +1502,7 @@ class MainWindow(QWidget):
                 leaves_material_path=self._operator_state.leaves_material_path or None,
                 single_material_path=self._operator_state.single_material_path or None,
                 base_material_overrides=self.materials_panel.collect_base_material_overrides(),
+                udim_material_settings=self.materials_panel.collect_udim_material_settings(),
                 prototype_source_configs=self.materials_panel.collect_prototype_source_configs(),
                 use_existing_part_meshes=False,
                 part_mesh_asset_paths=(),

@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSlider,
     QSizePolicy,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -42,6 +43,8 @@ from ..models import (
     FbxMaterialSlotOverride,
     PrototypeSourceConfig,
     PrototypeSourceMode,
+    UdimMaterialSetting,
+    UdimMode,
 )
 from ..settings_service import (
     BaseMaterialSettingRecord,
@@ -553,6 +556,8 @@ class BaseMaterialRowWidgets:
     source_id: int
     source_name: str
     path_edit: QLineEdit
+    udim_mode_combo: NoWheelComboBox
+    udim_id_spin: QSpinBox
 
 
 @dataclass
@@ -692,6 +697,21 @@ class MaterialsTabPanel(QWidget):
             for row in self._base_rows
         )
 
+    def collect_udim_material_settings(self) -> tuple[UdimMaterialSetting, ...]:
+        settings: list[UdimMaterialSetting] = []
+        for row in self._base_rows:
+            mode = UdimMode.parse(row.udim_mode_combo.currentData())
+            if mode == UdimMode.OFF:
+                continue
+            settings.append(
+                UdimMaterialSetting(
+                    material_id=row.source_id,
+                    mode=mode,
+                    udim_id=row.udim_id_spin.value(),
+                )
+            )
+        return tuple(settings)
+
     def collect_prototype_source_configs(self) -> tuple[PrototypeSourceConfig, ...]:
         configs: list[PrototypeSourceConfig] = []
         for row in self._part_rows:
@@ -769,13 +789,16 @@ class MaterialsTabPanel(QWidget):
         payload: list[BaseMaterialSettingRecord] = []
         for row in self._base_rows:
             value = row.path_edit.text().strip()
-            if not value:
+            udim_mode = UdimMode.parse(row.udim_mode_combo.currentData())
+            if not value and udim_mode == UdimMode.OFF:
                 continue
             payload.append(
                 BaseMaterialSettingRecord(
                     source_id=row.source_id,
                     source_name=row.source_name,
                     ue_asset_path=value,
+                    udim_mode=udim_mode,
+                    udim_id=row.udim_id_spin.value(),
                 )
             )
         return tuple(payload)
@@ -848,11 +871,27 @@ class MaterialsTabPanel(QWidget):
             path_edit = _make_path_edit(spec.ue_asset_path, row, placeholder="/Game/Path/Material.Material")
             path_edit.textChanged.connect(lambda _text: self._on_change())
             row_layout.addWidget(path_edit, 0, 2)
+            udim_mode_combo = NoWheelComboBox(row)
+            udim_mode_combo.setObjectName("InteractiveCombo")
+            udim_mode_combo.addItem("UDIM Off", UdimMode.OFF.value)
+            udim_mode_combo.addItem("Shift UV", UdimMode.SHIFT_PRIMARY_UV.value)
+            udim_mode_combo.addItem("Write UV1 Offset", UdimMode.WRITE_SECONDARY_UV_OFFSET.value)
+            _set_combo_value(udim_mode_combo, spec.udim_mode.value)
+            udim_mode_combo.currentIndexChanged.connect(lambda _index: self._on_change())
+            row_layout.addWidget(udim_mode_combo, 0, 3)
+            udim_id_spin = QSpinBox(row)
+            udim_id_spin.setRange(1001, 1999)
+            udim_id_spin.setValue(spec.udim_id)
+            udim_id_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+            udim_id_spin.valueChanged.connect(lambda _value: self._on_change())
+            row_layout.addWidget(udim_id_spin, 0, 4)
             self._base_rows.append(
                 BaseMaterialRowWidgets(
                     source_id=spec.source_id,
                     source_name=spec.source_name,
                     path_edit=path_edit,
+                    udim_mode_combo=udim_mode_combo,
+                    udim_id_spin=udim_id_spin,
                 )
             )
             layout.addWidget(row)
