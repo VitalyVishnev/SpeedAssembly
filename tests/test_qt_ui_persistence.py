@@ -12,7 +12,15 @@ from xml_to_usda.qt_ui.theme import ThemeOverrides
 
 def test_ui_shell_state_round_trip(tmp_path) -> None:
     path = tmp_path / "ui_next_state.json"
-    expected = UiShellState(x=10, y=20, width=1440, height=900, is_maximized=True, theme_name="default")
+    expected = UiShellState(
+        x=10,
+        y=20,
+        width=1440,
+        height=900,
+        is_maximized=True,
+        theme_name="default",
+        active_tab_name="Materials",
+    )
 
     save_ui_shell_state(expected, path)
     restored = load_ui_shell_state(path)

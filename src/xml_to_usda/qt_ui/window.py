@@ -460,6 +460,7 @@ class MainWindow(QWidget):
         self._apply_saved_state()
         self._apply_help_prompt_state()
         self._apply_operator_state_to_widgets()
+        self._apply_saved_active_tab()
         self._set_log(self._startup_log_text())
         self._apply_runtime_cleanup_summary()
         self._reload_input_dependent_tabs()
@@ -1040,6 +1041,10 @@ class MainWindow(QWidget):
         self._persistence_suspended = True
         self.source_input.setText(self._operator_state.input_path)
         self.output_input.setText(self._operator_state.output_path)
+        if self._operator_state.input_path:
+            self._auto_output_path = str(Path(self._operator_state.input_path).with_suffix(".usda"))
+        if self._operator_state.input_path and not self._operator_state.output_path:
+            self._set_default_output_from_source("", None, force=True)
         self.wind_panel.set_global_options(
             is_ground_cover=self._operator_state.is_ground_cover,
             gust_attenuation=self._operator_state.gust_attenuation,
@@ -1049,6 +1054,13 @@ class MainWindow(QWidget):
             for key, action in self._conversion_mode_actions.items():
                 action.setChecked(key == self._conversion_mode)
         self._persistence_suspended = False
+
+    def _apply_saved_active_tab(self) -> None:
+        active_tab_name = self._state.active_tab_name
+        for index in range(self.tabs.count()):
+            if self.tabs.tabText(index) == active_tab_name:
+                self.tabs.setCurrentIndex(index)
+                return
 
     def _apply_runtime_cleanup_summary(self) -> None:
         if not self._runtime_cleanup_summary.has_activity:
@@ -1430,6 +1442,10 @@ class MainWindow(QWidget):
         previous_input = self._operator_state.input_path
         previous_auto_output = self._auto_output_path
         initial = self.source_input.text().strip()
+        if initial:
+            initial_path = Path(initial)
+            if initial_path.suffix.lower() == ".xml" or initial_path.is_file():
+                initial = str(initial_path.parent)
         if not initial and self._operator_snapshot.last_input_path:
             initial = str(Path(self._operator_snapshot.last_input_path).parent)
         selected, _ = QFileDialog.getOpenFileName(
@@ -1673,6 +1689,7 @@ class MainWindow(QWidget):
                 is_maximized=self.isMaximized(),
                 theme_name=self._theme.name,
                 help_prompt_dismissed=self._state.help_prompt_dismissed,
+                active_tab_name=self.tabs.tabText(self.tabs.currentIndex()),
             ),
             self._state_path,
         )

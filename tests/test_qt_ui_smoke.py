@@ -184,13 +184,16 @@ def test_qt_shell_convert_button_switches_to_cancel_while_running(qtbot, tmp_pat
     assert not window.wind_panel.refresh_button.isEnabled()
 
 
-def test_qt_shell_starts_with_blank_paths_even_when_shared_settings_exist(qtbot, tmp_path) -> None:
+def test_qt_shell_restores_last_paths_when_shared_settings_exist(qtbot, tmp_path) -> None:
     deps = build_default_dependencies()
+    saved_xml = tmp_path / "saved.xml"
+    saved_usda = tmp_path / "saved.usda"
+    saved_xml.write_text("<tree/>", encoding="utf-8")
     deps.save_gui_settings(
         tmp_path / "gui_settings.json",
         GuiSettingsSnapshot(
-            last_input_path=str(tmp_path / "saved.xml"),
-            last_output_path=str(tmp_path / "saved.usda"),
+            last_input_path=str(saved_xml),
+            last_output_path=str(saved_usda),
             cpu_profile=CpuProfile.BALANCED,
             preserve_temp_files=True,
             material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
@@ -213,8 +216,9 @@ def test_qt_shell_starts_with_blank_paths_even_when_shared_settings_exist(qtbot,
     qtbot.addWidget(window)
     window.show()
 
-    assert window.source_input.text() == ""
-    assert window.output_input.text() == ""
+    assert window.source_input.text() == str(saved_xml)
+    assert window.output_input.text() == str(saved_usda)
+    assert window.convert_button.isEnabled()
 
 
 def test_qt_shell_auto_refreshes_wind_after_source_insert(monkeypatch, qtbot, tmp_path) -> None:

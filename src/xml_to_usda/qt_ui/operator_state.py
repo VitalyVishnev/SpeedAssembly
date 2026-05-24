@@ -46,13 +46,13 @@ def load_operator_state(
     *,
     settings_path: str | Path | None = None,
 ) -> tuple[OperatorState, GuiSettingsSnapshot]:
-    """Load shared operator defaults while keeping the Qt shell visually blank on startup."""
+    """Load shared operator defaults for the Qt shell."""
     resolved_settings_path = Path(settings_path) if settings_path is not None else SETTINGS_PATH
     snapshot = deps.load_gui_settings(resolved_settings_path)
     return (
         OperatorState(
-            input_path="",
-            output_path="",
+            input_path=snapshot.last_input_path,
+            output_path=snapshot.last_output_path,
             cpu_profile=CpuProfile.BALANCED,
             preserve_temp_files=snapshot.preserve_temp_files,
             conversion_mode=snapshot.conversion_mode,

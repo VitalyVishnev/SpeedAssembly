@@ -45,8 +45,8 @@ def test_qt_operator_state_loads_shared_gui_snapshot(tmp_path) -> None:
 
     operator_state, snapshot = load_operator_state(deps, settings_path=settings_path)
 
-    assert operator_state.input_path == ""
-    assert operator_state.output_path == ""
+    assert operator_state.input_path == "D:/trees/tree.xml"
+    assert operator_state.output_path == "D:/trees/tree.usda"
     assert operator_state.cpu_profile == CpuProfile.BALANCED
     assert operator_state.preserve_temp_files is True
     assert operator_state.conversion_mode == ConversionMode.SKELETAL_PARTS

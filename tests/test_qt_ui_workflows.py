@@ -604,9 +604,89 @@ def test_qt_window_uses_remembered_xml_and_output_folders_for_browse_dialogs(mon
     saved = load_gui_settings(settings_path)
 
     assert Path(observed["input_directory"]) == remembered_xml.parent
-    assert Path(observed["output_directory"]) == remembered_output
+    assert Path(observed["output_directory"]) == remembered_output.with_name("selected.usda")
     assert saved.last_input_path == str(selected_xml)
     assert saved.last_output_path == str(selected_output)
+
+
+def test_qt_window_restores_last_xml_and_derives_output_when_only_input_was_remembered(qtbot, tmp_path) -> None:
+    settings_path = tmp_path / "gui_settings.json"
+    remembered_xml = tmp_path / "xml_folder" / "last.xml"
+    remembered_xml.parent.mkdir()
+    remembered_xml.write_text("<tree/>", encoding="utf-8")
+    save_gui_settings(settings_path, GuiSettingsSnapshot(last_input_path=str(remembered_xml)))
+
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=settings_path,
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    assert window.source_input.text() == str(remembered_xml)
+    assert window.output_input.text() == str(remembered_xml.with_suffix(".usda"))
+    assert window.convert_button.isEnabled()
+
+
+def test_qt_window_persists_wind_settings_for_next_session(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    settings_path = tmp_path / "gui_settings.json"
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    first_window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=settings_path,
+    )
+    qtbot.addWidget(first_window)
+    first_window.show()
+    first_window.source_input.setText(str(tree_xml))
+    first_window.output_input.setText(str(tree_xml.with_suffix(".usda")))
+    qtbot.mouseClick(first_window.wind_panel.refresh_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: bool(first_window.wind_panel._rows), timeout=3000)
+
+    first_window.wind_panel.ground_cover_checkbox.setChecked(True)
+    first_window.wind_panel.gust_spin.setValue(0.6)
+    row = first_window.wind_panel._rows[0]
+    row.trunk_checkbox.setChecked(False)
+    row.dual_checkbox.setChecked(False)
+    row.influence_spin.setValue(0.75)
+    first_window._save_operator_state()
+
+    saved = load_gui_settings(settings_path)
+    assert saved.last_input_path == str(tree_xml)
+    assert saved.gust_attenuation == pytest.approx(0.6)
+    assert saved.is_ground_cover is True
+    assert saved.wind_group_settings["0"].is_trunk_group is False
+    assert saved.wind_group_settings["0"].use_dual_influence is False
+    assert saved.wind_group_settings["0"].influence == pytest.approx(0.75)
+
+    second_window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state_2.json",
+        operator_settings_path=settings_path,
+    )
+    qtbot.addWidget(second_window)
+    second_window.show()
+    qtbot.mouseClick(second_window.wind_panel.refresh_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: bool(second_window.wind_panel._rows), timeout=3000)
+
+    restored_row = second_window.wind_panel._rows[0]
+    assert second_window.source_input.text() == str(tree_xml)
+    assert second_window.wind_panel.is_ground_cover_enabled() is True
+    assert second_window.wind_panel.gust_attenuation() == pytest.approx(0.6)
+    assert restored_row.trunk_checkbox.isChecked() is False
+    assert restored_row.dual_checkbox.isChecked() is False
+    assert restored_row.influence_spin.value() == pytest.approx(0.75)
 
 
 def test_qt_window_shows_and_persists_dismissed_first_launch_tutorial_callout(qtbot, tmp_path) -> None:
@@ -631,6 +711,26 @@ def test_qt_window_shows_and_persists_dismissed_first_launch_tutorial_callout(qt
     window.close()
     restored = load_ui_shell_state(state_path)
     assert restored.help_prompt_dismissed is True
+
+
+def test_qt_window_restores_and_saves_active_tab(qtbot, tmp_path) -> None:
+    state_path = tmp_path / "ui_next_state.json"
+    window = MainWindow(
+        load_theme(),
+        UiShellState(active_tab_name="Materials"),
+        dependencies=_build_fake_deps({}),
+        state_path=state_path,
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    assert window.tabs.tabText(window.tabs.currentIndex()) == "Materials"
+
+    window.tabs.setCurrentIndex(window.tabs.indexOf(window.geometry_panel))
+    window.close()
+
+    assert load_ui_shell_state(state_path).active_tab_name == "Geometry"
 
 
 def test_qt_window_opens_slide_style_help_deck_with_topics_and_arrows(qtbot, tmp_path) -> None:
