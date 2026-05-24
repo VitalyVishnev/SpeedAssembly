@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path
 
 from .job_control import emit_telemetry, throw_if_cancelled
@@ -38,6 +39,11 @@ from .models import (
 )
 from .naming import make_stable_prim_name
 from .ue_schema import DEFAULT_UE_SCHEMA_CONTRACT, UeSchemaContract
+
+
+_UV_FORMAT_CACHE_MIN_PAIRS = 1024
+_UV_FORMAT_CACHE_SAMPLE_PAIRS = 2048
+_UV_FORMAT_CACHE_MAX_UNIQUE_RATIO = 0.75
 
 
 @dataclass(frozen=True)
@@ -1017,11 +1023,11 @@ def _emit_mesh_payload(sink, mesh: MeshData | GeometryBuffer, mesh_orientation: 
         _iter_payload_face_index_strings(mesh),
     )
     if _payload_has_uvs(mesh):
-        _write_array_attribute(
+        _write_uv_array_attribute(
             sink,
             indent_level,
             "texCoord2f[] primvars:st",
-            _iter_payload_uv_strings(mesh),
+            mesh,
             metadata_lines=('interpolation = "faceVarying"',),
         )
 
@@ -1083,6 +1089,29 @@ def _write_array_attribute(
     prefix = " " * 4 * indent_level
     sink.write(f"{prefix}{attribute_decl} = [")
     _write_formatted_values(sink, values, chunk_size=chunk_size)
+    _finish_array_attribute(sink, prefix, metadata_lines)
+
+
+def _write_uv_array_attribute(
+    sink,
+    indent_level: int,
+    attribute_decl: str,
+    mesh: MeshData | GeometryBuffer,
+    *,
+    metadata_lines: tuple[str, ...] = (),
+    chunk_size: int = 4096,
+) -> None:
+    _write_array_attribute(
+        sink,
+        indent_level,
+        attribute_decl,
+        _iter_payload_uv_strings(mesh),
+        metadata_lines=metadata_lines,
+        chunk_size=chunk_size,
+    )
+
+
+def _finish_array_attribute(sink, prefix: str, metadata_lines: tuple[str, ...]) -> None:
     sink.write("]")
     if metadata_lines:
         sink.write(" (\n")
@@ -1094,19 +1123,16 @@ def _write_array_attribute(
 
 
 def _write_formatted_values(sink, values: Iterable[str], *, chunk_size: int) -> None:
-    pending: list[str] = []
-    wrote_any = False
-    for value in values:
-        pending.append(value)
-        if len(pending) >= chunk_size:
-            if wrote_any:
-                sink.write(", ")
-            sink.write(", ".join(pending))
-            wrote_any = True
-            pending.clear()
-    if pending:
-        if wrote_any:
-            sink.write(", ")
+    iterator = iter(values)
+    pending = list(islice(iterator, chunk_size))
+    if not pending:
+        return
+    sink.write(", ".join(pending))
+    while True:
+        pending = list(islice(iterator, chunk_size))
+        if not pending:
+            return
+        sink.write(", ")
         sink.write(", ".join(pending))
 
 
@@ -1482,34 +1508,85 @@ def _iter_payload_point_strings(mesh: MeshData | GeometryBuffer):
             yield f"({mesh.point_components[index]:g}, {mesh.point_components[index + 1]:g}, {mesh.point_components[index + 2]:g})"
         return
     for point in mesh.points:
-        yield point.to_usda()
+        yield f"({point.x:g}, {point.y:g}, {point.z:g})"
 
 
 def _iter_payload_face_count_strings(mesh: MeshData | GeometryBuffer):
-    if isinstance(mesh, GeometryBuffer):
-        for value in mesh.face_vertex_counts:
-            yield str(value)
-        return
-    for value in mesh.face_vertex_counts:
-        yield str(value)
+    return map(str, mesh.face_vertex_counts)
 
 
 def _iter_payload_face_index_strings(mesh: MeshData | GeometryBuffer):
-    if isinstance(mesh, GeometryBuffer):
-        for value in mesh.face_vertex_indices:
-            yield str(value)
-        return
-    for value in mesh.face_vertex_indices:
-        yield str(value)
+    return map(str, mesh.face_vertex_indices)
 
 
 def _iter_payload_uv_strings(mesh: MeshData | GeometryBuffer):
     if isinstance(mesh, GeometryBuffer):
-        for index in range(0, len(mesh.uv_components), 2):
-            yield f"({mesh.uv_components[index]:g}, {mesh.uv_components[index + 1]:g})"
+        if _uv_components_should_cache_format(mesh.uv_components):
+            yield from _iter_cached_uv_component_strings(mesh.uv_components)
+            return
+        yield from _iter_uv_component_strings(mesh.uv_components)
         return
-    for uv in mesh.uv_coords:
-        yield uv.to_usda()
+    if _uv_coords_should_cache_format(mesh.uv_coords):
+        yield from _iter_cached_uv_coord_strings(mesh.uv_coords)
+        return
+    yield from _iter_uv_coord_strings(mesh.uv_coords)
+
+
+def _iter_uv_component_strings(uv_components):
+    for index in range(0, len(uv_components), 2):
+        yield f"({uv_components[index]:g}, {uv_components[index + 1]:g})"
+
+
+def _iter_cached_uv_component_strings(uv_components):
+    cache: dict[tuple[float, float], str] = {}
+    for index in range(0, len(uv_components), 2):
+        key = (uv_components[index], uv_components[index + 1])
+        value = cache.get(key)
+        if value is None:
+            value = f"({key[0]:g}, {key[1]:g})"
+            cache[key] = value
+        yield value
+
+
+def _iter_uv_coord_strings(uv_coords):
+    for uv in uv_coords:
+        yield f"({uv.x:g}, {uv.y:g})"
+
+
+def _iter_cached_uv_coord_strings(uv_coords):
+    cache: dict[tuple[float, float], str] = {}
+    for uv in uv_coords:
+        key = (uv.x, uv.y)
+        value = cache.get(key)
+        if value is None:
+            value = f"({uv.x:g}, {uv.y:g})"
+            cache[key] = value
+        yield value
+
+
+def _uv_components_should_cache_format(uv_components) -> bool:
+    pair_count = len(uv_components) // 2
+    if pair_count < _UV_FORMAT_CACHE_MIN_PAIRS:
+        return False
+    sample_pair_count = min(pair_count, _UV_FORMAT_CACHE_SAMPLE_PAIRS)
+    sample_end = sample_pair_count * 2
+    unique_pairs = {
+        (uv_components[index], uv_components[index + 1])
+        for index in range(0, sample_end, 2)
+    }
+    return len(unique_pairs) / sample_pair_count <= _UV_FORMAT_CACHE_MAX_UNIQUE_RATIO
+
+
+def _uv_coords_should_cache_format(uv_coords) -> bool:
+    pair_count = len(uv_coords)
+    if pair_count < _UV_FORMAT_CACHE_MIN_PAIRS:
+        return False
+    sample_pair_count = min(pair_count, _UV_FORMAT_CACHE_SAMPLE_PAIRS)
+    unique_pairs = {
+        (uv_coords[index].x, uv_coords[index].y)
+        for index in range(sample_pair_count)
+    }
+    return len(unique_pairs) / sample_pair_count <= _UV_FORMAT_CACHE_MAX_UNIQUE_RATIO
 
 
 def _payload_has_uvs(mesh: MeshData | GeometryBuffer) -> bool:
