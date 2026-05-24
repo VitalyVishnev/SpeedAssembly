@@ -660,6 +660,26 @@ def test_qt_window_preserves_manual_output_folder_and_updates_stem(qtbot, tmp_pa
     assert window.output_input.text() == str(output_path.with_name("cedar.usda"))
 
 
+def test_qt_window_reanchors_relative_output_to_selected_xml_folder(qtbot, tmp_path) -> None:
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    window.output_input.setText("SkeletalAssemblyTest_Spruce_Big_low.usda")
+    tree_xml = tmp_path / "XMLtoUSD_miscFiles" / "SkeletalAssemblyTest_Spruce_Big_low.xml"
+    tree_xml.parent.mkdir(parents=True, exist_ok=True)
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+
+    assert window.output_input.text() == str(tree_xml.with_suffix(".usda"))
+
+
 def test_qt_window_uses_remembered_xml_and_output_folders_for_browse_dialogs(monkeypatch, qtbot, tmp_path) -> None:
     settings_path = tmp_path / "gui_settings.json"
     remembered_xml = tmp_path / "xml_folder" / "last.xml"

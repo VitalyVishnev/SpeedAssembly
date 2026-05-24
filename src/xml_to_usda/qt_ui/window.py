@@ -1344,10 +1344,11 @@ class MainWindow(QWidget):
         new_auto_output = str(Path(source_path).with_suffix(".usda"))
         current_output = self.output_input.text().strip()
         previous_default = previous_auto_output or (str(Path(previous_input).with_suffix(".usda")) if previous_input else "")
-        if force or not current_output or current_output == previous_default:
+        current_path = Path(current_output) if current_output else None
+        current_is_relative = bool(current_path is not None and not current_path.is_absolute())
+        if force or not current_output or current_output == previous_default or current_is_relative:
             next_output = new_auto_output
         else:
-            current_path = Path(current_output)
             next_output = str(current_path.with_name(f"{Path(source_path).stem}{current_path.suffix or '.usda'}"))
         if next_output != current_output:
             self._persistence_suspended = True
