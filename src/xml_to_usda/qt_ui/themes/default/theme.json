@@ -10,6 +10,10 @@
     "button_text": "#13130F",
     "secondary_fill": "#DDBB64",
     "accent_fill": "#BF8C4E",
+    "control_fill": "#DDBB64",
+    "control_hover_fill": "#BF8C4E",
+    "chrome_control_fill": "#E0DCE5E8",
+    "chrome_control_hover_fill": "#BF8C4E",
     "danger_fill": "#A65233",
     "titlebar_fill": "#DCE5E8",
     "titlebar_text": "#13130F",
@@ -20,7 +24,11 @@
     "tab_fill": "#DCE8DF80",
     "tab_selected_fill": "#D9BB62",
     "tab_hover_fill": "#BF8C4E",
-    "tab_text": "#1A1A15"
+    "tab_text": "#1A1A15",
+    "path_input_fill": "#B8B7C5C9",
+    "path_input_hover_fill": "#DBC4D5D9",
+    "path_input_border": "#1A403D30",
+    "path_input_focus_border": "#6B8F964E"
   },
   "font_sizes": {
     "title": 11,
@@ -31,7 +39,7 @@
     "window": 30,
     "panel": 30,
     "control": 18,
-    "button": 17,
+    "button": 16,
     "card": 18,
     "tab": 16
   },
@@ -59,7 +67,7 @@
     "panel_vertical_offset": 0,
     "left_column_width": 325,
     "action_column_width": 234,
-    "tabs_min_height": 526,
+    "tabs_min_height": 559,
     "tab_min_width": 124,
     "file_row_gap": -24
   },
@@ -88,7 +96,7 @@
     "file_button_width": 122,
     "file_button_height": 34,
     "wind_refresh_button_width": 172,
-    "wind_refresh_button_height": 28
+    "wind_refresh_button_height": 32
   },
   "effects": {
     "panel_shadow_blur": 64,

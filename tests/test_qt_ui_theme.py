@@ -9,6 +9,7 @@ from xml_to_usda.qt_ui.theme import (
     ThemeOverrides,
     bake_theme_payload,
     build_stylesheet,
+    build_ui_palette,
     compute_cover_source_rect,
     load_bundled_theme,
     load_theme,
@@ -100,3 +101,36 @@ def test_primary_action_button_uses_theme_button_fill() -> None:
     assert "#123456" in stylesheet
     assert "rgba(101, 67, 33" in stylesheet
     assert "rgba(109, 115, 64, 0.94)" not in stylesheet
+
+
+def test_ui_palette_exposes_shared_control_tokens() -> None:
+    palette = build_ui_palette(load_theme())
+
+    assert palette["control_fill"] == "#DDBB64"
+    assert palette["control_hover_fill"] == "#BF8C4E"
+    assert palette["chrome_control_fill"] == "rgba(220, 229, 232, 0.878)"
+    assert palette["path_input_fill"] == "rgba(183, 197, 201, 0.722)"
+
+
+def test_shared_controls_use_one_hover_color() -> None:
+    theme = load_theme(
+        overrides=ThemeOverrides(
+            theme_name="default",
+            payload={
+                "colors": {
+                    "control_fill": "#445566",
+                    "control_hover_fill": "#778899",
+                    "chrome_control_fill": "#AABBCC",
+                    "chrome_control_hover_fill": "#778899",
+                }
+            },
+        )
+    )
+
+    stylesheet = build_stylesheet(theme)
+
+    assert "QPushButton#FileButton" in stylesheet
+    assert "QComboBox#InteractiveCombo" in stylesheet
+    assert "QPushButton#WindRefreshButton" in stylesheet
+    assert stylesheet.count("background: #445566;") >= 3
+    assert stylesheet.count("background: #778899;") >= 6

@@ -139,28 +139,67 @@ def compute_cover_source_rect(
     return (left, 0, max(1, crop_width), image_height)
 
 
+def build_ui_palette(theme: ResolvedTheme) -> dict[str, str]:
+    """Return the semantic UI color palette used by the stylesheet."""
+
+    control_hover_source = str(theme.colors.get("control_hover_fill", theme.colors.get("tab_hover_fill", theme.colors["accent_fill"])))
+    return {
+        "titlebar_fill": _css_color(str(theme.chrome["titlebar_fill"])),
+        "titlebar_text": _css_color(str(theme.chrome["titlebar_text"])),
+        "window_text": _css_color(str(theme.colors["window_text"])),
+        "muted_text": _css_color(str(theme.colors["muted_text"])),
+        "input_fill": _css_color(str(theme.colors["input_fill"])),
+        "input_text": _css_color(str(theme.colors["input_text"])),
+        "button_fill": _css_color(str(theme.colors["button_fill"])),
+        "button_text": _css_color(str(theme.colors["button_text"])),
+        "button_fill_disabled": _color_or_alpha(theme, "button_fill_disabled", "button_fill", 0.42),
+        "control_fill": _css_color(str(theme.colors.get("control_fill", theme.colors["secondary_fill"]))),
+        "control_hover_fill": _css_color(control_hover_source),
+        "chrome_control_fill": _css_color(str(theme.colors.get("chrome_control_fill", theme.colors["input_fill"]))),
+        "chrome_control_hover_fill": _css_color(str(theme.colors.get("chrome_control_hover_fill", control_hover_source))),
+        "danger_fill": _css_color(str(theme.colors["danger_fill"])),
+        "danger_fill_soft": _with_alpha(str(theme.colors["danger_fill"]), 0.78),
+        "log_fill": _css_color(str(theme.colors["log_fill"])),
+        "card_fill": _css_color(str(theme.colors["card_fill"])),
+        "card_text": _css_color(str(theme.colors["card_text"])),
+        "card_border": _css_color(str(theme.colors["card_border"])),
+        "tab_fill": _css_color(str(theme.colors["tab_fill"])),
+        "tab_selected_fill": _css_color(str(theme.colors["tab_selected_fill"])),
+        "tab_hover_fill": _css_color(str(theme.colors.get("tab_hover_fill", control_hover_source))),
+        "tab_text": _css_color(str(theme.colors["tab_text"])),
+        "path_input_fill": _css_color(str(theme.colors.get("path_input_fill", "#B8B7C5C9"))),
+        "path_input_hover_fill": _css_color(str(theme.colors.get("path_input_hover_fill", "#DBC4D5D9"))),
+        "path_input_border": _css_color(str(theme.colors.get("path_input_border", "#1A403D30"))),
+        "path_input_focus_border": _css_color(str(theme.colors.get("path_input_focus_border", "#6B8F964E"))),
+    }
+
+
 def build_stylesheet(theme: ResolvedTheme) -> str:
-    titlebar_fill = _css_color(theme.chrome["titlebar_fill"])
-    titlebar_text = _css_color(theme.chrome["titlebar_text"])
-    input_fill = _css_color(theme.colors["input_fill"])
-    input_text = _css_color(theme.colors["input_text"])
-    button_fill = _css_color(theme.colors["button_fill"])
-    button_text = _css_color(theme.colors["button_text"])
-    accent_fill = _css_color(theme.colors["accent_fill"])
-    secondary_fill = _css_color(theme.colors["secondary_fill"])
-    danger_fill = _css_color(theme.colors["danger_fill"])
-    log_fill = _css_color(theme.colors["log_fill"])
-    card_fill = _css_color(theme.colors["card_fill"])
-    card_text = _css_color(theme.colors["card_text"])
-    card_border = _css_color(theme.colors["card_border"])
-    tab_fill = _css_color(theme.colors["tab_fill"])
-    tab_selected_fill = _css_color(theme.colors["tab_selected_fill"])
-    tab_hover_fill = _css_color(theme.colors["tab_hover_fill"])
-    tab_text = _css_color(theme.colors["tab_text"])
-    window_text = _css_color(theme.colors["window_text"])
-    muted_text = _css_color(theme.colors["muted_text"])
-    menu_fill = _css_color(theme.colors["card_fill"])
-    menu_text = _css_color(theme.colors["card_text"])
+    palette = build_ui_palette(theme)
+    titlebar_fill = palette["titlebar_fill"]
+    titlebar_text = palette["titlebar_text"]
+    input_fill = palette["input_fill"]
+    input_text = palette["input_text"]
+    button_fill = palette["button_fill"]
+    button_text = palette["button_text"]
+    control_fill = palette["control_fill"]
+    control_hover_fill = palette["control_hover_fill"]
+    secondary_fill = control_fill
+    accent_fill = control_hover_fill
+    chrome_control_fill = palette["chrome_control_fill"]
+    chrome_control_hover_fill = palette["chrome_control_hover_fill"]
+    log_fill = palette["log_fill"]
+    card_fill = palette["card_fill"]
+    card_text = palette["card_text"]
+    card_border = palette["card_border"]
+    tab_fill = palette["tab_fill"]
+    tab_selected_fill = palette["tab_selected_fill"]
+    tab_hover_fill = palette["tab_hover_fill"]
+    tab_text = palette["tab_text"]
+    window_text = palette["window_text"]
+    muted_text = palette["muted_text"]
+    menu_fill = palette["card_fill"]
+    menu_text = palette["card_text"]
     panel_radius = theme.radii["control"]
     button_radius = theme.radii["button"]
     tab_radius = theme.radii.get("tab", button_radius)
@@ -181,10 +220,8 @@ def build_stylesheet(theme: ResolvedTheme) -> str:
     title_preset_width = int(theme.chrome.get("title_preset_width", 210))
     title_preset_height = int(theme.chrome.get("title_preset_height", window_button_size))
     tab_min_width = int(theme.layout.get("tab_min_width", 120))
-    button_fill_disabled = _with_alpha(theme.colors["button_fill"], 0.42)
-    accent_fill_soft = _with_alpha(theme.colors["accent_fill"], 0.35)
-    secondary_fill_soft = _with_alpha(theme.colors["secondary_fill"], 0.92)
-    danger_fill_soft = _with_alpha(theme.colors["danger_fill"], 0.78)
+    button_fill_disabled = palette["button_fill_disabled"]
+    danger_fill_soft = palette["danger_fill_soft"]
 
     return f"""
 QWidget {{
@@ -233,16 +270,16 @@ QLineEdit:hover {{
     background: {input_fill};
 }}
 QLineEdit#PathInput {{
-    background: rgba(183, 197, 201, 0.72);
+    background: {palette["path_input_fill"]};
     color: {input_text};
     border-radius: {panel_radius}px;
     padding: 8px 14px;
-    border: 1px solid rgba(64, 61, 48, 0.10);
+    border: 1px solid {palette["path_input_border"]};
 }}
 QLineEdit#PathInput:hover,
 QLineEdit#PathInput:focus {{
-    background: rgba(196, 213, 217, 0.86);
-    border: 1px solid rgba(143, 150, 78, 0.42);
+    background: {palette["path_input_hover_fill"]};
+    border: 1px solid {palette["path_input_focus_border"]};
 }}
 QPushButton {{
     background: {button_fill};
@@ -323,7 +360,7 @@ QPushButton#WindowButton {{
     font-weight: 600;
 }}
 QPushButton#WindowButton:hover {{
-    background: {accent_fill_soft};
+    background: {chrome_control_hover_fill};
 }}
 QPushButton#CloseWindowButton {{
     background: transparent;
@@ -341,7 +378,7 @@ QPushButton#CloseWindowButton:hover {{
     color: {log_fill};
 }}
 QPushButton#TitlePillButton {{
-    background: rgba(220, 229, 232, 0.88);
+    background: {chrome_control_fill};
     border-radius: {button_radius}px;
     min-width: {title_pill_width}px;
     max-width: {title_pill_width}px;
@@ -349,7 +386,7 @@ QPushButton#TitlePillButton {{
     max-height: {title_pill_height}px;
 }}
 QPushButton#AdjustUiButton {{
-    background: rgba(220, 229, 232, 0.88);
+    background: {chrome_control_fill};
     border-radius: {button_radius}px;
     min-width: {adjust_ui_button_width}px;
     max-width: {adjust_ui_button_width}px;
@@ -358,10 +395,10 @@ QPushButton#AdjustUiButton {{
 }}
 QPushButton#TitlePillButton:hover,
 QPushButton#AdjustUiButton:hover {{
-    background: {accent_fill_soft};
+    background: {chrome_control_hover_fill};
 }}
 QComboBox#TitlePresetCombo {{
-    background: rgba(220, 229, 232, 0.88);
+    background: {chrome_control_fill};
     color: {input_text};
     border-top-left-radius: {title_preset_height // 2}px;
     border-bottom-left-radius: {title_preset_height // 2}px;
@@ -375,14 +412,14 @@ QComboBox#TitlePresetCombo {{
     border: none;
 }}
 QComboBox#TitlePresetCombo:hover {{
-    background: {accent_fill_soft};
+    background: {chrome_control_hover_fill};
 }}
 QComboBox#TitlePresetCombo::drop-down {{
     border: none;
     width: 22px;
 }}
 QToolButton#TitlePresetMenuButton {{
-    background: rgba(220, 229, 232, 0.88);
+    background: {chrome_control_fill};
     color: {button_text};
     border-top-left-radius: 0px;
     border-bottom-left-radius: 0px;
@@ -396,14 +433,14 @@ QToolButton#TitlePresetMenuButton {{
     border: none;
 }}
 QToolButton#TitlePresetMenuButton:hover {{
-    background: {accent_fill_soft};
+    background: {chrome_control_hover_fill};
 }}
 QToolButton#TitlePresetMenuButton::menu-indicator {{
     image: none;
     width: 0px;
 }}
 QPushButton#FileButton {{
-    background: {secondary_fill};
+    background: {control_fill};
     color: {button_text};
     min-width: {file_button_width}px;
     max-width: {file_button_width}px;
@@ -411,18 +448,18 @@ QPushButton#FileButton {{
     max-height: {file_button_height}px;
 }}
 QPushButton#FileButton:hover {{
-    background: {secondary_fill_soft};
+    background: {control_hover_fill};
 }}
 QPushButton#PrimaryActionButton {{
     background: {button_fill};
 }}
 QPushButton#PrimaryActionButton:hover {{
-    background: {accent_fill};
+    background: {control_hover_fill};
 }}
 QPushButton#WindRefreshButton {{
-    background: {tab_fill};
-    color: {tab_text};
-    border-radius: {tab_radius}px;
+    background: {control_fill};
+    color: {button_text};
+    border-radius: {button_radius}px;
     min-width: {wind_refresh_button_width}px;
     max-width: {wind_refresh_button_width}px;
     min-height: {wind_refresh_button_height}px;
@@ -430,10 +467,10 @@ QPushButton#WindRefreshButton {{
     padding: 4px 10px;
 }}
 QPushButton#WindRefreshButton:hover {{
-    background: {tab_hover_fill};
+    background: {control_hover_fill};
 }}
 QPushButton#WindRefreshButton:disabled {{
-    background: {tab_fill};
+    background: {button_fill_disabled};
     color: rgba(26, 26, 21, 0.58);
 }}
 QPushButton#SplitActionMainButton {{
@@ -447,7 +484,7 @@ QPushButton#SplitActionMainButton {{
 }}
 QPushButton#SplitActionMainButton:hover,
 QToolButton#SplitActionMenuButton:hover {{
-    background: {accent_fill};
+    background: {control_hover_fill};
 }}
 QPushButton#SplitActionMainButton:disabled,
 QToolButton#SplitActionMenuButton:disabled {{
@@ -496,7 +533,7 @@ QMenu::separator {{
     margin: 6px 10px;
 }}
 QFrame#SplitActionDivider {{
-    background: rgba(220, 229, 232, 0.58);
+    background: {chrome_control_fill};
     min-width: 1px;
     max-width: 1px;
 }}
@@ -530,7 +567,7 @@ QComboBox QAbstractItemView {{
     outline: none;
 }}
 QComboBox#InteractiveCombo {{
-    background: {secondary_fill};
+    background: {control_fill};
     color: {button_text};
     border-radius: {button_radius}px;
     min-height: {input_height}px;
@@ -539,7 +576,7 @@ QComboBox#InteractiveCombo {{
 }}
 QComboBox#InteractiveCombo:hover,
 QComboBox#InteractiveCombo:focus {{
-    background: {accent_fill};
+    background: {control_hover_fill};
 }}
 QComboBox#InteractiveCombo::drop-down {{
     border: none;
@@ -747,6 +784,13 @@ def _with_alpha(value: str, alpha_fraction: float) -> str:
         alpha = max(0.0, min(1.0, alpha_fraction))
         return f"rgba({red}, {green}, {blue}, {alpha:.3f})"
     return normalized
+
+
+def _color_or_alpha(theme: _ThemeBase, key: str, fallback_key: str, alpha_fraction: float) -> str:
+    value = theme.colors.get(key)
+    if value is not None:
+        return _css_color(str(value))
+    return _with_alpha(str(theme.colors[fallback_key]), alpha_fraction)
 
 
 def _validate_theme_payload(payload: Mapping[str, Any]) -> None:
