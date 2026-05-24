@@ -18,6 +18,7 @@ from xml_to_usda.normalizer import (
     _extract_bounds,
     _mesh_with_original_scale,
     _read_float_list,
+    _read_int_list,
     _read_positive_float,
     normalize_to_canonical,
 )
@@ -1279,6 +1280,8 @@ def test_locale_decimal_parsing_accepts_comma_floats_for_lists_and_bounds() -> N
     )
 
     assert _read_float_list("0,3048 -0,490294 1,25") == pytest.approx([0.3048, -0.490294, 1.25])
+    assert _read_float_list("1,2,3 invalid 4.5") == pytest.approx([1.0, 2.0, 3.0, 4.5])
+    assert _read_int_list("1,2 invalid -3") == [1, 2, -3]
     assert _read_positive_float("15,8194") == pytest.approx(15.8194)
 
     bounds = _extract_bounds(obj, source_transform)

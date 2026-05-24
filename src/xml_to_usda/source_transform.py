@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from functools import cached_property
 
 from .models import Bounds, Vector3
 
@@ -27,17 +28,27 @@ class SourceTransform:
     target_meters_per_unit: float = 1.0
     target_up_axis: str = "Y"
 
-    @property
+    @cached_property
     def linear_scale(self) -> float:
         meters_per_source_unit = _METERS_PER_UNIT.get(self.source_units, _METERS_PER_UNIT["cm"])
         return meters_per_source_unit / self.target_meters_per_unit
 
     def point_to_stage(self, point: Vector3) -> Vector3:
-        rotated = self.direction_to_stage(point)
+        return self.point_components_to_stage(point.x, point.y, point.z)
+
+    def point_components_to_stage(self, x: float, y: float, z: float) -> Vector3:
+        scale = self.linear_scale
+        if self.source_up_axis == self.target_up_axis:
+            return Vector3(x * scale, y * scale, z * scale)
+        if self.source_up_axis == "Z" and self.target_up_axis == "Y":
+            return Vector3(x * scale, z * scale, -y * scale)
+        if self.source_up_axis == "Y" and self.target_up_axis == "Z":
+            return Vector3(x * scale, -z * scale, y * scale)
+        rotated = self.direction_to_stage(Vector3(x, y, z))
         return Vector3(
-            rotated.x * self.linear_scale,
-            rotated.y * self.linear_scale,
-            rotated.z * self.linear_scale,
+            rotated.x * scale,
+            rotated.y * scale,
+            rotated.z * scale,
         )
 
     def direction_to_stage(self, direction: Vector3) -> Vector3:

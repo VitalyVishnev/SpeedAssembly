@@ -3,7 +3,7 @@
 import math
 import xml.etree.ElementTree as ET
 from collections import defaultdict
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from .naming import build_prototype_identities
 from .models import (
@@ -37,6 +37,23 @@ from .source_transform import SourceTransform, build_source_transform
 
 PRIMARY_MATERIAL_ID = 1
 LEAVES_MATERIAL_ID = 2
+
+
+@dataclass(frozen=True)
+class _LeafReferencePayload:
+    xs: list[float]
+    ys: list[float]
+    zs: list[float]
+    scales: list[float]
+    axis_x: list[float]
+    axis_y: list[float]
+    axis_z: list[float]
+    angles: list[float]
+    mesh_ids: list[int]
+    mesh_lods: list[int]
+    bone_ids: list[int]
+    source_material_id: int | None
+    count: int
 
 
 def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> CanonicalTreeModel:
@@ -438,7 +455,7 @@ def _extract_skeleton(root: ET.Element, messages: list[str], source_transform: S
             (
                 int(bone_id),
                 parsed_parent_id,
-                source_transform.point_to_stage(Vector3(start_x, start_y, start_z)),
+                source_transform.point_components_to_stage(start_x, start_y, start_z),
                 generator_label,
                 generator_level,
             )
@@ -483,67 +500,107 @@ def _extract_assembly_parts_from_leaf_references(
         if leaf_ref_node is None:
             continue
 
-        xs = _read_float_list(leaf_ref_node.findtext("X"))
-        ys = _read_float_list(leaf_ref_node.findtext("Y"))
-        zs = _read_float_list(leaf_ref_node.findtext("Z"))
-        scales = _read_float_list(leaf_ref_node.findtext("Scale"))
-        axis_x = _read_float_list(leaf_ref_node.findtext("RotAxisX"))
-        axis_y = _read_float_list(leaf_ref_node.findtext("RotAxisY"))
-        axis_z = _read_float_list(leaf_ref_node.findtext("RotAxisZ"))
-        angles = _read_float_list(leaf_ref_node.findtext("RotAngle"))
-        mesh_ids = _read_int_list(leaf_ref_node.findtext("MeshID"))
-        mesh_lods = _read_int_list(leaf_ref_node.findtext("MeshLOD"))
-        bone_ids = _read_int_list(leaf_ref_node.findtext("BoneID"))
-        source_material_id = _read_material_id(leaf_ref_node, f"LeafReferences[{obj.attrib.get('Name', obj.attrib.get('ID', '?'))}]", messages, material_ids)
-
-        count = _consistent_count(
-            f"LeafReferences[{obj.attrib.get('Name', obj.attrib.get('ID', '?'))}]",
-            messages,
-            required=[("X", xs), ("Y", ys), ("Z", zs)],
-            optional=[
-                ("Scale", scales),
-                ("RotAxisX", axis_x),
-                ("RotAxisY", axis_y),
-                ("RotAxisZ", axis_z),
-                ("RotAngle", angles),
-                ("MeshID", mesh_ids),
-                ("MeshLOD", mesh_lods),
-                ("BoneID", bone_ids),
-            ],
-        )
-        if count == 0:
+        payload = _read_leaf_reference_payload(obj, leaf_ref_node, messages, material_ids)
+        if payload.count == 0:
             continue
 
-        for index in range(count):
-            source_bone_id = bone_ids[index] if index < len(bone_ids) else None
-            source_mesh_id = mesh_ids[index] if index < len(mesh_ids) else None
-            prototype_key = f"Mesh_{source_mesh_id}" if source_mesh_id is not None else "LeafPrototype"
-            uniform_scale = scales[index] if index < len(scales) else 1.0
-            binding = _binding_from_bone_id(source_bone_id)
+        for index in range(payload.count):
             assembly_parts.append(
-                RepeatedPartInstance(
+                _build_leaf_reference_instance(
+                    payload,
+                    index,
                     name=f"AssemblyPart_{len(assembly_parts):04d}",
-                    prototype_key=prototype_key,
-                    position=source_transform.point_to_stage(Vector3(xs[index], ys[index], zs[index])),
-                    orientation=_leaf_reference_orientation_to_stage(
-                        source_transform,
-                        Vector3(
-                            axis_x[index] if index < len(axis_x) else 0.0,
-                            axis_y[index] if index < len(axis_y) else 0.0,
-                            axis_z[index] if index < len(axis_z) else 1.0,
-                        ),
-                        angles[index] if index < len(angles) else 0.0,
-                    ),
-                    scale=Vector3(uniform_scale, uniform_scale, uniform_scale),
-                    binding=binding,
                     source_object_id=obj.attrib.get("ID"),
-                    source_mesh_id=source_mesh_id,
-                    source_material_id=source_material_id,
-                    source_bone_ids=(source_bone_id,) if source_bone_id is not None else (),
-                    mesh_lod=mesh_lods[index] if index < len(mesh_lods) else None,
+                    source_transform=source_transform,
                 )
             )
     return assembly_parts
+
+
+def _read_leaf_reference_payload(
+    obj: ET.Element,
+    leaf_ref_node: ET.Element,
+    messages: list[str],
+    material_ids: set[int],
+) -> _LeafReferencePayload:
+    context = f"LeafReferences[{obj.attrib.get('Name', obj.attrib.get('ID', '?'))}]"
+    xs = _read_float_list(leaf_ref_node.findtext("X"))
+    ys = _read_float_list(leaf_ref_node.findtext("Y"))
+    zs = _read_float_list(leaf_ref_node.findtext("Z"))
+    scales = _read_float_list(leaf_ref_node.findtext("Scale"))
+    axis_x = _read_float_list(leaf_ref_node.findtext("RotAxisX"))
+    axis_y = _read_float_list(leaf_ref_node.findtext("RotAxisY"))
+    axis_z = _read_float_list(leaf_ref_node.findtext("RotAxisZ"))
+    angles = _read_float_list(leaf_ref_node.findtext("RotAngle"))
+    mesh_ids = _read_int_list(leaf_ref_node.findtext("MeshID"))
+    mesh_lods = _read_int_list(leaf_ref_node.findtext("MeshLOD"))
+    bone_ids = _read_int_list(leaf_ref_node.findtext("BoneID"))
+    source_material_id = _read_material_id(leaf_ref_node, context, messages, material_ids)
+    count = _consistent_count(
+        context,
+        messages,
+        required=[("X", xs), ("Y", ys), ("Z", zs)],
+        optional=[
+            ("Scale", scales),
+            ("RotAxisX", axis_x),
+            ("RotAxisY", axis_y),
+            ("RotAxisZ", axis_z),
+            ("RotAngle", angles),
+            ("MeshID", mesh_ids),
+            ("MeshLOD", mesh_lods),
+            ("BoneID", bone_ids),
+        ],
+    )
+    return _LeafReferencePayload(
+        xs=xs,
+        ys=ys,
+        zs=zs,
+        scales=scales,
+        axis_x=axis_x,
+        axis_y=axis_y,
+        axis_z=axis_z,
+        angles=angles,
+        mesh_ids=mesh_ids,
+        mesh_lods=mesh_lods,
+        bone_ids=bone_ids,
+        source_material_id=source_material_id,
+        count=count,
+    )
+
+
+def _build_leaf_reference_instance(
+    payload: _LeafReferencePayload,
+    index: int,
+    *,
+    name: str,
+    source_object_id: str | None,
+    source_transform: SourceTransform,
+) -> RepeatedPartInstance:
+    source_bone_id = payload.bone_ids[index] if index < len(payload.bone_ids) else None
+    source_mesh_id = payload.mesh_ids[index] if index < len(payload.mesh_ids) else None
+    prototype_key = f"Mesh_{source_mesh_id}" if source_mesh_id is not None else "LeafPrototype"
+    uniform_scale = payload.scales[index] if index < len(payload.scales) else 1.0
+    return RepeatedPartInstance(
+        name=name,
+        prototype_key=prototype_key,
+        position=source_transform.point_components_to_stage(payload.xs[index], payload.ys[index], payload.zs[index]),
+        orientation=_leaf_reference_orientation_to_stage(
+            source_transform,
+            Vector3(
+                payload.axis_x[index] if index < len(payload.axis_x) else 0.0,
+                payload.axis_y[index] if index < len(payload.axis_y) else 0.0,
+                payload.axis_z[index] if index < len(payload.axis_z) else 1.0,
+            ),
+            payload.angles[index] if index < len(payload.angles) else 0.0,
+        ),
+        scale=Vector3(uniform_scale, uniform_scale, uniform_scale),
+        binding=_binding_from_bone_id(source_bone_id),
+        source_object_id=source_object_id,
+        source_mesh_id=source_mesh_id,
+        source_material_id=payload.source_material_id,
+        source_bone_ids=(source_bone_id,) if source_bone_id is not None else (),
+        mesh_lod=payload.mesh_lods[index] if index < len(payload.mesh_lods) else None,
+    )
 
 
 def _extract_branch_segments(source_objects: tuple[SourceObject, ...], skeleton: tuple[Joint, ...]) -> list[BranchSegment]:
@@ -725,7 +782,7 @@ def _extract_spine(
     if count == 0:
         return None
     points = tuple(
-        source_transform.point_to_stage(Vector3(xs[index], ys[index], zs[index]))
+        source_transform.point_components_to_stage(xs[index], ys[index], zs[index])
         for index in range(count)
     )
     usable_radii = tuple(radii[:count]) if radii else ()
@@ -752,11 +809,11 @@ def _vector_from_named_attributes(
     names: tuple[str, str, str],
     source_transform: SourceTransform,
 ) -> Vector3:
-    return source_transform.point_to_stage(Vector3(
+    return source_transform.point_components_to_stage(
         _find_float(elem, (names[0],), default=0.0) or 0.0,
         _find_float(elem, (names[1],), default=0.0) or 0.0,
         _find_float(elem, (names[2],), default=0.0) or 0.0,
-    ))
+    )
 
 
 def _capture_token_from_bone_id(bone_id: int | None) -> str:
@@ -811,7 +868,7 @@ def _extract_packed_points(
     ys = _read_float_list(node.findtext("Y"))
     zs = _read_float_list(node.findtext("Z"))
     count = _consistent_count(context, messages, required=[("X", xs), ("Y", ys), ("Z", zs)])
-    return [source_transform.point_to_stage(Vector3(xs[index], ys[index], zs[index])) for index in range(count)]
+    return [source_transform.point_components_to_stage(xs[index], ys[index], zs[index]) for index in range(count)]
 
 
 def _extract_packed_triangles(
@@ -1012,6 +1069,12 @@ def _extract_face_varying_uvs(
             f"packed_array_error: {context} vertex index count {len(authored_indices)} does not match face vertex count {len(face_indices)} for UV authoring"
         )
     limit = min(len(authored_indices), len(face_indices))
+    if limit == len(face_indices) and authored_indices:
+        min_index = min(authored_indices)
+        max_index = max(authored_indices)
+        if min_index >= 0 and max_index < uv_count:
+            return [Vector2(u_coords[vertex_index], v_coords[vertex_index]) for vertex_index in authored_indices]
+
     uv_coords: list[Vector2] = []
     for vertex_index in authored_indices[:limit]:
         if vertex_index < 0 or vertex_index >= uv_count:
@@ -1223,7 +1286,28 @@ def _read_float_list(raw: str | None) -> list[float]:
         return []
     values: list[float] = []
     for token in raw.split():
-        values.extend(_parse_float_token(token))
+        if "," not in token:
+            try:
+                values.append(float(token))
+            except ValueError:
+                continue
+            continue
+
+        normalized = token.strip()
+        if normalized.count(",") > 1 and "." not in normalized and "e" not in normalized.lower():
+            for chunk in normalized.split(","):
+                try:
+                    values.append(float(chunk))
+                except ValueError:
+                    continue
+            continue
+
+        if "." not in normalized:
+            normalized = normalized.replace(",", ".")
+        try:
+            values.append(float(normalized))
+        except ValueError:
+            continue
     return values
 
 
@@ -1231,7 +1315,8 @@ def _read_int_list(raw: str | None) -> list[int]:
     if not raw:
         return []
     values: list[int] = []
-    for token in raw.replace(",", " ").split():
+    tokens = raw.replace(",", " ").split() if "," in raw else raw.split()
+    for token in tokens:
         try:
             values.append(int(token))
         except ValueError:
@@ -1246,21 +1331,6 @@ def _read_positive_float(raw: str | None) -> float | None:
     if value is None:
         return None
     return value if math.isfinite(value) and value > 0.0 else None
-
-
-def _parse_float_token(token: str) -> list[float]:
-    normalized = token.strip()
-    if not normalized:
-        return []
-    if normalized.count(",") > 1 and "." not in normalized and "e" not in normalized.lower():
-        values: list[float] = []
-        for chunk in normalized.split(","):
-            parsed = _parse_float_value(chunk)
-            if parsed is not None:
-                values.append(parsed)
-        return values
-    parsed = _parse_float_value(normalized)
-    return [parsed] if parsed is not None else []
 
 
 def _parse_float_value(raw: str | None) -> float | None:
