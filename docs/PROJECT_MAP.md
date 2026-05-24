@@ -101,14 +101,11 @@ environment-facing implementation details.
 Operator-facing adapters over application contracts.
 
 - `src/xml_to_usda/qt_ui/`
-- `src/xml_to_usda/gui_app.py`
-- `src/xml_to_usda/gui_models.py`
-- `src/xml_to_usda/gui_*_panel.py`
-- `src/xml_to_usda/gui_persistence.py`
-- `src/xml_to_usda/gui_background_jobs.py`
+- `src/xml_to_usda/gui.py`
 
 The supported UI path is PySide6. The old Tk code path is retired and should
-not receive new feature work.
+not receive new feature work. `gui.py` is only a retired entrypoint facade plus
+UI-neutral text formatters.
 
 ### Public facades
 

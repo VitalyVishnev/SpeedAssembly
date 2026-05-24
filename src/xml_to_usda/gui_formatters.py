@@ -35,14 +35,6 @@ def format_conversion_results(
         lines.append(f"  - bark: {request.bark_material_path or '<none>'}")
         lines.append(f"  - leaves: {request.leaves_material_path or '<none>'}")
         lines.append("")
-    if request.use_existing_part_meshes:
-        lines.append("Existing PartMesh overrides:")
-        if request.part_mesh_asset_paths:
-            for source_key, asset_path in request.part_mesh_asset_paths:
-                lines.append(f"  - {source_key}: {asset_path}")
-        else:
-            lines.append("  - enabled with no explicit mappings")
-        lines.append("")
     if request.prototype_source_configs:
         lines.append("Prototype source overrides:")
         for config in request.prototype_source_configs:

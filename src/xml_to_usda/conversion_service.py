@@ -47,8 +47,6 @@ def prepare_conversion_plan(
     single_material_path: str | None,
     base_material_overrides: tuple[BaseMaterialOverride, ...],
     prototype_source_configs: tuple[PrototypeSourceConfig, ...],
-    use_existing_part_meshes: bool,
-    part_mesh_asset_paths: tuple[tuple[str, str], ...],
     async_threshold_bytes: int,
     conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY,
     udim_material_settings: tuple[UdimMaterialSetting, ...] = (),
@@ -103,8 +101,6 @@ def prepare_conversion_plan(
         cleanup_policy=cleanup_policy,
         use_explicit_material_contract=use_explicit_material_contract,
         prototype_source_configs=prototype_source_configs,
-        use_existing_part_meshes=use_existing_part_meshes,
-        part_mesh_asset_paths=part_mesh_asset_paths,
         conversion_mode=resolved_conversion_mode,
     )
     return ConversionLaunchPlan(

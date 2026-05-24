@@ -7,7 +7,7 @@ from xml_to_usda.assembly_resolution import AssemblyResolutionOptions
 from xml_to_usda.assembly_resolution import resolve_assembly_model as resolve_assembly_model_from_options
 from xml_to_usda.authoring_validation import validate_authoring_model
 from xml_to_usda.canonical_loader import load_source_tree_model
-from xml_to_usda.models import ConversionMode
+from xml_to_usda.models import ConversionMode, PrototypeSourceConfig, PrototypeSourceMode
 from xml_to_usda.resolution_validation import validate_resolution
 from xml_to_usda.source_validation import validate_source_model
 from xml_to_usda.validator import validate_model
@@ -36,8 +36,13 @@ def test_resolution_validation_module_owns_operator_intent_failures() -> None:
     resolved = resolve_assembly_model_from_options(
         source_model,
         AssemblyResolutionOptions(
-            use_existing_part_meshes=True,
-            part_mesh_asset_paths=(("Mesh_999", "/Game/TreeParts/SK_Missing.SK_Missing"),),
+            prototype_source_configs=(
+                PrototypeSourceConfig(
+                    source_key="Mesh_999",
+                    mode=PrototypeSourceMode.UNREAL_ASSET,
+                    asset_path="/Game/TreeParts/SK_Missing.SK_Missing",
+                ),
+            ),
         ),
         source_diagnostics=source_diagnostics,
     )

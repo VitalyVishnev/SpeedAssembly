@@ -113,8 +113,13 @@ def test_resolution_reports_unused_prototype_source_config_as_resolution_diagnos
     resolved = resolve_assembly_model_from_options(
         source_model,
         AssemblyResolutionOptions(
-            use_existing_part_meshes=True,
-            part_mesh_asset_paths=(("Mesh_999", "/Game/TreeParts/SK_Missing.SK_Missing"),),
+            prototype_source_configs=(
+                PrototypeSourceConfig(
+                    source_key="Mesh_999",
+                    mode=PrototypeSourceMode.UNREAL_ASSET,
+                    asset_path="/Game/TreeParts/SK_Missing.SK_Missing",
+                ),
+            ),
         ),
         source_diagnostics=source_diagnostics,
     )

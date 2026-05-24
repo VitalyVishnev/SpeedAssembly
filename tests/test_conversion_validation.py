@@ -21,16 +21,6 @@ def test_validate_conversion_request_rejects_explicit_output_for_batch() -> None
         validate_conversion_request(request)
 
 
-def test_validate_conversion_request_rejects_invalid_legacy_part_mesh_contract() -> None:
-    request = ConversionRequest(
-        input_paths=("a.xml",),
-        part_mesh_asset_paths=(("Mesh_1", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
-    )
-
-    with pytest.raises(ValueError, match="use_existing_part_meshes=True"):
-        validate_conversion_request(request)
-
-
 @pytest.mark.parametrize(
     ("setting", "message"),
     (

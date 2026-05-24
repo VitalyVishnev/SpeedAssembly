@@ -1777,8 +1777,13 @@ def test_skeletal_parts_mode_authors_library_without_base_tree_or_instancer() ->
 def test_skeletal_parts_mode_preserves_external_part_reuse() -> None:
     _, model, _ = load_canonical_model(
         str(SIMPLE_TREE_01),
-        use_existing_part_meshes=True,
-        part_mesh_asset_paths=(("Mesh_1", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                mode=PrototypeSourceMode.UNREAL_ASSET,
+                asset_path="/Game/TreeParts/SK_Twig01.SK_Twig01",
+            ),
+        ),
         conversion_mode=ConversionMode.SKELETAL_PARTS,
     )
     parts_only_model = replace(model, base_mesh=None, skeleton=None, assembly_parts=())
@@ -1875,8 +1880,13 @@ def test_static_assembly_preserves_fbx_and_unreal_reference_prototypes(tmp_path:
 
     _, unreal_model, unreal_diagnostics = load_canonical_model(
         str(SIMPLE_TREE_01),
-        use_existing_part_meshes=True,
-        part_mesh_asset_paths=(("Mesh_1", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                mode=PrototypeSourceMode.UNREAL_ASSET,
+                asset_path="/Game/TreeParts/SK_Twig01.SK_Twig01",
+            ),
+        ),
         conversion_mode=ConversionMode.STATIC_ASSEMBLY,
     )
     unreal_usda = render_usda(
@@ -2093,13 +2103,23 @@ def test_existing_part_mesh_override_authors_external_refs_in_mixed_mode(tmp_pat
     result = convert_file(
         str(SIMPLE_TREE_01),
         str(tmp_path / "external_parts.usda"),
-        use_existing_part_meshes=True,
-        part_mesh_asset_paths=(("Mesh_1", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                mode=PrototypeSourceMode.UNREAL_ASSET,
+                asset_path="/Game/TreeParts/SK_Twig01.SK_Twig01",
+            ),
+        ),
     )
     _, model, _diagnostics = load_canonical_model(
         str(SIMPLE_TREE_01),
-        use_existing_part_meshes=True,
-        part_mesh_asset_paths=(("Mesh_1", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                mode=PrototypeSourceMode.UNREAL_ASSET,
+                asset_path="/Game/TreeParts/SK_Twig01.SK_Twig01",
+            ),
+        ),
     )
 
     assert result.usda_document is not None
@@ -2116,13 +2136,23 @@ def test_existing_part_mesh_override_accepts_xml_mesh_names_in_mixed_mode(tmp_pa
     result = convert_file(
         str(SIMPLE_TREE_01),
         str(tmp_path / "external_parts_by_name.usda"),
-        use_existing_part_meshes=True,
-        part_mesh_asset_paths=(("Twig_01", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Twig_01",
+                mode=PrototypeSourceMode.UNREAL_ASSET,
+                asset_path="/Game/TreeParts/SK_Twig01.SK_Twig01",
+            ),
+        ),
     )
     _, model, _diagnostics = load_canonical_model(
         str(SIMPLE_TREE_01),
-        use_existing_part_meshes=True,
-        part_mesh_asset_paths=(("Twig_01", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Twig_01",
+                mode=PrototypeSourceMode.UNREAL_ASSET,
+                asset_path="/Game/TreeParts/SK_Twig01.SK_Twig01",
+            ),
+        ),
     )
 
     assert result.usda_document is not None
@@ -2853,8 +2883,13 @@ def test_authoring_engine_matches_text_and_file_sinks_for_baseline_model(tmp_pat
 def test_authoring_engine_matches_text_and_file_sinks_for_external_asset_prototypes(tmp_path: Path) -> None:
     _, model, diagnostics = load_canonical_model(
         str(SIMPLE_TREE_01),
-        use_existing_part_meshes=True,
-        part_mesh_asset_paths=(("Mesh_1", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                mode=PrototypeSourceMode.UNREAL_ASSET,
+                asset_path="/Game/TreeParts/SK_Twig01.SK_Twig01",
+            ),
+        ),
     )
     context = build_authoring_context(model, diagnostics, base_mesh_name="UnifiedExternal")
 
@@ -2987,20 +3022,16 @@ def test_streaming_writer_cleans_partial_file_on_cancel(tmp_path: Path) -> None:
 def test_unused_existing_part_mesh_override_becomes_warning() -> None:
     _, model, diagnostics = load_canonical_model(
         str(SIMPLE_TREE_01),
-        use_existing_part_meshes=True,
-        part_mesh_asset_paths=(("Mesh_999", "/Game/TreeParts/SK_Missing.SK_Missing"),),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_999",
+                mode=PrototypeSourceMode.UNREAL_ASSET,
+                asset_path="/Game/TreeParts/SK_Missing.SK_Missing",
+            ),
+        ),
     )
 
     assert any(issue.code == "metadata_warning" and "Mesh_999" in issue.message for issue in diagnostics)
-
-
-def test_part_mesh_override_requires_explicit_existing_parts_mode(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="use_existing_part_meshes=True"):
-        convert_file(
-            str(SIMPLE_TREE_01),
-            str(tmp_path / "tree.usda"),
-            part_mesh_asset_paths=(("Mesh_1", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
-        )
 
 
 def test_realistic_multi_material_part_mesh_authors_geom_subsets() -> None:

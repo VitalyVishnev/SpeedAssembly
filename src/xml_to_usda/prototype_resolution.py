@@ -53,26 +53,6 @@ class PrototypePayloadLoader(Protocol):
         ...
 
 
-def merge_legacy_part_mesh_configs(
-    prototype_source_configs: tuple[PrototypeSourceConfig, ...],
-    use_existing_part_meshes: bool,
-    part_mesh_asset_paths: tuple[tuple[str, str], ...],
-) -> tuple[PrototypeSourceConfig, ...]:
-    """Translate legacy PartMesh mappings into Prototype Source configs."""
-    if not use_existing_part_meshes or not part_mesh_asset_paths:
-        return prototype_source_configs
-
-    legacy_configs = tuple(
-        PrototypeSourceConfig(
-            source_key=source_key,
-            mode=PrototypeSourceMode.UNREAL_ASSET,
-            asset_path=asset_path,
-        )
-        for source_key, asset_path in part_mesh_asset_paths
-    )
-    return prototype_source_configs + legacy_configs
-
-
 def resolve_prototype_sources(
     model: CanonicalTreeModel,
     prototype_source_configs: tuple[PrototypeSourceConfig, ...],

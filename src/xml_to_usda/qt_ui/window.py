@@ -1508,8 +1508,6 @@ class MainWindow(QWidget):
                 base_material_overrides=self.materials_panel.collect_base_material_overrides(),
                 udim_material_settings=self.materials_panel.collect_udim_material_settings(),
                 prototype_source_configs=self.materials_panel.collect_prototype_source_configs(),
-                use_existing_part_meshes=False,
-                part_mesh_asset_paths=(),
                 conversion_mode=self._operator_state.conversion_mode,
                 async_threshold_bytes=self.ASYNC_CONVERSION_THRESHOLD_BYTES,
             )

@@ -71,8 +71,6 @@ def test_prepare_conversion_plan_builds_default_material_request() -> None:
         single_material_path=None,
         base_material_overrides=(),
         prototype_source_configs=(),
-        use_existing_part_meshes=False,
-        part_mesh_asset_paths=(),
         async_threshold_bytes=1_000_000_000,
     )
 
@@ -107,8 +105,6 @@ def test_prepare_conversion_plan_preserves_udim_operator_intent() -> None:
         single_material_path=None,
         base_material_overrides=(),
         prototype_source_configs=(),
-        use_existing_part_meshes=False,
-        part_mesh_asset_paths=(),
         async_threshold_bytes=1_000_000_000,
         udim_material_settings=udim_settings,
     )
@@ -128,8 +124,6 @@ def test_prepare_conversion_plan_builds_single_material_request() -> None:
         single_material_path="/Game/Assembly/Fern/M_Fern.M_Fern",
         base_material_overrides=(),
         prototype_source_configs=(),
-        use_existing_part_meshes=False,
-        part_mesh_asset_paths=(),
         async_threshold_bytes=1_000_000_000,
     )
 
@@ -159,8 +153,6 @@ def test_prepare_conversion_plan_marks_explicit_base_material_contract() -> None
             ),
         ),
         prototype_source_configs=(),
-        use_existing_part_meshes=False,
-        part_mesh_asset_paths=(),
         async_threshold_bytes=1_000_000_000,
     )
 
@@ -188,15 +180,11 @@ def test_prepare_conversion_plan_preserves_unreal_asset_part_override_request() 
         single_material_path=None,
         base_material_overrides=(),
         prototype_source_configs=(config,),
-        use_existing_part_meshes=True,
-        part_mesh_asset_paths=(("Twig_01", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
         async_threshold_bytes=1_000_000_000,
     )
 
     assert plan.run_async is False
     assert plan.request.use_explicit_material_contract is False
-    assert plan.request.use_existing_part_meshes is True
-    assert plan.request.part_mesh_asset_paths == (("Twig_01", "/Game/TreeParts/SK_Twig01.SK_Twig01"),)
     assert plan.request.prototype_source_configs == (config,)
 
 
@@ -212,8 +200,6 @@ def test_prepare_conversion_plan_keeps_explicit_conversion_mode() -> None:
         single_material_path=None,
         base_material_overrides=(),
         prototype_source_configs=(),
-        use_existing_part_meshes=False,
-        part_mesh_asset_paths=(),
         conversion_mode=ConversionMode.SKELETAL_PARTS,
         async_threshold_bytes=1_000_000_000,
     )
@@ -243,8 +229,6 @@ def test_prepare_conversion_plan_forces_async_for_fbx_override(tmp_path: Path) -
         single_material_path=None,
         base_material_overrides=(),
         prototype_source_configs=(config,),
-        use_existing_part_meshes=False,
-        part_mesh_asset_paths=(),
         async_threshold_bytes=1_000_000_000,
     )
 
@@ -267,8 +251,6 @@ def test_prepare_conversion_plan_forces_async_when_threshold_is_reached() -> Non
         single_material_path=None,
         base_material_overrides=(),
         prototype_source_configs=(),
-        use_existing_part_meshes=False,
-        part_mesh_asset_paths=(),
         async_threshold_bytes=0,
     )
 
@@ -288,8 +270,6 @@ def test_prepare_conversion_plan_rejects_invalid_material_paths_with_current_mes
             single_material_path=None,
             base_material_overrides=(),
             prototype_source_configs=(),
-            use_existing_part_meshes=False,
-            part_mesh_asset_paths=(),
             async_threshold_bytes=1_000_000_000,
         )
 
@@ -313,8 +293,6 @@ def test_prepare_conversion_plan_rejects_invalid_material_paths_with_current_mes
                     single_material_path="Not/Game/Path",
                 ),
             ),
-            use_existing_part_meshes=False,
-            part_mesh_asset_paths=(),
             async_threshold_bytes=1_000_000_000,
         )
 
@@ -342,8 +320,6 @@ def test_prepare_conversion_plan_rejects_invalid_material_paths_with_current_mes
                     fbx_material_slot_overrides=(),
                 ),
             ),
-            use_existing_part_meshes=False,
-            part_mesh_asset_paths=(),
             async_threshold_bytes=1_000_000_000,
         )
 
@@ -361,8 +337,6 @@ def test_prepare_conversion_plan_rejects_missing_input_and_output_with_current_m
             single_material_path=None,
             base_material_overrides=(),
             prototype_source_configs=(),
-            use_existing_part_meshes=False,
-            part_mesh_asset_paths=(),
             async_threshold_bytes=1_000_000_000,
         )
 
@@ -378,8 +352,6 @@ def test_prepare_conversion_plan_rejects_missing_input_and_output_with_current_m
             single_material_path=None,
             base_material_overrides=(),
             prototype_source_configs=(),
-            use_existing_part_meshes=False,
-            part_mesh_asset_paths=(),
             async_threshold_bytes=1_000_000_000,
         )
 
@@ -407,7 +379,5 @@ def test_prepare_conversion_plan_validates_fbx_material_slot_override_paths() ->
                     ),
                 ),
             ),
-            use_existing_part_meshes=False,
-            part_mesh_asset_paths=(),
             async_threshold_bytes=1_000_000_000,
         )

@@ -3,7 +3,7 @@
 Layer: UI/application boundary.
 
 The PySide6 shell reuses the existing GUI settings payload so operator defaults,
-material policy, and wind settings survive across Tk and Qt launches.
+material policy, and wind settings survive across sessions.
 """
 
 from __future__ import annotations

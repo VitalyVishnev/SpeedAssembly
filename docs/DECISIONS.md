@@ -160,7 +160,8 @@ Decision:
 
 - The Tk GUI is no longer a supported operator surface.
 - The supported desktop UI path is the PySide6 shell.
-- Any remaining Tk code in the repository is retired code only and should not receive new feature work.
+- The Tk implementation has been removed. The retired `gui.py` entrypoint must
+  stay a hard failure that points users to the PySide6 shell.
 
 Rationale:
 
@@ -359,8 +360,7 @@ Decision:
 - Treat `Assembly Part` as mode-neutral: skeletal exports author skeletal
   Assembly Parts, and static exports author static Assembly Parts.
 - In code, source repeated parts are `RepeatedPartInstance` values and USDA
-  authoring projects them into `AuthoredAssemblyPartInstance` values; the older
-  `AssemblyPartInstance` name remains an alias for older callers.
+  authoring projects them into `AuthoredAssemblyPartInstance` values.
 
 Rationale:
 

@@ -120,13 +120,6 @@ Primary modules:
 
 - `qt_ui/`
 - `gui.py`
-- `gui_app.py`
-- `gui_models.py`
-- `gui_materials_panel.py`
-- `gui_part_sources_panel.py`
-- `gui_wind_panel.py`
-- `gui_persistence.py`
-- `gui_background_jobs.py`
 - `gui_formatters.py`
 
 Expected interface shape:
@@ -212,7 +205,8 @@ domain concept.
 - UI shell seam:
   The supported Qt shell should remain an adapter over application modules,
   Operator State, Persisted Operator Settings, and UI Shell State. The retired
-  Tk code path must not acquire new behavior.
+  Tk implementation has been removed; `gui.py` must stay a hard-failing
+  retired entrypoint, not a second UI shell.
 - USDA writing seam:
   `ResolvedAssemblyModel` is the preferred input for USDA writing. Text and
   streaming sinks share the same authoring context.

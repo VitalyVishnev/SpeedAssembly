@@ -42,7 +42,7 @@ Representative modules:
 
 Domain code should not depend on:
 
-- Tkinter/UI modules
+- UI modules
 - subprocess/process-bridge code
 - launcher/package-specific behavior
 
@@ -93,13 +93,8 @@ Representative modules:
 
 - `src/xml_to_usda/qt_ui/`
 - `src/xml_to_usda/gui.py`
-- `src/xml_to_usda/gui_app.py`
-- `src/xml_to_usda/gui_models.py`
-- `src/xml_to_usda/gui_materials_panel.py`
-- `src/xml_to_usda/gui_part_sources_panel.py`
-- `src/xml_to_usda/gui_wind_panel.py`
-- `src/xml_to_usda/gui_persistence.py`
-- `src/xml_to_usda/gui_background_jobs.py`
+- `src/xml_to_usda/gui.py` (retired entrypoint facade only)
+- `src/xml_to_usda/qt_ui/`
 - `src/xml_to_usda/gui_formatters.py`
 
 UI code should not hold core conversion semantics. It should gather operator

@@ -52,8 +52,6 @@ def convert_file(
     cleanup_policy: CleanupPolicy = CleanupPolicy.EPHEMERAL,
     use_explicit_material_contract: bool = False,
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = (),
-    use_existing_part_meshes: bool = False,
-    part_mesh_asset_paths: tuple[tuple[str, str], ...] = (),
     conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY,
     telemetry_callback=None,
     cancel_event=None,
@@ -74,8 +72,6 @@ def convert_file(
         cleanup_policy=cleanup_policy,
         use_explicit_material_contract=use_explicit_material_contract,
         prototype_source_configs=prototype_source_configs,
-        use_existing_part_meshes=use_existing_part_meshes,
-        part_mesh_asset_paths=part_mesh_asset_paths,
         conversion_mode=conversion_mode,
     )
     return convert_request(
@@ -148,8 +144,6 @@ def _convert_single_input(
             cpu_profile=request.cpu_profile,
             use_explicit_material_contract=request.use_explicit_material_contract,
             prototype_source_configs=request.prototype_source_configs,
-            use_existing_part_meshes=request.use_existing_part_meshes,
-            part_mesh_asset_paths=request.part_mesh_asset_paths,
             conversion_mode=request.conversion_mode,
             output_stem=resolved_output.stem if resolved_output is not None else None,
             telemetry_callback=runtime_telemetry,

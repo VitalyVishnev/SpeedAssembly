@@ -3,7 +3,7 @@
 Layer: application.
 
 This module converts UI/CLI wind intents into typed requests and keeps retry and
-error-formatting policy out of the Tk layer. The actual wind analysis and JSON
+error-formatting policy out of the UI shell. The actual wind analysis and JSON
 authoring stay in `wind_pipeline`.
 """
 

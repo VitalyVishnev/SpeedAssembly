@@ -526,9 +526,6 @@ class RepeatedPartInstance:
     def source_bone_id(self) -> int | None:
         return self.source_bone_ids[0] if self.source_bone_ids else None
 
-# Compatibility name for older callers.
-AssemblyPartInstance = RepeatedPartInstance
-
 
 @dataclass(frozen=True)
 class AuthoredAssemblyPartInstance:
@@ -719,8 +716,6 @@ class ConversionRequest:
     cleanup_policy: CleanupPolicy = CleanupPolicy.EPHEMERAL
     use_explicit_material_contract: bool = False
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = ()
-    use_existing_part_meshes: bool = False
-    part_mesh_asset_paths: tuple[tuple[str, str], ...] = ()
     conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
 
 

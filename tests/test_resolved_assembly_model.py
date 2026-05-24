@@ -172,8 +172,13 @@ def test_staged_validation_separates_source_resolution_and_authoring() -> None:
 
     resolved = resolve_assembly_model(
         source_model,
-        use_existing_part_meshes=True,
-        part_mesh_asset_paths=(("Mesh_999", "/Game/TreeParts/SK_Missing.SK_Missing"),),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_999",
+                mode=PrototypeSourceMode.UNREAL_ASSET,
+                asset_path="/Game/TreeParts/SK_Missing.SK_Missing",
+            ),
+        ),
         source_diagnostics=source_diagnostics,
     )
     assert any(
@@ -194,8 +199,13 @@ def test_resolution_validation_names_resolved_prototype_path_failures() -> None:
     _report, source_model, source_diagnostics = load_source_tree_model(str(SIMPLE_TREE_01))
     resolved = resolve_assembly_model(
         source_model,
-        use_existing_part_meshes=True,
-        part_mesh_asset_paths=(("Mesh_1", "/Game/TreeParts/SK_Twig01.SK_Twig01"),),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                mode=PrototypeSourceMode.UNREAL_ASSET,
+                asset_path="/Game/TreeParts/SK_Twig01.SK_Twig01",
+            ),
+        ),
         source_diagnostics=source_diagnostics,
     )
     prototypes = list(resolved.authoring_model.prototypes)

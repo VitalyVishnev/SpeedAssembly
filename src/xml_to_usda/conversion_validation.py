@@ -9,8 +9,6 @@ def validate_conversion_request(request: ConversionRequest) -> None:
         raise ValueError("ConversionRequest requires at least one input path.")
     if request.output_path and len(request.input_paths) != 1:
         raise ValueError("Explicit output_path is only valid for single-file conversion.")
-    if request.part_mesh_asset_paths and not request.use_existing_part_meshes and not request.prototype_source_configs:
-        raise ValueError("part_mesh_asset_paths require use_existing_part_meshes=True.")
     for setting in request.udim_material_settings:
         mode = UdimMode.parse(setting.mode)
         if mode == UdimMode.OFF:

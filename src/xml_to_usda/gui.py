@@ -1,10 +1,9 @@
-"""Retired Tk GUI module kept only for historical imports and tests.
+"""Retired Tk GUI entrypoint.
 
 Layer: UI facade.
 
-The supported desktop UI now lives in `qt_ui`. This module remains only so old
-imports and tests can keep resolving the retired Tk code without growing new
-behavior.
+The supported desktop UI lives in `qt_ui`. This module deliberately keeps no
+Tk implementation behind the retired entrypoint.
 """
 
 from __future__ import annotations
@@ -13,82 +12,20 @@ import multiprocessing
 import sys
 
 from .fbx_worker_subprocess import FBX_WORKER_COMMAND
-
-_IS_FBX_WORKER_MODE = len(sys.argv) > 1 and sys.argv[1] == FBX_WORKER_COMMAND
-
-if _IS_FBX_WORKER_MODE:
-    from .cli import main as cli_main
-    from .gui_formatters import format_conversion_results, format_wind_group_summary, format_wind_json_result
-
-    ConversionApp = None  # type: ignore[assignment]
-
-    def main() -> int:
-        """Dispatch helper-subprocess invocations without importing the GUI facade."""
-        multiprocessing.freeze_support()
-        return cli_main(sys.argv[1:])
-
-
-else:
-    import tkinter as tk
-    from tkinter import filedialog, messagebox
-
-    from .conversion_process import close_process_queue, drain_process_queue, start_conversion_process
-    from .conversion_service import prepare_conversion_plan
-    from .discovery_service import inspect_fbx_material_slot_rows
-    from .gui_app import ConversionApp as _ConversionApp
-    from .gui_app import GuiDependencies
-    from .gui_formatters import format_conversion_results, format_wind_group_summary, format_wind_json_result
-    from .pipeline import convert_request
-    from .settings_service import load_gui_settings, resolve_input_settings_key, save_gui_settings
-    from .wind_service import (
-        WindGenerationRequest,
-        derive_wind_json_output_path,
-        format_wind_error,
-        generate_wind_json_from_request,
-        inspect_wind_groups,
-        prepare_wind_inspection_plan,
-        should_retry_wind_error,
-    )
-
-    def _build_gui_dependencies() -> GuiDependencies:
-        """Capture the current public GUI-module globals into one dependency bundle."""
-        return GuiDependencies(
-            prepare_conversion_plan=prepare_conversion_plan,
-            start_conversion_process=start_conversion_process,
-            close_process_queue=close_process_queue,
-            drain_process_queue=drain_process_queue,
-            convert_request=convert_request,
-            inspect_fbx_material_slot_rows=inspect_fbx_material_slot_rows,
-            load_gui_settings=load_gui_settings,
-            save_gui_settings=save_gui_settings,
-            resolve_input_settings_key=resolve_input_settings_key,
-            prepare_wind_inspection_plan=prepare_wind_inspection_plan,
-            inspect_wind_groups=inspect_wind_groups,
-            WindGenerationRequest=WindGenerationRequest,
-            generate_wind_json_from_request=generate_wind_json_from_request,
-            derive_wind_json_output_path=derive_wind_json_output_path,
-            format_wind_error=format_wind_error,
-            should_retry_wind_error=should_retry_wind_error,
-            messagebox=messagebox,
-            filedialog=filedialog,
-            sys=sys,
-        )
-
-
-    class ConversionApp(_ConversionApp):
-        """Compatibility wrapper that feeds public-module dependencies into the app shell."""
-
-        def __init__(self, root: tk.Tk) -> None:
-            super().__init__(root, dependencies=_build_gui_dependencies())
+from .gui_formatters import format_conversion_results, format_wind_group_summary, format_wind_json_result
 
 
 def main() -> int:
-    """Launch the Tk GUI entrypoint used by the project package/launcher."""
+    """Reject retired Tk launches while preserving frozen FBX helper dispatch."""
+    if len(sys.argv) > 1 and sys.argv[1] == FBX_WORKER_COMMAND:
+        from .cli import main as cli_main
+
+        multiprocessing.freeze_support()
+        return cli_main(sys.argv[1:])
     raise RuntimeError("The Tk GUI is retired. Use `python -m xml_to_usda gui` for the supported PySide6 shell.")
 
 
 __all__ = [
-    "ConversionApp",
     "main",
     "format_conversion_results",
     "format_wind_group_summary",

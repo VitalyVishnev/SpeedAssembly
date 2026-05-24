@@ -31,7 +31,6 @@ from .models import (
 )
 from .prototype_resolution import (
     PrototypePayloadLoader,
-    merge_legacy_part_mesh_configs,
     resolve_prototype_sources,
 )
 from .authoring_validation import validate_authoring_model
@@ -52,8 +51,6 @@ class AssemblyResolutionOptions:
     cpu_profile: CpuProfile = CpuProfile.BALANCED
     use_explicit_material_contract: bool = False
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = ()
-    use_existing_part_meshes: bool = False
-    part_mesh_asset_paths: tuple[tuple[str, str], ...] = ()
     conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY
     output_stem: str | None = None
 
@@ -89,14 +86,9 @@ def resolve_assembly_model(
     runtime = replace(runtime, started_at=started_at)
     resolved_conversion_mode = ConversionMode.parse(options.conversion_mode)
 
-    source_configs = merge_legacy_part_mesh_configs(
-        options.prototype_source_configs,
-        options.use_existing_part_meshes,
-        options.part_mesh_asset_paths,
-    )
     authoring_model = resolve_prototype_sources(
         source_model,
-        source_configs,
+        options.prototype_source_configs,
         cpu_profile=options.cpu_profile,
         telemetry_callback=runtime.telemetry_callback,
         cancel_event=runtime.cancel_event,

@@ -26,3 +26,11 @@ def test_usda_writer_public_facade_exports_stable_symbols() -> None:
     assert callable(usda_writer.render_resolved_usda)
     assert callable(usda_writer.write_usda_document)
     assert callable(usda_writer.write_resolved_usda_document)
+
+
+def test_retired_tk_gui_facade_keeps_only_non_ui_helpers() -> None:
+    from xml_to_usda import gui
+
+    assert callable(gui.main)
+    assert callable(gui.format_conversion_results)
+    assert not hasattr(gui, "ConversionApp")
