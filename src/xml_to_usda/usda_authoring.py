@@ -675,6 +675,7 @@ def _emit_point_instancer(
     contract = context.contract
     prototypes = context.model.prototypes
     prototype_index_map = {prototype.source_key: index for index, prototype in enumerate(prototypes)}
+    prototype_name_map = {prototype.source_key: prototype.source_name for prototype in prototypes}
     binding_width, bindings = _normalized_bindings(assembly_parts, contract.point_instancer_joint_element_size)
     binding_support = _render_binding_support_primvars(context.model, bindings)
     prototype_paths = _prototype_target_paths(context.model, contract)
@@ -738,7 +739,7 @@ def _emit_point_instancer(
         sink,
         indent_level + 1,
         "string[] primvars:name",
-        (f'"{_prototype_name_for_instance(part, prototypes)}"' for part in assembly_parts),
+        (f'"{_prototype_name_for_instance(part, prototype_name_map)}"' for part in assembly_parts),
         metadata_lines=('interpolation = "varying"',),
     )
     _write_line(sink, 0)
@@ -1335,12 +1336,9 @@ def _normalized_bindings(
 
 def _prototype_name_for_instance(
     part: AuthoredAssemblyPartInstance,
-    prototypes: tuple[Prototype, ...],
+    prototype_name_map: dict[str, str],
 ) -> str:
-    for prototype in prototypes:
-        if prototype.source_key == part.prototype_key:
-            return prototype.source_name
-    return part.prototype_key
+    return prototype_name_map.get(part.prototype_key, part.prototype_key)
 
 
 def _material_prim_name(material: MaterialSpec) -> str:

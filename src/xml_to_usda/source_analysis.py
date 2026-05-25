@@ -13,14 +13,15 @@ from dataclasses import replace
 
 from .models import BaseMaterialOverride, CanonicalTreeModel, ObservedXmlSchemaReport, PrototypeDiscoveryEntry
 from .normalizer import normalize_to_canonical
-from .xml_reader import inspect_xml, read_source_xml
+from .xml_reader import analyze_xml, read_source_xml
 
 
 def inspect_source(input_path: str) -> ObservedXmlSchemaReport:
     """Inspect one source XML file and enrich the observed-schema report."""
     document = read_source_xml(input_path)
-    report = inspect_xml(document)
-    model = normalize_to_canonical(document, report)
+    analysis = analyze_xml(document)
+    report = analysis.report
+    model = normalize_to_canonical(document, report, source_nodes=analysis.source_nodes)
     return replace(
         report,
         base_geometry_mode=_base_geometry_mode(model),

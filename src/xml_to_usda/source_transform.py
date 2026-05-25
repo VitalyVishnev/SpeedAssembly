@@ -36,8 +36,33 @@ class SourceTransform:
     def point_to_stage(self, point: Vector3) -> Vector3:
         return self.point_components_to_stage(point.x, point.y, point.z)
 
+    def points_components_to_stage(self, xs, ys, zs) -> list[Vector3]:
+        scale = self.linear_scale
+        if scale == 1.0:
+            if self.source_up_axis == self.target_up_axis:
+                return [Vector3(x, y, z) for x, y, z in zip(xs, ys, zs)]
+            if self.source_up_axis == "Z" and self.target_up_axis == "Y":
+                return [Vector3(x, z, -y) for x, y, z in zip(xs, ys, zs)]
+            if self.source_up_axis == "Y" and self.target_up_axis == "Z":
+                return [Vector3(x, -z, y) for x, y, z in zip(xs, ys, zs)]
+            return [self.point_components_to_stage(x, y, z) for x, y, z in zip(xs, ys, zs)]
+        if self.source_up_axis == self.target_up_axis:
+            return [Vector3(x * scale, y * scale, z * scale) for x, y, z in zip(xs, ys, zs)]
+        if self.source_up_axis == "Z" and self.target_up_axis == "Y":
+            return [Vector3(x * scale, z * scale, -y * scale) for x, y, z in zip(xs, ys, zs)]
+        if self.source_up_axis == "Y" and self.target_up_axis == "Z":
+            return [Vector3(x * scale, -z * scale, y * scale) for x, y, z in zip(xs, ys, zs)]
+        return [self.point_components_to_stage(x, y, z) for x, y, z in zip(xs, ys, zs)]
+
     def point_components_to_stage(self, x: float, y: float, z: float) -> Vector3:
         scale = self.linear_scale
+        if scale == 1.0:
+            if self.source_up_axis == self.target_up_axis:
+                return Vector3(x, y, z)
+            if self.source_up_axis == "Z" and self.target_up_axis == "Y":
+                return Vector3(x, z, -y)
+            if self.source_up_axis == "Y" and self.target_up_axis == "Z":
+                return Vector3(x, -z, y)
         if self.source_up_axis == self.target_up_axis:
             return Vector3(x * scale, y * scale, z * scale)
         if self.source_up_axis == "Z" and self.target_up_axis == "Y":
@@ -73,6 +98,40 @@ class SourceTransform:
     def bounds_to_stage(self, bounds: Bounds | None) -> Bounds | None:
         if bounds is None:
             return None
+        scale = self.linear_scale
+        minimum = bounds.minimum
+        maximum = bounds.maximum
+        if self.source_up_axis == self.target_up_axis:
+            return Bounds(
+                minimum=Vector3(minimum.x * scale, minimum.y * scale, minimum.z * scale),
+                maximum=Vector3(maximum.x * scale, maximum.y * scale, maximum.z * scale),
+            )
+        if self.source_up_axis == "Z" and self.target_up_axis == "Y":
+            return Bounds(
+                minimum=Vector3(
+                    minimum.x * scale,
+                    min(minimum.z, maximum.z) * scale,
+                    -max(minimum.y, maximum.y) * scale,
+                ),
+                maximum=Vector3(
+                    maximum.x * scale,
+                    max(minimum.z, maximum.z) * scale,
+                    -min(minimum.y, maximum.y) * scale,
+                ),
+            )
+        if self.source_up_axis == "Y" and self.target_up_axis == "Z":
+            return Bounds(
+                minimum=Vector3(
+                    minimum.x * scale,
+                    -max(minimum.z, maximum.z) * scale,
+                    min(minimum.y, maximum.y) * scale,
+                ),
+                maximum=Vector3(
+                    maximum.x * scale,
+                    -min(minimum.z, maximum.z) * scale,
+                    max(minimum.y, maximum.y) * scale,
+                ),
+            )
         corners = (
             Vector3(bounds.minimum.x, bounds.minimum.y, bounds.minimum.z),
             Vector3(bounds.minimum.x, bounds.minimum.y, bounds.maximum.z),
@@ -98,11 +157,18 @@ class SourceTransform:
         )
 
 
-def build_source_transform(root: ET.Element, units_hint: str | None, up_axis_hint: str | None) -> SourceTransform:
+def build_source_transform(
+    root: ET.Element,
+    units_hint: str | None,
+    up_axis_hint: str | None,
+    mesh_nodes: tuple[ET.Element, ...] | None = None,
+) -> SourceTransform:
     # Phase 1 importer contract now assumes SpeedTree XML exports are authored in meters.
     # We keep the USDA stage in meters as well, so no unit rescale should be applied here.
     source_units = "m"
-    source_up_axis = _normalize_up_axis(up_axis_hint) or _infer_up_axis_from_mesh_orientation(root) or "Z"
+    source_up_axis = _normalize_up_axis(up_axis_hint) or _infer_up_axis_from_mesh_orientation(
+        mesh_nodes if mesh_nodes is not None else root.findall(".//Meshes/Mesh")
+    ) or "Z"
     return SourceTransform(
         source_units=source_units,
         source_up_axis=source_up_axis,
@@ -123,8 +189,8 @@ def _normalize_up_axis(up_axis_hint: str | None) -> str | None:
     return normalized if normalized in {"Y", "Z"} else None
 
 
-def _infer_up_axis_from_mesh_orientation(root: ET.Element) -> str | None:
-    for mesh in root.findall(".//Meshes/Mesh"):
+def _infer_up_axis_from_mesh_orientation(meshes: tuple[ET.Element, ...] | list[ET.Element]) -> str | None:
+    for mesh in meshes:
         orient = mesh.attrib.get("Orient", "").upper()
         if orient.endswith("Y"):
             return "Y"

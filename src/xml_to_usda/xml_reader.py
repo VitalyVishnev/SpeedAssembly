@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -59,6 +60,20 @@ IGNORED_PAYLOAD_TAGS = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class SourceNodeIndex:
+    materials: tuple[ET.Element, ...]
+    objects: tuple[ET.Element, ...]
+    meshes: tuple[ET.Element, ...]
+    bones: tuple[ET.Element, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SourceXmlAnalysis:
+    report: ObservedXmlSchemaReport
+    source_nodes: SourceNodeIndex
+
+
 def read_source_xml(path: str | Path) -> SourceXmlDocument:
     xml_path = Path(path)
     tree = ET.parse(xml_path)
@@ -67,16 +82,32 @@ def read_source_xml(path: str | Path) -> SourceXmlDocument:
 
 
 def inspect_xml(document: SourceXmlDocument) -> ObservedXmlSchemaReport:
+    return analyze_xml(document).report
+
+
+def analyze_xml(document: SourceXmlDocument) -> SourceXmlAnalysis:
     root = document.tree.getroot()
     tag_counts: Counter[str] = Counter()
     attributes_by_tag: dict[str, set[str]] = defaultdict(set)
+    objects: list[ET.Element] = []
+    materials: list[ET.Element] = []
+    meshes: list[ET.Element] = []
+    bones: list[ET.Element] = []
 
     for elem in root.iter():
         tag_counts[elem.tag] += 1
         # Iterate over attribute names directly instead of calling .keys().
         # This is more permissive with mapping-like views and avoids rare
         # descriptor errors observed in packaged/worker execution paths.
-        attributes_by_tag[elem.tag].update(sorted(elem.attrib))
+        attributes_by_tag[elem.tag].update(elem.attrib)
+        if elem.tag == "Object":
+            objects.append(elem)
+        elif elem.tag == "Material":
+            materials.append(elem)
+        elif elem.tag == "Mesh":
+            meshes.append(elem)
+        elif elem.tag == "Bone":
+            bones.append(elem)
 
     known_sections = {
         name: sum(
@@ -105,10 +136,9 @@ def inspect_xml(document: SourceXmlDocument) -> ObservedXmlSchemaReport:
         or _find_first_attr(root, "up_axis")
     )
 
-    object_class_counts, hierarchy_depth, spine_object_count = _inspect_object_hierarchy(root)
-    leaf_binding_distribution, leaf_mesh_distribution, leaf_source_object_distribution = _inspect_leaf_bindings(root)
+    object_class_counts, hierarchy_depth, spine_object_count, leaf_binding_distribution, leaf_mesh_distribution, leaf_source_object_distribution = _inspect_objects(objects)
 
-    return ObservedXmlSchemaReport(
+    report = ObservedXmlSchemaReport(
         source_path=document.source_path,
         root_tag=document.root_tag,
         tag_counts=dict(sorted(tag_counts.items())),
@@ -124,7 +154,16 @@ def inspect_xml(document: SourceXmlDocument) -> ObservedXmlSchemaReport:
         leaf_binding_distribution=leaf_binding_distribution,
         leaf_mesh_distribution=leaf_mesh_distribution,
         leaf_source_object_distribution=leaf_source_object_distribution,
-        material_count=len(root.findall(".//Materials/Material")),
+        material_count=len(materials),
+    )
+    return SourceXmlAnalysis(
+        report=report,
+        source_nodes=SourceNodeIndex(
+            materials=tuple(materials),
+            objects=tuple(objects),
+            meshes=tuple(meshes),
+            bones=tuple(bones),
+        ),
     )
 
 
@@ -187,24 +226,42 @@ def _extract_version(root: ET.Element) -> str | None:
     )
 
 
-def _inspect_object_hierarchy(root: ET.Element) -> tuple[dict[str, int], int, int]:
-    objects = root.findall(".//Object")
+def _inspect_objects(
+    objects: list[ET.Element],
+) -> tuple[dict[str, int], int, int, dict[str, int], dict[str, int], dict[str, int]]:
     class_counts: Counter[str] = Counter()
     parents: dict[str, str | None] = {}
     children_by_parent: defaultdict[str, list[str]] = defaultdict(list)
+    bone_counts: Counter[str] = Counter()
+    mesh_counts: Counter[str] = Counter()
+    source_object_counts: Counter[str] = Counter()
     spine_object_count = 0
 
     for obj in objects:
         object_id = obj.attrib.get("ID")
+        points_node = None
+        triangles_node = None
+        leaf_ref_node = None
+        spine_node = None
+        for child in obj:
+            tag = child.tag
+            if tag == "Points" and points_node is None:
+                points_node = child
+            elif tag == "Triangles" and triangles_node is None:
+                triangles_node = child
+            elif tag == "LeafReferences" and leaf_ref_node is None:
+                leaf_ref_node = child
+            elif tag == "Spine" and spine_node is None:
+                spine_node = child
         if object_id is not None:
             parent_id = obj.attrib.get("ParentID")
             parents[object_id] = parent_id
             if parent_id not in {None, "", "-1"}:
                 children_by_parent[parent_id].append(object_id)
 
-        if obj.find("Points") is not None and obj.find("Triangles") is not None:
+        if points_node is not None and triangles_node is not None:
             class_counts["mesh_object"] += 1
-        elif obj.find("LeafReferences") is not None:
+        elif leaf_ref_node is not None:
             class_counts["leaf_reference_host"] += 1
         else:
             class_counts["other"] += 1
@@ -212,9 +269,15 @@ def _inspect_object_hierarchy(root: ET.Element) -> tuple[dict[str, int], int, in
         if obj.attrib.get("ParentID") in {None, "", "-1"}:
             class_counts["root"] += 1
 
-        if obj.find("Spine") is not None:
+        if spine_node is not None:
             spine_object_count += 1
             class_counts["spine_object"] += 1
+
+        if leaf_ref_node is None:
+            continue
+        bone_counts.update(_read_tokens(leaf_ref_node.findtext("BoneID")))
+        mesh_counts.update(_read_tokens(leaf_ref_node.findtext("MeshID")))
+        source_object_counts[obj.attrib.get("ID", "Object")] += 1
 
     for object_id in parents:
         if children_by_parent.get(object_id):
@@ -235,23 +298,10 @@ def _inspect_object_hierarchy(root: ET.Element) -> tuple[dict[str, int], int, in
 
     hierarchy_depth = max((depth_for(object_id) for object_id in parents), default=0)
     class_counts["total"] = len(objects)
-    return dict(sorted(class_counts.items())), hierarchy_depth, spine_object_count
-
-
-def _inspect_leaf_bindings(root: ET.Element) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
-    bone_counts: Counter[str] = Counter()
-    mesh_counts: Counter[str] = Counter()
-    source_object_counts: Counter[str] = Counter()
-
-    for obj in root.findall(".//Object"):
-        leaf_ref = obj.find("LeafReferences")
-        if leaf_ref is None:
-            continue
-        bone_counts.update(_read_tokens(leaf_ref.findtext("BoneID")))
-        mesh_counts.update(_read_tokens(leaf_ref.findtext("MeshID")))
-        source_object_counts[obj.attrib.get("ID", "Object")] += 1
-
     return (
+        dict(sorted(class_counts.items())),
+        hierarchy_depth,
+        spine_object_count,
         _sort_numeric_key_dict(bone_counts),
         _sort_numeric_key_dict(mesh_counts),
         dict(sorted(source_object_counts.items())),

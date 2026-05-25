@@ -22,7 +22,7 @@ except ImportError:
         pass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Vector3:
     x: float
     y: float
@@ -32,7 +32,7 @@ class Vector3:
         return f"({self.x:g}, {self.y:g}, {self.z:g})"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Vector2:
     x: float
     y: float
@@ -41,7 +41,7 @@ class Vector2:
         return f"({self.x:g}, {self.y:g})"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Color4:
     r: float
     g: float
@@ -55,7 +55,7 @@ class Color4:
         return self.r == 1.0 and self.g == 1.0 and self.b == 1.0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Quaternion:
     real: float
     i: float
@@ -173,7 +173,7 @@ class ConversionPhase(StrEnum):
     CANCELLED = "cancelled"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Joint:
     name: str
     source_id: int | None = None
@@ -192,7 +192,7 @@ class Joint:
         return self.rest_transform.translation
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MeshData:
     name: str
     points: tuple[Vector3, ...]
@@ -207,7 +207,7 @@ class MeshData:
     skel_element_size: int = 0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MaterialSpec:
     source_id: int
     name: str
@@ -217,28 +217,28 @@ class MaterialSpec:
     source_material_ids: tuple[int, ...] = ()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class BaseMaterialOverride:
     source_id: int
     source_name: str = ""
     ue_asset_path: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class UdimMaterialSetting:
     material_id: int
     mode: UdimMode = UdimMode.OFF
     udim_id: int = 1001
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class FbxMaterialSlotSpec:
     source_id: int
     name: str
     face_count: int = 0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class FbxMaterialSlotOverride:
     slot_name: str
     ue_asset_path: str | None = None
@@ -246,13 +246,13 @@ class FbxMaterialSlotOverride:
     udim_id: int = 1001
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MeshSection:
     material_id: int
     face_indices: tuple[int, ...]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CompactMeshSection:
     material_id: int
     face_indices: array = field(default_factory=lambda: array("i"))
@@ -262,7 +262,7 @@ class CompactMeshSection:
         return len(self.face_indices)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Matrix4d:
     rows: tuple[tuple[float, float, float, float], ...]
 
@@ -298,7 +298,7 @@ class Matrix4d:
         return Vector3(row[0], row[1], row[2])
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class InstanceBinding:
     joint_tokens: tuple[str, ...]
     weights: tuple[float, ...]
@@ -324,7 +324,7 @@ class InstanceBinding:
         return "single_joint" if self.element_size <= 1 else "multi_joint"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Prototype:
     identity: "PrototypeIdentity"
     mesh: MeshData | None
@@ -350,7 +350,7 @@ class Prototype:
     geometry_payload: "GeometryBuffer | None" = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GeometryBuffer:
     name: str
     point_components: array
@@ -391,7 +391,7 @@ class GeometryBuffer:
         return self.vertex_color_count > 0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PrototypeSourceConfig:
     source_key: str
     source_name: str = ""
@@ -411,7 +411,7 @@ class PrototypeSourceConfig:
     fbx_material_slot_overrides: tuple["FbxMaterialSlotOverride", ...] = ()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PrototypeDiscoveryEntry:
     source_key: str
     source_mesh_id: int | None
@@ -419,7 +419,7 @@ class PrototypeDiscoveryEntry:
     instance_count: int = 0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ConversionTelemetry:
     phase: ConversionPhase
     completed_units: int = 0
@@ -429,14 +429,14 @@ class ConversionTelemetry:
     elapsed_seconds: float = 0.0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ExportStats:
     bytes_written: int = 0
     duration_seconds: float = 0.0
     streamed: bool = False
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ConversionJobResult:
     result: "ConversionResult | None" = None
     telemetry: ConversionTelemetry | None = None
@@ -444,20 +444,20 @@ class ConversionJobResult:
     error_message: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Bounds:
     minimum: Vector3
     maximum: Vector3
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SpineCurve:
     source_object_id: str
     points: tuple[Vector3, ...]
     radii: tuple[float, ...]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MeshLibraryEntry:
     mesh_id: int
     name: str
@@ -465,7 +465,7 @@ class MeshLibraryEntry:
     original_scale: float | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SourceObject:
     object_id: str
     parent_id: str | None
@@ -478,7 +478,7 @@ class SourceObject:
     spine: SpineCurve | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class BranchSegment:
     object_id: str
     parent_id: str | None
@@ -488,7 +488,7 @@ class BranchSegment:
     source_joint: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class BaseTreePart:
     object_id: str
     parent_id: str | None
@@ -500,7 +500,7 @@ class BaseTreePart:
     face_count: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RepeatedPartInstance:
     name: str
     prototype_key: str
@@ -527,7 +527,7 @@ class RepeatedPartInstance:
         return self.source_bone_ids[0] if self.source_bone_ids else None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class AuthoredAssemblyPartInstance:
     name: str
     prototype_key: str
@@ -545,14 +545,14 @@ class AuthoredAssemblyPartInstance:
         return self.binding.weights[0] if self.binding.weights else 0.0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PrototypeIdentity:
     source_key: str
     prim_name: str
     prototype_type: str = "assembly_part"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SourceSampleMetadata:
     sample_id: str
     source_path: str
@@ -561,7 +561,7 @@ class SourceSampleMetadata:
     notes: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ResourceIndexEntry:
     resource_path: str
     category: str
@@ -571,7 +571,7 @@ class ResourceIndexEntry:
     purpose: str = ""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ExportMetadata:
     source_path: str
     source_version: str | None
@@ -584,7 +584,7 @@ class ExportMetadata:
     conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SkeletalSupportPrimvars:
     capture_paths: tuple[str, ...]
     ue_joint_names: tuple[str, ...]
@@ -593,14 +593,14 @@ class SkeletalSupportPrimvars:
     local_transform: Matrix4d = field(default_factory=Matrix4d.identity)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SourceXmlDocument:
     source_path: str
     root_tag: str
     tree: Any
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ObservedXmlSchemaReport:
     source_path: str
     root_tag: str
@@ -631,7 +631,7 @@ class ObservedXmlSchemaReport:
     orientation_sample: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TreeAsset:
     metadata: ExportMetadata
     materials: tuple[MaterialSpec, ...]
@@ -668,14 +668,14 @@ class TreeAsset:
 CanonicalTreeModel = TreeAsset
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ValidationIssue:
     severity: str
     code: str
     message: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ResolvedAssemblyModel:
     """Authoring-stage model: source facts plus operator intent resolution."""
     source_model: CanonicalTreeModel
@@ -692,14 +692,14 @@ class ResolvedAssemblyModel:
         return self.source_diagnostics + self.resolution_diagnostics + self.authoring_diagnostics
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class UsdAssemblyDocument:
     text: str | None
     diagnostics: tuple[ValidationIssue, ...]
     stats: ExportStats = field(default_factory=ExportStats)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ConversionRequest:
     input_paths: tuple[str, ...]
     output_path: str | None = None
@@ -719,7 +719,7 @@ class ConversionRequest:
     conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ConversionResult:
     input_path: str
     output_path: str | None
@@ -729,14 +729,14 @@ class ConversionResult:
     runtime_job_dir: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DynamicWindJointAssignment:
     joint_name: str
     simulation_group_index: int
     branch_order: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DynamicWindSimulationGroup:
     group_index: int
     branch_order: int
@@ -748,7 +748,7 @@ class DynamicWindSimulationGroup:
     max_influence: float = 1.0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DynamicWindData:
     joint_assignments: tuple[DynamicWindJointAssignment, ...]
     simulation_groups: tuple[DynamicWindSimulationGroup, ...]
@@ -756,7 +756,7 @@ class DynamicWindData:
     gust_attenuation: float = 0.0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class WindJsonResult:
     input_path: str
     output_path: str

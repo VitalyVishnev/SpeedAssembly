@@ -33,6 +33,7 @@ from .models import (
 )
 from .skeleton_rules import joint_name_from_bone_id, parse_generator_label
 from .source_transform import SourceTransform, build_source_transform
+from .xml_reader import SourceNodeIndex
 
 
 PRIMARY_MATERIAL_ID = 1
@@ -56,28 +57,51 @@ class _LeafReferencePayload:
     count: int
 
 
-def normalize_to_canonical(document, report: ObservedXmlSchemaReport) -> CanonicalTreeModel:
+@dataclass(frozen=True)
+class _ObjectExtractionResult:
+    source_objects: tuple[SourceObject, ...]
+    assembly_parts: tuple[RepeatedPartInstance, ...]
+
+
+def normalize_to_canonical(
+    document,
+    report: ObservedXmlSchemaReport,
+    *,
+    source_nodes: SourceNodeIndex | None = None,
+) -> CanonicalTreeModel:
     root = document.tree.getroot()
     data_messages: list[str] = []
     # Stage metadata alone is not enough. Every spatial payload must be remapped into stage space here.
-    source_transform = build_source_transform(root, report.units_hint, report.up_axis_hint)
-    materials = tuple(_extract_materials(root))
+    mesh_nodes = source_nodes.meshes if source_nodes is not None else None
+    source_transform = build_source_transform(root, report.units_hint, report.up_axis_hint, mesh_nodes)
+    if source_nodes is None:
+        source_nodes = SourceNodeIndex(
+            materials=tuple(root.findall(".//Materials/Material")),
+            objects=tuple(root.findall(".//Object")),
+            meshes=tuple(root.findall(".//Meshes/Mesh")),
+            bones=tuple(root.findall(".//Bones/Bone")),
+        )
+    materials = tuple(_extract_materials(source_nodes.materials))
     material_ids = {material.source_id for material in materials}
 
-    skeleton = tuple(_extract_skeleton(root, data_messages, source_transform))
+    skeleton = tuple(_extract_skeleton(source_nodes.bones, data_messages, source_transform))
     joint_index_by_source_id = {
         joint.source_id: index for index, joint in enumerate(skeleton) if joint.source_id is not None
     }
-    source_objects = tuple(
-        _extract_source_objects(root, data_messages, joint_index_by_source_id, source_transform, material_ids)
+    object_extraction = _extract_object_records(
+        source_nodes.objects,
+        data_messages,
+        joint_index_by_source_id,
+        source_transform,
+        material_ids,
     )
-    mesh_library = tuple(_extract_mesh_library(root, data_messages, source_transform, material_ids))
+    source_objects = object_extraction.source_objects
+    mesh_library = tuple(_extract_mesh_library(source_nodes.meshes, data_messages, source_transform, material_ids))
     base_mesh, base_tree_parts = _build_base_mesh(source_objects)
     # The project contract treats LeafReferences as the source of repeated Parts.
-    assembly_parts = tuple(
-        _extract_assembly_parts_from_leaf_references(root, data_messages, source_transform, material_ids)
-    )
-    branch_segments = tuple(_extract_branch_segments(source_objects, skeleton))
+    assembly_parts = object_extraction.assembly_parts
+    joint_names = {joint.name for joint in skeleton}
+    branch_segments = tuple(_extract_branch_segments(source_objects, joint_names))
     prototypes = tuple(_build_prototypes(assembly_parts, mesh_library, material_ids, data_messages))
     skeletal_support_primvars = _build_skeletal_support_primvars(skeleton)
     spines = tuple(source_object.spine for source_object in source_objects if source_object.spine is not None)
@@ -123,9 +147,9 @@ def _metadata_warnings(report: ObservedXmlSchemaReport) -> list[str]:
     return warnings
 
 
-def _extract_materials(root: ET.Element) -> list[MaterialSpec]:
+def _extract_materials(material_nodes: tuple[ET.Element, ...]) -> list[MaterialSpec]:
     materials: list[MaterialSpec] = []
-    for material_node in root.findall(".//Materials/Material"):
+    for material_node in material_nodes:
         source_id = material_node.attrib.get("ID")
         if source_id is None or not source_id.lstrip("-").isdigit():
             continue
@@ -170,8 +194,11 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
             continue
         point_offset = len(merged_points)
         face_offset = len(merged_face_counts)
-        translated_points = tuple(_translate_point(point, source_object.abs_translate) for point in mesh.points)
-        merged_points.extend(translated_points)
+        translate = source_object.abs_translate
+        tx = translate.x
+        ty = translate.y
+        tz = translate.z
+        merged_points.extend(Vector3(point.x + tx, point.y + ty, point.z + tz) for point in mesh.points)
         merged_face_counts.extend(mesh.face_vertex_counts)
         merged_face_indices.extend(index + point_offset for index in mesh.face_vertex_indices)
         merged_uv_coords.extend(mesh.uv_coords)
@@ -216,44 +243,131 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
 
 
 def _extract_source_objects(
-    root: ET.Element,
+    object_nodes: tuple[ET.Element, ...],
     messages: list[str],
     joint_index_by_source_id: dict[int, int],
     source_transform: SourceTransform,
     material_ids: set[int],
 ) -> list[SourceObject]:
+    return list(
+        _extract_object_records(
+            object_nodes,
+            messages,
+            joint_index_by_source_id,
+            source_transform,
+            material_ids,
+        ).source_objects
+    )
+
+
+def _extract_object_records(
+    object_nodes: tuple[ET.Element, ...],
+    messages: list[str],
+    joint_index_by_source_id: dict[int, int],
+    source_transform: SourceTransform,
+    material_ids: set[int],
+) -> _ObjectExtractionResult:
     source_objects: list[SourceObject] = []
-    for obj in root.findall(".//Object"):
-        object_id = obj.attrib.get("ID")
-        if object_id is None:
-            continue
-        mesh = _extract_object_mesh(obj, messages, joint_index_by_source_id, source_transform, material_ids)
-        leaf_count = _count_packed_values(obj.find("LeafReferences"), "X")
-        spine = _extract_spine(obj, object_id, messages, source_transform)
-        source_objects.append(
-            SourceObject(
-                object_id=object_id,
-                parent_id=obj.attrib.get("ParentID"),
-                name=obj.attrib.get("Name", f"Object_{object_id}"),
-                abs_translate=_vector_from_named_attributes(obj, ("AbsX", "AbsY", "AbsZ"), source_transform),
-                rel_translate=_vector_from_named_attributes(obj, ("RelX", "RelY", "RelZ"), source_transform),
-                bounds=_extract_bounds(obj, source_transform),
-                mesh=mesh,
-                assembly_part_reference_count=leaf_count,
-                spine=spine,
+    assembly_parts: list[RepeatedPartInstance] = []
+    for obj in object_nodes:
+        attrib = obj.attrib
+        object_id = attrib.get("ID")
+        points_node: ET.Element | None = None
+        triangles_node: ET.Element | None = None
+        vertices_node: ET.Element | None = None
+        leaf_ref_node: ET.Element | None = None
+        spine_node: ET.Element | None = None
+        for child in obj:
+            tag = child.tag
+            if tag == "Points" and points_node is None:
+                points_node = child
+            elif tag == "Triangles" and triangles_node is None:
+                triangles_node = child
+            elif tag == "Vertices" and vertices_node is None:
+                vertices_node = child
+            elif tag == "LeafReferences" and leaf_ref_node is None:
+                leaf_ref_node = child
+            elif tag == "Spine" and spine_node is None:
+                spine_node = child
+        if object_id is not None:
+            parent_id = attrib.get("ParentID")
+            to_stage = source_transform.point_components_to_stage
+            abs_x = _parse_float_value(attrib.get("AbsX"))
+            abs_y = _parse_float_value(attrib.get("AbsY"))
+            abs_z = _parse_float_value(attrib.get("AbsZ"))
+            rel_x = _parse_float_value(attrib.get("RelX"))
+            rel_y = _parse_float_value(attrib.get("RelY"))
+            rel_z = _parse_float_value(attrib.get("RelZ"))
+            mesh = _extract_object_mesh(
+                obj,
+                messages,
+                joint_index_by_source_id,
+                source_transform,
+                material_ids,
+                points_node=points_node,
+                triangles_node=triangles_node,
+                vertices_node=vertices_node,
             )
-        )
-    return source_objects
+            leaf_count = _count_packed_values(leaf_ref_node, "X")
+            spine = _extract_spine(
+                obj,
+                object_id,
+                messages,
+                source_transform,
+                spine_node=spine_node,
+            )
+            source_objects.append(
+                SourceObject(
+                    object_id=object_id,
+                    parent_id=parent_id,
+                    name=attrib.get("Name", f"Object_{object_id}"),
+                    abs_translate=to_stage(
+                        abs_x if abs_x is not None else 0.0,
+                        abs_y if abs_y is not None else 0.0,
+                        abs_z if abs_z is not None else 0.0,
+                    ),
+                    rel_translate=to_stage(
+                        rel_x if rel_x is not None else 0.0,
+                        rel_y if rel_y is not None else 0.0,
+                        rel_z if rel_z is not None else 0.0,
+                    ),
+                    bounds=_extract_bounds(obj, source_transform),
+                    mesh=mesh,
+                    assembly_part_reference_count=leaf_count,
+                    spine=spine,
+                )
+            )
+        if leaf_ref_node is None:
+            continue
+
+        payload = _read_leaf_reference_payload(obj, leaf_ref_node, messages, material_ids, source_transform)
+        if payload.count == 0:
+            continue
+
+        for index in range(payload.count):
+            assembly_parts.append(
+                _build_leaf_reference_instance(
+                    payload,
+                    index,
+                    name=f"AssemblyPart_{len(assembly_parts):04d}",
+                    source_object_id=object_id,
+                    source_transform=source_transform,
+                )
+            )
+    return _ObjectExtractionResult(
+        source_objects=tuple(source_objects),
+        assembly_parts=tuple(assembly_parts),
+    )
 
 
 def _extract_mesh_library(
-    root: ET.Element,
+    mesh_nodes: tuple[ET.Element, ...],
     messages: list[str],
     source_transform: SourceTransform,
     material_ids: set[int],
 ) -> list[MeshLibraryEntry]:
     entries: list[MeshLibraryEntry] = []
-    for mesh in root.findall(".//Meshes/Mesh"):
+    for mesh in mesh_nodes:
         mesh_id = mesh.attrib.get("ID")
         if mesh_id is None or not mesh_id.isdigit():
             continue
@@ -291,12 +405,13 @@ def _extract_object_mesh(
     joint_index_by_source_id: dict[int, int],
     source_transform: SourceTransform,
     material_ids: set[int],
+    *,
+    points_node: ET.Element | None = None,
+    triangles_node: ET.Element | None = None,
+    vertices_node: ET.Element | None = None,
 ) -> MeshData | None:
-    points_node = obj.find("Points")
-    triangles_node = obj.find("Triangles")
     if points_node is None or triangles_node is None:
         return None
-    vertices_node = obj.find("Vertices")
     return _build_mesh_data(
         obj.attrib.get("Name", obj.tag),
         points_node,
@@ -411,10 +526,6 @@ def _build_mesh_from_faces(
     )
 
 
-def _translate_point(point: Vector3, translate: Vector3) -> Vector3:
-    return Vector3(point.x + translate.x, point.y + translate.y, point.z + translate.z)
-
-
 def _select_primary_lod(mesh: ET.Element) -> ET.Element | None:
     lods = mesh.findall("LOD")
     if not lods:
@@ -428,8 +539,7 @@ def _select_primary_lod(mesh: ET.Element) -> ET.Element | None:
     return lods[0]
 
 
-def _extract_skeleton(root: ET.Element, messages: list[str], source_transform: SourceTransform) -> list[Joint]:
-    bones = root.findall(".//Bones/Bone")
+def _extract_skeleton(bones: tuple[ET.Element, ...], messages: list[str], source_transform: SourceTransform) -> list[Joint]:
     if not bones:
         return []
 
@@ -489,32 +599,20 @@ def _extract_skeleton(root: ET.Element, messages: list[str], source_transform: S
 
 
 def _extract_assembly_parts_from_leaf_references(
-    root: ET.Element,
+    object_nodes: tuple[ET.Element, ...],
     messages: list[str],
     source_transform: SourceTransform,
     material_ids: set[int],
 ) -> list[RepeatedPartInstance]:
-    assembly_parts: list[RepeatedPartInstance] = []
-    for obj in root.findall(".//Object"):
-        leaf_ref_node = obj.find("LeafReferences")
-        if leaf_ref_node is None:
-            continue
-
-        payload = _read_leaf_reference_payload(obj, leaf_ref_node, messages, material_ids)
-        if payload.count == 0:
-            continue
-
-        for index in range(payload.count):
-            assembly_parts.append(
-                _build_leaf_reference_instance(
-                    payload,
-                    index,
-                    name=f"AssemblyPart_{len(assembly_parts):04d}",
-                    source_object_id=obj.attrib.get("ID"),
-                    source_transform=source_transform,
-                )
-            )
-    return assembly_parts
+    return list(
+        _extract_object_records(
+            object_nodes,
+            messages,
+            {},
+            source_transform,
+            material_ids,
+        ).assembly_parts
+    )
 
 
 def _read_leaf_reference_payload(
@@ -522,19 +620,49 @@ def _read_leaf_reference_payload(
     leaf_ref_node: ET.Element,
     messages: list[str],
     material_ids: set[int],
+    source_transform: SourceTransform,
 ) -> _LeafReferencePayload:
     context = f"LeafReferences[{obj.attrib.get('Name', obj.attrib.get('ID', '?'))}]"
-    xs = _read_float_list(leaf_ref_node.findtext("X"))
-    ys = _read_float_list(leaf_ref_node.findtext("Y"))
-    zs = _read_float_list(leaf_ref_node.findtext("Z"))
-    scales = _read_float_list(leaf_ref_node.findtext("Scale"))
-    axis_x = _read_float_list(leaf_ref_node.findtext("RotAxisX"))
-    axis_y = _read_float_list(leaf_ref_node.findtext("RotAxisY"))
-    axis_z = _read_float_list(leaf_ref_node.findtext("RotAxisZ"))
-    angles = _read_float_list(leaf_ref_node.findtext("RotAngle"))
-    mesh_ids = _read_int_list(leaf_ref_node.findtext("MeshID"))
-    mesh_lods = _read_int_list(leaf_ref_node.findtext("MeshLOD"))
-    bone_ids = _read_int_list(leaf_ref_node.findtext("BoneID"))
+    xs_raw = ys_raw = zs_raw = None
+    scales_raw = axis_x_raw = axis_y_raw = axis_z_raw = None
+    angles_raw = mesh_ids_raw = mesh_lods_raw = bone_ids_raw = None
+    for child in leaf_ref_node:
+        tag = child.tag
+        text = child.text
+        if tag == "X":
+            xs_raw = text
+        elif tag == "Y":
+            ys_raw = text
+        elif tag == "Z":
+            zs_raw = text
+        elif tag == "Scale":
+            scales_raw = text
+        elif tag == "RotAxisX":
+            axis_x_raw = text
+        elif tag == "RotAxisY":
+            axis_y_raw = text
+        elif tag == "RotAxisZ":
+            axis_z_raw = text
+        elif tag == "RotAngle":
+            angles_raw = text
+        elif tag == "MeshID":
+            mesh_ids_raw = text
+        elif tag == "MeshLOD":
+            mesh_lods_raw = text
+        elif tag == "BoneID":
+            bone_ids_raw = text
+
+    xs = _read_float_list(xs_raw)
+    ys = _read_float_list(ys_raw)
+    zs = _read_float_list(zs_raw)
+    scales = _read_float_list(scales_raw)
+    axis_x = _read_float_list(axis_x_raw)
+    axis_y = _read_float_list(axis_y_raw)
+    axis_z = _read_float_list(axis_z_raw)
+    angles = _read_float_list(angles_raw)
+    mesh_ids = _read_int_list(mesh_ids_raw)
+    mesh_lods = _read_int_list(mesh_lods_raw)
+    bone_ids = _read_int_list(bone_ids_raw)
     source_material_id = _read_material_id(leaf_ref_node, context, messages, material_ids)
     count = _consistent_count(
         context,
@@ -603,12 +731,12 @@ def _build_leaf_reference_instance(
     )
 
 
-def _extract_branch_segments(source_objects: tuple[SourceObject, ...], skeleton: tuple[Joint, ...]) -> list[BranchSegment]:
+def _extract_branch_segments(source_objects: tuple[SourceObject, ...], joint_names: set[str]) -> list[BranchSegment]:
     segments: list[BranchSegment] = []
     for source_object in source_objects:
         if source_object.mesh is None:
             continue
-        candidate_joint = _resolve_source_object_joint_name(source_object, skeleton)
+        candidate_joint = _resolve_source_object_joint_name(source_object, joint_names)
         segments.append(
             BranchSegment(
                 object_id=source_object.object_id,
@@ -622,8 +750,7 @@ def _extract_branch_segments(source_objects: tuple[SourceObject, ...], skeleton:
     return segments
 
 
-def _resolve_source_object_joint_name(source_object: SourceObject, skeleton: tuple[Joint, ...]) -> str | None:
-    joint_names = {joint.name for joint in skeleton}
+def _resolve_source_object_joint_name(source_object: SourceObject, joint_names: set[str]) -> str | None:
     if source_object.object_id.isdigit():
         numeric_id = int(source_object.object_id)
         candidate_joint = joint_name_from_bone_id(numeric_id)
@@ -765,14 +892,27 @@ def _extract_spine(
     object_id: str,
     messages: list[str],
     source_transform: SourceTransform,
+    *,
+    spine_node: ET.Element | None = None,
 ) -> SpineCurve | None:
-    spine_node = obj.find("Spine")
     if spine_node is None:
         return None
-    xs = _read_float_list(spine_node.findtext("X"))
-    ys = _read_float_list(spine_node.findtext("Y"))
-    zs = _read_float_list(spine_node.findtext("Z"))
-    radii = _read_float_list(spine_node.findtext("Radius"))
+    xs_raw = ys_raw = zs_raw = radii_raw = None
+    for child in spine_node:
+        tag = child.tag
+        text = child.text
+        if tag == "X":
+            xs_raw = text
+        elif tag == "Y":
+            ys_raw = text
+        elif tag == "Z":
+            zs_raw = text
+        elif tag == "Radius":
+            radii_raw = text
+    xs = _read_float_list(xs_raw)
+    ys = _read_float_list(ys_raw)
+    zs = _read_float_list(zs_raw)
+    radii = _read_float_list(radii_raw)
     count = _consistent_count(
         f"Spine[{obj.attrib.get('Name', object_id)}]",
         messages,
@@ -781,39 +921,29 @@ def _extract_spine(
     )
     if count == 0:
         return None
-    points = tuple(
-        source_transform.point_components_to_stage(xs[index], ys[index], zs[index])
-        for index in range(count)
-    )
+    points = tuple(source_transform.points_components_to_stage(xs[:count], ys[:count], zs[:count]))
     usable_radii = tuple(radii[:count]) if radii else ()
     return SpineCurve(source_object_id=object_id, points=points, radii=usable_radii)
 
 
 def _extract_bounds(obj: ET.Element, source_transform: SourceTransform) -> Bounds | None:
-    min_components = (obj.attrib.get("BoundsMinX"), obj.attrib.get("BoundsMinY"), obj.attrib.get("BoundsMinZ"))
-    max_components = (obj.attrib.get("BoundsMaxX"), obj.attrib.get("BoundsMaxY"), obj.attrib.get("BoundsMaxZ"))
+    return _bounds_from_attributes(obj.attrib, source_transform)
+
+
+def _bounds_from_attributes(attrib: dict[str, str], source_transform: SourceTransform) -> Bounds | None:
+    bounds_to_stage = source_transform.bounds_to_stage
+    min_components = (attrib.get("BoundsMinX"), attrib.get("BoundsMinY"), attrib.get("BoundsMinZ"))
+    max_components = (attrib.get("BoundsMaxX"), attrib.get("BoundsMaxY"), attrib.get("BoundsMaxZ"))
     if any(component is None for component in min_components + max_components):
         return None
     minimum = tuple(_parse_float_value(component) for component in min_components)
     maximum = tuple(_parse_float_value(component) for component in max_components)
     if any(component is None for component in minimum + maximum):
         return None
-    return source_transform.bounds_to_stage(Bounds(
+    return bounds_to_stage(Bounds(
         minimum=Vector3(minimum[0], minimum[1], minimum[2]),
         maximum=Vector3(maximum[0], maximum[1], maximum[2]),
     ))
-
-
-def _vector_from_named_attributes(
-    elem: ET.Element,
-    names: tuple[str, str, str],
-    source_transform: SourceTransform,
-) -> Vector3:
-    return source_transform.point_components_to_stage(
-        _find_float(elem, (names[0],), default=0.0) or 0.0,
-        _find_float(elem, (names[1],), default=0.0) or 0.0,
-        _find_float(elem, (names[2],), default=0.0) or 0.0,
-    )
 
 
 def _capture_token_from_bone_id(bone_id: int | None) -> str:
@@ -868,7 +998,7 @@ def _extract_packed_points(
     ys = _read_float_list(node.findtext("Y"))
     zs = _read_float_list(node.findtext("Z"))
     count = _consistent_count(context, messages, required=[("X", xs), ("Y", ys), ("Z", zs)])
-    return [source_transform.point_components_to_stage(xs[index], ys[index], zs[index]) for index in range(count)]
+    return source_transform.points_components_to_stage(xs[:count], ys[:count], zs[:count])
 
 
 def _extract_packed_triangles(
@@ -983,22 +1113,26 @@ def _extract_vertex_skinning(
         messages.append(f"packed_array_error: {context} missing BoneID payload for skeletal base mesh")
         return [], []
 
-    if vertex_indices and len(vertex_indices) != len(point_indices):
+    point_index_count = len(point_indices)
+    bone_count = len(source_bone_ids)
+    joint_index_get = joint_index_by_source_id.get
+
+    if vertex_indices and len(vertex_indices) != point_index_count:
         messages.append(
-            f"packed_array_error: {context} point index count {len(point_indices)} does not match vertex index count {len(vertex_indices)}"
+            f"packed_array_error: {context} point index count {point_index_count} does not match vertex index count {len(vertex_indices)}"
         )
     point_vertex_pairs = zip(point_indices, vertex_indices or point_indices, strict=False)
 
     resolved_joint_indices = [0] * point_count
     resolved_joint_weights = [1.0] * point_count
-    assigned_points = [False] * point_count
+    assigned_points = bytearray(point_count)
 
     for point_index, vertex_index in point_vertex_pairs:
         if point_index < 0 or point_index >= point_count:
             messages.append(f"packed_array_error: {context} point index {point_index} exceeds point count {point_count}")
             continue
-        if vertex_index < 0 or vertex_index >= len(source_bone_ids):
-            messages.append(f"packed_array_error: {context} vertex index {vertex_index} exceeds BoneID count {len(source_bone_ids)}")
+        if vertex_index < 0 or vertex_index >= bone_count:
+            messages.append(f"packed_array_error: {context} vertex index {vertex_index} exceeds BoneID count {bone_count}")
             continue
         source_bone_id = source_bone_ids[vertex_index]
         if source_bone_id == -1:
@@ -1006,7 +1140,7 @@ def _extract_vertex_skinning(
         elif source_bone_id < 0:
             messages.append(f"packed_array_error: {context} BoneID {source_bone_id} is not a valid skeletal binding")
             continue
-        joint_index = joint_index_by_source_id.get(source_bone_id)
+        joint_index = joint_index_get(source_bone_id)
         if joint_index is None:
             messages.append(f"packed_array_error: {context} BoneID {source_bone_id} does not resolve to a skeleton joint")
             continue
@@ -1020,7 +1154,7 @@ def _extract_vertex_skinning(
 
         resolved_joint_indices[point_index] = joint_index
         resolved_joint_weights[point_index] = 1.0
-        assigned_points[point_index] = True
+        assigned_points[point_index] = 1
 
     for point_index, assigned in enumerate(assigned_points):
         if not assigned:
@@ -1053,28 +1187,42 @@ def _extract_face_varying_uvs(
     uv_count = min(len(u_coords), len(v_coords))
     if uv_count == 0:
         return []
+    face_vertex_count = len(face_indices)
     if vertex_indices:
         authored_indices = vertex_indices
     elif allow_point_index_fallback:
         authored_indices = face_indices
     else:
-        if uv_count != len(face_indices):
+        if uv_count != face_vertex_count:
             messages.append(
-                f"packed_array_error: {context} UV count {uv_count} requires VertexIndices for face-varying authoring with {len(face_indices)} face vertices"
+                f"packed_array_error: {context} UV count {uv_count} requires VertexIndices for face-varying authoring with {face_vertex_count} face vertices"
             )
             return []
-        authored_indices = list(range(uv_count))
-    if len(authored_indices) != len(face_indices):
+        authored_indices = range(uv_count)
+    authored_count = len(authored_indices)
+    if authored_count != face_vertex_count:
         messages.append(
-            f"packed_array_error: {context} vertex index count {len(authored_indices)} does not match face vertex count {len(face_indices)} for UV authoring"
+            f"packed_array_error: {context} vertex index count {authored_count} does not match face vertex count {face_vertex_count} for UV authoring"
         )
-    limit = min(len(authored_indices), len(face_indices))
-    if limit == len(face_indices) and authored_indices:
-        min_index = min(authored_indices)
-        max_index = max(authored_indices)
-        if min_index >= 0 and max_index < uv_count:
-            return [Vector2(u_coords[vertex_index], v_coords[vertex_index]) for vertex_index in authored_indices]
-
+    limit = min(authored_count, face_vertex_count)
+    if isinstance(authored_indices, range):
+        return [Vector2(u_coords[vertex_index], v_coords[vertex_index]) for vertex_index in authored_indices]
+    if limit == face_vertex_count and authored_indices:
+        uv_coords: list[Vector2] = []
+        has_invalid_index = False
+        for vertex_index in authored_indices:
+            if vertex_index < 0 or vertex_index >= uv_count:
+                messages.append(f"packed_array_error: {context} UV vertex index {vertex_index} exceeds texcoord count {uv_count}")
+                has_invalid_index = True
+                continue
+            uv_coords.append(Vector2(u_coords[vertex_index], v_coords[vertex_index]))
+        if not has_invalid_index:
+            return uv_coords
+        if len(uv_coords) != face_vertex_count:
+            messages.append(
+                f"packed_array_error: {context} authored UV count {len(uv_coords)} does not match face vertex count {len(face_indices)}"
+            )
+            return []
     uv_coords: list[Vector2] = []
     for vertex_index in authored_indices[:limit]:
         if vertex_index < 0 or vertex_index >= uv_count:
@@ -1284,11 +1432,26 @@ def _count_packed_values(node: ET.Element | None, tag_name: str) -> int:
 def _read_float_list(raw: str | None) -> list[float]:
     if not raw:
         return []
+    if "," not in raw:
+        tokens = raw.split()
+        try:
+            return [float(token) for token in tokens]
+        except ValueError:
+            values: list[float] = []
+            append = values.append
+            for token in tokens:
+                try:
+                    append(float(token))
+                except ValueError:
+                    continue
+            return values
+
     values: list[float] = []
+    append = values.append
     for token in raw.split():
         if "," not in token:
             try:
-                values.append(float(token))
+                append(float(token))
             except ValueError:
                 continue
             continue
@@ -1297,7 +1460,7 @@ def _read_float_list(raw: str | None) -> list[float]:
         if normalized.count(",") > 1 and "." not in normalized and "e" not in normalized.lower():
             for chunk in normalized.split(","):
                 try:
-                    values.append(float(chunk))
+                    append(float(chunk))
                 except ValueError:
                     continue
             continue
@@ -1305,7 +1468,7 @@ def _read_float_list(raw: str | None) -> list[float]:
         if "." not in normalized:
             normalized = normalized.replace(",", ".")
         try:
-            values.append(float(normalized))
+            append(float(normalized))
         except ValueError:
             continue
     return values
@@ -1314,14 +1477,32 @@ def _read_float_list(raw: str | None) -> list[float]:
 def _read_int_list(raw: str | None) -> list[int]:
     if not raw:
         return []
-    values: list[int] = []
-    tokens = raw.replace(",", " ").split() if "," in raw else raw.split()
-    for token in tokens:
+    if "," not in raw:
+        tokens = raw.split()
         try:
-            values.append(int(token))
+            return [int(token) for token in tokens]
         except ValueError:
-            continue
-    return values
+            values: list[int] = []
+            append = values.append
+            for token in tokens:
+                try:
+                    append(int(token))
+                except ValueError:
+                    continue
+            return values
+
+    tokens = raw.replace(",", " ").split()
+    try:
+        return [int(token) for token in tokens]
+    except ValueError:
+        values: list[int] = []
+        append = values.append
+        for token in tokens:
+            try:
+                append(int(token))
+            except ValueError:
+                continue
+        return values
 
 
 def _read_positive_float(raw: str | None) -> float | None:

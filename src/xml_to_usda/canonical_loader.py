@@ -34,7 +34,7 @@ from .models import (
 )
 from .normalizer import normalize_to_canonical
 from .source_validation import validate_source_model
-from .xml_reader import inspect_xml, read_source_xml
+from .xml_reader import analyze_xml, read_source_xml
 
 
 def load_source_tree_model(
@@ -53,8 +53,9 @@ def load_source_tree_model(
     )
     throw_if_cancelled(cancel_event)
     document = read_source_xml(input_path)
-    report = inspect_xml(document)
-    model = normalize_to_canonical(document, report)
+    analysis = analyze_xml(document)
+    report = analysis.report
+    model = normalize_to_canonical(document, report, source_nodes=analysis.source_nodes)
     diagnostics = validate_source_model(model)
     return report, model, diagnostics
 

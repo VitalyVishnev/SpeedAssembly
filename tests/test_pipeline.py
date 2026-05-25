@@ -24,6 +24,7 @@ from xml_to_usda.normalizer import (
 )
 from xml_to_usda.models import (
     BaseMaterialOverride,
+    Bounds,
     Color4,
     CpuProfile,
     ConversionMode,
@@ -31,6 +32,7 @@ from xml_to_usda.models import (
     ExportMetadata,
     FbxMaterialMode,
     FbxMaterialSlotOverride,
+    InstanceBinding,
     Joint,
     MaterialPolicy,
     MaterialSpec,
@@ -41,11 +43,13 @@ from xml_to_usda.models import (
     PrototypeSourceConfig,
     PrototypeSourceMode,
     PrototypeStrategy,
+    RepeatedPartInstance,
     SourceObject,
     PrototypeResolutionMode,
     TreeAsset,
     UdimMaterialSetting,
     UdimMode,
+    Quaternion,
     Vector2,
     Vector3,
 )
@@ -71,7 +75,7 @@ from xml_to_usda.udim_settings import load_udim_material_settings_from_json
 from xml_to_usda.usda_authoring import author_usda_stream, author_usda_text, build_authoring_context
 from xml_to_usda.usda_writer import render_usda, write_usda_document
 from xml_to_usda.validator import validate_model
-from xml_to_usda.xml_reader import inspect_xml, read_source_xml, render_inspect_report
+from xml_to_usda.xml_reader import analyze_xml, inspect_xml, read_source_xml, render_inspect_report
 
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -355,6 +359,15 @@ def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
     assert all(len(part.binding.joint_tokens) == len(part.binding.weights) for part in model.assembly_parts)
     assert all(token.startswith("bone_") or token == "root" for part in model.assembly_parts for token in part.binding.joint_tokens)
     assert {prototype.source_key for prototype in model.prototypes} == {part.prototype_key for part in model.assembly_parts}
+
+
+def test_canonical_model_matches_when_source_node_index_is_prebuilt() -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    analysis = analyze_xml(document)
+    model_from_analysis = normalize_to_canonical(document, analysis.report, source_nodes=analysis.source_nodes)
+    model_without_shared_index = normalize_to_canonical(document, analysis.report)
+
+    assert model_without_shared_index == model_from_analysis
 
 
 def test_dynamic_wind_groups_follow_vertical_levels_without_horizontal_bias() -> None:
@@ -1228,6 +1241,61 @@ def test_speedtree_xml_ignores_non_meter_units_hint_and_uses_meter_source_scale(
     assert transform.linear_scale == pytest.approx(1.0)
 
 
+def test_source_transform_batch_point_conversion_matches_single_point_conversion() -> None:
+    root = ET.fromstring("<SpeedTreeRaw><Meshes><Mesh Orient='xyzZ' /></Meshes></SpeedTreeRaw>")
+    transform = build_source_transform(root, units_hint=None, up_axis_hint=None)
+
+    batch_points = transform.points_components_to_stage([1.0, 2.0], [3.0, 4.0], [5.0, 6.0])
+
+    assert batch_points == [Vector3(1.0, 5.0, -3.0), Vector3(2.0, 6.0, -4.0)]
+
+
+def test_core_value_types_remain_pickleable() -> None:
+    payload = (
+        Vector2(1.0, 2.0),
+        Vector3(3.0, 4.0, 5.0),
+        Color4(0.25, 0.5, 0.75, 1.0),
+        Quaternion(1.0, 0.0, 0.0, 0.0),
+    )
+
+    assert pickle.loads(pickle.dumps(payload)) == payload
+
+
+def test_model_dataclasses_remain_pickleable() -> None:
+    mesh = MeshData(
+        name="TestMesh",
+        points=(Vector3(0.0, 0.0, 0.0),),
+        face_vertex_counts=(1,),
+        face_vertex_indices=(0,),
+    )
+    bounds = Bounds(minimum=Vector3(0.0, 0.0, 0.0), maximum=Vector3(1.0, 1.0, 1.0))
+    payload = (
+        Joint(name="joint_0", source_id=0),
+        mesh,
+        SourceObject(
+            object_id="0",
+            parent_id=None,
+            name="Object_0",
+            abs_translate=Vector3(0.0, 0.0, 0.0),
+            rel_translate=Vector3(0.0, 0.0, 0.0),
+            bounds=bounds,
+            mesh=mesh,
+        ),
+        RepeatedPartInstance(
+            name="Part_0",
+            prototype_key="Mesh_0",
+            position=Vector3(0.0, 0.0, 0.0),
+            orientation=Quaternion(1.0, 0.0, 0.0, 0.0),
+            scale=Vector3(1.0, 1.0, 1.0),
+            binding=InstanceBinding(joint_tokens=("Tree_point_0",), weights=(1.0,)),
+            source_object_id="0",
+            source_mesh_id=0,
+        ),
+    )
+
+    assert pickle.loads(pickle.dumps(payload)) == payload
+
+
 def test_leaf_reference_orientation_preserves_rotation_sense_after_axis_remap() -> None:
     root = ET.fromstring(
         """
@@ -1254,7 +1322,7 @@ def test_leaf_reference_orientation_preserves_rotation_sense_after_axis_remap() 
     )
 
     transform = build_source_transform(root, units_hint=None, up_axis_hint=None)
-    parts = _extract_assembly_parts_from_leaf_references(root, [], transform, {2})
+    parts = _extract_assembly_parts_from_leaf_references(tuple(root.findall(".//Object")), [], transform, {2})
 
     assert len(parts) == 1
     orientation = parts[0].orientation

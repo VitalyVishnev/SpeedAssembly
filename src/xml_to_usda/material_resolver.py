@@ -306,20 +306,20 @@ def _build_source_role_materials(
     base_mesh: MeshData | None,
     prototypes,
 ) -> tuple[MaterialSpec, ...]:
-    original_material_by_id = {material.source_id: material for material in model.materials}
     source_ids_by_role: dict[int, set[int]] = {}
     for source_material_id in _source_material_ids(model):
         role_id = role_map.get(source_material_id, source_material_id)
         source_ids_by_role.setdefault(role_id, set()).add(source_material_id)
     used_role_ids = _used_material_ids(base_mesh, prototypes)
+    representative_by_role: dict[int, MaterialSpec] = {}
+    for source_material in model.materials:
+        role_id = role_map.get(source_material.source_id, source_material.source_id)
+        representative_by_role.setdefault(role_id, source_material)
 
     materials: list[MaterialSpec] = []
     for role_id in sorted(set(source_ids_by_role) | used_role_ids):
         source_material_ids = tuple(sorted(source_ids_by_role.get(role_id, {role_id})))
-        representative = next(
-            (original_material_by_id[source_id] for source_id in source_material_ids if source_id in original_material_by_id),
-            None,
-        )
+        representative = representative_by_role.get(role_id)
         name = "PrimaryMaterial" if role_id == BASELINE_BARK_MATERIAL_ID else "SecondaryMaterial"
         two_sided = representative.two_sided if representative is not None else False
         maps = representative.maps if representative is not None else ()
@@ -914,20 +914,17 @@ def _explicit_fbx_material_slot_sections_for_prototype(
             f"{prototype.identity.prim_name} requested FBX material_slots but the FBX payload does not expose any usable material slots."
         )
 
-    overrides_by_name = {
-        override.slot_name: normalize_asset_path(override.ue_asset_path)
-        if override.ue_asset_path
-        else None
+    overrides_by_slot_name = {
+        override.slot_name: override
         for override in prototype.fbx_material_slot_overrides
     }
-    first_filled_override = next(
-        (
-            normalize_asset_path(override.ue_asset_path)
-            for override in prototype.fbx_material_slot_overrides
-            if override.ue_asset_path
-        ),
-        None,
-    )
+    overrides_by_name: dict[str, str | None] = {}
+    first_filled_override = None
+    for override in prototype.fbx_material_slot_overrides:
+        resolved_path = normalize_asset_path(override.ue_asset_path) if override.ue_asset_path else None
+        overrides_by_name[override.slot_name] = resolved_path
+        if first_filled_override is None and resolved_path:
+            first_filled_override = resolved_path
     if not first_filled_override:
         raise ValueError(
             "Prototype "
@@ -957,10 +954,7 @@ def _explicit_fbx_material_slot_sections_for_prototype(
                 source_material_ids=(slot_spec.source_id,),
             )
         )
-        override = next(
-            (override for override in prototype.fbx_material_slot_overrides if override.slot_name == slot_spec.name),
-            None,
-        )
+        override = overrides_by_slot_name.get(slot_spec.name)
         if override is not None and override.udim_mode != UdimMode.OFF:
             udim_settings.append(
                 UdimMaterialSetting(

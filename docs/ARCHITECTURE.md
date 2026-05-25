@@ -231,6 +231,13 @@ Treat these modules as likely deep until proven otherwise:
 Deleting or bypassing these modules would probably spread high-risk knowledge
 across callers.
 
+Performance note:
+
+- `normalizer.py` remains the hottest deep module.
+- Profile changes there across more than one real sample before keeping them.
+- Several local loop and child-scan rewrites regressed `BigSpruce`, so a
+  single timing sample is not enough evidence for that module.
+
 ## Architecture review checklist
 
 For each proposed deepening opportunity, answer:

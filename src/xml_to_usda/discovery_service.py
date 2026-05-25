@@ -199,17 +199,21 @@ def inspect_fbx_material_slot_rows(
     """Inspect face-used FBX slots and apply any persisted Unreal material paths."""
     resolved_path = str(Path(fbx_path).expanduser().resolve())
     slots = _inspect_fbx_material_slots_cached(resolved_path, cpu_profile.value)
-    persisted_by_name = {record.slot_name: record.ue_asset_path for record in persisted_records if record.slot_name}
-    return tuple(
-        PrototypeMaterialSlotRowSpec(
-            slot_name=slot.name,
-            face_count=slot.face_count,
-            ue_asset_path=persisted_by_name.get(slot.name, ""),
-            udim_mode=next((record.udim_mode for record in persisted_records if record.slot_name == slot.name), UdimMode.OFF),
-            udim_id=next((record.udim_id for record in persisted_records if record.slot_name == slot.name), 1001),
+    persisted_by_name = {record.slot_name: record for record in persisted_records if record.slot_name}
+    default_persisted = FbxMaterialSlotSettingRecord("", "", UdimMode.OFF, 1001)
+    rows: list[PrototypeMaterialSlotRowSpec] = []
+    for slot in slots:
+        persisted = persisted_by_name.get(slot.name, default_persisted)
+        rows.append(
+            PrototypeMaterialSlotRowSpec(
+                slot_name=slot.name,
+                face_count=slot.face_count,
+                ue_asset_path=persisted.ue_asset_path,
+                udim_mode=persisted.udim_mode,
+                udim_id=persisted.udim_id,
+            )
         )
-        for slot in slots
-    )
+    return tuple(rows)
 
 
 @lru_cache(maxsize=64)
