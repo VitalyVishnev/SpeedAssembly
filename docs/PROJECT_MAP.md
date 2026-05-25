@@ -133,13 +133,6 @@ Compatibility surfaces. They should remain thin.
   `qt_ui/window.py` and `qt_ui/panels.py` -> `qt_ui/operator_state.py` ->
   `settings_service.py` and application services
 
-Performance review note:
-
-- When revisiting `normalizer.py`, use more than one real sample and keep the
-  median, not a single `BigSpruce` run.
-- The durable wins so far came from shared analysis reuse and duplicate-work
-  removal, not from extra local caches in object extraction.
-
 ## Review discipline
 
 Before suggesting a new seam, verify whether there are at least two real
