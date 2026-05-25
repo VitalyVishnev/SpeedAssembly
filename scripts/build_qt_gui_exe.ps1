@@ -7,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$env:PYTHONNOUSERSITE = '1'
 
 function Get-VenvExecutable([string]$RepoRoot) {
     $pythonExe = Join-Path $RepoRoot '.venv310\Scripts\python.exe'
@@ -89,17 +90,20 @@ $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $launcherScript = Join-Path $repoRoot 'scripts\launch_qt_gui.py'
 $distPath = Join-Path $repoRoot 'dist-next'
 $buildPath = Join-Path $repoRoot 'build-next'
+$qtUiSourceRoot = Join-Path $repoRoot 'src\xml_to_usda\qt_ui'
+$qtUiStagingRoot = Join-Path $buildPath 'qt_ui_data'
 $exePath = Join-Path $distPath 'XMLtoUSDAConverter.exe'
 $iconPath = Join-Path $repoRoot 'src\xml_to_usda\qt_ui\assets\Icon.ico'
+$hooksPath = Join-Path $repoRoot 'hooks'
 
 Push-Location $repoRoot
 try {
     $pythonExe = Get-VenvExecutable -RepoRoot $repoRoot
     if (-not $SkipBootstrap) {
-        & $pythonExe -c "import PySide6, PyInstaller" 2>$null
+        & $pythonExe -s -c "import PySide6, PyInstaller" 2>$null
         if ($LASTEXITCODE -ne 0) {
             Write-Host 'Installing UI-next build dependencies into .venv310 ...'
-            & $pythonExe -m pip install -e '.[dev,ui-next]'
+            & $pythonExe -s -m pip install -e '.[dev,ui-next]'
             if ($LASTEXITCODE -ne 0) {
                 throw 'Failed to install ui-next dependencies for PySide6 release build.'
             }
@@ -125,6 +129,11 @@ try {
             Remove-Item -Recurse -Force $distPath
         }
 
+        & $pythonExe -s -m xml_to_usda.qt_ui.release_build --source-ui-root $qtUiSourceRoot --staging-root $qtUiStagingRoot --jpeg-quality 85
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Qt UI asset staging failed.'
+        }
+
         $pyInstallerArgs = @(
             '-m', 'PyInstaller',
             '--noconfirm',
@@ -133,16 +142,65 @@ try {
             '--windowed',
             '--name', 'XMLtoUSDAConverter',
             '--icon', $iconPath,
+            '--additional-hooks-dir', $hooksPath,
             '--paths', (Join-Path $repoRoot 'src'),
-            '--collect-data', 'xml_to_usda.qt_ui',
+            '--add-data', "$qtUiStagingRoot;xml_to_usda/qt_ui",
             '--distpath', $distPath,
             '--workpath', $buildPath,
             '--specpath', $buildPath,
             $launcherScript
         )
 
+        $qtExcludes = @(
+            'PySide6.QtBluetooth',
+            'PySide6.QtCharts',
+            'PySide6.QtDataVisualization',
+            'PySide6.QtDesigner',
+            'PySide6.QtGraphs',
+            'PySide6.QtGraphsWidgets',
+            'PySide6.QtHelp',
+            'PySide6.QtHttpServer',
+            'PySide6.QtLocation',
+            'PySide6.QtMultimedia',
+            'PySide6.QtMultimediaWidgets',
+            'PySide6.QtNfc',
+            'PySide6.QtOpenGL',
+            'PySide6.QtOpenGLWidgets',
+            'PySide6.QtPdf',
+            'PySide6.QtPdfWidgets',
+            'PySide6.QtPositioning',
+            'PySide6.QtPrintSupport',
+            'PySide6.QtQml',
+            'PySide6.QtQuick',
+            'PySide6.QtQuick3D',
+            'PySide6.QtQuickControls2',
+            'PySide6.QtQuickWidgets',
+            'PySide6.QtRemoteObjects',
+            'PySide6.QtScxml',
+            'PySide6.QtSensors',
+            'PySide6.QtSerialBus',
+            'PySide6.QtSerialPort',
+            'PySide6.QtSql',
+            'PySide6.QtStateMachine',
+            'PySide6.QtSvg',
+            'PySide6.QtSvgWidgets',
+            'PySide6.QtTextToSpeech',
+            'PySide6.QtUiTools',
+            'PySide6.QtVirtualKeyboard',
+            'PySide6.QtWebChannel',
+            'PySide6.QtWebEngineCore',
+            'PySide6.QtWebEngineQuick',
+            'PySide6.QtWebEngineWidgets',
+            'PySide6.QtWebSockets',
+            'PySide6.QtNetwork',
+            'PySide6.QtNetworkAuth'
+        )
+        foreach ($exclude in $qtExcludes) {
+            $pyInstallerArgs += @('--exclude-module', $exclude)
+        }
+
         Write-Host "Building PySide6 release shell with $pythonExe ..."
-        & $pythonExe @pyInstallerArgs
+        & $pythonExe -s @pyInstallerArgs
         if ($LASTEXITCODE -ne 0) {
             throw 'PyInstaller PySide6 release build failed.'
         }
@@ -153,7 +211,7 @@ try {
 
         Write-BuildInfo -DistPath $distPath -ExePath $exePath -PythonExe $pythonExe -RepoRoot $repoRoot -BuildMode 'release'
         $bundlePath = Join-Path $distPath 'XMLtoUSDAConverter_release.zip'
-        & $pythonExe -m xml_to_usda.release_bundle --repo-root $repoRoot --dist-path $distPath --zip-path $bundlePath
+        & $pythonExe -s -m xml_to_usda.release_bundle --repo-root $repoRoot --dist-path $distPath --zip-path $bundlePath
         if ($LASTEXITCODE -ne 0) {
             throw 'Release zip assembly failed.'
         }

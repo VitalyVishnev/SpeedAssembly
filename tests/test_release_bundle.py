@@ -44,6 +44,9 @@ def test_qt_package_script_builds_release_zip() -> None:
 
     assert "xml_to_usda.release_bundle" in script_text
     assert "XMLtoUSDAConverter_release.zip" in script_text
+    assert "xml_to_usda.qt_ui.release_build" in script_text
     assert "Missing application icon" in script_text
     assert "'--icon', $iconPath" in script_text
-    assert "src\\xml_to_usda\\qt_ui\\assets\\Icon.ico" in script_text
+    assert "'--additional-hooks-dir', $hooksPath" in script_text
+    assert "'--add-data', \"$qtUiStagingRoot;xml_to_usda/qt_ui\"" in script_text
+    assert "'--exclude-module', $exclude" in script_text

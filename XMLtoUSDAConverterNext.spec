@@ -1,8 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files
+import os
+import sys
+from pathlib import Path
 
-datas = []
-datas += collect_data_files('xml_to_usda.qt_ui')
+os.environ.setdefault('PYTHONNOUSERSITE', '1')
+
+REPO_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(REPO_ROOT / 'src'))
+
+from xml_to_usda.qt_ui.release_build import PYINSTALLER_EXCLUDES, build_release_data_tree
+
+STAGING_ROOT = REPO_ROOT / 'build-next' / 'qt_ui_data'
+build_release_data_tree(
+    source_ui_root=REPO_ROOT / 'src' / 'xml_to_usda' / 'qt_ui',
+    staging_root=STAGING_ROOT,
+    jpeg_quality=85,
+)
+
+datas = [(str(STAGING_ROOT), 'xml_to_usda/qt_ui')]
 
 
 a = Analysis(
@@ -11,10 +26,10 @@ a = Analysis(
     binaries=[],
     datas=datas,
     hiddenimports=[],
-    hookspath=[],
+    hookspath=['D:\\3D Personal\\VibeCode\\XMLtoUSDAconverter\\hooks'],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=list(PYINSTALLER_EXCLUDES),
     noarchive=False,
     optimize=0,
 )
