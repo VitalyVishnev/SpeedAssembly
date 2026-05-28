@@ -3,11 +3,14 @@ from __future__ import annotations
 import argparse
 import multiprocessing
 import sys
+import time
 
+from .fbx_adapter import load_fbx_geometry
+from .fbx_payload_cache import FbxPayloadCacheOptions, load_fbx_payload_from_cache, store_fbx_payload_in_cache
 from .fbx_worker_subprocess import FBX_WORKER_COMMAND, run_fbx_worker_request_file
-from .models import CleanupPolicy, CpuProfile, MaterialPolicy
+from .models import CleanupPolicy, CpuProfile, FbxMaterialMode, GeometryBuffer, MaterialPolicy
 from .pipeline import convert_file, generate_wind_json, inspect_source
-from .prototype_sources import load_prototype_source_configs_from_json
+from .prototype_sources import fbx_import_read_options_for_material_mode, load_prototype_source_configs_from_json
 from .runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
 from .udim_settings import load_udim_material_settings_from_json
 from .xml_reader import render_inspect_report
@@ -56,6 +59,21 @@ def build_parser() -> argparse.ArgumentParser:
     wind_parser.add_argument("input", help="Path to the source XML file.")
     wind_parser.add_argument("output", help="Path to the output JSON file.")
 
+    benchmark_fbx_parser = subparsers.add_parser("benchmark-fbx", help="Benchmark one explicit Assembly Part FBX payload.")
+    benchmark_fbx_parser.add_argument("input", help="Path to the FBX file.")
+    benchmark_fbx_parser.add_argument(
+        "--material-mode",
+        choices=[mode.value for mode in FbxMaterialMode],
+        default=FbxMaterialMode.SINGLE_MATERIAL.value,
+        help="Repeated-part material mode to benchmark. Default: single_material.",
+    )
+    benchmark_fbx_parser.add_argument(
+        "--cpu-profile",
+        choices=[profile.value for profile in CpuProfile],
+        default=CpuProfile.BALANCED.value,
+        help="CPU usage profile for the benchmark. Default: balanced.",
+    )
+
     subparsers.add_parser("gui", help="Launch the primary PySide6 desktop GUI.")
     fbx_worker_parser = subparsers.add_parser(FBX_WORKER_COMMAND, help=argparse.SUPPRESS)
     fbx_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
@@ -102,6 +120,12 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "generate-wind-json":
             return _run_generate_wind_json(args.input, args.output)
+        if args.command == "benchmark-fbx":
+            return _run_benchmark_fbx(
+                args.input,
+                material_mode=FbxMaterialMode(args.material_mode),
+                cpu_profile=CpuProfile(args.cpu_profile),
+            )
         if args.command == "gui":
             from .qt_ui.entry import main as gui_main
 
@@ -167,6 +191,60 @@ def _run_convert(
 def _run_generate_wind_json(input_path: str, output_path: str) -> int:
     result = generate_wind_json(input_path, output_path)
     sys.stdout.write(f"Wrote wind JSON to {result.output_path}\n")
+    return 0
+
+
+def _run_benchmark_fbx(
+    input_path: str,
+    *,
+    material_mode: FbxMaterialMode,
+    cpu_profile: CpuProfile,
+) -> int:
+    read_options = fbx_import_read_options_for_material_mode(material_mode)
+    options = FbxPayloadCacheOptions(
+        read_vertex_colors=read_options.read_vertex_colors,
+        read_material_slots=read_options.read_material_slots,
+        strict_vertex_colors=read_options.strict_vertex_colors,
+    )
+    started_at = time.perf_counter()
+    cache_result = load_fbx_payload_from_cache(input_path, options)
+    cache_seconds = time.perf_counter() - started_at
+    payload = cache_result.payload
+    import_seconds = 0.0
+    store_seconds = 0.0
+    telemetry_messages: list[str] = []
+    if payload is None:
+        import_started_at = time.perf_counter()
+        payload = load_fbx_geometry(
+            input_path,
+            "BenchmarkPayload",
+            cpu_profile=cpu_profile,
+            strict_vertex_colors=read_options.strict_vertex_colors,
+            read_vertex_colors=read_options.read_vertex_colors,
+            read_material_slots=read_options.read_material_slots,
+            telemetry_callback=lambda telemetry: telemetry_messages.append(telemetry.message),
+        )
+        import_seconds = time.perf_counter() - import_started_at
+        if isinstance(payload, GeometryBuffer):
+            store_started_at = time.perf_counter()
+            store_fbx_payload_in_cache(input_path, options, payload)
+            store_seconds = time.perf_counter() - store_started_at
+
+    sys.stdout.write(f"FBX benchmark: {input_path}\n")
+    sys.stdout.write(f"material_mode: {material_mode.value}\n")
+    sys.stdout.write(f"cache_hit: {cache_result.hit}\n")
+    sys.stdout.write(f"cache_lookup_seconds: {cache_seconds:.3f}\n")
+    sys.stdout.write(f"import_seconds: {import_seconds:.3f}\n")
+    sys.stdout.write(f"cache_store_seconds: {store_seconds:.3f}\n")
+    if isinstance(payload, GeometryBuffer):
+        sys.stdout.write(f"points: {payload.point_count}\n")
+        sys.stdout.write(f"faces: {payload.face_count}\n")
+        sys.stdout.write(f"uvs: {payload.uv_count}\n")
+        sys.stdout.write(f"vertex_colors: {payload.vertex_color_count}\n")
+        sys.stdout.write(f"material_slots: {len(payload.fbx_material_slots)}\n")
+    for message in telemetry_messages:
+        if message:
+            sys.stdout.write(f"stage: {message}\n")
     return 0
 
 

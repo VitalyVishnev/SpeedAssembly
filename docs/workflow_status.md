@@ -46,6 +46,8 @@ Current large-job execution contract:
 - the GUI process now only owns the UI and telemetry polling; the Conversion Worker owns XML normalization, FBX import, material resolution, and USDA writing
 - explicit FBX prototype imports are parallelized across a `spawn` process pool when more than one FBX prototype must be imported
 - this parallelism is currently prototype-level and stage-level, not "all cores inside one single FBX file"
+- explicit FBX prototype payloads are cached across Runtime Jobs in the bounded FBX payload cache under the runtime cache root
+- repeated-part FBX import now avoids vertex-color and material-slot face-section reads when the selected FBX material mode does not need them
 - packaged frozen runs use isolated `FBX Helper` imports through the shared FBX supervisor and start from the requested prototype-level concurrency
 - if a native helper crash occurs at that concurrency, the supervisor automatically retries the remaining FBX imports with a lower helper count instead of failing the whole job immediately
 - if that worker pool cannot be created in the current environment, FBX prototype import falls back to sequential execution instead of failing outright
@@ -58,6 +60,7 @@ Current huge-FBX status:
 
 - huge FBX writing uses the streamed USDA path with temp-file replacement and runtime telemetry
 - `Runtime Job` manifests now include `runtime_context` for launcher-versus-packaged crash comparison
+- use `python -m xml_to_usda benchmark-fbx <fbx path> --material-mode <mode>` for local heavy-FBX cache/read-option profiling
 
 The only remaining open item before `Phase 1` can be considered complete is broader validation on multiple real SpeedTree structures with different tree and grass shapes:
 

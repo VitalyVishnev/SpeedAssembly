@@ -143,6 +143,7 @@ Symptom:
 What to know:
 
 - huge FBX prototype payloads now stream USDA through a temporary `.partial` file and atomically replace the final target on success
+- repeated use of the same explicit `.fbx` Part Mesh can hit the bounded FBX payload cache under `%LOCALAPPDATA%/XMLtoUSDAConverter/cache/fbx-payloads`
 - `balanced` leaves logical CPUs free for the rest of the system
 - `max_speed` uses more of the machine but may feel less responsive during the job
 - the current multiprocessing path is mainly across independent prototypes and stages; one single huge Autodesk FBX import may still keep total Task Manager CPU surprisingly low
@@ -153,6 +154,7 @@ Practical rule:
 - use `max_speed` when throughput matters more than responsiveness
 - do not treat low total CPU percentage alone as a regression if the job still completes in acceptable wall-clock time
 - if conversion is cancelled or fails, a leftover `.partial` file is treated as a bug
+- to profile a huge branch payload directly, run `python -m xml_to_usda benchmark-fbx "<fbx path>" --material-mode single_material`
 
 ## Material override looks ignored
 

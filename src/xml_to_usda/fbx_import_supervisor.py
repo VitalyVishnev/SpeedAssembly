@@ -41,6 +41,8 @@ class FbxImportTask:
     fbx_path: str
     cpu_profile: CpuProfile
     strict_vertex_colors: bool = False
+    read_vertex_colors: bool = True
+    read_material_slots: bool = True
 
 
 @dataclass(frozen=True)
@@ -216,6 +218,8 @@ def _launch_helper(task: FbxImportTask) -> _RunningHelper:
             prototype_name=task.prototype_name,
             cpu_profile=task.cpu_profile,
             strict_vertex_colors=task.strict_vertex_colors,
+            read_vertex_colors=task.read_vertex_colors,
+            read_material_slots=task.read_material_slots,
             result_path=str(result_path),
             error_path=str(error_path),
         ),

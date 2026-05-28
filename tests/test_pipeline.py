@@ -2402,6 +2402,78 @@ def test_cli_fbx_worker_command_writes_payload_pickle_and_returns_zero(
     assert read_fbx_worker_error(error_path) is None
 
 
+def test_cli_fbx_worker_command_passes_selective_read_options(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from xml_to_usda.cli import main as cli_main
+    from xml_to_usda.fbx_payload_cache import FbxPayloadCacheResult
+    from xml_to_usda.fbx_worker_subprocess import FBX_WORKER_COMMAND, FbxWorkerRequest, write_fbx_worker_request
+    import xml_to_usda.fbx_worker_subprocess as fbx_worker_subprocess_module
+
+    result_path = tmp_path / "worker_payload.pkl"
+    error_path = tmp_path / "worker_error.json"
+    request_path = tmp_path / "worker_request.json"
+    fbx_path = tmp_path / "branch.fbx"
+    fbx_path.write_bytes(b"fbx")
+    observed_kwargs = {}
+
+    def _fake_load_fbx_geometry(*_args, **kwargs):
+        observed_kwargs.update(kwargs)
+        return {"points": [1, 2, 3]}
+
+    monkeypatch.setattr(fbx_worker_subprocess_module, "load_fbx_geometry", _fake_load_fbx_geometry)
+    monkeypatch.setattr(
+        fbx_worker_subprocess_module,
+        "load_fbx_payload_from_cache",
+        lambda *_args, **_kwargs: FbxPayloadCacheResult(None, hit=False),
+    )
+    monkeypatch.setattr(
+        fbx_worker_subprocess_module,
+        "store_fbx_payload_in_cache",
+        lambda *_args, **_kwargs: None,
+    )
+    write_fbx_worker_request(
+        request_path,
+        FbxWorkerRequest(
+            fbx_path=str(fbx_path),
+            prototype_name="SM_BigBranch_01_HIGH",
+            cpu_profile=CpuProfile.BALANCED,
+            strict_vertex_colors=False,
+            result_path=str(result_path),
+            error_path=str(error_path),
+            read_vertex_colors=False,
+            read_material_slots=True,
+        ),
+    )
+
+    exit_code = cli_main([FBX_WORKER_COMMAND, "--request", str(request_path)])
+
+    assert exit_code == 0
+    assert observed_kwargs["read_vertex_colors"] is False
+    assert observed_kwargs["read_material_slots"] is True
+    assert observed_kwargs["strict_vertex_colors"] is False
+
+
+def test_cli_benchmark_fbx_reports_payload_counts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from xml_to_usda.cli import main as cli_main
+
+    payload_path = _write_fbx_json_payload(tmp_path, file_name="benchmark_payload.json")
+
+    exit_code = cli_main(["benchmark-fbx", str(payload_path), "--material-mode", "single_material"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "cache_hit: False" in captured.out
+    assert "points: 6" in captured.out
+    assert "faces: 2" in captured.out
+    assert "vertex_colors: 0" in captured.out
+    assert "material_slots: 0" in captured.out
+
+
 def test_fbx_import_supervisor_prefers_sidecar_worker_directory_in_frozen_mode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -13,11 +13,16 @@ from __future__ import annotations
 import json
 import pickle
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .fbx_adapter import load_fbx_geometry
-from .models import CpuProfile
+from .fbx_payload_cache import (
+    FbxPayloadCacheOptions,
+    load_fbx_payload_from_cache,
+    store_fbx_payload_in_cache,
+)
+from .models import CpuProfile, GeometryBuffer
 
 FBX_WORKER_COMMAND = "fbx-worker"
 
@@ -30,6 +35,8 @@ class FbxWorkerRequest:
     strict_vertex_colors: bool
     result_path: str
     error_path: str
+    read_vertex_colors: bool = True
+    read_material_slots: bool = True
 
 
 def write_fbx_worker_request(path: str | Path, request: FbxWorkerRequest) -> None:
@@ -40,6 +47,8 @@ def write_fbx_worker_request(path: str | Path, request: FbxWorkerRequest) -> Non
                 "prototype_name": request.prototype_name,
                 "cpu_profile": request.cpu_profile.value,
                 "strict_vertex_colors": request.strict_vertex_colors,
+                "read_vertex_colors": request.read_vertex_colors,
+                "read_material_slots": request.read_material_slots,
                 "result_path": request.result_path,
                 "error_path": request.error_path,
             }
@@ -55,6 +64,8 @@ def read_fbx_worker_request(path: str | Path) -> FbxWorkerRequest:
         prototype_name=str(payload["prototype_name"]),
         cpu_profile=CpuProfile(str(payload["cpu_profile"])),
         strict_vertex_colors=bool(payload.get("strict_vertex_colors", False)),
+        read_vertex_colors=bool(payload.get("read_vertex_colors", True)),
+        read_material_slots=bool(payload.get("read_material_slots", True)),
         result_path=str(payload["result_path"]),
         error_path=str(payload["error_path"]),
     )
@@ -71,12 +82,26 @@ def read_fbx_worker_error(path: str | Path) -> tuple[str, str] | None:
 def run_fbx_worker_request_file(path: str | Path) -> int:
     request = read_fbx_worker_request(path)
     try:
-        payload = load_fbx_geometry(
-            request.fbx_path,
-            request.prototype_name,
-            cpu_profile=request.cpu_profile,
+        cache_options = FbxPayloadCacheOptions(
+            read_vertex_colors=request.read_vertex_colors,
+            read_material_slots=request.read_material_slots,
             strict_vertex_colors=request.strict_vertex_colors,
         )
+        cached = load_fbx_payload_from_cache(request.fbx_path, cache_options)
+        payload = cached.payload
+        if payload is None:
+            payload = load_fbx_geometry(
+                request.fbx_path,
+                request.prototype_name,
+                cpu_profile=request.cpu_profile,
+                strict_vertex_colors=request.strict_vertex_colors,
+                read_vertex_colors=request.read_vertex_colors,
+                read_material_slots=request.read_material_slots,
+            )
+            if isinstance(payload, GeometryBuffer):
+                store_fbx_payload_in_cache(request.fbx_path, cache_options, payload)
+        elif isinstance(payload, GeometryBuffer) and payload.name != request.prototype_name:
+            payload = replace(payload, name=request.prototype_name)
         with Path(request.result_path).open("wb") as handle:
             pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
         _cleanup_file(Path(request.error_path))

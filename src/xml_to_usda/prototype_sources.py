@@ -9,6 +9,7 @@ Resolved Prototype matching lives in `prototype_resolution`.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from .fbx_import_supervisor import FbxImportTask, import_fbx_payloads
@@ -22,6 +23,13 @@ from .models import (
 from .prototype_resolution import (
     _PreparedFbxImport,
 )
+
+
+@dataclass(frozen=True)
+class FbxImportReadOptions:
+    read_vertex_colors: bool
+    read_material_slots: bool
+    strict_vertex_colors: bool
 
 
 def load_prototype_source_configs_from_json(path: str) -> tuple[PrototypeSourceConfig, ...]:
@@ -116,23 +124,33 @@ def _load_fbx_payloads(
     if not prepared_imports:
         return {}
 
-    tasks = tuple(
-        FbxImportTask(
-            task_id=prepared_import.prototype_index,
-            display_name=prepared_import.resolved_source_name,
-            prototype_name=prepared_import.resolved_identity.prim_name,
-            fbx_path=prepared_import.config.fbx_path or "",
-            cpu_profile=cpu_profile,
-            strict_vertex_colors=(
-                prepared_import.config.fbx_material_mode == FbxMaterialMode.VERTEX_COLOR_SPLIT
-            ),
+    tasks: list[FbxImportTask] = []
+    for prepared_import in prepared_imports:
+        read_options = fbx_import_read_options_for_material_mode(prepared_import.config.fbx_material_mode)
+        tasks.append(
+            FbxImportTask(
+                task_id=prepared_import.prototype_index,
+                display_name=prepared_import.resolved_source_name,
+                prototype_name=prepared_import.resolved_identity.prim_name,
+                fbx_path=prepared_import.config.fbx_path or "",
+                cpu_profile=cpu_profile,
+                strict_vertex_colors=read_options.strict_vertex_colors,
+                read_vertex_colors=read_options.read_vertex_colors,
+                read_material_slots=read_options.read_material_slots,
+            )
         )
-        for prepared_import in prepared_imports
-    )
     return import_fbx_payloads(
-        tasks,
+        tuple(tasks),
         cpu_profile=cpu_profile,
         telemetry_callback=telemetry_callback,
         cancel_event=cancel_event,
         started_at=started_at,
+    )
+
+
+def fbx_import_read_options_for_material_mode(mode: FbxMaterialMode) -> FbxImportReadOptions:
+    return FbxImportReadOptions(
+        read_vertex_colors=mode in {FbxMaterialMode.AUTO, FbxMaterialMode.VERTEX_COLOR_SPLIT},
+        read_material_slots=mode == FbxMaterialMode.MATERIAL_SLOTS,
+        strict_vertex_colors=mode == FbxMaterialMode.VERTEX_COLOR_SPLIT,
     )

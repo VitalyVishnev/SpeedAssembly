@@ -105,6 +105,8 @@ Huge FBX branch replacement notes:
 - if every `material_slots` path is blank, conversion fails loudly
 - huge FBX jobs stream USDA directly to disk instead of building one giant in-memory string
 - runtime conversion temp files live in a separate cache root under `%LOCALAPPDATA%/XMLtoUSDAConverter/cache/jobs`
+- explicit `.fbx` Part Mesh payloads are cached under `%LOCALAPPDATA%/XMLtoUSDAConverter/cache/fbx-payloads` using the FBX path, file size, timestamp, and import read-options as the cache key
+- the FBX payload cache is bounded by size and age, and corrupt/stale entries fall back to a normal FBX import instead of changing conversion output
 - by default the converter removes per-job runtime temp data on success, cancel, and failure
 - the GUI `Preserve temp files for debugging` switch and CLI `--preserve-temp-files` flag keep the job manifest/temp dir for inspection
 - stale runtime job dirs older than 24 hours are swept on startup
@@ -116,8 +118,15 @@ Huge FBX branch replacement notes:
 - multiple explicit FBX prototype imports are fanned out through a `spawn` process pool, so different huge branch FBX files can import in parallel
 - `balanced` now matters most when there are multiple independent heavy stages or prototype FBX imports; one single giant FBX is still largely limited by the Autodesk SDK's own single-file import path
 - because of that, a huge job can legitimately show low total `% CPU` in Task Manager while still behaving correctly
+- repeated-part FBX import skips vertex color reads for `single_material` and `material_slots`, and skips material slot face-section reads unless `material_slots` is selected
 - current optimization priority is stability, diagnostics, and predictable UE-facing output rather than forcing maximum all-core utilization on a single huge FBX
 - packaged frozen runs now prefer sequential multi-FBX prototype import for stability, while launcher/dev runs may still import multiple prototypes in parallel
+
+Developer benchmark helper:
+
+```powershell
+python -m xml_to_usda benchmark-fbx "D:\3D Personal\XMLtoUSD_miscFiles\SM_BigBranch_01_HIGH.fbx" --material-mode single_material
+```
 
 Autodesk FBX SDK note:
 

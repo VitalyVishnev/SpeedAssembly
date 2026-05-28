@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import time
 from array import array
 from dataclasses import dataclass
 from pathlib import Path
 
-from .job_control import apply_process_profile, throw_if_cancelled
-from .models import CompactMeshSection, CpuProfile, FbxMaterialSlotSpec, GeometryBuffer
+from .job_control import apply_process_profile, emit_telemetry, throw_if_cancelled
+from .models import CompactMeshSection, ConversionPhase, CpuProfile, FbxMaterialSlotSpec, GeometryBuffer
 
 
 class FbxImportError(ValueError):
@@ -29,6 +30,8 @@ class FbxBackend:
         *,
         cpu_profile: CpuProfile,
         strict_vertex_colors: bool = False,
+        read_vertex_colors: bool = True,
+        read_material_slots: bool = True,
         telemetry_callback=None,
         cancel_event=None,
     ) -> GeometryBuffer:
@@ -53,9 +56,12 @@ class AutodeskFbxBackend(FbxBackend):
         *,
         cpu_profile: CpuProfile,
         strict_vertex_colors: bool = False,
+        read_vertex_colors: bool = True,
+        read_material_slots: bool = True,
         telemetry_callback=None,
         cancel_event=None,
     ) -> GeometryBuffer:
+        started_at = time.perf_counter()
         apply_process_profile(cpu_profile)
         throw_if_cancelled(cancel_event)
         try:
@@ -70,6 +76,7 @@ class AutodeskFbxBackend(FbxBackend):
         try:
             if not _load_scene(fbx, sdk_manager, scene, str(fbx_path)):
                 raise FbxImportError(f"Failed to load FBX scene: {fbx_path}")
+            _emit_fbx_stage(telemetry_callback, f"Loaded FBX scene {Path(fbx_path).name}.", started_at)
 
             anim_stack_criteria = fbx.FbxCriteria.ObjectType(fbx.FbxAnimStack.ClassId)
             if scene.GetSrcObjectCount(anim_stack_criteria) > 0:
@@ -77,11 +84,13 @@ class AutodeskFbxBackend(FbxBackend):
 
             geometry_converter = fbx.FbxGeometryConverter(sdk_manager)
             geometry_converter.Triangulate(scene, True)
+            _emit_fbx_stage(telemetry_callback, f"Triangulated FBX scene {Path(fbx_path).name}.", started_at)
 
             mesh_nodes: list = []
             _collect_mesh_nodes(scene.GetRootNode(), mesh_nodes, fbx)
             if not mesh_nodes:
                 raise FbxImportError(f"FBX file does not contain any polygon mesh nodes: {fbx_path}")
+            _emit_fbx_stage(telemetry_callback, f"Collected {len(mesh_nodes)} FBX mesh node(s).", started_at)
 
             point_components = array("f")
             face_vertex_counts = array("i")
@@ -109,11 +118,11 @@ class AutodeskFbxBackend(FbxBackend):
                     control_point = _transform_control_point(fbx, transform, control_points[point_index])
                     point_components.extend((float(control_point[0]), float(control_point[1]), float(control_point[2])))
 
-                mesh_color_components = [0.0] * (local_point_count * 4)
+                mesh_color_components = [0.0] * (local_point_count * 4) if read_vertex_colors else []
                 has_colors = False
-                vertex_colors_disabled_for_mesh = not usable_vertex_colors
-                assigned_color_flags = bytearray(local_point_count)
-                referenced_point_flags = bytearray(local_point_count)
+                vertex_colors_disabled_for_mesh = (not read_vertex_colors) or not usable_vertex_colors
+                assigned_color_flags = bytearray(local_point_count) if read_vertex_colors else bytearray()
+                referenced_point_flags = bytearray(local_point_count) if read_vertex_colors else bytearray()
                 uv_element = mesh.GetElementUV(0) if mesh.GetElementUVCount() > 0 else None
                 default_uv_set = uv_element.GetName() if uv_element is not None else None
                 for polygon_index in range(mesh.GetPolygonCount()):
@@ -125,21 +134,23 @@ class AutodeskFbxBackend(FbxBackend):
                             f"FBX triangulation produced a non-triangle polygon in {Path(fbx_path).name}."
                         )
                     face_vertex_counts.append(3)
-                    _append_face_to_material_slot_sections(
-                        node,
-                        mesh,
-                        polygon_index,
-                        face_index=len(face_vertex_counts) - 1,
-                        material_slot_face_indices=material_slot_face_indices,
-                        material_slot_order=material_slot_order,
-                    )
+                    if read_material_slots:
+                        _append_face_to_material_slot_sections(
+                            node,
+                            mesh,
+                            polygon_index,
+                            face_index=len(face_vertex_counts) - 1,
+                            material_slot_face_indices=material_slot_face_indices,
+                            material_slot_order=material_slot_order,
+                        )
                     for vertex_order in range(polygon_size):
                         control_point_index = int(mesh.GetPolygonVertex(polygon_index, vertex_order))
                         if control_point_index < 0 or control_point_index >= local_point_count:
                             raise FbxImportError(
                                 f"FBX polygon index is out of bounds for control points in {Path(fbx_path).name}."
                             )
-                        referenced_point_flags[control_point_index] = 1
+                        if read_vertex_colors:
+                            referenced_point_flags[control_point_index] = 1
                         face_vertex_indices.append(point_offset + control_point_index)
                         if default_uv_set is not None:
                             uv = fbx.FbxVector2()
@@ -197,6 +208,11 @@ class AutodeskFbxBackend(FbxBackend):
                     usable_vertex_colors = False
                     vertex_color_components = array("f")
                 point_offset += local_point_count
+                _emit_fbx_stage(
+                    telemetry_callback,
+                    f"Imported FBX mesh node {str(node.GetName()) or '<unnamed>'}.",
+                    started_at,
+                )
 
             if not point_components or not face_vertex_counts or not face_vertex_indices:
                 raise FbxImportError(f"FBX file does not contain readable mesh topology: {fbx_path}")
@@ -284,6 +300,8 @@ class JsonGeometryBackend(FbxBackend):
         *,
         cpu_profile: CpuProfile,
         strict_vertex_colors: bool = False,
+        read_vertex_colors: bool = True,
+        read_material_slots: bool = True,
         telemetry_callback=None,
         cancel_event=None,
     ) -> GeometryBuffer:
@@ -294,7 +312,10 @@ class JsonGeometryBackend(FbxBackend):
             face_vertex_counts=array("i", payload["face_vertex_counts"]),
             face_vertex_indices=array("i", payload["face_vertex_indices"]),
             uv_components=array("f", payload.get("uv_components", [])),
-            vertex_color_components=array("f", payload.get("vertex_color_components", [])),
+            vertex_color_components=array(
+                "f",
+                payload.get("vertex_color_components", []) if read_vertex_colors else [],
+            ),
             vertex_color_warning=payload.get("vertex_color_warning"),
             fbx_material_slots=tuple(
                 FbxMaterialSlotSpec(
@@ -303,14 +324,14 @@ class JsonGeometryBackend(FbxBackend):
                     face_count=int(slot.get("face_count", 0)),
                 )
                 for slot in payload.get("fbx_material_slots", [])
-            ),
+            ) if read_material_slots else (),
             sections=tuple(
                 CompactMeshSection(
                     material_id=int(section["material_id"]),
                     face_indices=array("i", section.get("face_indices", [])),
                 )
                 for section in payload.get("sections", [])
-            ),
+            ) if read_material_slots else (),
         )
 
     def inspect_material_slots(
@@ -363,6 +384,8 @@ def load_fbx_geometry(
     *,
     cpu_profile: CpuProfile = CpuProfile.BALANCED,
     strict_vertex_colors: bool = False,
+    read_vertex_colors: bool = True,
+    read_material_slots: bool = True,
     telemetry_callback=None,
     cancel_event=None,
 ) -> GeometryBuffer:
@@ -372,6 +395,8 @@ def load_fbx_geometry(
         prototype_name,
         cpu_profile=cpu_profile,
         strict_vertex_colors=strict_vertex_colors,
+        read_vertex_colors=read_vertex_colors,
+        read_material_slots=read_material_slots,
         telemetry_callback=telemetry_callback,
         cancel_event=cancel_event,
     )
@@ -388,6 +413,15 @@ def inspect_fbx_material_slots(
         fbx_path,
         cpu_profile=cpu_profile,
         cancel_event=cancel_event,
+    )
+
+
+def _emit_fbx_stage(telemetry_callback, message: str, started_at: float) -> None:
+    emit_telemetry(
+        telemetry_callback,
+        ConversionPhase.FBX_IMPORT,
+        message=message,
+        started_at=started_at,
     )
 
 
