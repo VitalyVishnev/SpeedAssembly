@@ -12,6 +12,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from .fbx_payload_cache import FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS, FBX_PAYLOAD_CACHE_MAX_BYTES
 from .fbx_import_supervisor import FbxImportTask, import_fbx_payloads
 from .models import (
     CpuProfile,
@@ -67,6 +68,8 @@ def load_fbx_payloads_for_prototype_resolution(
     prepared_imports: tuple[_PreparedFbxImport, ...],
     *,
     cpu_profile: CpuProfile,
+    fbx_cache_max_bytes: int = FBX_PAYLOAD_CACHE_MAX_BYTES,
+    fbx_cache_max_age_seconds: int = FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS,
     telemetry_callback=None,
     cancel_event=None,
     started_at: float | None = None,
@@ -75,6 +78,8 @@ def load_fbx_payloads_for_prototype_resolution(
     return _load_fbx_payloads(
         prepared_imports,
         cpu_profile=cpu_profile,
+        fbx_cache_max_bytes=fbx_cache_max_bytes,
+        fbx_cache_max_age_seconds=fbx_cache_max_age_seconds,
         telemetry_callback=telemetry_callback,
         cancel_event=cancel_event,
         started_at=started_at,
@@ -117,6 +122,8 @@ def _load_fbx_payloads(
     prepared_imports: tuple[_PreparedFbxImport, ...],
     *,
     cpu_profile: CpuProfile,
+    fbx_cache_max_bytes: int = FBX_PAYLOAD_CACHE_MAX_BYTES,
+    fbx_cache_max_age_seconds: int = FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS,
     telemetry_callback=None,
     cancel_event=None,
     started_at: float | None = None,
@@ -137,6 +144,8 @@ def _load_fbx_payloads(
                 strict_vertex_colors=read_options.strict_vertex_colors,
                 read_vertex_colors=read_options.read_vertex_colors,
                 read_material_slots=read_options.read_material_slots,
+                fbx_cache_max_bytes=fbx_cache_max_bytes,
+                fbx_cache_max_age_seconds=fbx_cache_max_age_seconds,
             )
         )
     return import_fbx_payloads(

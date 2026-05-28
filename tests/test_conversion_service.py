@@ -112,6 +112,27 @@ def test_prepare_conversion_plan_preserves_udim_operator_intent() -> None:
     assert plan.request.udim_material_settings == udim_settings
 
 
+def test_prepare_conversion_plan_preserves_global_fbx_cache_policy() -> None:
+    plan = prepare_conversion_plan(
+        input_path=str(SIMPLE_TREE_01),
+        output_path="out.usda",
+        cpu_profile=CpuProfile.BALANCED,
+        cleanup_policy=CleanupPolicy.EPHEMERAL,
+        material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
+        bark_material_path=None,
+        leaves_material_path=None,
+        single_material_path=None,
+        base_material_overrides=(),
+        prototype_source_configs=(),
+        async_threshold_bytes=1_000_000_000,
+        fbx_cache_max_bytes=1234,
+        fbx_cache_max_age_seconds=5678,
+    )
+
+    assert plan.request.fbx_cache_max_bytes == 1234
+    assert plan.request.fbx_cache_max_age_seconds == 5678
+
+
 def test_prepare_conversion_plan_builds_single_material_request() -> None:
     plan = prepare_conversion_plan(
         input_path=str(SIMPLE_TREE_01),

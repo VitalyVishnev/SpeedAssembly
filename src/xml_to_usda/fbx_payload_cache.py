@@ -14,7 +14,7 @@ from .runtime_paths import resolve_runtime_paths
 
 FBX_PAYLOAD_CACHE_SCHEMA_VERSION = 1
 FBX_PAYLOAD_CACHE_MAX_BYTES = 20 * 1024 * 1024 * 1024
-FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
+FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS = 14 * 24 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,15 @@ class FbxPayloadCacheResult:
     hit: bool
     message: str = ""
     cache_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class FbxPayloadCacheSummary:
+    entry_count: int = 0
+    total_bytes: int = 0
+    removed_entries: int = 0
+    removed_bytes: int = 0
+    failed_paths: tuple[Path, ...] = ()
 
 
 def load_fbx_payload_from_cache(
@@ -67,6 +76,8 @@ def store_fbx_payload_in_cache(
     payload: GeometryBuffer,
     *,
     cache_root: Path | None = None,
+    max_bytes: int = FBX_PAYLOAD_CACHE_MAX_BYTES,
+    max_age_seconds: int = FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS,
 ) -> FbxPayloadCacheResult:
     if not _is_cacheable_source_path(fbx_path):
         return FbxPayloadCacheResult(None, hit=False, message="cache_skipped_for_test_backend")
@@ -86,12 +97,58 @@ def store_fbx_payload_in_cache(
         meta_tmp.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
         payload_tmp.replace(payload_path)
         meta_tmp.replace(meta_path)
-        sweep_fbx_payload_cache(cache_root=root)
+        sweep_fbx_payload_cache(cache_root=root, max_bytes=max_bytes, max_age_seconds=max_age_seconds)
         return FbxPayloadCacheResult(payload, hit=False, message="cache_stored", cache_path=payload_path)
     except Exception as exc:
         _unlink_quietly(payload_tmp)
         _unlink_quietly(meta_tmp)
         return FbxPayloadCacheResult(None, hit=False, message=f"cache_write_failed: {exc}", cache_path=payload_path)
+
+
+def summarize_fbx_payload_cache(*, cache_root: Path | None = None) -> FbxPayloadCacheSummary:
+    root = cache_root or _default_fbx_cache_root()
+    if not root.exists():
+        return FbxPayloadCacheSummary()
+    entry_count = 0
+    total_bytes = 0
+    failed_paths: list[Path] = []
+    for payload_path in root.glob("*.pkl"):
+        try:
+            stat = payload_path.stat()
+        except OSError:
+            failed_paths.append(payload_path)
+            continue
+        entry_count += 1
+        total_bytes += stat.st_size
+    return FbxPayloadCacheSummary(
+        entry_count=entry_count,
+        total_bytes=total_bytes,
+        failed_paths=tuple(failed_paths),
+    )
+
+
+def clear_fbx_payload_cache(*, cache_root: Path | None = None) -> FbxPayloadCacheSummary:
+    root = cache_root or _default_fbx_cache_root()
+    if not root.exists():
+        return FbxPayloadCacheSummary()
+    removed_entries = 0
+    removed_bytes = 0
+    failed_paths: list[Path] = []
+    for payload_path in root.glob("*.pkl"):
+        meta_path = payload_path.with_suffix(".json")
+        size = _payload_size_or_zero(payload_path, failed_paths)
+        if _unlink_report(payload_path, failed_paths):
+            removed_entries += 1
+            removed_bytes += size
+        _unlink_report(meta_path, failed_paths)
+    after = summarize_fbx_payload_cache(cache_root=root)
+    return FbxPayloadCacheSummary(
+        entry_count=after.entry_count,
+        total_bytes=after.total_bytes,
+        removed_entries=removed_entries,
+        removed_bytes=removed_bytes,
+        failed_paths=tuple([*failed_paths, *after.failed_paths]),
+    )
 
 
 def sweep_fbx_payload_cache(
@@ -100,34 +157,57 @@ def sweep_fbx_payload_cache(
     max_bytes: int = FBX_PAYLOAD_CACHE_MAX_BYTES,
     max_age_seconds: int = FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS,
     now: float | None = None,
-) -> None:
+) -> FbxPayloadCacheSummary:
     root = cache_root or _default_fbx_cache_root()
     if not root.exists():
-        return
+        return FbxPayloadCacheSummary()
     current_time = time.time() if now is None else now
     entries: list[tuple[float, int, Path, Path]] = []
+    removed_entries = 0
+    removed_bytes = 0
+    failed_paths: list[Path] = []
     for payload_path in root.glob("*.pkl"):
         meta_path = payload_path.with_suffix(".json")
         try:
             stat = payload_path.stat()
         except OSError:
+            failed_paths.append(payload_path)
             continue
         age = current_time - stat.st_mtime
         if age > max_age_seconds:
-            _unlink_quietly(payload_path)
-            _unlink_quietly(meta_path)
+            if _unlink_report(payload_path, failed_paths):
+                removed_entries += 1
+                removed_bytes += stat.st_size
+            _unlink_report(meta_path, failed_paths)
             continue
         entries.append((stat.st_mtime, stat.st_size, payload_path, meta_path))
 
     total_bytes = sum(size for _mtime, size, _payload_path, _meta_path in entries)
     if total_bytes <= max_bytes:
-        return
+        after = summarize_fbx_payload_cache(cache_root=root)
+        return FbxPayloadCacheSummary(
+            entry_count=after.entry_count,
+            total_bytes=after.total_bytes,
+            removed_entries=removed_entries,
+            removed_bytes=removed_bytes,
+            failed_paths=tuple([*failed_paths, *after.failed_paths]),
+        )
     for _mtime, size, payload_path, meta_path in sorted(entries):
-        _unlink_quietly(payload_path)
-        _unlink_quietly(meta_path)
+        if _unlink_report(payload_path, failed_paths):
+            removed_entries += 1
+            removed_bytes += size
+        _unlink_report(meta_path, failed_paths)
         total_bytes -= size
         if total_bytes <= max_bytes:
-            return
+            break
+    after = summarize_fbx_payload_cache(cache_root=root)
+    return FbxPayloadCacheSummary(
+        entry_count=after.entry_count,
+        total_bytes=after.total_bytes,
+        removed_entries=removed_entries,
+        removed_bytes=removed_bytes,
+        failed_paths=tuple([*failed_paths, *after.failed_paths]),
+    )
 
 
 def _cache_paths(
@@ -187,3 +267,20 @@ def _unlink_quietly(path: Path) -> None:
         path.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def _payload_size_or_zero(path: Path, failed_paths: list[Path]) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        failed_paths.append(path)
+        return 0
+
+
+def _unlink_report(path: Path, failed_paths: list[Path]) -> bool:
+    try:
+        path.unlink(missing_ok=True)
+        return True
+    except OSError:
+        failed_paths.append(path)
+        return False

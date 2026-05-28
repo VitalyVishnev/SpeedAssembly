@@ -50,6 +50,8 @@ def prepare_conversion_plan(
     async_threshold_bytes: int,
     conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY,
     udim_material_settings: tuple[UdimMaterialSetting, ...] = (),
+    fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
+    fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60,
 ) -> ConversionLaunchPlan:
     """Build one stable conversion plan from operator-facing semantic inputs."""
     resolved_input_path = input_path.strip()
@@ -102,6 +104,8 @@ def prepare_conversion_plan(
         use_explicit_material_contract=use_explicit_material_contract,
         prototype_source_configs=prototype_source_configs,
         conversion_mode=resolved_conversion_mode,
+        fbx_cache_max_bytes=fbx_cache_max_bytes,
+        fbx_cache_max_age_seconds=fbx_cache_max_age_seconds,
     )
     return ConversionLaunchPlan(
         request=request,

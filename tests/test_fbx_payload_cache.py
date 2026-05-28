@@ -9,8 +9,10 @@ import pytest
 from xml_to_usda.fbx_adapter import load_fbx_geometry
 from xml_to_usda.fbx_payload_cache import (
     FbxPayloadCacheOptions,
+    clear_fbx_payload_cache,
     load_fbx_payload_from_cache,
     store_fbx_payload_in_cache,
+    summarize_fbx_payload_cache,
     sweep_fbx_payload_cache,
 )
 from xml_to_usda.models import CpuProfile, GeometryBuffer
@@ -98,6 +100,42 @@ def test_fbx_payload_cache_corrupt_entry_falls_back_to_import(tmp_path: Path) ->
     assert "cache_read_failed" in cached.message
 
 
+def test_fbx_payload_cache_summary_and_clear_report_payload_entries(tmp_path: Path) -> None:
+    fbx_path = tmp_path / "branch.fbx"
+    fbx_path.write_bytes(b"fbx")
+    cache_root = tmp_path / "cache"
+
+    stored = store_fbx_payload_in_cache(str(fbx_path), _options(), _payload(), cache_root=cache_root)
+    assert stored.cache_path is not None
+    payload_bytes = stored.cache_path.stat().st_size
+
+    before_clear = summarize_fbx_payload_cache(cache_root=cache_root)
+    cleared = clear_fbx_payload_cache(cache_root=cache_root)
+    after_clear = summarize_fbx_payload_cache(cache_root=cache_root)
+
+    assert before_clear.entry_count == 1
+    assert before_clear.total_bytes == payload_bytes
+    assert before_clear.removed_entries == 0
+    assert cleared.entry_count == 0
+    assert cleared.total_bytes == 0
+    assert cleared.removed_entries == 1
+    assert cleared.removed_bytes == payload_bytes
+    assert cleared.failed_paths == ()
+    assert after_clear.entry_count == 0
+    assert stored.cache_path.exists() is False
+    assert stored.cache_path.with_suffix(".json").exists() is False
+
+
+def test_fbx_payload_cache_clear_missing_directory_is_empty_summary(tmp_path: Path) -> None:
+    cleared = clear_fbx_payload_cache(cache_root=tmp_path / "missing-cache")
+
+    assert cleared.entry_count == 0
+    assert cleared.total_bytes == 0
+    assert cleared.removed_entries == 0
+    assert cleared.removed_bytes == 0
+    assert cleared.failed_paths == ()
+
+
 def test_fbx_payload_cache_sweep_removes_oldest_payload_over_size_limit(tmp_path: Path) -> None:
     first_fbx = tmp_path / "first.fbx"
     second_fbx = tmp_path / "second.fbx"
@@ -112,11 +150,13 @@ def test_fbx_payload_cache_sweep_removes_oldest_payload_over_size_limit(tmp_path
     os.utime(first.cache_path, (1.0, 1.0))
     os.utime(first.cache_path.with_suffix(".json"), (1.0, 1.0))
 
-    sweep_fbx_payload_cache(cache_root=cache_root, max_bytes=second.cache_path.stat().st_size)
+    summary = sweep_fbx_payload_cache(cache_root=cache_root, max_bytes=second.cache_path.stat().st_size)
 
     assert first.cache_path.exists() is False
     assert first.cache_path.with_suffix(".json").exists() is False
     assert second.cache_path.exists() is True
+    assert summary.entry_count == 1
+    assert summary.removed_entries == 1
 
 
 def test_fbx_payload_cache_sweep_removes_stale_payload(tmp_path: Path) -> None:
@@ -128,10 +168,12 @@ def test_fbx_payload_cache_sweep_removes_stale_payload(tmp_path: Path) -> None:
     os.utime(stored.cache_path, (1.0, 1.0))
     os.utime(stored.cache_path.with_suffix(".json"), (1.0, 1.0))
 
-    sweep_fbx_payload_cache(cache_root=cache_root, max_age_seconds=1, now=10.0)
+    summary = sweep_fbx_payload_cache(cache_root=cache_root, max_age_seconds=1, now=10.0)
 
     assert stored.cache_path.exists() is False
     assert stored.cache_path.with_suffix(".json").exists() is False
+    assert summary.entry_count == 0
+    assert summary.removed_entries == 1
 
 
 def test_json_geometry_backend_honors_selective_read_options(tmp_path: Path) -> None:

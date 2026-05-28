@@ -147,6 +147,8 @@ def save_nested_input_settings(
         wind_group_settings=dict(wind_group_records),
         base_material_settings=base_material_records,
         part_mesh_settings=part_source_records,
+        fbx_cache_max_size_gb=previous_snapshot.fbx_cache_max_size_gb,
+        fbx_cache_max_age_days=previous_snapshot.fbx_cache_max_age_days,
         active_preset_name=previous_snapshot.active_preset_name,
         presets=previous_snapshot.presets,
     )

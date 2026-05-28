@@ -107,6 +107,40 @@ def test_prototype_resolution_uses_payload_loader_adapter_without_fbx_helper(tmp
     assert resolved_prototype.geometry_payload is not None
 
 
+def test_assembly_resolution_passes_fbx_cache_policy_to_payload_loader(tmp_path: Path) -> None:
+    _report, source_model, source_diagnostics = load_source_tree_model(str(SIMPLE_TREE_01))
+    fbx_path = tmp_path / "SM_Twig_01.fbx"
+    fbx_path.write_text("stub", encoding="utf-8")
+    calls = []
+
+    def fake_payload_loader(prepared_imports, **kwargs):
+        calls.append(kwargs)
+        return {
+            prepared_import.prototype_index: _geometry_payload(prepared_import.resolved_identity.prim_name)
+            for prepared_import in prepared_imports
+        }
+
+    resolve_assembly_model_from_options(
+        source_model,
+        AssemblyResolutionOptions(
+            prototype_source_configs=(
+                PrototypeSourceConfig(
+                    source_key="Mesh_1",
+                    mode=PrototypeSourceMode.FBX_FILE,
+                    fbx_path=str(fbx_path),
+                ),
+            ),
+            fbx_cache_max_bytes=1234,
+            fbx_cache_max_age_seconds=5678,
+        ),
+        source_diagnostics=source_diagnostics,
+        runtime=ResolutionRuntime(prototype_payload_loader=fake_payload_loader),
+    )
+
+    assert calls[0]["fbx_cache_max_bytes"] == 1234
+    assert calls[0]["fbx_cache_max_age_seconds"] == 5678
+
+
 def test_resolution_reports_unused_prototype_source_config_as_resolution_diagnostic() -> None:
     _report, source_model, source_diagnostics = load_source_tree_model(str(SIMPLE_TREE_01))
 

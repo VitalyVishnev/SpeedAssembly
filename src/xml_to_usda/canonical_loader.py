@@ -75,6 +75,8 @@ def resolve_assembly_model(
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = (),
     conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY,
     output_stem: str | None = None,
+    fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
+    fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60,
     source_diagnostics: tuple[ValidationIssue, ...] | None = None,
     telemetry_callback=None,
     cancel_event=None,
@@ -95,6 +97,8 @@ def resolve_assembly_model(
             prototype_source_configs=prototype_source_configs,
             conversion_mode=conversion_mode,
             output_stem=output_stem,
+            fbx_cache_max_bytes=fbx_cache_max_bytes,
+            fbx_cache_max_age_seconds=fbx_cache_max_age_seconds,
         ),
         source_diagnostics=source_diagnostics,
         runtime=ResolutionRuntime(
@@ -118,6 +122,8 @@ def load_resolved_assembly_model(
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = (),
     conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY,
     output_stem: str | None = None,
+    fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
+    fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60,
     telemetry_callback=None,
     cancel_event=None,
 ) -> tuple[ObservedXmlSchemaReport, ResolvedAssemblyModel]:
@@ -141,6 +147,8 @@ def load_resolved_assembly_model(
         prototype_source_configs=prototype_source_configs,
         conversion_mode=conversion_mode,
         output_stem=output_stem,
+        fbx_cache_max_bytes=fbx_cache_max_bytes,
+        fbx_cache_max_age_seconds=fbx_cache_max_age_seconds,
         source_diagnostics=source_diagnostics,
         telemetry_callback=telemetry_callback,
         cancel_event=cancel_event,
@@ -161,6 +169,8 @@ def load_canonical_model(
     use_explicit_material_contract: bool = False,
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = (),
     conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY,
+    fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
+    fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60,
     telemetry_callback=None,
     cancel_event=None,
 ) -> tuple[ObservedXmlSchemaReport, CanonicalTreeModel, tuple[ValidationIssue, ...]]:
@@ -178,6 +188,8 @@ def load_canonical_model(
         use_explicit_material_contract=use_explicit_material_contract,
         prototype_source_configs=prototype_source_configs,
         conversion_mode=conversion_mode,
+        fbx_cache_max_bytes=fbx_cache_max_bytes,
+        fbx_cache_max_age_seconds=fbx_cache_max_age_seconds,
         telemetry_callback=telemetry_callback,
         cancel_event=cancel_event,
     )

@@ -6,7 +6,8 @@ import pytest
 pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 
-from PySide6.QtWidgets import QAbstractSpinBox
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QAbstractSpinBox, QMessageBox
 
 from xml_to_usda.qt_ui.dependencies import build_default_dependencies
 from xml_to_usda.qt_ui.entry import main
@@ -16,6 +17,7 @@ from xml_to_usda.qt_ui.persistence import UiShellState
 from xml_to_usda.qt_ui.window import MainWindow
 from xml_to_usda.qt_ui.theme import load_theme
 from xml_to_usda.settings_service import GuiSettingsSnapshot
+from xml_to_usda.fbx_payload_cache import FbxPayloadCacheSummary
 
 
 def test_qt_shell_window_creation(qtbot, tmp_path) -> None:
@@ -158,6 +160,94 @@ def test_qt_shell_enables_actions_when_paths_present(qtbot, tmp_path) -> None:
     assert window.generate_button.isEnabled()
 
 
+def test_qt_title_bar_shows_global_settings_gear_instead_of_title(qtbot, tmp_path) -> None:
+    theme = load_theme()
+    window = MainWindow(
+        theme,
+        UiShellState(),
+        dependencies=build_default_dependencies(),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    assert window.title_bar.settings_button.text() == "⚙"
+    assert not hasattr(window.title_bar, "title_label")
+
+
+def test_qt_global_settings_popup_saves_cache_limits_and_sweeps(monkeypatch, qtbot, tmp_path) -> None:
+    sweep_calls = []
+    monkeypatch.setattr(
+        "xml_to_usda.qt_ui.window.summarize_fbx_payload_cache",
+        lambda **_kwargs: FbxPayloadCacheSummary(entry_count=2, total_bytes=4096),
+    )
+    monkeypatch.setattr(
+        "xml_to_usda.qt_ui.window.sweep_fbx_payload_cache",
+        lambda **kwargs: sweep_calls.append(kwargs) or FbxPayloadCacheSummary(entry_count=1, total_bytes=1024),
+    )
+    theme = load_theme()
+    settings_path = tmp_path / "gui_settings.json"
+    window = MainWindow(
+        theme,
+        UiShellState(),
+        dependencies=build_default_dependencies(),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=settings_path,
+    )
+    qtbot.addWidget(window)
+    window.show()
+    sweep_calls.clear()
+
+    qtbot.mouseClick(window.title_bar.settings_button, Qt.MouseButton.LeftButton)
+    assert window._global_settings_dialog is not None
+    assert window._global_settings_dialog.isVisible()
+    window._global_settings_dialog.max_size_spin.setValue(12)
+    window._global_settings_dialog.max_age_spin.setValue(3)
+    qtbot.mouseClick(window._global_settings_dialog.apply_button, Qt.MouseButton.LeftButton)
+
+    saved = window._deps.load_gui_settings(settings_path)
+    assert saved.fbx_cache_max_size_gb == 12
+    assert saved.fbx_cache_max_age_days == 3
+    assert sweep_calls[-1]["max_bytes"] == 12 * 1024 * 1024 * 1024
+    assert sweep_calls[-1]["max_age_seconds"] == 3 * 24 * 60 * 60
+
+
+def test_qt_global_settings_clear_cache_requires_confirmation(monkeypatch, qtbot, tmp_path) -> None:
+    clear_calls = []
+    monkeypatch.setattr(
+        "xml_to_usda.qt_ui.window.summarize_fbx_payload_cache",
+        lambda **_kwargs: FbxPayloadCacheSummary(entry_count=2, total_bytes=4096),
+    )
+    monkeypatch.setattr(
+        "xml_to_usda.qt_ui.window.sweep_fbx_payload_cache",
+        lambda **_kwargs: FbxPayloadCacheSummary(entry_count=2, total_bytes=4096),
+    )
+    monkeypatch.setattr(
+        "xml_to_usda.qt_ui.window.clear_fbx_payload_cache",
+        lambda **kwargs: clear_calls.append(kwargs) or FbxPayloadCacheSummary(removed_entries=2, removed_bytes=4096),
+    )
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.No))
+    theme = load_theme()
+    window = MainWindow(
+        theme,
+        UiShellState(),
+        dependencies=build_default_dependencies(),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.mouseClick(window.title_bar.settings_button, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(window._global_settings_dialog.clear_button, Qt.MouseButton.LeftButton)
+    assert clear_calls == []
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Yes))
+    qtbot.mouseClick(window._global_settings_dialog.clear_button, Qt.MouseButton.LeftButton)
+    assert len(clear_calls) == 1
+
+
 def test_qt_shell_convert_button_switches_to_cancel_while_running(qtbot, tmp_path) -> None:
     theme = load_theme()
     window = MainWindow(
@@ -181,6 +271,7 @@ def test_qt_shell_convert_button_switches_to_cancel_while_running(qtbot, tmp_pat
     assert window.convert_button.text() == "Cancel"
     assert window.convert_button.isEnabled()
     assert not window.convert_mode_button.isEnabled()
+    assert not window.title_bar.settings_button.isEnabled()
     assert not window.wind_panel.refresh_button.isEnabled()
 
 

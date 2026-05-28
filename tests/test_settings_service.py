@@ -101,6 +101,8 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
                 ),
             ),
         ),
+        fbx_cache_max_size_gb=42,
+        fbx_cache_max_age_days=7,
     )
 
     save_gui_settings(settings_path, snapshot)
@@ -116,6 +118,8 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert "part_mesh_settings_by_input_path" not in payload
     assert "wind_group_settings_by_input_path" not in payload
     assert payload["part_mesh_settings"][0]["fbx_material_mode"] == "material_slots"
+    assert payload["fbx_cache_max_size_gb"] == 42
+    assert payload["fbx_cache_max_age_days"] == 7
     assert payload["part_mesh_settings"][0]["fbx_material_slot_overrides"] == [
         {
             "slot_name": "Bark",
@@ -138,6 +142,8 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert restored.preserve_temp_files is True
     assert restored.conversion_mode == snapshot.conversion_mode
     assert restored.material_policy == snapshot.material_policy
+    assert restored.fbx_cache_max_size_gb == 42
+    assert restored.fbx_cache_max_age_days == 7
     assert restored.single_material_path == snapshot.single_material_path
     assert restored.wind_group_settings == snapshot.wind_group_settings
     assert restored.base_material_settings == snapshot.base_material_settings
@@ -152,6 +158,16 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert restored_part.fbx_material_slot_overrides[0].slot_name == "Bark"
     assert restored_part.fbx_material_slot_overrides[0].udim_mode == UdimMode.OFF
     assert restored_part.fbx_material_slot_overrides[0].udim_id == 1001
+
+
+def test_load_gui_settings_uses_fbx_cache_defaults_for_legacy_payload(tmp_path: Path) -> None:
+    settings_path = tmp_path / "gui_settings.json"
+    settings_path.write_text(json.dumps({"schema_version": GUI_SETTINGS_SCHEMA_VERSION}), encoding="utf-8")
+
+    restored = load_gui_settings(settings_path)
+
+    assert restored.fbx_cache_max_size_gb == 20
+    assert restored.fbx_cache_max_age_days == 14
 
 
 def test_save_gui_settings_preserves_base_material_udim_settings(tmp_path: Path) -> None:
@@ -231,4 +247,6 @@ def test_gui_preset_import_export_round_trips_one_preset(tmp_path: Path) -> None
 
     payload = json.loads(preset_path.read_text(encoding="utf-8"))
     assert payload["schema_version"] == GUI_SETTINGS_SCHEMA_VERSION
+    assert "fbx_cache_max_size_gb" not in payload
+    assert "fbx_cache_max_age_days" not in payload
     assert load_gui_preset(preset_path) == preset

@@ -18,7 +18,9 @@ from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QCursor, QLinea
 from PySide6.QtWidgets import (
     QLayout,
     QComboBox,
+    QDialog,
     QFileDialog,
+    QFormLayout,
     QFrame,
     QGraphicsDropShadowEffect,
     QGridLayout,
@@ -30,6 +32,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QSpinBox,
     QTabWidget,
     QToolButton,
     QVBoxLayout,
@@ -37,6 +40,12 @@ from PySide6.QtWidgets import (
 )
 
 from ..diagnostics_bundle import DiagnosticsBundleRequest, default_build_info_path, export_diagnostics_bundle
+from ..fbx_payload_cache import (
+    FbxPayloadCacheSummary,
+    clear_fbx_payload_cache,
+    summarize_fbx_payload_cache,
+    sweep_fbx_payload_cache,
+)
 from ..gui_formatters import format_wind_group_summary, format_wind_json_result
 from ..models import CleanupPolicy, ConversionMode
 from ..runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
@@ -101,6 +110,15 @@ CONVERSION_MODES: tuple[tuple[str, str, bool], ...] = (
     ("static_assembly", "Static Assembly", True),
     ("static_parts", "Static Parts", False),
 )
+
+
+def _format_bytes(value: int) -> str:
+    amount = float(max(0, value))
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if amount < 1024.0 or unit == "TB":
+            return f"{amount:.1f} {unit}" if unit != "B" else f"{int(amount)} B"
+        amount /= 1024.0
+    return f"{int(value)} B"
 
 
 class PathLineEdit(QLineEdit):
@@ -195,9 +213,11 @@ class TitleBar(QFrame):
         self.preset_layout.setSpacing(0)
         self._layout.addWidget(self.preset_host, 0, Qt.AlignmentFlag.AlignLeft)
 
-        self.title_label = QLabel("XML to USDA Converter", self)
-        self.title_label.setObjectName("TitleLabel")
-        self._layout.addWidget(self.title_label)
+        self.settings_button = QPushButton("⚙", self)
+        self.settings_button.setObjectName("GlobalSettingsButton")
+        self.settings_button.setToolTip("Global settings")
+        self.settings_button.clicked.connect(window.open_global_settings_dialog)
+        self._layout.addWidget(self.settings_button)
         self._layout.addStretch(1)
 
         self.minimize_button = QPushButton("\u2212", self)
@@ -236,6 +256,7 @@ class TitleBar(QFrame):
         self.adjust_button.setFixedWidth(int(theme.chrome.get("adjust_ui_button_width", 104)))
         self.adjust_button.setFixedHeight(adjust_height)
         self.preset_host.setFixedHeight(max(button_size, pill_height, adjust_height))
+        self.settings_button.setFixedSize(button_size, button_size)
         for button in (self.minimize_button, self.maximize_button, self.close_button):
             button.setFixedSize(button_size, button_size)
 
@@ -371,6 +392,121 @@ class GlassPanel(QFrame):
         painter.drawPath(border_path)
 
 
+class GlobalSettingsDialog(QDialog):
+    def __init__(self, window: "MainWindow") -> None:
+        super().__init__(window, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        self._window = window
+        self.setObjectName("GlobalSettingsDialog")
+        self.setMinimumWidth(360)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
+
+        title = QLabel("FBX Cache", self)
+        title.setStyleSheet("font-weight: 700;")
+        layout.addWidget(title)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(8)
+        self.path_label = QLabel("", self)
+        self.path_label.setWordWrap(True)
+        self.size_label = QLabel("", self)
+        self.entry_label = QLabel("", self)
+        form.addRow("Path", self.path_label)
+        form.addRow("Size", self.size_label)
+        form.addRow("Entries", self.entry_label)
+        layout.addLayout(form)
+
+        controls = QFormLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(8)
+        self.max_size_spin = QSpinBox(self)
+        self.max_size_spin.setObjectName("FbxCacheMaxSizeSpin")
+        self.max_size_spin.setRange(1, 1024)
+        self.max_size_spin.setSuffix(" GB")
+        self.max_age_spin = QSpinBox(self)
+        self.max_age_spin.setObjectName("FbxCacheMaxAgeSpin")
+        self.max_age_spin.setRange(1, 3650)
+        self.max_age_spin.setSuffix(" days")
+        controls.addRow("Max size", self.max_size_spin)
+        controls.addRow("Max age", self.max_age_spin)
+        layout.addLayout(controls)
+
+        self.warning_label = QLabel("", self)
+        self.warning_label.setObjectName("MutedLabel")
+        self.warning_label.setWordWrap(True)
+        layout.addWidget(self.warning_label)
+
+        button_row = QHBoxLayout()
+        button_row.setContentsMargins(0, 0, 0, 0)
+        button_row.setSpacing(8)
+        self.apply_button = QPushButton("Apply", self)
+        self.refresh_button = QPushButton("Refresh", self)
+        self.clear_button = QPushButton("Clear FBX cache", self)
+        self.apply_button.clicked.connect(self._apply_clicked)
+        self.refresh_button.clicked.connect(self._refresh_clicked)
+        self.clear_button.clicked.connect(self._clear_clicked)
+        button_row.addWidget(self.apply_button)
+        button_row.addWidget(self.refresh_button)
+        button_row.addWidget(self.clear_button)
+        layout.addLayout(button_row)
+
+        self.sync_from_settings()
+
+    def sync_from_settings(self) -> None:
+        snapshot = self._window._operator_snapshot
+        self.max_size_spin.setValue(snapshot.fbx_cache_max_size_gb)
+        self.max_age_spin.setValue(snapshot.fbx_cache_max_age_days)
+        self.path_label.setText(str(self._window._fbx_payload_cache_root()))
+
+    def set_controls_enabled(self, enabled: bool) -> None:
+        for widget in (self.max_size_spin, self.max_age_spin, self.apply_button, self.refresh_button, self.clear_button):
+            widget.setEnabled(enabled)
+
+    def refresh_cache_summary(self) -> None:
+        summary = self._window._summarize_fbx_cache()
+        self._set_cache_summary(summary)
+
+    def _apply_clicked(self) -> None:
+        summary = self._window._apply_fbx_cache_settings(
+            max_size_gb=self.max_size_spin.value(),
+            max_age_days=self.max_age_spin.value(),
+        )
+        self._set_cache_summary(summary)
+
+    def _refresh_clicked(self) -> None:
+        self._set_cache_summary(self._window._sweep_fbx_cache())
+
+    def _clear_clicked(self) -> None:
+        before = self._window._summarize_fbx_cache()
+        answer = QMessageBox.question(
+            self,
+            "Clear FBX cache",
+            (
+                "Delete FBX payload cache?\n\n"
+                f"Entries: {before.entry_count}\n"
+                f"Size: {_format_bytes(before.total_bytes)}"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._set_cache_summary(self._window._clear_fbx_cache())
+
+    def _set_cache_summary(self, summary: FbxPayloadCacheSummary) -> None:
+        self.size_label.setText(_format_bytes(summary.total_bytes))
+        self.entry_label.setText(str(summary.entry_count))
+        if summary.failed_paths:
+            self.warning_label.setText(
+                "Warning: some cache files could not be updated. Details were written to the log."
+            )
+        else:
+            self.warning_label.setText("")
+
+
 class MainWindow(QWidget):
     ASYNC_WIND_REFRESH_THRESHOLD_BYTES = 5 * 1024 * 1024
     ASYNC_CONVERSION_THRESHOLD_BYTES = 5 * 1024 * 1024
@@ -419,6 +555,7 @@ class MainWindow(QWidget):
         self._help_dialog: HelpDeckDialog | None = None
         self._support_dialog: SupportDialog | None = None
         self._adjust_ui_dialog: AdjustUiDialog | None = None
+        self._global_settings_dialog: GlobalSettingsDialog | None = None
 
         self._operator_state, self._operator_snapshot = load_operator_state(
             self._deps,
@@ -430,6 +567,7 @@ class MainWindow(QWidget):
             settings_path=self._operator_settings_path,
         )
         self._runtime_cleanup_summary = sweep_stale_job_workspaces(self._runtime_paths)
+        self._fbx_cache_startup_summary = self._sweep_fbx_cache()
 
         self._settings_save_timer = QTimer(self)
         self._settings_save_timer.setSingleShot(True)
@@ -463,6 +601,7 @@ class MainWindow(QWidget):
         self._apply_saved_active_tab()
         self._set_log(self._startup_log_text())
         self._apply_runtime_cleanup_summary()
+        self._apply_fbx_cache_startup_summary()
         self._reload_input_dependent_tabs()
         self._refresh_state_cards()
         self._update_action_state()
@@ -958,7 +1097,7 @@ class MainWindow(QWidget):
         self._update_window_shape()
         self.panel.update()
         self.update()
-        for dialog in (self._log_dialog, self._help_dialog, self._adjust_ui_dialog):
+        for dialog in (self._log_dialog, self._help_dialog, self._adjust_ui_dialog, self._global_settings_dialog):
             if dialog is not None:
                 dialog.setStyleSheet(build_stylesheet(theme))
 
@@ -1071,6 +1210,67 @@ class MainWindow(QWidget):
             summary_message = f"{summary_message}\n{failed_paths}"
         self._append_log(summary_message)
 
+    def _apply_fbx_cache_startup_summary(self) -> None:
+        summary = self._fbx_cache_startup_summary
+        self._append_log(
+            "FBX cache startup sweep: "
+            f"{summary.entry_count} entrie(s), {_format_bytes(summary.total_bytes)}, "
+            f"removed {summary.removed_entries} entrie(s) / {_format_bytes(summary.removed_bytes)}."
+        )
+        self._append_fbx_cache_failures_to_log(summary)
+
+    def _fbx_payload_cache_root(self) -> Path:
+        return self._runtime_paths.cache_root / "fbx-payloads"
+
+    def _fbx_cache_max_bytes(self) -> int:
+        return int(self._operator_snapshot.fbx_cache_max_size_gb) * 1024 * 1024 * 1024
+
+    def _fbx_cache_max_age_seconds(self) -> int:
+        return int(self._operator_snapshot.fbx_cache_max_age_days) * 24 * 60 * 60
+
+    def _summarize_fbx_cache(self) -> FbxPayloadCacheSummary:
+        return summarize_fbx_payload_cache(cache_root=self._fbx_payload_cache_root())
+
+    def _sweep_fbx_cache(self) -> FbxPayloadCacheSummary:
+        summary = sweep_fbx_payload_cache(
+            cache_root=self._fbx_payload_cache_root(),
+            max_bytes=self._fbx_cache_max_bytes(),
+            max_age_seconds=self._fbx_cache_max_age_seconds(),
+        )
+        self._append_fbx_cache_failures_to_log(summary)
+        return summary
+
+    def _clear_fbx_cache(self) -> FbxPayloadCacheSummary:
+        summary = clear_fbx_payload_cache(cache_root=self._fbx_payload_cache_root())
+        self._append_log(
+            "FBX cache clear: "
+            f"removed {summary.removed_entries} entrie(s) / {_format_bytes(summary.removed_bytes)}."
+        )
+        self._append_fbx_cache_failures_to_log(summary)
+        return summary
+
+    def _apply_fbx_cache_settings(self, *, max_size_gb: int, max_age_days: int) -> FbxPayloadCacheSummary:
+        self._operator_snapshot = replace(
+            self._operator_snapshot,
+            fbx_cache_max_size_gb=max(1, int(max_size_gb)),
+            fbx_cache_max_age_days=max(1, int(max_age_days)),
+        )
+        self._deps.save_gui_settings(self._operator_settings_path, self._operator_snapshot)
+        summary = self._sweep_fbx_cache()
+        self._set_status("FBX cache settings saved.")
+        self._append_log(
+            "FBX cache settings saved: "
+            f"{self._operator_snapshot.fbx_cache_max_size_gb} GB, "
+            f"{self._operator_snapshot.fbx_cache_max_age_days} days."
+        )
+        return summary
+
+    def _append_fbx_cache_failures_to_log(self, summary: FbxPayloadCacheSummary) -> None:
+        if not summary.failed_paths:
+            return
+        failed_paths = "\n".join(f"  - {failed_path}" for failed_path in summary.failed_paths)
+        self._append_log(f"FBX cache warning: failed path(s)\n{failed_paths}")
+
     def _refresh_state_cards(self) -> None:
         policy = self._operator_state.material_policy.value
         if self._operator_state.material_policy.value == "single_material":
@@ -1100,6 +1300,9 @@ class MainWindow(QWidget):
         self.convert_button.setText("Cancel" if self._conversion_running else "Convert to USDA")
         self.convert_button.setEnabled(self._conversion_running or (has_input and has_output))
         self.convert_mode_button.setEnabled(not self._conversion_running)
+        self.title_bar.settings_button.setEnabled(not self._conversion_running)
+        if self._global_settings_dialog is not None:
+            self._global_settings_dialog.set_controls_enabled(not self._conversion_running)
         self.preset_combo.setEnabled(not self._conversion_running)
         self.preset_menu_button.setEnabled(not self._conversion_running)
         if hasattr(self, "overwrite_preset_action"):
@@ -1185,6 +1388,25 @@ class MainWindow(QWidget):
         self._support_dialog.show()
         self._support_dialog.raise_()
         self._support_dialog.activateWindow()
+
+    def open_global_settings_dialog(self) -> None:
+        if self._conversion_running:
+            return
+        if self._global_settings_dialog is None:
+            self._global_settings_dialog = GlobalSettingsDialog(self)
+            self._global_settings_dialog.finished.connect(self._handle_global_settings_closed)
+        self._global_settings_dialog.setStyleSheet(build_stylesheet(self._theme))
+        self._global_settings_dialog.sync_from_settings()
+        self._global_settings_dialog.set_controls_enabled(not self._conversion_running)
+        self._global_settings_dialog.refresh_cache_summary()
+        anchor = self.title_bar.settings_button.mapToGlobal(QPoint(0, self.title_bar.settings_button.height() + 6))
+        self._global_settings_dialog.move(anchor)
+        self._global_settings_dialog.show()
+        self._global_settings_dialog.raise_()
+        self._global_settings_dialog.activateWindow()
+
+    def _handle_global_settings_closed(self, _result: int) -> None:
+        self._global_settings_dialog = None
 
     def export_diagnostics_bundle(self) -> None:
         selected, _ = QFileDialog.getSaveFileName(
@@ -1511,6 +1733,8 @@ class MainWindow(QWidget):
                 prototype_source_configs=self.materials_panel.collect_prototype_source_configs(),
                 conversion_mode=self._operator_state.conversion_mode,
                 async_threshold_bytes=self.ASYNC_CONVERSION_THRESHOLD_BYTES,
+                fbx_cache_max_bytes=self._fbx_cache_max_bytes(),
+                fbx_cache_max_age_seconds=self._fbx_cache_max_age_seconds(),
             )
         except ValueError as exc:
             message = str(exc)

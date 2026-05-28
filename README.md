@@ -106,7 +106,8 @@ Huge FBX branch replacement notes:
 - huge FBX jobs stream USDA directly to disk instead of building one giant in-memory string
 - runtime conversion temp files live in a separate cache root under `%LOCALAPPDATA%/XMLtoUSDAConverter/cache/jobs`
 - explicit `.fbx` Part Mesh payloads are cached under `%LOCALAPPDATA%/XMLtoUSDAConverter/cache/fbx-payloads` using the FBX path, file size, timestamp, and import read-options as the cache key
-- the FBX payload cache is bounded by size and age, and corrupt/stale entries fall back to a normal FBX import instead of changing conversion output
+- the FBX payload cache defaults to `20 GB` / `14 days`; the title-bar gear opens global cache controls for refresh, clear, and policy changes
+- corrupt/stale FBX cache entries fall back to a normal FBX import instead of changing conversion output
 - by default the converter removes per-job runtime temp data on success, cancel, and failure
 - the GUI `Preserve temp files for debugging` switch and CLI `--preserve-temp-files` flag keep the job manifest/temp dir for inspection
 - stale runtime job dirs older than 24 hours are swept on startup

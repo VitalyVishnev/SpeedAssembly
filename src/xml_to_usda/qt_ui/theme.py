@@ -397,6 +397,20 @@ QPushButton#TitlePillButton:hover,
 QPushButton#AdjustUiButton:hover {{
     background: {chrome_control_hover_fill};
 }}
+QPushButton#GlobalSettingsButton {{
+    background: {chrome_control_fill};
+    border-radius: {window_button_size // 2}px;
+    min-width: {window_button_size}px;
+    max-width: {window_button_size}px;
+    min-height: {window_button_size}px;
+    max-height: {window_button_size}px;
+    padding: 0px;
+    font-size: 13px;
+    font-weight: 700;
+}}
+QPushButton#GlobalSettingsButton:hover {{
+    background: {chrome_control_hover_fill};
+}}
 QComboBox#TitlePresetCombo {{
     background: {chrome_control_fill};
     color: {input_text};

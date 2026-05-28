@@ -46,7 +46,7 @@ Current large-job execution contract:
 - the GUI process now only owns the UI and telemetry polling; the Conversion Worker owns XML normalization, FBX import, material resolution, and USDA writing
 - explicit FBX prototype imports are parallelized across a `spawn` process pool when more than one FBX prototype must be imported
 - this parallelism is currently prototype-level and stage-level, not "all cores inside one single FBX file"
-- explicit FBX prototype payloads are cached across Runtime Jobs in the bounded FBX payload cache under the runtime cache root
+- explicit FBX prototype payloads are cached across Runtime Jobs in the bounded FBX payload cache under the runtime cache root; the shipped default policy is `20 GB` / `14 days` and is configurable from the Qt title-bar gear
 - repeated-part FBX import now avoids vertex-color and material-slot face-section reads when the selected FBX material mode does not need them
 - packaged frozen runs use isolated `FBX Helper` imports through the shared FBX supervisor and start from the requested prototype-level concurrency
 - if a native helper crash occurs at that concurrency, the supervisor automatically retries the remaining FBX imports with a lower helper count instead of failing the whole job immediately

@@ -53,6 +53,8 @@ class AssemblyResolutionOptions:
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = ()
     conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY
     output_stem: str | None = None
+    fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024
+    fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60
 
     def material_assignment_options(self) -> MaterialAssignmentOptions:
         return MaterialAssignmentOptions(
@@ -94,6 +96,8 @@ def resolve_assembly_model(
         cancel_event=runtime.cancel_event,
         started_at=runtime.started_at,
         payload_loader=runtime.prototype_payload_loader,
+        fbx_cache_max_bytes=options.fbx_cache_max_bytes,
+        fbx_cache_max_age_seconds=options.fbx_cache_max_age_seconds,
     )
     authoring_model = resolve_material_assignments(
         authoring_model,

@@ -40,6 +40,8 @@ Expected behavior:
 - only UI settings persist by default
 - runtime temp dirs are removed unless `Preserve temp files for debugging` or `--preserve-temp-files` is enabled
 - build folders such as `build/` and `dist/` are unrelated to runtime cache cleanup
+- explicit FBX payload cache lives separately under `%LOCALAPPDATA%/XMLtoUSDAConverter/cache/fbx-payloads` and defaults to `20 GB` / `14 days`
+- use the title-bar gear in the Qt UI to refresh, clear, or change the FBX cache policy
 
 ## External PartMesh override looks ignored
 

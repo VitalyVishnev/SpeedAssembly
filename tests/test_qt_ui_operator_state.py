@@ -149,6 +149,31 @@ def test_qt_operator_state_saves_tab_records_as_global_state(tmp_path) -> None:
     assert reloaded == snapshot
 
 
+def test_qt_operator_state_save_preserves_global_fbx_cache_settings(tmp_path) -> None:
+    settings_path = tmp_path / "gui_settings.json"
+    deps = SimpleNamespace(load_gui_settings=load_gui_settings, save_gui_settings=save_gui_settings)
+    previous_snapshot = GuiSettingsSnapshot(
+        last_input_path="old.xml",
+        fbx_cache_max_size_gb=64,
+        fbx_cache_max_age_days=9,
+    )
+
+    snapshot = save_nested_input_settings(
+        deps,
+        OperatorState(input_path="new.xml"),
+        previous_snapshot=previous_snapshot,
+        base_material_records=(),
+        part_source_records=(),
+        wind_group_records={},
+        settings_path=settings_path,
+    )
+
+    assert snapshot.fbx_cache_max_size_gb == 64
+    assert snapshot.fbx_cache_max_age_days == 9
+    assert load_gui_settings(settings_path).fbx_cache_max_size_gb == 64
+    assert load_gui_settings(settings_path).fbx_cache_max_age_days == 9
+
+
 def test_qt_operator_state_applies_preset_without_replacing_paths() -> None:
     state = OperatorState(input_path="tree.xml", output_path="tree.usda")
     preset = GuiPresetRecord(

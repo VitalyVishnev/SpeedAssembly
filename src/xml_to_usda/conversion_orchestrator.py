@@ -53,6 +53,8 @@ def convert_file(
     use_explicit_material_contract: bool = False,
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = (),
     conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY,
+    fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
+    fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60,
     telemetry_callback=None,
     cancel_event=None,
     runtime_paths: RuntimePaths | None = None,
@@ -73,6 +75,8 @@ def convert_file(
         use_explicit_material_contract=use_explicit_material_contract,
         prototype_source_configs=prototype_source_configs,
         conversion_mode=conversion_mode,
+        fbx_cache_max_bytes=fbx_cache_max_bytes,
+        fbx_cache_max_age_seconds=fbx_cache_max_age_seconds,
     )
     return convert_request(
         request,
@@ -145,6 +149,8 @@ def _convert_single_input(
             use_explicit_material_contract=request.use_explicit_material_contract,
             prototype_source_configs=request.prototype_source_configs,
             conversion_mode=request.conversion_mode,
+            fbx_cache_max_bytes=request.fbx_cache_max_bytes,
+            fbx_cache_max_age_seconds=request.fbx_cache_max_age_seconds,
             output_stem=resolved_output.stem if resolved_output is not None else None,
             telemetry_callback=runtime_telemetry,
             cancel_event=cancel_event,

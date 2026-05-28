@@ -18,6 +18,8 @@ from pathlib import Path
 
 from .fbx_adapter import load_fbx_geometry
 from .fbx_payload_cache import (
+    FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS,
+    FBX_PAYLOAD_CACHE_MAX_BYTES,
     FbxPayloadCacheOptions,
     load_fbx_payload_from_cache,
     store_fbx_payload_in_cache,
@@ -37,6 +39,8 @@ class FbxWorkerRequest:
     error_path: str
     read_vertex_colors: bool = True
     read_material_slots: bool = True
+    fbx_cache_max_bytes: int = FBX_PAYLOAD_CACHE_MAX_BYTES
+    fbx_cache_max_age_seconds: int = FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS
 
 
 def write_fbx_worker_request(path: str | Path, request: FbxWorkerRequest) -> None:
@@ -49,6 +53,8 @@ def write_fbx_worker_request(path: str | Path, request: FbxWorkerRequest) -> Non
                 "strict_vertex_colors": request.strict_vertex_colors,
                 "read_vertex_colors": request.read_vertex_colors,
                 "read_material_slots": request.read_material_slots,
+                "fbx_cache_max_bytes": request.fbx_cache_max_bytes,
+                "fbx_cache_max_age_seconds": request.fbx_cache_max_age_seconds,
                 "result_path": request.result_path,
                 "error_path": request.error_path,
             }
@@ -66,6 +72,8 @@ def read_fbx_worker_request(path: str | Path) -> FbxWorkerRequest:
         strict_vertex_colors=bool(payload.get("strict_vertex_colors", False)),
         read_vertex_colors=bool(payload.get("read_vertex_colors", True)),
         read_material_slots=bool(payload.get("read_material_slots", True)),
+        fbx_cache_max_bytes=int(payload.get("fbx_cache_max_bytes", FBX_PAYLOAD_CACHE_MAX_BYTES)),
+        fbx_cache_max_age_seconds=int(payload.get("fbx_cache_max_age_seconds", FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS)),
         result_path=str(payload["result_path"]),
         error_path=str(payload["error_path"]),
     )
@@ -99,7 +107,13 @@ def run_fbx_worker_request_file(path: str | Path) -> int:
                 read_material_slots=request.read_material_slots,
             )
             if isinstance(payload, GeometryBuffer):
-                store_fbx_payload_in_cache(request.fbx_path, cache_options, payload)
+                store_fbx_payload_in_cache(
+                    request.fbx_path,
+                    cache_options,
+                    payload,
+                    max_bytes=request.fbx_cache_max_bytes,
+                    max_age_seconds=request.fbx_cache_max_age_seconds,
+                )
         elif isinstance(payload, GeometryBuffer) and payload.name != request.prototype_name:
             payload = replace(payload, name=request.prototype_name)
         with Path(request.result_path).open("wb") as handle:

@@ -717,6 +717,8 @@ class ConversionRequest:
     use_explicit_material_contract: bool = False
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = ()
     conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
+    fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024
+    fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60
 
 
 @dataclass(frozen=True, slots=True)

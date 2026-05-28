@@ -30,6 +30,7 @@ from .fbx_worker_subprocess import (
     read_fbx_worker_error,
     write_fbx_worker_request,
 )
+from .fbx_payload_cache import FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS, FBX_PAYLOAD_CACHE_MAX_BYTES
 from .job_control import cpu_worker_count, emit_telemetry, throw_if_cancelled
 from .models import ConversionPhase, CpuProfile
 
@@ -43,6 +44,8 @@ class FbxImportTask:
     strict_vertex_colors: bool = False
     read_vertex_colors: bool = True
     read_material_slots: bool = True
+    fbx_cache_max_bytes: int = FBX_PAYLOAD_CACHE_MAX_BYTES
+    fbx_cache_max_age_seconds: int = FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS
 
 
 @dataclass(frozen=True)
@@ -220,6 +223,8 @@ def _launch_helper(task: FbxImportTask) -> _RunningHelper:
             strict_vertex_colors=task.strict_vertex_colors,
             read_vertex_colors=task.read_vertex_colors,
             read_material_slots=task.read_material_slots,
+            fbx_cache_max_bytes=task.fbx_cache_max_bytes,
+            fbx_cache_max_age_seconds=task.fbx_cache_max_age_seconds,
             result_path=str(result_path),
             error_path=str(error_path),
         ),

@@ -99,6 +99,8 @@ class GuiSettingsSnapshot:
     wind_group_settings: dict[str, WindGroupSettingRecord] = field(default_factory=dict)
     base_material_settings: tuple[BaseMaterialSettingRecord, ...] = ()
     part_mesh_settings: tuple[PartSourceSettingRecord, ...] = ()
+    fbx_cache_max_size_gb: int = 20
+    fbx_cache_max_age_days: int = 14
     active_preset_name: str = FACTORY_DEFAULT_PRESET_NAME
     presets: dict[str, GuiPresetRecord] = field(default_factory=dict)
 
@@ -145,6 +147,8 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
         wind_group_settings=wind_group_settings,
         base_material_settings=base_material_settings,
         part_mesh_settings=part_mesh_settings,
+        fbx_cache_max_size_gb=_coerce_positive_int(payload.get("fbx_cache_max_size_gb"), 20),
+        fbx_cache_max_age_days=_coerce_positive_int(payload.get("fbx_cache_max_age_days"), 14),
         active_preset_name=active_preset_name,
         presets=presets,
     )
@@ -169,6 +173,8 @@ def save_gui_settings(settings_path: str | Path, snapshot: GuiSettingsSnapshot) 
         "wind_group_settings": _serialize_wind_group_settings(snapshot.wind_group_settings),
         "base_material_settings": _serialize_base_material_settings(snapshot.base_material_settings),
         "part_mesh_settings": _serialize_part_mesh_settings(snapshot.part_mesh_settings),
+        "fbx_cache_max_size_gb": _coerce_positive_int(snapshot.fbx_cache_max_size_gb, 20),
+        "fbx_cache_max_age_days": _coerce_positive_int(snapshot.fbx_cache_max_age_days, 14),
     }
     if snapshot.cpu_profile != CpuProfile.BALANCED:
         payload["cpu_profile"] = snapshot.cpu_profile.value
@@ -271,6 +277,14 @@ def _coerce_float(raw_value, default: float) -> float:
         return float(raw_value)
     except (TypeError, ValueError):
         return default
+
+
+def _coerce_positive_int(raw_value, default: int) -> int:
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
 
 
 def _parse_wind_group_settings(raw_value) -> dict[str, WindGroupSettingRecord]:
