@@ -181,3 +181,32 @@ def test_udim_secondary_uv_authoring_overwrites_existing_geometry_channel_with_d
     assert len(secondary_uvs) == len(resolved.prototypes[0].geometry_payload.uv_components)
     assert secondary_uvs[:2] == array("f", (2.5, 0.5))
     assert secondary_uvs[-2:] == array("f", (0.5, 0.5))
+
+
+def test_udim_settings_keep_input_order_for_the_same_material() -> None:
+    model = TreeAsset(
+        metadata=ExportMetadata(source_path="synthetic.xml", source_version=None),
+        materials=(),
+        source_objects=(),
+        base_mesh=MeshData(
+            name="OrderSensitiveMesh",
+            points=(Vector3(0.0, 0.0, 0.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0)),
+            face_vertex_counts=(3,),
+            face_vertex_indices=(0, 1, 2),
+            uv_coords=(Vector2(0.0, 0.0), Vector2(1.0, 0.0), Vector2(0.0, 1.0)),
+            sections=(MeshSection(material_id=1, face_indices=(0,)),),
+        ),
+        skeleton=(),
+        assembly_parts=(),
+    )
+
+    resolved = apply_udim_material_settings(
+        model,
+        (
+            UdimMaterialSetting(material_id=1, mode=UdimMode.SHIFT_PRIMARY_UV, udim_id=1003),
+            UdimMaterialSetting(material_id=1, mode=UdimMode.SHIFT_PRIMARY_UV, udim_id=1004),
+        ),
+    )
+
+    assert resolved.base_mesh is not None
+    assert resolved.base_mesh.uv_coords[0] == Vector2(5.0, 0.0)

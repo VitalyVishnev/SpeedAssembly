@@ -85,10 +85,9 @@ def _apply_settings_to_mesh(
 
     wrote_secondary = bool(secondary_uvs)
     face_ranges = _face_vertex_ranges(mesh.face_vertex_counts)
+    sections_by_material = _group_sections_by_material_id(mesh.sections)
     for setting in settings:
-        for section in mesh.sections:
-            if section.material_id != setting.material_id:
-                continue
+        for section in sections_by_material.get(setting.material_id, ()):
             if setting.mode == UdimMode.SHIFT_PRIMARY_UV:
                 _shift_primary_uvs(primary_uvs, face_ranges, section.face_indices, setting.offset)
             elif setting.mode == UdimMode.WRITE_SECONDARY_UV_OFFSET:
@@ -117,10 +116,9 @@ def _apply_settings_to_geometry_buffer(
 
     wrote_secondary = bool(secondary_uvs)
     face_ranges = _face_vertex_ranges(mesh.face_vertex_counts)
+    sections_by_material = _group_sections_by_material_id(mesh.sections)
     for setting in settings:
-        for section in mesh.sections:
-            if section.material_id != setting.material_id:
-                continue
+        for section in sections_by_material.get(setting.material_id, ()):
             if setting.mode == UdimMode.SHIFT_PRIMARY_UV:
                 _shift_primary_uv_components(primary_uvs, face_ranges, section.face_indices, setting.offset)
             elif setting.mode == UdimMode.WRITE_SECONDARY_UV_OFFSET:
@@ -147,6 +145,15 @@ def _face_vertex_ranges(face_vertex_counts) -> tuple[tuple[int, int], ...]:
         ranges.append((start, end))
         start = end
     return tuple(ranges)
+
+
+def _group_sections_by_material_id(
+    sections: tuple[MeshSection | CompactMeshSection, ...],
+) -> dict[int, tuple[MeshSection | CompactMeshSection, ...]]:
+    grouped_sections: dict[int, list[MeshSection | CompactMeshSection]] = {}
+    for section in sections:
+        grouped_sections.setdefault(section.material_id, []).append(section)
+    return {material_id: tuple(section_group) for material_id, section_group in grouped_sections.items()}
 
 
 def _shift_primary_uvs(
