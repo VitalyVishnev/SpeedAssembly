@@ -271,8 +271,9 @@ Supported modes:
   - untouched material faces receive `(0.5, 0.5)`, representing the first UDIM tile
 
 Current authoring uses `texCoord2f[] primvars:st1` for the second UV channel.
-This name is covered by automated USDA regression tests but still requires UE
-5.7.x import validation before being treated as importer-proven.
+This name is covered by automated USDA regression tests and has been manually
+validated in UE 5.7.x on the current baseline sample. Broader real-sample
+coverage is still required before treating it as fully generalized.
 
 Raw SpeedTree XML material ids must be treated as opaque Source Material
 metadata. `source_material_roles` may infer bark/leaves buckets from authored

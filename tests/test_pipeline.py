@@ -1559,6 +1559,62 @@ def test_udim_secondary_mode_defaults_untouched_material_faces_to_first_udim() -
     )
 
 
+def test_udim_secondary_mode_overwrites_existing_secondary_uvs_with_default_fill() -> None:
+    mesh = MeshData(
+        name="TwoMaterialMeshWithSecondaryUVs",
+        points=(Vector3(0.0, 0.0, 0.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0)),
+        face_vertex_counts=(3, 3),
+        face_vertex_indices=(0, 1, 2, 0, 2, 1),
+        uv_coords=(
+            Vector2(0.0, 0.0),
+            Vector2(1.0, 0.0),
+            Vector2(0.0, 1.0),
+            Vector2(0.0, 0.0),
+            Vector2(0.0, 1.0),
+            Vector2(1.0, 0.0),
+        ),
+        secondary_uv_coords=(
+            Vector2(9.0, 9.0),
+            Vector2(9.0, 9.0),
+            Vector2(9.0, 9.0),
+            Vector2(8.0, 8.0),
+            Vector2(8.0, 8.0),
+            Vector2(8.0, 8.0),
+        ),
+        sections=(
+            MeshSection(material_id=1, face_indices=(0,)),
+            MeshSection(material_id=2, face_indices=(1,)),
+        ),
+    )
+    model = TreeAsset(
+        metadata=ExportMetadata(source_path="synthetic.xml", source_version=None),
+        materials=(),
+        source_objects=(),
+        base_mesh=mesh,
+        skeleton=(),
+        assembly_parts=(),
+    )
+
+    resolved = apply_udim_material_settings(
+        model,
+        (
+            UdimMaterialSetting(
+                material_id=1,
+                mode=UdimMode.WRITE_SECONDARY_UV_OFFSET,
+                udim_id=1003,
+            ),
+        ),
+    )
+
+    assert resolved.base_mesh is not None
+    assert [(uv.x, uv.y) for uv in resolved.base_mesh.secondary_uv_coords[:3]] == pytest.approx(
+        [(2.5, 0.5), (2.5, 0.5), (2.5, 0.5)]
+    )
+    assert [(uv.x, uv.y) for uv in resolved.base_mesh.secondary_uv_coords[3:]] == pytest.approx(
+        [(0.5, 0.5), (0.5, 0.5), (0.5, 0.5)]
+    )
+
+
 def test_udim_setting_that_matches_no_inline_material_is_resolution_error() -> None:
     _, resolved = load_resolved_assembly_model(
         str(SIMPLE_TREE_01),

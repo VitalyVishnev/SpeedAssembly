@@ -142,14 +142,14 @@ Decision:
 - UDIM behavior is configured as per-material Operator Intent.
 - Default behavior is `off`.
 - `shift_primary_uv` offsets primary face-varying UVs for matching material faces.
-- `write_secondary_uv_offset` preserves primary UVs and writes a full-size second face-varying UV channel, defaulting untouched faces to the first UDIM offset `(0.5, 0.5)`.
+- `write_secondary_uv_offset` initializes a full-size second face-varying UV channel to the first UDIM offset `(0.5, 0.5)` for every face and then overwrites only the target material faces with the selected UDIM offset.
 - UDIM math uses fixed `base_udim = 1001`.
 - Active UDIM settings that match no authored inline material are resolution errors.
 
 Rationale:
 
 - The material target is the stable operator-facing unit for shared bark/branch atlas workflows.
-- Full-size second UV data avoids malformed per-face-varying payloads when only part of a mesh uses UDIM.
+- Full-size second UV data avoids malformed per-face-varying payloads when only part of a mesh uses UDIM, and default-filling the whole channel prevents stale authored `st1` data from leaking through.
 - External Unreal asset prototypes do not expose inline geometry in USDA, so unmatched settings must fail loudly instead of pretending to edit them.
 
 ## 2026-05-24: Tk shell is retired

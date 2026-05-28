@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from array import array
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from .models import (
     CanonicalTreeModel,
@@ -21,11 +21,18 @@ BASE_UDIM = 1001
 DEFAULT_SECONDARY_OFFSET = Vector2(0.5, 0.5)
 
 
+@dataclass(frozen=True, slots=True)
+class _ResolvedUdimSetting:
+    material_id: int
+    mode: UdimMode
+    offset: Vector2
+
+
 def apply_udim_material_settings(
     model: CanonicalTreeModel,
     settings: tuple[UdimMaterialSetting, ...],
 ) -> CanonicalTreeModel:
-    active_settings = tuple(setting for setting in settings if UdimMode.parse(setting.mode) != UdimMode.OFF)
+    active_settings = _resolve_active_udim_settings(settings)
     if not active_settings:
         return model
 
@@ -34,9 +41,25 @@ def apply_udim_material_settings(
     return replace(model, base_mesh=base_mesh, prototypes=prototypes)
 
 
+def _resolve_active_udim_settings(settings: tuple[UdimMaterialSetting, ...]) -> tuple[_ResolvedUdimSetting, ...]:
+    active_settings: list[_ResolvedUdimSetting] = []
+    for setting in settings:
+        mode = UdimMode.parse(setting.mode)
+        if mode == UdimMode.OFF:
+            continue
+        active_settings.append(
+            _ResolvedUdimSetting(
+                material_id=setting.material_id,
+                mode=mode,
+                offset=_udim_offset(setting.udim_id),
+            )
+        )
+    return tuple(active_settings)
+
+
 def _apply_settings_to_prototype(
     prototype: Prototype,
-    settings: tuple[UdimMaterialSetting, ...],
+    settings: tuple[_ResolvedUdimSetting, ...],
 ) -> Prototype:
     mesh = _apply_settings_to_mesh(prototype.mesh, settings) if prototype.mesh is not None else None
     geometry_payload = (
@@ -49,32 +72,27 @@ def _apply_settings_to_prototype(
 
 def _apply_settings_to_mesh(
     mesh: MeshData | None,
-    settings: tuple[UdimMaterialSetting, ...],
+    settings: tuple[_ResolvedUdimSetting, ...],
 ) -> MeshData | None:
     if mesh is None or not mesh.uv_coords:
         return mesh
 
     primary_uvs = list(mesh.uv_coords)
-    secondary_uvs = list(mesh.secondary_uv_coords) if mesh.secondary_uv_coords else []
+    write_secondary = any(setting.mode == UdimMode.WRITE_SECONDARY_UV_OFFSET for setting in settings)
+    secondary_uvs = [DEFAULT_SECONDARY_OFFSET] * len(mesh.uv_coords) if write_secondary else list(mesh.secondary_uv_coords)
     if secondary_uvs and len(secondary_uvs) != len(mesh.uv_coords):
-        secondary_uvs = []
+        secondary_uvs = [DEFAULT_SECONDARY_OFFSET] * len(mesh.uv_coords) if write_secondary else []
 
     wrote_secondary = bool(secondary_uvs)
     face_ranges = _face_vertex_ranges(mesh.face_vertex_counts)
     for setting in settings:
-        mode = UdimMode.parse(setting.mode)
-        if mode == UdimMode.OFF:
-            continue
-        offset = _udim_offset(setting.udim_id)
         for section in mesh.sections:
             if section.material_id != setting.material_id:
                 continue
-            if mode == UdimMode.SHIFT_PRIMARY_UV:
-                _shift_primary_uvs(primary_uvs, face_ranges, section.face_indices, offset)
-            elif mode == UdimMode.WRITE_SECONDARY_UV_OFFSET:
-                if not secondary_uvs:
-                    secondary_uvs = [DEFAULT_SECONDARY_OFFSET] * len(mesh.uv_coords)
-                _write_secondary_uvs(secondary_uvs, face_ranges, section.face_indices, offset)
+            if setting.mode == UdimMode.SHIFT_PRIMARY_UV:
+                _shift_primary_uvs(primary_uvs, face_ranges, section.face_indices, setting.offset)
+            elif setting.mode == UdimMode.WRITE_SECONDARY_UV_OFFSET:
+                _write_secondary_uvs(secondary_uvs, face_ranges, section.face_indices, setting.offset)
                 wrote_secondary = True
 
     return replace(
@@ -86,32 +104,27 @@ def _apply_settings_to_mesh(
 
 def _apply_settings_to_geometry_buffer(
     mesh: GeometryBuffer | None,
-    settings: tuple[UdimMaterialSetting, ...],
+    settings: tuple[_ResolvedUdimSetting, ...],
 ) -> GeometryBuffer | None:
     if mesh is None or not mesh.uv_components:
         return mesh
 
     primary_uvs = array("f", mesh.uv_components)
-    secondary_uvs = array("f", mesh.secondary_uv_components)
+    write_secondary = any(setting.mode == UdimMode.WRITE_SECONDARY_UV_OFFSET for setting in settings)
+    secondary_uvs = _default_secondary_uv_components(len(primary_uvs)) if write_secondary else array("f", mesh.secondary_uv_components)
     if secondary_uvs and len(secondary_uvs) != len(primary_uvs):
-        secondary_uvs = array("f")
+        secondary_uvs = _default_secondary_uv_components(len(primary_uvs)) if write_secondary else array("f")
 
     wrote_secondary = bool(secondary_uvs)
     face_ranges = _face_vertex_ranges(mesh.face_vertex_counts)
     for setting in settings:
-        mode = UdimMode.parse(setting.mode)
-        if mode == UdimMode.OFF:
-            continue
-        offset = _udim_offset(setting.udim_id)
         for section in mesh.sections:
             if section.material_id != setting.material_id:
                 continue
-            if mode == UdimMode.SHIFT_PRIMARY_UV:
-                _shift_primary_uv_components(primary_uvs, face_ranges, section.face_indices, offset)
-            elif mode == UdimMode.WRITE_SECONDARY_UV_OFFSET:
-                if not secondary_uvs:
-                    secondary_uvs = _default_secondary_uv_components(len(primary_uvs))
-                _write_secondary_uv_components(secondary_uvs, face_ranges, section.face_indices, offset)
+            if setting.mode == UdimMode.SHIFT_PRIMARY_UV:
+                _shift_primary_uv_components(primary_uvs, face_ranges, section.face_indices, setting.offset)
+            elif setting.mode == UdimMode.WRITE_SECONDARY_UV_OFFSET:
+                _write_secondary_uv_components(secondary_uvs, face_ranges, section.face_indices, setting.offset)
                 wrote_secondary = True
 
     return replace(
@@ -198,7 +211,4 @@ def _iter_section_face_vertices(
 
 
 def _default_secondary_uv_components(primary_component_count: int) -> array:
-    values = array("f")
-    for _ in range(primary_component_count // 2):
-        values.extend((DEFAULT_SECONDARY_OFFSET.x, DEFAULT_SECONDARY_OFFSET.y))
-    return values
+    return array("f", (DEFAULT_SECONDARY_OFFSET.x, DEFAULT_SECONDARY_OFFSET.y)) * (primary_component_count // 2)

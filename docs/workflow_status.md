@@ -28,6 +28,8 @@ The project has passed the baseline importer gate:
 - the baseline keeps a real `Base Skeletal Tree`
 - repeated parts are authored through `PointInstancer`
 - UE-backed material overrides work on the current baseline workflow
+- the authored second UV channel (`primvars:st1`) is accepted by UE 5.7.x on the current baseline sample, and UDIM offsets behave as expected in that path
+- automated tests cover the USDA authoring path and the secondary-UV overwrite rule that fills untouched faces with `(0.5, 0.5)`
 
 The project has also passed automated `Phase 1` regression coverage for:
 
@@ -153,7 +155,7 @@ Run this checklist for every real `Phase 1` sample:
 
 1. keep the baseline skeletal assembly path stable
 2. validate the current contract on multiple real structural variants
-3. keep newly added UDIM UV modification importer-validated as real UE 5.7 samples are exercised
+3. extend UDIM validation across additional real SpeedTree samples while keeping the importer path stable
 
 ## Troubleshooting shortcut
 
