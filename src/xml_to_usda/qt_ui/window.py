@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QBrush, QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QLayout,
     QComboBox,
@@ -88,7 +88,6 @@ from .theme import (
     compute_screen_scale,
     compute_cover_source_rect,
     load_bundled_theme,
-    merge_theme,
     resolve_theme_asset,
     scale_theme_for_runtime,
     theme_to_payload,
@@ -1127,18 +1126,10 @@ class MainWindow(QWidget):
         self._design_theme = theme
         self._ui_scale = self._compute_current_screen_scale()
         runtime_theme = scale_theme_for_runtime(theme, self._ui_scale)
-        self._theme = runtime_theme
         self._assets = self._load_window_assets(theme)
-        self.setStyleSheet(build_stylesheet(runtime_theme))
-        self.title_bar.apply_theme(runtime_theme)
+        self._apply_runtime_theme_to_widgets(runtime_theme)
         self.help_callout.adjustSize()
         self._position_help_callout()
-        self.panel.set_theme(runtime_theme, self._assets.panel_blur, self._assets.noise)
-        self._apply_theme_to_layout()
-        self._update_panel_metrics()
-        self._update_window_shape()
-        self.panel.update()
-        self.update()
         for dialog in (self._log_dialog, self._help_dialog, self._adjust_ui_dialog, self._global_settings_dialog):
             if dialog is not None:
                 dialog.setStyleSheet(build_stylesheet(runtime_theme))
@@ -1149,6 +1140,9 @@ class MainWindow(QWidget):
             return
         self._ui_scale = screen_scale
         runtime_theme = scale_theme_for_runtime(self._design_theme, self._ui_scale)
+        self._apply_runtime_theme_to_widgets(runtime_theme)
+
+    def _apply_runtime_theme_to_widgets(self, runtime_theme: ResolvedTheme) -> None:
         self._theme = runtime_theme
         self.setStyleSheet(build_stylesheet(runtime_theme))
         self.title_bar.apply_theme(runtime_theme)
@@ -1156,6 +1150,7 @@ class MainWindow(QWidget):
         self._apply_theme_to_layout()
         self._update_panel_metrics()
         self._update_window_shape()
+        self.panel.update()
         self.update()
 
     def _connect_screen_scale_updates(self) -> None:
@@ -1721,14 +1716,10 @@ class MainWindow(QWidget):
     def _reload_input_dependent_tabs(self) -> None:
         input_path = self.source_input.text().strip()
         if not input_path:
-            self.wind_panel.clear()
-            self.geometry_panel.clear()
-            self.materials_panel.clear()
+            self._clear_input_dependent_tabs()
             return
         if not Path(input_path).exists():
-            self.wind_panel.clear("Selected XML path is unavailable.")
-            self.geometry_panel.clear("Selected XML path is unavailable.")
-            self.materials_panel.clear("Selected XML path is unavailable.")
+            self._clear_input_dependent_tabs("Selected XML path is unavailable.")
             return
 
         base_records = load_base_material_records(self._operator_snapshot)
@@ -1754,6 +1745,16 @@ class MainWindow(QWidget):
             cpu_profile=self._operator_state.cpu_profile,
         )
         self.wind_panel.clear("Click Refresh Wind Groups to inspect wind settings.")
+
+    def _clear_input_dependent_tabs(self, message: str | None = None) -> None:
+        if message is None:
+            self.wind_panel.clear()
+            self.geometry_panel.clear()
+            self.materials_panel.clear()
+            return
+        self.wind_panel.clear(message)
+        self.geometry_panel.clear(message)
+        self.materials_panel.clear(message)
 
     def browse_input(self) -> None:
         previous_input = self._operator_state.input_path

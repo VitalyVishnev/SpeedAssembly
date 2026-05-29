@@ -8,6 +8,8 @@ from pathlib import Path
 
 from .theme import ThemeOverrides
 
+_UI_SETTINGS_DIRNAME = ".xml_to_usda"
+
 
 @dataclass(frozen=True)
 class UiShellState:
@@ -21,20 +23,28 @@ class UiShellState:
     active_tab_name: str = "Wind"
 
 
+def _default_ui_path(filename: str) -> Path:
+    return Path.home() / _UI_SETTINGS_DIRNAME / filename
+
+
+def _resolve_optional_path(path: str | Path | None, default_path: Path) -> Path:
+    return Path(path) if path is not None else default_path
+
+
 def default_ui_state_path() -> Path:
-    return Path.home() / ".xml_to_usda" / "ui_next_state.json"
+    return _default_ui_path("ui_next_state.json")
 
 
 def default_ui_theme_overrides_path() -> Path:
-    return Path.home() / ".xml_to_usda" / "ui_next_theme_overrides.json"
+    return _default_ui_path("ui_next_theme_overrides.json")
 
 
 def default_ui_theme_export_path() -> Path:
-    return Path.home() / ".xml_to_usda" / "ui_next_theme_export.json"
+    return _default_ui_path("ui_next_theme_export.json")
 
 
 def load_ui_shell_state(path: str | Path | None = None) -> UiShellState:
-    state_path = Path(path) if path is not None else default_ui_state_path()
+    state_path = _resolve_optional_path(path, default_ui_state_path())
     if not state_path.exists():
         return UiShellState()
     try:
@@ -54,13 +64,13 @@ def load_ui_shell_state(path: str | Path | None = None) -> UiShellState:
 
 
 def save_ui_shell_state(state: UiShellState, path: str | Path | None = None) -> None:
-    state_path = Path(path) if path is not None else default_ui_state_path()
+    state_path = _resolve_optional_path(path, default_ui_state_path())
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(json.dumps(asdict(state), indent=2), encoding="utf-8")
 
 
 def load_ui_theme_overrides(path: str | Path | None = None) -> ThemeOverrides:
-    overrides_path = Path(path) if path is not None else default_ui_theme_overrides_path()
+    overrides_path = _resolve_optional_path(path, default_ui_theme_overrides_path())
     if not overrides_path.exists():
         return ThemeOverrides(theme_name="default", payload={})
     try:
@@ -75,7 +85,7 @@ def load_ui_theme_overrides(path: str | Path | None = None) -> ThemeOverrides:
 
 
 def save_ui_theme_overrides(overrides: ThemeOverrides, path: str | Path | None = None) -> None:
-    overrides_path = Path(path) if path is not None else default_ui_theme_overrides_path()
+    overrides_path = _resolve_optional_path(path, default_ui_theme_overrides_path())
     overrides_path.parent.mkdir(parents=True, exist_ok=True)
     overrides_path.write_text(
         json.dumps(

@@ -9,9 +9,26 @@ import json
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, TypeVar
 
 from importlib.resources import files
+
+_ThemeT = TypeVar("_ThemeT", bound="_ThemeBase")
+_THEME_SECTION_KEYS = (
+    "colors",
+    "font_sizes",
+    "radii",
+    "spacing",
+    "control_heights",
+    "border_widths",
+    "layout",
+    "glass",
+    "chrome",
+    "effects",
+    "assets",
+)
+_RUNTIME_SCALED_SECTIONS = ("font_sizes", "radii", "spacing", "control_heights", "layout", "chrome")
+_RUNTIME_SCALED_EFFECT_KEYS = ("panel_shadow_blur", "panel_shadow_offset_y")
 
 
 @dataclass(frozen=True)
@@ -91,21 +108,13 @@ def merge_theme(theme: ThemeSpec, overrides: ThemeOverrides | None = None) -> Re
 
 
 def theme_to_payload(theme: _ThemeBase) -> dict[str, Any]:
-    return {
+    payload = {
         "name": theme.name,
         "display_name": theme.display_name,
-        "colors": deepcopy(theme.colors),
-        "font_sizes": deepcopy(theme.font_sizes),
-        "radii": deepcopy(theme.radii),
-        "spacing": deepcopy(theme.spacing),
-        "control_heights": deepcopy(theme.control_heights),
-        "border_widths": deepcopy(theme.border_widths),
-        "layout": deepcopy(theme.layout),
-        "glass": deepcopy(theme.glass),
-        "chrome": deepcopy(theme.chrome),
-        "effects": deepcopy(theme.effects),
-        "assets": deepcopy(theme.assets),
     }
+    for key in _THEME_SECTION_KEYS:
+        payload[key] = deepcopy(getattr(theme, key))
+    return payload
 
 
 def write_theme_payload(path: str | Path, payload: Mapping[str, Any]) -> None:
@@ -139,18 +148,18 @@ def compute_screen_scale(
 def scale_theme_for_runtime(theme: ResolvedTheme, scale: float) -> ResolvedTheme:
     payload = theme_to_payload(theme)
     if scale == 1.0:
-        return _theme_from_payload(payload, cls=ResolvedTheme)  # type: ignore[return-value]
-    for section_name in ("font_sizes", "radii", "spacing", "control_heights", "layout", "chrome"):
+        return _theme_from_payload(payload, cls=ResolvedTheme)
+    for section_name in _RUNTIME_SCALED_SECTIONS:
         section = payload[section_name]
         for key, value in section.items():
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 section[key] = _scaled_design_unit(value, scale)
     effects = payload["effects"]
-    for key in ("panel_shadow_blur", "panel_shadow_offset_y"):
+    for key in _RUNTIME_SCALED_EFFECT_KEYS:
         value = effects.get(key)
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             effects[key] = _scaled_design_unit(value, scale)
-    return _theme_from_payload(payload, cls=ResolvedTheme)  # type: ignore[return-value]
+    return _theme_from_payload(payload, cls=ResolvedTheme)
 
 
 def compute_cover_source_rect(
@@ -783,7 +792,7 @@ def bake_theme_payload(
     write_theme_payload(target_theme_path, snapshot)
 
 
-def _theme_from_payload(payload: Mapping[str, Any], *, cls: type[_ThemeBase]) -> _ThemeBase:
+def _theme_from_payload(payload: Mapping[str, Any], *, cls: type[_ThemeT]) -> _ThemeT:
     return cls(
         name=str(payload["name"]),
         display_name=str(payload["display_name"]),
@@ -856,21 +865,7 @@ def _color_or_alpha(theme: _ThemeBase, key: str, fallback_key: str, alpha_fracti
 
 
 def _validate_theme_payload(payload: Mapping[str, Any]) -> None:
-    required_top_level = (
-        "name",
-        "display_name",
-        "colors",
-        "font_sizes",
-        "radii",
-        "spacing",
-        "control_heights",
-        "border_widths",
-        "layout",
-        "glass",
-        "chrome",
-        "effects",
-        "assets",
-    )
+    required_top_level = ("name", "display_name", *_THEME_SECTION_KEYS)
     for key in required_top_level:
         if key not in payload:
             raise ValueError(f"Theme payload is missing required key: {key}")

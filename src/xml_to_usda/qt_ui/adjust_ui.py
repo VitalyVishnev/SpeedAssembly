@@ -519,7 +519,12 @@ class AdjustUiDialog(QDialog):
         self._recompute_preview()
 
     def _recompute_preview(self) -> None:
+        self._refresh_from_working_overrides(sync_widgets=False)
+
+    def _refresh_from_working_overrides(self, *, sync_widgets: bool) -> None:
         self._current_theme = merge_theme(self._base_theme, self._working_overrides)
+        if sync_widgets:
+            self._sync_widgets_from_theme()
         self._dirty = self._working_overrides.payload != self._applied_overrides.payload
         self._status()
         self._on_preview(self._working_overrides, self._current_theme)
@@ -554,15 +559,11 @@ class AdjustUiDialog(QDialog):
         for definition in (field for field in self._field_definitions if field.category == category):
             delete_nested_value(payload, definition.path)
         self._working_overrides = ThemeOverrides(self._working_overrides.theme_name, payload)
-        self._current_theme = merge_theme(self._base_theme, self._working_overrides)
-        self._sync_widgets_from_theme()
-        self._recompute_preview()
+        self._refresh_from_working_overrides(sync_widgets=True)
 
     def _reset_all(self) -> None:
         self._working_overrides = ThemeOverrides(self._working_overrides.theme_name, {})
-        self._current_theme = merge_theme(self._base_theme, self._working_overrides)
-        self._sync_widgets_from_theme()
-        self._recompute_preview()
+        self._refresh_from_working_overrides(sync_widgets=True)
 
     def _status(self) -> None:
         self.status_label.setText("Unsaved UI changes." if self._dirty else "No unsaved UI changes.")

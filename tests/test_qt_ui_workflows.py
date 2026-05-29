@@ -216,11 +216,13 @@ def test_qt_window_runs_sync_conversion_through_services(monkeypatch, qtbot, tmp
     tree_xml.write_text("<tree/>", encoding="utf-8")
     window.source_input.setText(str(tree_xml))
     window.output_input.setText(str(tmp_path / "tree.usda"))
+    qtbot.waitUntil(lambda: "Loaded 1 wind groups." in window.status_label.text(), timeout=3000)
     qtbot.mouseClick(window.convert_button, Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(lambda: "Wrote USDA to" in window.status_label.text(), timeout=3000)
 
     assert "convert_request" in calls
+    assert "Wrote USDA to" in window.status_label.text()
     assert "Status: success" in window._log_text
     assert window.geometry_panel.has_rows() is True
 
@@ -244,6 +246,7 @@ def test_qt_window_passes_selected_conversion_mode_to_conversion_request(monkeyp
     tree_xml.write_text("<tree/>", encoding="utf-8")
     window.source_input.setText(str(tree_xml))
     window.output_input.setText(str(tmp_path / "tree.usda"))
+    qtbot.waitUntil(lambda: "Loaded 1 wind groups." in window.status_label.text(), timeout=3000)
     window._conversion_mode_actions["skeletal_parts"].trigger()
     qtbot.mouseClick(window.convert_button, Qt.MouseButton.LeftButton)
 
@@ -251,6 +254,7 @@ def test_qt_window_passes_selected_conversion_mode_to_conversion_request(monkeyp
 
     request = calls["convert_request"]["request"]
     assert calls["prepare_conversion_plan"]["conversion_mode"] == ConversionMode.SKELETAL_PARTS
+    assert "Wrote USDA to" in window.status_label.text()
     assert request.conversion_mode == ConversionMode.SKELETAL_PARTS
 
 
@@ -273,6 +277,7 @@ def test_qt_window_passes_static_assembly_mode_to_conversion_request(monkeypatch
     tree_xml.write_text("<tree/>", encoding="utf-8")
     window.source_input.setText(str(tree_xml))
     window.output_input.setText(str(tmp_path / "tree.usda"))
+    qtbot.waitUntil(lambda: "Loaded 1 wind groups." in window.status_label.text(), timeout=3000)
     window._conversion_mode_actions["static_assembly"].trigger()
     qtbot.mouseClick(window.convert_button, Qt.MouseButton.LeftButton)
 
@@ -280,6 +285,7 @@ def test_qt_window_passes_static_assembly_mode_to_conversion_request(monkeypatch
 
     request = calls["convert_request"]["request"]
     assert calls["prepare_conversion_plan"]["conversion_mode"] == ConversionMode.STATIC_ASSEMBLY
+    assert "Wrote USDA to" in window.status_label.text()
     assert request.conversion_mode == ConversionMode.STATIC_ASSEMBLY
 
 
@@ -530,6 +536,41 @@ def test_qt_window_serializes_udim_settings_for_part_material_rows(monkeypatch, 
     assert records[0].white_material_path == "/Game/Test/M_White.M_White"
     assert records[0].white_material_udim_mode == UdimMode.OFF
     assert records[0].white_material_udim_id == 1001
+
+
+def test_qt_window_collects_part_material_udim_settings_for_conversion_request(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+    row = window.materials_panel._part_rows[0]
+
+    row.black_edit.setText("/Game/Test/M_Black.M_Black")
+    row.black_udim_mode_combo.setCurrentIndex(row.black_udim_mode_combo.findData(UdimMode.WRITE_SECONDARY_UV_OFFSET.value))
+    row.black_udim_id_spin.setValue(1028)
+    row.white_edit.setText("/Game/Test/M_White.M_White")
+    row.white_udim_mode_combo.setCurrentIndex(row.white_udim_mode_combo.findData(UdimMode.SHIFT_PRIMARY_UV.value))
+    row.white_udim_id_spin.setValue(1003)
+
+    configs = window.materials_panel.collect_prototype_source_configs()
+    assert configs[0].black_material_path == "/Game/Test/M_Black.M_Black"
+    assert configs[0].black_material_udim_mode == UdimMode.WRITE_SECONDARY_UV_OFFSET
+    assert configs[0].black_material_udim_id == 1028
+    assert configs[0].white_material_path == "/Game/Test/M_White.M_White"
+    assert configs[0].white_material_udim_mode == UdimMode.SHIFT_PRIMARY_UV
+    assert configs[0].white_material_udim_id == 1003
 
 
 def test_qt_window_serializes_udim_settings_for_fbx_material_slot_rows(monkeypatch, qtbot, tmp_path) -> None:

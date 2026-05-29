@@ -10,6 +10,7 @@ main UI thread.
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass
 from queue import Empty, Queue
 import threading
@@ -216,16 +217,12 @@ class QtBackgroundJobsController:
         if self._conversion_cancel_event is not None:
             self._conversion_cancel_event.set()
         if self._conversion_process is not None and self._conversion_process.is_alive():
-            try:
+            with suppress(Exception):
                 self._conversion_process.join(timeout=0.2)
-            except Exception:
-                pass
             if self._conversion_process.is_alive():
-                try:
+                with suppress(Exception):
                     self._conversion_process.terminate()
                     self._conversion_process.join(timeout=0.2)
-                except Exception:
-                    pass
         self.close_conversion_process()
 
     def _ensure_polling(self) -> None:

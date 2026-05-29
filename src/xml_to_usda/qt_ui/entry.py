@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from .dependencies import build_default_dependencies
     from .persistence import load_ui_shell_state, load_ui_theme_overrides
-    from .theme import load_bundled_theme, merge_theme
+    from .theme import ThemeOverrides, load_bundled_theme, merge_theme
     from .window import MainWindow
 
     state = load_ui_shell_state()
@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     base_theme = load_bundled_theme(theme_name)
     theme_overrides = load_ui_theme_overrides()
     if theme_overrides.theme_name != theme_name and theme_overrides.payload:
-        theme_overrides = theme_overrides.__class__(theme_name=theme_name, payload=theme_overrides.payload)
+        theme_overrides = ThemeOverrides(theme_name=theme_name, payload=theme_overrides.payload)
     theme = merge_theme(base_theme, theme_overrides)
     deps = build_default_dependencies()
     configure_windows_taskbar_identity()

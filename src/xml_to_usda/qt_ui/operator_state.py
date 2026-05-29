@@ -80,17 +80,7 @@ def save_operator_state(
     """Persist shared operator defaults without overwriting GUI file-path history."""
     resolved_settings_path = Path(settings_path) if settings_path is not None else SETTINGS_PATH
     snapshot = GuiSettingsSnapshot(
-        last_input_path=state.input_path or previous_snapshot.last_input_path,
-        last_output_path=state.output_path or previous_snapshot.last_output_path,
-        cpu_profile=state.cpu_profile,
-        preserve_temp_files=bool(state.preserve_temp_files),
-        conversion_mode=state.conversion_mode,
-        material_policy=state.material_policy,
-        bark_material_path=state.bark_material_path,
-        leaves_material_path=state.leaves_material_path,
-        single_material_path=state.single_material_path,
-        gust_attenuation=float(state.gust_attenuation),
-        is_ground_cover=bool(state.is_ground_cover),
+        **_operator_snapshot_fields(state, previous_snapshot),
         wind_group_settings=previous_snapshot.wind_group_settings,
         base_material_settings=previous_snapshot.base_material_settings,
         part_mesh_settings=previous_snapshot.part_mesh_settings,
@@ -133,17 +123,7 @@ def save_nested_input_settings(
     resolved_settings_path = Path(settings_path) if settings_path is not None else SETTINGS_PATH
 
     snapshot = GuiSettingsSnapshot(
-        last_input_path=state.input_path or previous_snapshot.last_input_path,
-        last_output_path=state.output_path or previous_snapshot.last_output_path,
-        cpu_profile=state.cpu_profile,
-        preserve_temp_files=bool(state.preserve_temp_files),
-        conversion_mode=state.conversion_mode,
-        material_policy=state.material_policy,
-        bark_material_path=state.bark_material_path,
-        leaves_material_path=state.leaves_material_path,
-        single_material_path=state.single_material_path,
-        gust_attenuation=float(state.gust_attenuation),
-        is_ground_cover=bool(state.is_ground_cover),
+        **_operator_snapshot_fields(state, previous_snapshot),
         wind_group_settings=dict(wind_group_records),
         base_material_settings=base_material_records,
         part_mesh_settings=part_source_records,
@@ -154,6 +134,22 @@ def save_nested_input_settings(
     )
     deps.save_gui_settings(resolved_settings_path, snapshot)
     return snapshot
+
+
+def _operator_snapshot_fields(state: OperatorState, previous_snapshot: GuiSettingsSnapshot) -> dict[str, object]:
+    return {
+        "last_input_path": state.input_path or previous_snapshot.last_input_path,
+        "last_output_path": state.output_path or previous_snapshot.last_output_path,
+        "cpu_profile": state.cpu_profile,
+        "preserve_temp_files": bool(state.preserve_temp_files),
+        "conversion_mode": state.conversion_mode,
+        "material_policy": state.material_policy,
+        "bark_material_path": state.bark_material_path,
+        "leaves_material_path": state.leaves_material_path,
+        "single_material_path": state.single_material_path,
+        "gust_attenuation": float(state.gust_attenuation),
+        "is_ground_cover": bool(state.is_ground_cover),
+    }
 
 
 def preset_from_operator_state(

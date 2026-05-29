@@ -616,6 +616,20 @@ class PartMaterialRowWidgets:
     header_label: QLabel
 
 
+@dataclass(frozen=True)
+class _PartMaterialValues:
+    fbx_material_mode: FbxMaterialMode
+    single_material_path: str
+    single_material_udim_mode: UdimMode
+    single_material_udim_id: int
+    black_material_path: str
+    black_material_udim_mode: UdimMode
+    black_material_udim_id: int
+    white_material_path: str
+    white_material_udim_mode: UdimMode
+    white_material_udim_id: int
+
+
 class MaterialsTabPanel(QWidget):
     def __init__(self, *, deps, on_change) -> None:
         super().__init__()
@@ -750,16 +764,7 @@ class MaterialsTabPanel(QWidget):
             if geometry is None:
                 continue
             source_mode = geometry.source_mode
-            material_mode = FbxMaterialMode(row.material_mode_combo.currentData())
-            single_material_path = row.single_edit.text().strip() or None
-            single_material_udim_mode = UdimMode.parse(row.single_udim_mode_combo.currentData())
-            single_material_udim_id = row.single_udim_id_spin.value()
-            black_material_path = row.black_edit.text().strip() or None
-            black_material_udim_mode = UdimMode.parse(row.black_udim_mode_combo.currentData())
-            black_material_udim_id = row.black_udim_id_spin.value()
-            white_material_path = row.white_edit.text().strip() or None
-            white_material_udim_mode = UdimMode.parse(row.white_udim_mode_combo.currentData())
-            white_material_udim_id = row.white_udim_id_spin.value()
+            values = self._part_material_values(row)
             slot_overrides = tuple(
                 FbxMaterialSlotOverride(
                     slot_name=slot_row.slot_name,
@@ -773,26 +778,26 @@ class MaterialsTabPanel(QWidget):
 
             if source_mode == PrototypeSourceMode.XML_MESH:
                 if (
-                    material_mode != FbxMaterialMode.VERTEX_COLOR_SPLIT
-                    or single_material_path
-                    or black_material_path
-                    or white_material_path
+                    values.fbx_material_mode != FbxMaterialMode.VERTEX_COLOR_SPLIT
+                    or values.single_material_path
+                    or values.black_material_path
+                    or values.white_material_path
                 ):
                     configs.append(
                         PrototypeSourceConfig(
                             source_key=row.source_key,
                             source_name=row.source_name,
                             mode=source_mode,
-                            fbx_material_mode=material_mode,
-                            single_material_path=single_material_path,
-                            single_material_udim_mode=single_material_udim_mode,
-                            single_material_udim_id=single_material_udim_id,
-                            black_material_path=black_material_path,
-                            black_material_udim_mode=black_material_udim_mode,
-                            black_material_udim_id=black_material_udim_id,
-                            white_material_path=white_material_path,
-                            white_material_udim_mode=white_material_udim_mode,
-                            white_material_udim_id=white_material_udim_id,
+                            fbx_material_mode=values.fbx_material_mode,
+                            single_material_path=values.single_material_path or None,
+                            single_material_udim_mode=values.single_material_udim_mode,
+                            single_material_udim_id=values.single_material_udim_id,
+                            black_material_path=values.black_material_path or None,
+                            black_material_udim_mode=values.black_material_udim_mode,
+                            black_material_udim_id=values.black_material_udim_id,
+                            white_material_path=values.white_material_path or None,
+                            white_material_udim_mode=values.white_material_udim_mode,
+                            white_material_udim_id=values.white_material_udim_id,
                         )
                     )
                 continue
@@ -820,17 +825,17 @@ class MaterialsTabPanel(QWidget):
                     source_key=row.source_key,
                     source_name=row.source_name,
                     mode=source_mode,
-                    fbx_material_mode=material_mode,
+                    fbx_material_mode=values.fbx_material_mode,
                     fbx_path=str(resolved),
-                    single_material_path=single_material_path,
-                    single_material_udim_mode=single_material_udim_mode,
-                    single_material_udim_id=single_material_udim_id,
-                    black_material_path=black_material_path,
-                    black_material_udim_mode=black_material_udim_mode,
-                    black_material_udim_id=black_material_udim_id,
-                    white_material_path=white_material_path,
-                    white_material_udim_mode=white_material_udim_mode,
-                    white_material_udim_id=white_material_udim_id,
+                    single_material_path=values.single_material_path or None,
+                    single_material_udim_mode=values.single_material_udim_mode,
+                    single_material_udim_id=values.single_material_udim_id,
+                    black_material_path=values.black_material_path or None,
+                    black_material_udim_mode=values.black_material_udim_mode,
+                    black_material_udim_id=values.black_material_udim_id,
+                    white_material_path=values.white_material_path or None,
+                    white_material_udim_mode=values.white_material_udim_mode,
+                    white_material_udim_id=values.white_material_udim_id,
                     fbx_material_slot_overrides=slot_overrides,
                 )
             )
@@ -861,16 +866,7 @@ class MaterialsTabPanel(QWidget):
             if geometry is None:
                 continue
             source_mode = geometry.source_mode
-            fbx_material_mode = FbxMaterialMode(row.material_mode_combo.currentData())
-            single_material_path = row.single_edit.text().strip()
-            single_material_udim_mode = UdimMode.parse(row.single_udim_mode_combo.currentData())
-            single_material_udim_id = row.single_udim_id_spin.value()
-            black_material_path = row.black_edit.text().strip()
-            black_material_udim_mode = UdimMode.parse(row.black_udim_mode_combo.currentData())
-            black_material_udim_id = row.black_udim_id_spin.value()
-            white_material_path = row.white_edit.text().strip()
-            white_material_udim_mode = UdimMode.parse(row.white_udim_mode_combo.currentData())
-            white_material_udim_id = row.white_udim_id_spin.value()
+            values = self._part_material_values(row)
             slot_records = tuple(
                 FbxMaterialSlotSettingRecord(
                     slot_name=slot_row.slot_name,
@@ -885,10 +881,10 @@ class MaterialsTabPanel(QWidget):
                 source_mode == PrototypeSourceMode.XML_MESH
                 and not geometry.unreal_asset_path.strip()
                 and not geometry.fbx_path.strip()
-                and fbx_material_mode == FbxMaterialMode.VERTEX_COLOR_SPLIT
-                and not single_material_path
-                and not black_material_path
-                and not white_material_path
+                and values.fbx_material_mode == FbxMaterialMode.VERTEX_COLOR_SPLIT
+                and not values.single_material_path
+                and not values.black_material_path
+                and not values.white_material_path
                 and not slot_records
             ):
                 continue
@@ -899,20 +895,35 @@ class MaterialsTabPanel(QWidget):
                     source_mode=source_mode,
                     unreal_asset_path=geometry.unreal_asset_path.strip(),
                     fbx_path=geometry.fbx_path.strip(),
-                    fbx_material_mode=fbx_material_mode,
-                    single_material_path=single_material_path,
-                    single_material_udim_mode=single_material_udim_mode,
-                    single_material_udim_id=single_material_udim_id,
-                    black_material_path=black_material_path,
-                    black_material_udim_mode=black_material_udim_mode,
-                    black_material_udim_id=black_material_udim_id,
-                    white_material_path=white_material_path,
-                    white_material_udim_mode=white_material_udim_mode,
-                    white_material_udim_id=white_material_udim_id,
+                    fbx_material_mode=values.fbx_material_mode,
+                    single_material_path=values.single_material_path,
+                    single_material_udim_mode=values.single_material_udim_mode,
+                    single_material_udim_id=values.single_material_udim_id,
+                    black_material_path=values.black_material_path,
+                    black_material_udim_mode=values.black_material_udim_mode,
+                    black_material_udim_id=values.black_material_udim_id,
+                    white_material_path=values.white_material_path,
+                    white_material_udim_mode=values.white_material_udim_mode,
+                    white_material_udim_id=values.white_material_udim_id,
                     fbx_material_slot_overrides=slot_records,
                 )
             )
         return tuple(payload)
+
+    @staticmethod
+    def _part_material_values(row: PartMaterialRowWidgets) -> _PartMaterialValues:
+        return _PartMaterialValues(
+            fbx_material_mode=FbxMaterialMode(row.material_mode_combo.currentData()),
+            single_material_path=row.single_edit.text().strip(),
+            single_material_udim_mode=UdimMode.parse(row.single_udim_mode_combo.currentData()),
+            single_material_udim_id=row.single_udim_id_spin.value(),
+            black_material_path=row.black_edit.text().strip(),
+            black_material_udim_mode=UdimMode.parse(row.black_udim_mode_combo.currentData()),
+            black_material_udim_id=row.black_udim_id_spin.value(),
+            white_material_path=row.white_edit.text().strip(),
+            white_material_udim_mode=UdimMode.parse(row.white_udim_mode_combo.currentData()),
+            white_material_udim_id=row.white_udim_id_spin.value(),
+        )
 
     def _build_base_materials_card(self, discovery) -> QWidget:
         card = QFrame(self.scroll_container)
@@ -936,18 +947,13 @@ class MaterialsTabPanel(QWidget):
             path_edit = _make_path_edit(spec.ue_asset_path, row, placeholder="/Game/Path/Material.Material")
             path_edit.textChanged.connect(lambda _text: self._on_change())
             row_layout.addWidget(path_edit, 0, 2)
-            udim_mode_combo = NoWheelComboBox(row)
-            udim_mode_combo.setObjectName("InteractiveCombo")
-            udim_mode_combo.addItem("UDIM Off", UdimMode.OFF.value)
-            udim_mode_combo.addItem("Shift UV", UdimMode.SHIFT_PRIMARY_UV.value)
-            udim_mode_combo.addItem("Write UV1 Offset", UdimMode.WRITE_SECONDARY_UV_OFFSET.value)
-            _set_combo_value(udim_mode_combo, spec.udim_mode.value)
+            udim_mode_combo, udim_id_spin = _make_udim_controls(
+                row,
+                mode=spec.udim_mode,
+                udim_id=spec.udim_id,
+            )
             udim_mode_combo.currentIndexChanged.connect(lambda _index: self._on_change())
             row_layout.addWidget(udim_mode_combo, 0, 3)
-            udim_id_spin = QSpinBox(row)
-            udim_id_spin.setRange(1001, 1999)
-            udim_id_spin.setValue(spec.udim_id)
-            udim_id_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
             udim_id_spin.valueChanged.connect(lambda _value: self._on_change())
             row_layout.addWidget(udim_id_spin, 0, 4)
             self._base_rows.append(

@@ -2,17 +2,15 @@
 
 ## Mission
 
-Build a deterministic converter from SpeedTree Raw XML to USDA for the UE 5.7.x vegetation pipeline. This is not a generic XML-to-USD tool. `static_assembly` is supported, but `skeletal_assembly` remains the primary path.
-
+Build a deterministic converter from SpeedTree Raw XML to USDA for the UE 5.7.x vegetation pipeline. This is not a generic XML-to-USD tool.
 ## Read Order
 
 Use these docs in this order:
 
-1. `AGENTS.md`
-2. `docs/ue_import_contract.md`
-3. `docs/speedtree_mapping.md`
-4. `docs/workflow_status.md`
-5. `docs/local-python-environment.md`
+1. `docs/ue_import_contract.md`
+2. `docs/speedtree_mapping.md`
+3. `docs/workflow_status.md`
+4. `docs/local-python-environment.md`
 
 If they conflict, this order wins.
 
@@ -45,6 +43,9 @@ If theory and UE behavior disagree, UE behavior wins.
 - If required structural, architectural, or importer-contract decisions are unresolved, stop and ask before coding.
 - Keep side effects at the edges. Keep core transformation logic deterministic and inspectable.
 - Minimize hidden mutable state.
+- If Goal is active, do not finish goal after first iteration.
+- After all code changes run build: "$ & '.\scripts\build_qt_gui_exe.cmd' -Package"
+- Don't use unnecessary words, talk short and professional.
 
 ## Simplicity and Architecture Requirements
 
