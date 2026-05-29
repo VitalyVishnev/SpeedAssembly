@@ -34,6 +34,10 @@ The PySide6 shell loads theme data in 3 layers:
 The editor must never mutate the bundled theme during ordinary preview/save
 usage. Bundled defaults only change through the explicit export/bake flow.
 
+Theme numeric values are reference design units, not final monitor pixels. The
+runtime shell derives a scaled copy from the current screen's available logical
+geometry; saved theme overrides remain unscaled.
+
 ## Main glass controls
 
 The first editor version gives the most detailed control to the main glass
@@ -87,6 +91,8 @@ surface-specific token group.
   visible shell uses the same geometry as a manually repolished shell
 - the glass-panel blur slice must track the same cover/crop transform as the
   full-window background, otherwise the glass illusion breaks during resize
+- title-bar text buttons must enforce a font-metric minimum height so narrow
+  theme values cannot clip labels on mixed-DPI displays
 
 ## First milestone defaults
 

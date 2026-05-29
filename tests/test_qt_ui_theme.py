@@ -10,11 +10,13 @@ from xml_to_usda.qt_ui.theme import (
     bake_theme_payload,
     build_stylesheet,
     build_ui_palette,
+    compute_screen_scale,
     compute_cover_source_rect,
     load_bundled_theme,
     load_theme,
     merge_theme,
     resolve_theme_asset,
+    scale_theme_for_runtime,
     theme_to_payload,
 )
 
@@ -47,6 +49,19 @@ def test_compute_cover_source_rect_crops_vertically() -> None:
     assert compute_cover_source_rect(1000, 2000, 800, 800) == (0, 0, 1000, 1000)
 
 
+def test_compute_screen_scale_keeps_reference_screen_at_current_size() -> None:
+    assert compute_screen_scale(2048, 1104) == pytest.approx(1.0)
+
+
+def test_compute_screen_scale_uses_readability_floor_for_full_hd() -> None:
+    assert compute_screen_scale(1920, 1080) == pytest.approx(0.9375)
+    assert compute_screen_scale(1280, 720) == pytest.approx(0.90)
+
+
+def test_compute_screen_scale_caps_very_large_monitors() -> None:
+    assert compute_screen_scale(5120, 2880) == pytest.approx(1.75)
+
+
 def test_merge_theme_applies_overrides() -> None:
     bundled = load_bundled_theme()
 
@@ -61,6 +76,19 @@ def test_merge_theme_applies_overrides() -> None:
     assert merged.glass["tint_opacity"] == 0.35
     assert merged.layout["panel_preferred_width"] == 980
     assert bundled.layout["panel_preferred_width"] != 980
+
+
+def test_scale_theme_for_runtime_scales_layout_without_mutating_base_theme() -> None:
+    theme = load_theme()
+
+    scaled = scale_theme_for_runtime(theme, 1.25)
+
+    assert scaled.layout["panel_preferred_width"] == 1224
+    assert scaled.control_heights["button"] == 55
+    assert scaled.font_sizes["body"] == 16
+    assert scaled.glass["light_gradient_height"] == theme.glass["light_gradient_height"]
+    assert theme.layout["panel_preferred_width"] == 979
+    assert theme.control_heights["button"] == 44
 
 
 def test_bake_theme_payload_overwrites_target_theme(tmp_path) -> None:

@@ -15,7 +15,7 @@ from xml_to_usda.models import CpuProfile, MaterialPolicy
 from xml_to_usda.qt_ui.panels import SliderSpinEditor
 from xml_to_usda.qt_ui.persistence import UiShellState
 from xml_to_usda.qt_ui.window import MainWindow
-from xml_to_usda.qt_ui.theme import load_theme
+from xml_to_usda.qt_ui.theme import ThemeOverrides, load_theme
 from xml_to_usda.settings_service import GuiSettingsSnapshot
 from xml_to_usda.fbx_payload_cache import FbxPayloadCacheSummary
 
@@ -34,6 +34,82 @@ def test_qt_shell_window_creation(qtbot, tmp_path) -> None:
 
     assert window.windowTitle() == "XML to USDA Converter"
     assert window.minimumWidth() >= 1100
+
+
+def test_qt_shell_title_buttons_do_not_clip_text_when_theme_height_is_too_small(qtbot, tmp_path) -> None:
+    theme = load_theme(
+        overrides=ThemeOverrides(
+            theme_name="default",
+            payload={"chrome": {"title_pill_height": 10, "adjust_ui_button_height": 10}},
+        )
+    )
+    window = MainWindow(
+        theme,
+        UiShellState(),
+        dependencies=build_default_dependencies(),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    for button in (
+        window.title_bar.help_button,
+        window.title_bar.log_button,
+        window.title_bar.support_button,
+        window.title_bar.adjust_button,
+    ):
+        assert button.height() >= button.fontMetrics().height() + 6
+
+
+def test_qt_shell_title_help_button_fits_its_label_width(qtbot, tmp_path) -> None:
+    theme = load_theme()
+    window = MainWindow(
+        theme,
+        UiShellState(),
+        dependencies=build_default_dependencies(),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    help_button = window.title_bar.help_button
+    assert help_button.width() >= help_button.fontMetrics().horizontalAdvance(help_button.text()) + 32
+
+
+def test_qt_shell_factory_defaults_preset_control_stays_compact(qtbot, tmp_path) -> None:
+    theme = load_theme()
+    window = MainWindow(
+        theme,
+        UiShellState(),
+        dependencies=build_default_dependencies(),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    text_width = window.preset_combo.fontMetrics().horizontalAdvance(window.preset_combo.currentText())
+    assert window.preset_combo.width() >= text_width + 40
+    assert window.preset_combo.width() <= text_width + 64
+
+
+def test_qt_shell_scales_glass_panel_from_runtime_screen_scale(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr("xml_to_usda.qt_ui.window.compute_screen_scale", lambda *_args, **_kwargs: 1.25)
+    theme = load_theme()
+    window = MainWindow(
+        theme,
+        UiShellState(width=1360, height=860),
+        dependencies=build_default_dependencies(),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    assert window.panel.width() == 1224
+    assert theme.layout["panel_preferred_width"] == 979
 
 
 def test_qt_shell_applies_native_corner_preference_on_show(monkeypatch, qtbot, tmp_path) -> None:
@@ -376,8 +452,9 @@ def test_qt_shell_restores_from_maximized_state(qtbot, tmp_path) -> None:
     qtbot.waitUntil(lambda: not window.isMaximized(), timeout=3000)
 
     geometry = window.geometry()
-    assert geometry.width() == 1280
-    assert geometry.height() == 820
+    available = window.screen().availableGeometry()
+    assert geometry.width() == max(window.minimumWidth(), int(round(available.width() * 0.66)))
+    assert geometry.height() == max(window.minimumHeight(), int(round(available.height() * 0.78)))
 
 
 def test_qt_shell_uses_slider_editor_for_wind_numeric_controls(qtbot, tmp_path) -> None:

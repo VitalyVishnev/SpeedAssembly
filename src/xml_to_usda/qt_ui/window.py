@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QApplication,
     QSizePolicy,
     QSpinBox,
     QTabWidget,
@@ -84,10 +85,12 @@ from .theme import (
     ThemeOverrides,
     ThemeSpec,
     build_stylesheet,
+    compute_screen_scale,
     compute_cover_source_rect,
     load_bundled_theme,
     merge_theme,
     resolve_theme_asset,
+    scale_theme_for_runtime,
     theme_to_payload,
     write_theme_payload,
 )
@@ -187,7 +190,7 @@ class TitleBar(QFrame):
         self._layout = QHBoxLayout(self)
 
         self.help_button = QPushButton("How to use", self)
-        self.help_button.setObjectName("TitlePillButton")
+        self.help_button.setObjectName("HelpTitleButton")
         self.help_button.clicked.connect(window.open_help_dialog)
         self._layout.addWidget(self.help_button, 0, Qt.AlignmentFlag.AlignLeft)
 
@@ -243,11 +246,26 @@ class TitleBar(QFrame):
         self._layout.setContentsMargins(edge_padding, 2, edge_padding, 2)
         self._layout.setSpacing(max(8, spacing - 2))
         titlebar_height = int(theme.control_heights["titlebar"])
-        pill_height = int(theme.chrome.get("title_pill_height", 24))
-        adjust_height = int(theme.chrome.get("adjust_ui_button_height", pill_height))
         button_size = int(theme.chrome.get("window_button_size", 22))
+        pill_height = max(
+            int(theme.chrome.get("title_pill_height", 24)),
+            self._minimum_text_button_height(
+                self.help_button,
+                self.log_button,
+                self.support_button,
+            ),
+        )
+        adjust_height = max(
+            int(theme.chrome.get("adjust_ui_button_height", pill_height)),
+            self._minimum_text_button_height(self.adjust_button),
+        )
         self.setFixedHeight(max(24, titlebar_height + 4, pill_height + 8, adjust_height + 8, button_size + 8))
-        self.help_button.setFixedWidth(int(theme.chrome.get("title_pill_width", 78)) + 28)
+        self.help_button.setFixedWidth(
+            max(
+                int(theme.chrome.get("title_pill_width", 78)) + 28,
+                self._minimum_text_button_width(self.help_button),
+            )
+        )
         self.help_button.setFixedHeight(pill_height)
         self.log_button.setFixedWidth(int(theme.chrome.get("title_pill_width", 78)))
         self.log_button.setFixedHeight(pill_height)
@@ -259,6 +277,17 @@ class TitleBar(QFrame):
         self.settings_button.setFixedSize(button_size, button_size)
         for button in (self.minimize_button, self.maximize_button, self.close_button):
             button.setFixedSize(button_size, button_size)
+
+    @staticmethod
+    def _minimum_text_button_height(*buttons: QPushButton) -> int:
+        for button in buttons:
+            button.ensurePolished()
+        return max((button.fontMetrics().height() + 6 for button in buttons), default=0)
+
+    @staticmethod
+    def _minimum_text_button_width(button: QPushButton) -> int:
+        button.ensurePolished()
+        return button.fontMetrics().horizontalAdvance(button.text()) + 32
 
     def mouseDoubleClickEvent(self, event) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.LeftButton:
@@ -527,7 +556,9 @@ class MainWindow(QWidget):
         theme_overrides_path=None,
     ) -> None:
         super().__init__()
-        self._theme = theme
+        self._design_theme = theme
+        self._ui_scale = self._compute_current_screen_scale()
+        self._theme = scale_theme_for_runtime(theme, self._ui_scale)
         self._base_theme = base_theme if base_theme is not None else load_bundled_theme(theme.name)
         self._theme_overrides = theme_overrides if theme_overrides is not None else ThemeOverrides(theme.name, {})
         self._theme_overrides_path = (
@@ -538,8 +569,9 @@ class MainWindow(QWidget):
         self._deps = dependencies
         self._state_path = state_path
         self._operator_settings_path = Path(operator_settings_path) if operator_settings_path is not None else SETTINGS_PATH
-        self._assets = self._load_window_assets(theme)
+        self._assets = self._load_window_assets(self._design_theme)
         self._native_corner_preference_applied = False
+        self._screen_change_connected = False
         self._restore_geometry = QRect(state.x, state.y, state.width, state.height)
         self._active_resize_edges = Qt.Edge(0)
         self._auto_output_path: str | None = None
@@ -591,7 +623,7 @@ class MainWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StaticContents, True)
         self.setMouseTracking(True)
         self.setMinimumSize(QSize(1160, 780))
-        self.setStyleSheet(build_stylesheet(theme))
+        self.setStyleSheet(build_stylesheet(self._theme))
 
         self._build_layout()
         self._install_resize_event_filters()
@@ -1084,14 +1116,24 @@ class MainWindow(QWidget):
             noise=noise_pixmap,
         )
 
+    def _compute_current_screen_scale(self) -> float:
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return 1.0
+        available = screen.availableGeometry()
+        return compute_screen_scale(available.width(), available.height())
+
     def _apply_runtime_theme(self, theme: ResolvedTheme) -> None:
-        self._theme = theme
+        self._design_theme = theme
+        self._ui_scale = self._compute_current_screen_scale()
+        runtime_theme = scale_theme_for_runtime(theme, self._ui_scale)
+        self._theme = runtime_theme
         self._assets = self._load_window_assets(theme)
-        self.setStyleSheet(build_stylesheet(theme))
-        self.title_bar.apply_theme(theme)
+        self.setStyleSheet(build_stylesheet(runtime_theme))
+        self.title_bar.apply_theme(runtime_theme)
         self.help_callout.adjustSize()
         self._position_help_callout()
-        self.panel.set_theme(theme, self._assets.panel_blur, self._assets.noise)
+        self.panel.set_theme(runtime_theme, self._assets.panel_blur, self._assets.noise)
         self._apply_theme_to_layout()
         self._update_panel_metrics()
         self._update_window_shape()
@@ -1099,7 +1141,31 @@ class MainWindow(QWidget):
         self.update()
         for dialog in (self._log_dialog, self._help_dialog, self._adjust_ui_dialog, self._global_settings_dialog):
             if dialog is not None:
-                dialog.setStyleSheet(build_stylesheet(theme))
+                dialog.setStyleSheet(build_stylesheet(runtime_theme))
+
+    def _refresh_runtime_scale_for_current_screen(self) -> None:
+        screen_scale = self._compute_current_screen_scale()
+        if abs(screen_scale - self._ui_scale) < 0.001:
+            return
+        self._ui_scale = screen_scale
+        runtime_theme = scale_theme_for_runtime(self._design_theme, self._ui_scale)
+        self._theme = runtime_theme
+        self.setStyleSheet(build_stylesheet(runtime_theme))
+        self.title_bar.apply_theme(runtime_theme)
+        self.panel.set_theme(runtime_theme, self._assets.panel_blur, self._assets.noise)
+        self._apply_theme_to_layout()
+        self._update_panel_metrics()
+        self._update_window_shape()
+        self.update()
+
+    def _connect_screen_scale_updates(self) -> None:
+        if self._screen_change_connected or self.windowHandle() is None:
+            return
+        self.windowHandle().screenChanged.connect(self._handle_screen_changed)
+        self._screen_change_connected = True
+
+    def _handle_screen_changed(self, _screen) -> None:
+        self._refresh_runtime_scale_for_current_screen()
 
     def _apply_theme_to_layout(self) -> None:
         outer_margin = int(self._theme.spacing["outer_margin"])
@@ -1123,7 +1189,7 @@ class MainWindow(QWidget):
         file_button_height = int(self._theme.chrome.get("file_button_height", self._theme.control_heights["input"]))
         self.source_button.setFixedSize(file_button_width, file_button_height)
         self.output_button.setFixedSize(file_button_width, file_button_height)
-        title_preset_width = int(self._theme.chrome.get("title_preset_width", 210))
+        title_preset_width = self._title_preset_width()
         title_preset_height = int(self._theme.chrome.get("title_preset_height", self._theme.chrome.get("window_button_size", 28)))
         self.preset_combo.setFixedSize(title_preset_width, title_preset_height)
         self.preset_menu_button.setFixedSize(max(32, title_preset_height), title_preset_height)
@@ -1159,10 +1225,34 @@ class MainWindow(QWidget):
             layout.invalidate()
             layout.activate()
 
+    def _title_preset_width(self) -> int:
+        configured_width = int(self._theme.chrome.get("title_preset_width", 136))
+        current_text = self.preset_combo.currentText() or FACTORY_DEFAULT_PRESET_NAME
+        text_width = self.preset_combo.fontMetrics().horizontalAdvance(current_text)
+        return max(96, min(configured_width, text_width + 52))
+
     def _apply_saved_state(self) -> None:
+        self._restore_geometry = self._default_restore_geometry_for_current_screen()
         self.setGeometry(self._restore_geometry)
         if self._state.is_maximized:
             self.showMaximized()
+
+    def _default_restore_geometry_for_current_screen(self) -> QRect:
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return QRect(self._restore_geometry)
+        available = screen.availableGeometry()
+        width = min(
+            available.width(),
+            max(self.minimumWidth(), int(round(available.width() * 0.66))),
+        )
+        height = min(
+            available.height(),
+            max(self.minimumHeight(), int(round(available.height() * 0.78))),
+        )
+        x = available.x() + max(0, (available.width() - width) // 2)
+        y = available.y() + max(0, (available.height() - height) // 2)
+        return QRect(x, y, width, height)
 
     def _refresh_layout_after_show(self) -> None:
         # The first frameless layout pass on Windows can be conservative while
@@ -1479,7 +1569,7 @@ class MainWindow(QWidget):
             self._adjust_ui_dialog = AdjustUiDialog(
                 base_theme=self._base_theme,
                 applied_overrides=self._theme_overrides,
-                current_theme=self._theme,
+                current_theme=self._design_theme,
                 on_preview=self._preview_theme_overrides,
                 on_apply=self._apply_theme_overrides_runtime,
                 on_save=self._save_theme_overrides,
@@ -1842,6 +1932,8 @@ class MainWindow(QWidget):
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
+        self._connect_screen_scale_updates()
+        self._refresh_runtime_scale_for_current_screen()
         self._apply_native_corner_preference()
         self._position_help_callout()
         QTimer.singleShot(0, self._refresh_layout_after_show)
@@ -1915,7 +2007,7 @@ class MainWindow(QWidget):
                 width=geometry.width(),
                 height=geometry.height(),
                 is_maximized=self.isMaximized(),
-                theme_name=self._theme.name,
+                theme_name=self._design_theme.name,
                 help_prompt_dismissed=self._state.help_prompt_dismissed,
                 active_tab_name=self.tabs.tabText(self.tabs.currentIndex()),
             ),

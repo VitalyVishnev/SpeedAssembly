@@ -39,6 +39,11 @@ The PySide6 UI lives in `src/xml_to_usda/qt_ui/` and is split into:
 The shell now owns the primary operator workflow while staying thin over the
 shared application services.
 
+The shell applies a runtime screen scale on top of the resolved theme. The
+stored theme and `Adjust UI` values remain reference design units; the live
+stylesheet and layout use a scaled copy derived from the current screen's
+available logical geometry.
+
 ## Rollout
 
 - primary release GUI entrypoint is `xml_to_usda.qt_ui.entry`
@@ -80,6 +85,8 @@ The current PySide6 shell uses the following operator-facing interaction rules:
 - the shell performs a post-show layout activation pass so size-sensitive
   controls settle to their intended dimensions on first launch instead of only
   after an `Adjust UI` round-trip
+- startup normal geometry is recomputed from the current screen instead of
+  blindly replaying raw saved dimensions from another monitor
 
 This interaction contract is intentional and should be treated as the default
 layout baseline for future PySide6 iterations unless a later UI review replaces

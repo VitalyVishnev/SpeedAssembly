@@ -120,6 +120,39 @@ def resolve_theme_asset(theme: _ThemeBase, relative_path: str) -> Path:
     return Path(files("xml_to_usda.qt_ui").joinpath("themes", theme.name, relative_path))
 
 
+def compute_screen_scale(
+    available_width: int,
+    available_height: int,
+    *,
+    reference_width: int = 2048,
+    reference_height: int = 1104,
+    minimum: float = 0.90,
+    maximum: float = 1.75,
+) -> float:
+    if available_width <= 0 or available_height <= 0:
+        return 1.0
+    width_scale = available_width / reference_width
+    height_scale = available_height / reference_height
+    return max(minimum, min(maximum, min(width_scale, height_scale)))
+
+
+def scale_theme_for_runtime(theme: ResolvedTheme, scale: float) -> ResolvedTheme:
+    payload = theme_to_payload(theme)
+    if scale == 1.0:
+        return _theme_from_payload(payload, cls=ResolvedTheme)  # type: ignore[return-value]
+    for section_name in ("font_sizes", "radii", "spacing", "control_heights", "layout", "chrome"):
+        section = payload[section_name]
+        for key, value in section.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                section[key] = _scaled_design_unit(value, scale)
+    effects = payload["effects"]
+    for key in ("panel_shadow_blur", "panel_shadow_offset_y"):
+        value = effects.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            effects[key] = _scaled_design_unit(value, scale)
+    return _theme_from_payload(payload, cls=ResolvedTheme)  # type: ignore[return-value]
+
+
 def compute_cover_source_rect(
     image_width: int,
     image_height: int,
@@ -137,6 +170,15 @@ def compute_cover_source_rect(
     crop_width = int(round(image_height * target_ratio))
     left = max(0, (image_width - crop_width) // 2)
     return (left, 0, max(1, crop_width), image_height)
+
+
+def _scaled_design_unit(value: int | float, scale: float) -> int:
+    scaled = int(round(value * scale))
+    if value > 0:
+        return max(1, scaled)
+    if value < 0:
+        return min(-1, scaled)
+    return 0
 
 
 def build_ui_palette(theme: ResolvedTheme) -> dict[str, str]:
@@ -214,10 +256,10 @@ def build_stylesheet(theme: ResolvedTheme) -> str:
     wind_refresh_button_height = int(theme.chrome.get("wind_refresh_button_height", 28))
     window_button_size = int(theme.chrome.get("window_button_size", 22))
     title_pill_width = int(theme.chrome.get("title_pill_width", 78))
-    title_pill_height = int(theme.chrome.get("title_pill_height", 24))
+    title_pill_height = max(int(theme.chrome.get("title_pill_height", 24)), theme.font_sizes["body"] + 10)
     adjust_ui_button_width = int(theme.chrome.get("adjust_ui_button_width", 104))
-    adjust_ui_button_height = int(theme.chrome.get("adjust_ui_button_height", title_pill_height))
-    title_preset_width = int(theme.chrome.get("title_preset_width", 210))
+    adjust_ui_button_height = max(int(theme.chrome.get("adjust_ui_button_height", title_pill_height)), theme.font_sizes["body"] + 10)
+    title_preset_width = int(theme.chrome.get("title_preset_width", 136))
     title_preset_height = int(theme.chrome.get("title_preset_height", window_button_size))
     tab_min_width = int(theme.layout.get("tab_min_width", 120))
     button_fill_disabled = palette["button_fill_disabled"]
@@ -377,13 +419,18 @@ QPushButton#CloseWindowButton:hover {{
     background: {danger_fill_soft};
     color: {log_fill};
 }}
-QPushButton#TitlePillButton {{
+QPushButton#TitlePillButton,
+QPushButton#HelpTitleButton {{
     background: {chrome_control_fill};
     border-radius: {button_radius}px;
     min-width: {title_pill_width}px;
     max-width: {title_pill_width}px;
     min-height: {title_pill_height}px;
     max-height: {title_pill_height}px;
+}}
+QPushButton#HelpTitleButton {{
+    min-width: {title_pill_width + 40}px;
+    max-width: {title_pill_width + 40}px;
 }}
 QPushButton#AdjustUiButton {{
     background: {chrome_control_fill};
@@ -394,6 +441,7 @@ QPushButton#AdjustUiButton {{
     max-height: {adjust_ui_button_height}px;
 }}
 QPushButton#TitlePillButton:hover,
+QPushButton#HelpTitleButton:hover,
 QPushButton#AdjustUiButton:hover {{
     background: {chrome_control_hover_fill};
 }}
