@@ -9,6 +9,8 @@ import pytest
 pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 
+pytestmark = pytest.mark.qt
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
@@ -197,6 +199,18 @@ def _build_fake_deps(calls: dict[str, object]) -> QtUiDependencies:
     )
 
 
+def _select_conversion_mode(window: MainWindow, mode_key: str) -> None:
+    window._conversion_mode_actions[mode_key].trigger()
+
+
+def _current_conversion_mode(window: MainWindow) -> ConversionMode:
+    return window._operator_state.conversion_mode
+
+
+def _current_preset_name(window: MainWindow) -> str:
+    return str(window.preset_combo.currentData() or "Factory Defaults")
+
+
 def test_qt_window_runs_sync_conversion_through_services(monkeypatch, qtbot, tmp_path) -> None:
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
     monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
@@ -247,7 +261,7 @@ def test_qt_window_passes_selected_conversion_mode_to_conversion_request(monkeyp
     window.source_input.setText(str(tree_xml))
     window.output_input.setText(str(tmp_path / "tree.usda"))
     qtbot.waitUntil(lambda: "Loaded 1 wind groups." in window.status_label.text(), timeout=3000)
-    window._conversion_mode_actions["skeletal_parts"].trigger()
+    _select_conversion_mode(window, "skeletal_parts")
     qtbot.mouseClick(window.convert_button, Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(lambda: "Wrote USDA to" in window.status_label.text(), timeout=3000)
@@ -278,7 +292,7 @@ def test_qt_window_passes_static_assembly_mode_to_conversion_request(monkeypatch
     window.source_input.setText(str(tree_xml))
     window.output_input.setText(str(tmp_path / "tree.usda"))
     qtbot.waitUntil(lambda: "Loaded 1 wind groups." in window.status_label.text(), timeout=3000)
-    window._conversion_mode_actions["static_assembly"].trigger()
+    _select_conversion_mode(window, "static_assembly")
     qtbot.mouseClick(window.convert_button, Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(lambda: "Wrote USDA to" in window.status_label.text(), timeout=3000)
@@ -308,7 +322,7 @@ def test_qt_window_saves_and_applies_named_preset(monkeypatch, qtbot, tmp_path) 
     tree_xml.write_text("<tree/>", encoding="utf-8")
     window.source_input.setText(str(tree_xml))
     window.output_input.setText(str(tmp_path / "tree.usda"))
-    window._conversion_mode_actions["static_assembly"].trigger()
+    _select_conversion_mode(window, "static_assembly")
     window.wind_panel.gust_spin.setValue(0.5)
 
     window._save_preset_with_name("Static Grass")
@@ -318,13 +332,13 @@ def test_qt_window_saves_and_applies_named_preset(monkeypatch, qtbot, tmp_path) 
     assert saved.presets["Static Grass"].conversion_mode == ConversionMode.STATIC_ASSEMBLY
     assert saved.presets["Static Grass"].gust_attenuation == pytest.approx(0.5)
 
-    window._conversion_mode_actions["skeletal_parts"].trigger()
+    _select_conversion_mode(window, "skeletal_parts")
     window.wind_panel.gust_spin.setValue(0.1)
     window.preset_combo.setCurrentIndex(window.preset_combo.findData("Factory Defaults"))
     preset_index = window.preset_combo.findData("Static Grass")
     window.preset_combo.setCurrentIndex(preset_index)
 
-    assert window._operator_state.conversion_mode == ConversionMode.STATIC_ASSEMBLY
+    assert _current_conversion_mode(window) == ConversionMode.STATIC_ASSEMBLY
     assert window.wind_panel.gust_attenuation() == pytest.approx(0.5)
 
 
@@ -343,11 +357,11 @@ def test_qt_window_overwrites_deletes_and_resets_presets(monkeypatch, qtbot, tmp
     qtbot.addWidget(window)
     window.show()
 
-    window._conversion_mode_actions["static_assembly"].trigger()
+    _select_conversion_mode(window, "static_assembly")
     window.wind_panel.gust_spin.setValue(0.5)
     window._save_preset_with_name("Reusable")
 
-    window._conversion_mode_actions["skeletal_parts"].trigger()
+    _select_conversion_mode(window, "skeletal_parts")
     window.wind_panel.gust_spin.setValue(0.25)
     window._overwrite_current_preset()
 
@@ -357,8 +371,8 @@ def test_qt_window_overwrites_deletes_and_resets_presets(monkeypatch, qtbot, tmp
 
     window._reset_to_factory_defaults()
 
-    assert window._current_preset_name() == "Factory Defaults"
-    assert window._operator_state.conversion_mode == ConversionMode.SKELETAL_ASSEMBLY
+    assert _current_preset_name(window) == "Factory Defaults"
+    assert _current_conversion_mode(window) == ConversionMode.SKELETAL_ASSEMBLY
     assert window.wind_panel.gust_attenuation() == pytest.approx(0.0)
 
     window.preset_combo.setCurrentIndex(window.preset_combo.findData("Reusable"))
@@ -367,7 +381,7 @@ def test_qt_window_overwrites_deletes_and_resets_presets(monkeypatch, qtbot, tmp
 
     assert "Reusable" not in saved.presets
     assert saved.active_preset_name == "Factory Defaults"
-    assert window._current_preset_name() == "Factory Defaults"
+    assert _current_preset_name(window) == "Factory Defaults"
 
 
 def test_qt_window_imports_and_exports_presets(monkeypatch, qtbot, tmp_path) -> None:
@@ -403,8 +417,8 @@ def test_qt_window_imports_and_exports_presets(monkeypatch, qtbot, tmp_path) -> 
 
     saved = load_gui_settings(settings_path)
     assert saved.presets["Imported Branches"] == imported
-    assert window._current_preset_name() == "Imported Branches"
-    assert window._operator_state.conversion_mode == ConversionMode.SKELETAL_PARTS
+    assert _current_preset_name(window) == "Imported Branches"
+    assert _current_conversion_mode(window) == ConversionMode.SKELETAL_PARTS
     assert window.wind_panel.gust_attenuation() == pytest.approx(0.75)
 
     window._export_current_preset()

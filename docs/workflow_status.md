@@ -17,6 +17,9 @@ The repository also carries synthetic regression fixtures for `Phase 1` structur
 - `tests/data/leafrefs_on_trunk.xml`
 - `tests/data/leafrefs_on_branch_levels.xml`
 - `tests/data/invalid_leaf_bone.xml`
+- `tests/data/missing_leaf_refs.xml`
+- `tests/data/missing_skeleton.xml`
+- `tests/data/non_default_metadata.xml`
 
 These synthetic files exist to validate normalization, binding, and material authoring behavior that is not yet covered by additional real exports.
 

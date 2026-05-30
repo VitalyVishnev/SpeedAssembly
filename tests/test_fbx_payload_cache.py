@@ -207,6 +207,7 @@ def test_json_geometry_backend_honors_selective_read_options(tmp_path: Path) -> 
     not os.environ.get("XML_TO_USDA_HEAVY_FBX_STRESS_PATH"),
     reason="Set XML_TO_USDA_HEAVY_FBX_STRESS_PATH to run the local huge-FBX cache stress test.",
 )
+@pytest.mark.stress
 def test_optional_heavy_fbx_payload_cache_stress() -> None:
     fbx_path = os.environ["XML_TO_USDA_HEAVY_FBX_STRESS_PATH"]
     options = _options(read_vertex_colors=False, read_material_slots=False)

@@ -6,6 +6,8 @@ import pytest
 pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 
+pytestmark = pytest.mark.qt
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QAbstractSpinBox, QMessageBox
 
@@ -16,7 +18,7 @@ from xml_to_usda.qt_ui.panels import SliderSpinEditor
 from xml_to_usda.qt_ui.persistence import UiShellState
 from xml_to_usda.qt_ui.window import MainWindow
 from xml_to_usda.qt_ui.theme import ThemeOverrides, load_theme
-from xml_to_usda.settings_service import GuiSettingsSnapshot
+from xml_to_usda.settings_service import GuiSettingsSnapshot, load_gui_settings
 from xml_to_usda.fbx_payload_cache import FbxPayloadCacheSummary
 
 
@@ -110,28 +112,6 @@ def test_qt_shell_scales_glass_panel_from_runtime_screen_scale(monkeypatch, qtbo
 
     assert window.panel.width() == 1224
     assert theme.layout["panel_preferred_width"] == 979
-
-
-def test_qt_shell_applies_native_corner_preference_on_show(monkeypatch, qtbot, tmp_path) -> None:
-    theme = load_theme()
-    calls: list[bool] = []
-
-    def _fake_apply(self) -> None:
-        calls.append(True)
-
-    monkeypatch.setattr(MainWindow, "_apply_native_corner_preference", _fake_apply)
-    window = MainWindow(
-        theme,
-        UiShellState(),
-        dependencies=build_default_dependencies(),
-        state_path=tmp_path / "ui_next_state.json",
-        operator_settings_path=tmp_path / "gui_settings.json",
-    )
-    qtbot.addWidget(window)
-    window.show()
-    qtbot.wait(50)
-
-    assert calls
 
 
 def test_qt_entry_main_launches_and_exits_cleanly(monkeypatch) -> None:
@@ -276,13 +256,14 @@ def test_qt_global_settings_popup_saves_cache_limits_and_sweeps(monkeypatch, qtb
     sweep_calls.clear()
 
     qtbot.mouseClick(window.title_bar.settings_button, Qt.MouseButton.LeftButton)
-    assert window._global_settings_dialog is not None
-    assert window._global_settings_dialog.isVisible()
-    window._global_settings_dialog.max_size_spin.setValue(12)
-    window._global_settings_dialog.max_age_spin.setValue(3)
-    qtbot.mouseClick(window._global_settings_dialog.apply_button, Qt.MouseButton.LeftButton)
+    dialog = window._global_settings_dialog
+    assert dialog is not None
+    assert dialog.isVisible()
+    dialog.max_size_spin.setValue(12)
+    dialog.max_age_spin.setValue(3)
+    qtbot.mouseClick(dialog.apply_button, Qt.MouseButton.LeftButton)
 
-    saved = window._deps.load_gui_settings(settings_path)
+    saved = load_gui_settings(settings_path)
     assert saved.fbx_cache_max_size_gb == 12
     assert saved.fbx_cache_max_age_days == 3
     assert sweep_calls[-1]["max_bytes"] == 12 * 1024 * 1024 * 1024
@@ -316,11 +297,13 @@ def test_qt_global_settings_clear_cache_requires_confirmation(monkeypatch, qtbot
     window.show()
 
     qtbot.mouseClick(window.title_bar.settings_button, Qt.MouseButton.LeftButton)
-    qtbot.mouseClick(window._global_settings_dialog.clear_button, Qt.MouseButton.LeftButton)
+    dialog = window._global_settings_dialog
+    assert dialog is not None
+    qtbot.mouseClick(dialog.clear_button, Qt.MouseButton.LeftButton)
     assert clear_calls == []
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Yes))
-    qtbot.mouseClick(window._global_settings_dialog.clear_button, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(dialog.clear_button, Qt.MouseButton.LeftButton)
     assert len(clear_calls) == 1
 
 

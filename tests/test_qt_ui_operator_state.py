@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.qt
+
 from types import SimpleNamespace
 
 from xml_to_usda.models import ConversionMode, CpuProfile, MaterialPolicy

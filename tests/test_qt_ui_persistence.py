@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.qt
+
 from xml_to_usda.qt_ui.persistence import (
     UiShellState,
     load_ui_shell_state,

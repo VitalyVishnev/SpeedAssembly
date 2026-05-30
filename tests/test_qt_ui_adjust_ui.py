@@ -8,6 +8,8 @@ import pytest
 pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 
+pytestmark = pytest.mark.qt
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMessageBox
 

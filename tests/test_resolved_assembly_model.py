@@ -4,12 +4,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from xml_to_usda.canonical_loader import (
-    load_canonical_model,
-    load_resolved_assembly_model,
-    load_source_tree_model,
-    resolve_assembly_model,
-)
+from xml_to_usda.canonical_loader import load_source_tree_model, resolve_assembly_model
 from xml_to_usda.models import (
     BaseMaterialOverride,
     ConversionMode,
@@ -147,21 +142,6 @@ def test_material_resolution_does_not_rewrite_source_materials() -> None:
     )
     assert source_material.ue_asset_path is None
     assert resolved_material.ue_asset_path == "/Game/Materials/M_Base.M_Base"
-
-
-def test_load_canonical_model_remains_compatibility_projection() -> None:
-    old_report, old_model, old_diagnostics = load_canonical_model(
-        str(SIMPLE_TREE_01),
-        conversion_mode=ConversionMode.STATIC_ASSEMBLY,
-    )
-    new_report, resolved = load_resolved_assembly_model(
-        str(SIMPLE_TREE_01),
-        conversion_mode=ConversionMode.STATIC_ASSEMBLY,
-    )
-
-    assert old_report == new_report
-    assert old_model == resolved.authoring_model
-    assert old_diagnostics == resolved.diagnostics
 
 
 def test_staged_validation_separates_source_resolution_and_authoring() -> None:

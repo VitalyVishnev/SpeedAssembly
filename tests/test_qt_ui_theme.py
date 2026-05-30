@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.qt
+
 from xml_to_usda.qt_ui.theme import (
     ThemeOverrides,
     bake_theme_payload,
