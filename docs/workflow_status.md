@@ -65,6 +65,34 @@ Current huge-FBX status:
 - `Runtime Job` manifests now include `runtime_context` for launcher-versus-packaged crash comparison
 - use `python -m xml_to_usda benchmark-fbx <fbx path> --material-mode <mode>` for local heavy-FBX cache/read-option profiling
 
+Current Proxy Mesh status:
+
+- Proxy Mesh preview/export is implemented as a companion workflow, not as a new
+  main conversion mode
+- the current shipping method is `density_field`
+- base geometry is simplified directly from the base mesh
+- repeated parts from `LeafReferences` become instanced foliage volume kernels,
+  are accumulated into one density field, extracted as one surface, then reduced
+  with QEM through `fast-simplification`
+- the preview uses a real Qt OpenGL viewport with orbit camera, wheel zoom,
+  Matcap-style shading, and a floor grid
+- preview generation runs in an isolated Proxy Mesh worker process so native
+  failures do not freeze or crash the Qt shell
+- changing preview settings keeps the previous mesh visible until the new mesh
+  is ready and does not reset the camera
+- the preview window persists its proxy settings and passes them back to the
+  Geometry tab on close
+- `Generate Proxy Mesh` writes the last completed preview result when it exists
+  for the current input XML; otherwise it generates with the persisted proxy
+  settings
+- `Final Polycount` is a target, not a hard failure threshold: below the
+  simplifier's reachable minimum it returns the minimum reachable mesh, and
+  above the extracted source surface it returns the full extracted surface
+- `Density Resolution` defaults to `64` and the preview window allows values up
+  to `256`
+- UE import as a Static Mesh has been manually confirmed; Distance Field and
+  shadow quality validation remain pending
+
 The only remaining open item before `Phase 1` can be considered complete is broader validation on multiple real SpeedTree structures with different tree and grass shapes:
 
 - small shrub with one trunk

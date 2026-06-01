@@ -11,7 +11,7 @@ The goal is not visual parity with the source tree. The goal is a compact static
 - preserves the broad silhouette of the tree
 - keeps the overall foliage volume stable
 - produces usable input for Distance Fields and low-cost shadowing
-- stays within a strict polycount budget
+- treats the requested polycount as a target budget
 - can be inspected interactively before export
 
 The main tree export remains the source of truth for the actual vegetation asset.
@@ -35,22 +35,37 @@ The proxy exists only as a companion asset for rendering, shadows, and distance-
 - There is no fallback proxy geometry.
 - Proxy generation is a companion workflow, not a separate `ConversionMode`.
 - Proxy generation should run in a dedicated worker process when possible.
-- If parallel execution is unavailable, it may fall back to a sequential worker path.
+- If the last completed preview mesh was generated for the current input XML,
+  export writes that mesh without regenerating it.
+- If no preview result exists for the current input XML, export generates with
+  the persisted proxy settings.
+- `Final Polycount` is saturating:
+  - below the simplifier's reachable minimum, generation returns the minimum
+    reachable mesh instead of failing
+  - above the extracted source surface, generation returns the full extracted
+    surface instead of failing
+- `Density Resolution` defaults to `64`; the preview control allows values up
+  to `256`.
+- Proxy settings are persisted with the Qt GUI settings and restored on the
+  next launch/open.
+- Preview and export run through isolated worker process infrastructure when
+  possible so native failures do not block the UI process.
 
-## Methods Under Investigation
+## Current Method And Research Branches
 
-The feature should keep multiple proxy-generation strategies available while the
-implementation is being tested against real trees.
+The implemented method is `density_field`. Other methods remain research
+branches until there is evidence that they solve a real vegetation class better.
 
 ### `density_field`
 
-- build local kernels for repeated foliage and small vegetation elements
-- scatter kernels through the tree using the canonical instance data
-- accumulate them into a sparse density field
-- extract a surface
-- simplify the result with QEM
-
-This is the primary candidate for the first working method.
+- base geometry is simplified directly as mesh geometry
+- repeated parts from `LeafReferences` build local foliage kernels
+- those kernels are scattered through the tree using canonical instance data
+- the kernels are accumulated into one density field
+- one shared surface is extracted from occupied cells
+- the surface is simplified with QEM through `fast-simplification`
+- `Base Mesh Priority` controls how much of the requested budget is reserved
+  for base geometry before foliage volume simplification
 
 ### `triangle_soup`
 
@@ -120,6 +135,17 @@ The final UI may eventually hide one of them if it proves redundant.
 - Changes to preview settings regenerate the mesh on mouse up, not on every keystroke or slider move.
 - The preview window auto-generates a proxy when it opens.
 - The preview window always frames the tree so the full object fits in view at open.
+- There is no manual `Regenerate` button in the preview window.
+- While a new proxy is being generated, the previous completed proxy remains
+  visible.
+- Replacing the preview mesh does not reset the camera.
+- Closing the preview window applies and persists the current proxy settings.
+- Preview controls currently include:
+  - method
+  - final polycount target
+  - bounds inflation
+  - density resolution
+  - base mesh priority
 
 ### Camera Controls
 
@@ -128,10 +154,12 @@ The final UI may eventually hide one of them if it proves redundant.
 - The camera always rotates around the center of the tree.
 - The camera target does not drift away from the tree center.
 - The initial view is framed so the whole proxy fits inside the viewport.
+- Horizontal drag direction follows the mouse.
+- The viewport uses a Matcap-style shader and a subtle fading floor grid.
 
 ## Scope For The First Iteration
 
-The first iteration should end when all of the following are true:
+The first iteration is implemented when all of the following are true:
 
 - the shell has a working proxy preview viewport
 - the viewport can display a generated proxy mesh with a simple Matcap material
@@ -142,9 +170,8 @@ The first iteration should end when all of the following are true:
 - the generated proxy can be exported as a separate USD(A) asset
 - the proxy can be imported into Unreal Engine as a static mesh and inspected there
 
-The first iteration does not need the final best algorithm.
-It only needs one stable method plus a preview loop strong enough to iterate visually.
-The method itself remains under investigation.
+This has been reached for the current `density_field` method. The remaining
+work is quality validation and method tuning, not basic end-to-end wiring.
 
 ## Data Contract
 
@@ -178,11 +205,11 @@ Lock the non-negotiable contract:
 Do not hardcode a single proxy algorithm into the contract.
 The UI must support method selection and method-specific tuning while the feature is under development.
 
-The current contract only requires:
+The current contract requires:
 
 - a method selector
 - a final triangle budget control or equivalent density control
-- method-specific dev parameters while the feature is being investigated
+- method-specific dev parameters while the feature is being tuned
 - the same preview/export mesh for any chosen method
 
 ### 3. Build The Proxy Preview Window
@@ -234,6 +261,8 @@ Export behavior:
 - keep the proxy export deterministic
 - keep the proxy file separate from the main USD file
 - do not merge proxy export into the main tree export
+- write the last completed preview result for the current XML when available
+- otherwise generate once from the persisted proxy settings
 
 ### 6. Keep The Generation Result Shared
 
@@ -270,10 +299,18 @@ The feature is complete when:
 - the proxy preview and exported file match
 - the UI remains responsive during generation
 - the exported proxy imports in UE 5.7.x as a static mesh
-- the proxy is materially cheaper than the source tree
+- the proxy is materially cheaper than the source tree for the selected target
 - the proxy still reads as the same tree silhouette
 - the proxy path remains sibling to the main USDA path
 - the proxy remains a companion asset, not a new export mode
+
+Current achieved subset:
+
+- deterministic proxy generation is covered by automated tests
+- preview/export share the same `ProxyMeshResult`
+- preview and export use isolated worker process paths
+- preview settings persist
+- UE Static Mesh import has been manually confirmed
 
 ## Deferred Research
 

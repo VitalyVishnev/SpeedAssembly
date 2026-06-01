@@ -1,5 +1,35 @@
 # Proxy Mesh Implementation Plan
 
+## Current Implementation Snapshot
+
+Status: the first end-to-end proxy mesh pass is implemented.
+
+Implemented:
+
+- separate proxy service and worker protocol
+- `_proxy.usda` companion export
+- real Qt OpenGL preview viewport
+- orbit camera, zoom, Matcap-style shading, and floor grid
+- automatic preview generation on open
+- automatic regeneration when preview settings change
+- previous mesh stays visible while a new preview is generated
+- camera is preserved when a new proxy replaces the previous mesh
+- preview settings persist and are applied back to the Geometry tab on close
+- export writes the last completed preview mesh for the current XML when one is
+  available
+- `density_field` method with direct base mesh simplification, foliage kernel
+  accumulation, surface extraction, and QEM simplification
+- `Base Mesh Priority` controls base-versus-foliage simplification budget
+- `Final Polycount` is a target with saturating behavior instead of a hard error
+- preview `Density Resolution` supports values up to `256`
+
+Remaining:
+
+- validate Distance Field and shadow quality in UE 5.7.x
+- compare proxy quality across sparse trees, dense crowns, grass, and moss
+- decide whether zoned simplification is required
+- decide whether alternative methods are needed after real-sample comparison
+
 ## Step 1. Prepare Proxy Backend Skeleton
 
 Create the minimal code path for proxy generation without implementing the real simplification yet.
@@ -9,6 +39,8 @@ Create the minimal code path for proxy generation without implementing the real 
 - define proxy output metadata
 - add a separate `Generate Proxy Mesh` action in the UI
 - add a placeholder mesh path so the pipeline can run end-to-end before the real method exists
+
+Status: done.
 
 Done when:
 
@@ -29,6 +61,8 @@ Implement a proper interactive viewport for polygon meshes.
 - keep the viewport responsive and lightweight
 - make the viewport suitable for repeated iteration, but not a full DCC scene editor
 
+Status: done.
+
 Done when:
 
 - the viewport opens inside the Qt shell
@@ -47,6 +81,8 @@ Make the viewport usable for iteration.
 - keep the UI simple and readable
 - allow preview regeneration on user action
 
+Status: done.
+
 Done when:
 
 - the user can open the proxy preview from the Geometry tab
@@ -62,6 +98,8 @@ Write the proxy as its own USD file.
 - keep the proxy export deterministic
 - do not merge the proxy into the main skeletal export
 - keep preview and export using the same generated mesh
+
+Status: done.
 
 Done when:
 
@@ -83,9 +121,12 @@ Build the first usable proxy algorithm end-to-end.
 Done when:
 
 - the placeholder proxy is replaced by a real proxy result
-- the proxy still stays within budget
+- the proxy treats the requested budget as a target and saturates at the
+  reachable minimum or full extracted surface when needed
 - the result is visually inspectable in the viewport
 - the exported proxy matches the preview
+
+Status: done for the current `density_field` method.
 
 ## Step 6. Add The Simplification Backend
 
@@ -95,6 +136,8 @@ Choose and integrate the QEM reducer that will be used by the first method.
 - verify that the backend is easy to ship in the current environment
 - verify that it is stable on real proxy meshes
 - keep the choice replaceable if packaging or quality is poor
+
+Status: done with `fast-simplification` as the current backend.
 
 Done when:
 
@@ -111,6 +154,9 @@ Check the result on the actual target importer path.
 - check if the silhouette and volume are useful for distance-field and shadow testing
 - compare at least one sparse tree and one dense tree
 
+Status: partially done. UE Static Mesh import is confirmed; Distance Field and
+shadow usefulness still need manual validation.
+
 Done when:
 
 - UE imports the exported proxy successfully
@@ -126,6 +172,8 @@ Keep research branches for other proxy strategies.
 
 These should be compared after the first working method exists.
 
+Status: deferred until `density_field` is compared against more real samples.
+
 Done when:
 
 - the codebase can switch between methods
@@ -139,9 +187,11 @@ Reduce the UI and keep only what is actually useful.
 - remove controls that do not help the iteration loop
 - keep the viewport and export path stable
 
+Status: deferred until quality validation shows which controls are worth
+keeping.
+
 Done when:
 
 - the feature is easy to use
 - the controls are not redundant
 - the proxy generation path is still deterministic
-

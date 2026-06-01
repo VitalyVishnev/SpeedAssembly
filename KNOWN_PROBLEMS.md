@@ -11,7 +11,7 @@
 
 - Issue: `density_field` now keeps base geometry direct, builds foliage volume from instanced kernels, and extracts a shared topology before QEM, but simplification quality has not yet been compared across sparse trees, dense crowns, grass, and moss samples.
 - Location: `src/xml_to_usda/proxy_mesh_service.py`
-- Reason for deferral: The first pass needs a working preview/export loop before method quality can be measured against real vegetation variants.
+- Reason for deferral: The preview/export loop is working, but method quality needs real vegetation comparison instead of synthetic unit-test evidence.
 - Likely next step: Use the OpenGL proxy preview and UE static mesh import on at least one sparse tree and one dense tree, then decide whether `fast-simplification` remains the release backend or becomes a replaceable baseline.
 
 ## Proxy Mesh Zoned Simplification Pending

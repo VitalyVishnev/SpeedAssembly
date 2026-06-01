@@ -72,6 +72,7 @@ Primary modules:
 - `discovery_service.py`
 - `settings_service.py`
 - `wind_service.py`
+- `proxy_mesh_service.py`
 - `conversion_orchestrator.py`
 - `canonical_loader.py`
 - `assembly_resolution.py`
@@ -99,6 +100,7 @@ Primary modules:
 - `fbx_worker_subprocess.py`
 - `fbx_worker_entry.py`
 - `conversion_process.py`
+- `proxy_mesh_worker_subprocess.py`
 - `runtime_paths.py`
 - `output_resolution.py`
 - `job_control.py`
@@ -184,6 +186,12 @@ domain concept.
   executing conversion run with telemetry, cleanup, workers, helpers, and a Job
   Workspace. Launcher/dev and packaged executable behavior are Runtime Adapters
   and must preserve the same conversion semantics.
+- Proxy Mesh seam:
+  Proxy generation is a companion application service over `CanonicalTreeModel`.
+  It must not traverse raw XML directly and must not author Nanite Assembly,
+  skeleton, or `PointInstancer` contracts. Preview and export share the same
+  `ProxyMeshResult`; export may write an already generated preview result
+  without rebuilding it.
 - Operator state seam:
   `Operator State` is the current UI selection surface. `Persisted Operator
   Settings` restore that state across sessions or input XML files. `UI Shell
@@ -227,6 +235,9 @@ Treat these modules as likely deep until proven otherwise:
   count fallback.
 - `usda_authoring.py`
   Concentrates importer-facing authoring layout and streaming writer behavior.
+- `proxy_mesh_service.py`
+  Concentrates proxy mesh generation, density-field surface extraction, QEM
+  simplification policy, and proxy USDA companion writing.
 
 Deleting or bypassing these modules would probably spread high-risk knowledge
 across callers.

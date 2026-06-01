@@ -72,6 +72,7 @@ contracts.
 - `src/xml_to_usda/discovery_service.py`
 - `src/xml_to_usda/settings_service.py`
 - `src/xml_to_usda/wind_service.py`
+- `src/xml_to_usda/proxy_mesh_service.py`
 - `src/xml_to_usda/conversion_orchestrator.py`
 - `src/xml_to_usda/canonical_loader.py`
 - `src/xml_to_usda/assembly_resolution.py`
@@ -90,6 +91,7 @@ environment-facing implementation details.
 - `src/xml_to_usda/fbx_import_supervisor.py`
 - `src/xml_to_usda/fbx_worker_subprocess.py`
 - `src/xml_to_usda/conversion_process.py`
+- `src/xml_to_usda/proxy_mesh_worker_subprocess.py`
 - `src/xml_to_usda/output_resolution.py`
 - `src/xml_to_usda/runtime_paths.py`
 - `src/xml_to_usda/job_control.py`
@@ -101,6 +103,7 @@ environment-facing implementation details.
 Operator-facing adapters over application contracts.
 
 - `src/xml_to_usda/qt_ui/`
+- `src/xml_to_usda/qt_ui/proxy_preview.py`
 - `src/xml_to_usda/gui.py`
 
 The supported UI path is PySide6. The old Tk code path is retired and should
@@ -129,6 +132,10 @@ Compatibility surfaces. They should remain thin.
   `usda_authoring.py`
 - Wind path:
   `wind_service.py` -> `wind_pipeline.py` -> `dynamic_wind.py`
+- Proxy Mesh path:
+  `qt_ui/window.py` or background job -> `conversion_process.py` ->
+  `proxy_mesh_worker_subprocess.py` -> `proxy_mesh_service.py` ->
+  `canonical_loader.py` -> generated `GeometryBuffer` -> proxy USDA writer
 - Qt operator path:
   `qt_ui/window.py` and `qt_ui/panels.py` -> `qt_ui/operator_state.py` ->
   `settings_service.py` and application services
