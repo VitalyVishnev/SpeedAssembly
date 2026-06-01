@@ -11,7 +11,10 @@ requires-python = ">=3.10"
 authors = [
   { name = "OpenAI Codex" }
 ]
-dependencies = []
+dependencies = [
+  "numpy>=1.26,<2",
+  "fast-simplification>=0.1.9,<1",
+]
 
 [project.optional-dependencies]
 ui-next = ["PySide6>=6.8,<7"]

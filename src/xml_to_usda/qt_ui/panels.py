@@ -9,7 +9,7 @@ services.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
@@ -45,6 +45,11 @@ from ..models import (
     PrototypeSourceMode,
     UdimMaterialSetting,
     UdimMode,
+)
+from ..proxy_mesh_service import (
+    DEFAULT_PROXY_POLYCOUNT,
+    PROXY_METHOD_DENSITY_FIELD,
+    ProxyMeshSettings,
 )
 from ..settings_service import (
     BaseMaterialSettingRecord,
@@ -433,11 +438,14 @@ class GeometryRowWidgets:
 
 
 class GeometryTabPanel(QWidget):
-    def __init__(self, *, browse_fbx, on_change) -> None:
+    def __init__(self, *, browse_fbx, on_change, on_preview_proxy_requested, on_proxy_settings_changed) -> None:
         super().__init__()
         self._browse_fbx = browse_fbx
         self._on_change = on_change
+        self._on_preview_proxy_requested = on_preview_proxy_requested
+        self._on_proxy_settings_changed = on_proxy_settings_changed
         self._rows: list[GeometryRowWidgets] = []
+        self._proxy_settings = ProxyMeshSettings()
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -446,6 +454,45 @@ class GeometryTabPanel(QWidget):
         self.summary_label = QLabel("Select an XML file to load repeated branch prototypes.", self)
         self.summary_label.setWordWrap(True)
         outer.addWidget(self.summary_label)
+
+        proxy_card = QFrame(self)
+        proxy_card.setObjectName("PanelCard")
+        proxy_layout = QGridLayout(proxy_card)
+        proxy_layout.setContentsMargins(16, 16, 16, 16)
+        proxy_layout.setHorizontalSpacing(10)
+        proxy_layout.setVerticalSpacing(8)
+        proxy_title = QLabel("Proxy Mesh", proxy_card)
+        proxy_title.setStyleSheet("font-weight: 600;")
+        self.proxy_method_combo = NoWheelComboBox(proxy_card)
+        self.proxy_method_combo.setObjectName("InteractiveCombo")
+        self.proxy_method_combo.addItem("Density Field", PROXY_METHOD_DENSITY_FIELD)
+        self.proxy_polycount_spin = QSpinBox(proxy_card)
+        self.proxy_polycount_spin.setRange(6, 500_000)
+        self.proxy_polycount_spin.setValue(DEFAULT_PROXY_POLYCOUNT)
+        self.proxy_polycount_spin.setSingleStep(500)
+        self.proxy_polycount_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.proxy_base_priority_spin = SliderSpinEditor(
+            minimum=0.0,
+            maximum=1.0,
+            step=0.01,
+            value=ProxyMeshSettings().base_mesh_priority,
+            parent=proxy_card,
+        )
+        self.preview_proxy_button = QPushButton("Preview Proxy Mesh", proxy_card)
+        self.preview_proxy_button.clicked.connect(self._on_preview_proxy_requested)
+        self.proxy_method_combo.currentIndexChanged.connect(lambda _index: self._handle_proxy_settings_changed())
+        self.proxy_polycount_spin.valueChanged.connect(lambda _value: self._handle_proxy_settings_changed())
+        self.proxy_base_priority_spin.valueChanged.connect(lambda _value: self._handle_proxy_settings_changed())
+        proxy_layout.addWidget(proxy_title, 0, 0)
+        proxy_layout.addWidget(QLabel("Method", proxy_card), 1, 0)
+        proxy_layout.addWidget(self.proxy_method_combo, 1, 1)
+        proxy_layout.addWidget(QLabel("Final Polycount", proxy_card), 1, 2)
+        proxy_layout.addWidget(self.proxy_polycount_spin, 1, 3)
+        proxy_layout.addWidget(QLabel("Base Priority", proxy_card), 2, 0)
+        proxy_layout.addWidget(self.proxy_base_priority_spin, 2, 1, 1, 3)
+        proxy_layout.addWidget(self.preview_proxy_button, 1, 4, 2, 1)
+        proxy_layout.setColumnStretch(1, 1)
+        outer.addWidget(proxy_card)
 
         self.scroll = QScrollArea(self)
         self.scroll.setWidgetResizable(True)
@@ -544,6 +591,25 @@ class GeometryTabPanel(QWidget):
 
     def has_rows(self) -> bool:
         return bool(self._rows)
+
+    def proxy_settings(self) -> ProxyMeshSettings:
+        return replace(
+            self._proxy_settings,
+            method=str(self.proxy_method_combo.currentData() or PROXY_METHOD_DENSITY_FIELD),
+            final_polycount=int(self.proxy_polycount_spin.value()),
+            base_mesh_priority=float(self.proxy_base_priority_spin.value()),
+        )
+
+    def apply_proxy_settings(self, settings: ProxyMeshSettings) -> None:
+        self._proxy_settings = settings
+        with QSignalBlocker(self.proxy_method_combo), QSignalBlocker(self.proxy_polycount_spin):
+            _set_combo_value(self.proxy_method_combo, settings.method)
+            self.proxy_polycount_spin.setValue(int(settings.final_polycount))
+        self.proxy_base_priority_spin.setValue(float(settings.base_mesh_priority))
+
+    def _handle_proxy_settings_changed(self) -> None:
+        self._proxy_settings = self.proxy_settings()
+        self._on_proxy_settings_changed()
 
     def _handle_row_mode_changed(self, row: GeometryRowWidgets) -> None:
         self._apply_row_mode(row)

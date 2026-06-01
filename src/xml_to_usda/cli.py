@@ -11,6 +11,7 @@ from .fbx_worker_subprocess import FBX_WORKER_COMMAND, run_fbx_worker_request_fi
 from .models import CleanupPolicy, CpuProfile, FbxMaterialMode, GeometryBuffer, MaterialPolicy
 from .pipeline import convert_file, generate_wind_json, inspect_source
 from .prototype_sources import fbx_import_read_options_for_material_mode, load_prototype_source_configs_from_json
+from .proxy_mesh_worker_subprocess import PROXY_MESH_WORKER_COMMAND, run_proxy_mesh_worker_request_file
 from .runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
 from .udim_settings import load_udim_material_settings_from_json
 from .xml_reader import render_inspect_report
@@ -77,6 +78,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("gui", help="Launch the primary PySide6 desktop GUI.")
     fbx_worker_parser = subparsers.add_parser(FBX_WORKER_COMMAND, help=argparse.SUPPRESS)
     fbx_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
+    proxy_worker_parser = subparsers.add_parser(PROXY_MESH_WORKER_COMMAND, help=argparse.SUPPRESS)
+    proxy_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
     return parser
 
 
@@ -94,6 +97,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(raw_argv)
     if args.command == FBX_WORKER_COMMAND:
         return run_fbx_worker_request_file(args.request)
+    if args.command == PROXY_MESH_WORKER_COMMAND:
+        return run_proxy_mesh_worker_request_file(args.request)
     runtime_paths = resolve_runtime_paths()
     _report_runtime_cleanup_summary(sweep_stale_job_workspaces(runtime_paths))
 

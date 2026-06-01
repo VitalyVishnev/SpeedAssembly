@@ -15,6 +15,7 @@ from dataclasses import dataclass
 class QtUiDependencies:
     prepare_conversion_plan: object
     start_conversion_process: object
+    start_proxy_mesh_process: object
     close_process_queue: object
     drain_process_queue: object
     convert_request: object
@@ -29,6 +30,9 @@ class QtUiDependencies:
     WindGenerationRequest: object
     generate_wind_json_from_request: object
     derive_wind_json_output_path: object
+    generate_proxy_mesh_from_request: object
+    export_proxy_usda_from_request: object
+    export_generated_proxy_usda_from_request: object
     format_wind_error: object
     should_retry_wind_error: object
     sys: object
@@ -38,7 +42,7 @@ def build_default_dependencies() -> QtUiDependencies:
     """Build the default PySide6-shell dependency bundle."""
     import sys
 
-    from ..conversion_process import close_process_queue, drain_process_queue, start_conversion_process
+    from ..conversion_process import close_process_queue, drain_process_queue, start_conversion_process, start_proxy_mesh_process
     from ..conversion_service import prepare_conversion_plan
     from ..discovery_service import (
         discover_base_material_rows,
@@ -56,10 +60,16 @@ def build_default_dependencies() -> QtUiDependencies:
         prepare_wind_inspection_plan,
         should_retry_wind_error,
     )
+    from ..proxy_mesh_service import (
+        export_generated_proxy_usda_from_request,
+        export_proxy_usda_from_request,
+        generate_proxy_mesh_from_request,
+    )
 
     return QtUiDependencies(
         prepare_conversion_plan=prepare_conversion_plan,
         start_conversion_process=start_conversion_process,
+        start_proxy_mesh_process=start_proxy_mesh_process,
         close_process_queue=close_process_queue,
         drain_process_queue=drain_process_queue,
         convert_request=convert_request,
@@ -74,6 +84,9 @@ def build_default_dependencies() -> QtUiDependencies:
         WindGenerationRequest=WindGenerationRequest,
         generate_wind_json_from_request=generate_wind_json_from_request,
         derive_wind_json_output_path=derive_wind_json_output_path,
+        generate_proxy_mesh_from_request=generate_proxy_mesh_from_request,
+        export_proxy_usda_from_request=export_proxy_usda_from_request,
+        export_generated_proxy_usda_from_request=export_generated_proxy_usda_from_request,
         format_wind_error=format_wind_error,
         should_retry_wind_error=should_retry_wind_error,
         sys=sys,

@@ -6,12 +6,15 @@ import threading
 
 from xml_to_usda.conversion_process import (
     _conversion_process_entry,
+    _proxy_mesh_process_entry,
     close_process_queue,
     drain_process_queue,
     start_conversion_process,
+    start_proxy_mesh_process,
 )
 from xml_to_usda.models import ConversionJobResult, ConversionRequest
 from xml_to_usda.pipeline import convert_request
+from xml_to_usda.proxy_mesh_service import ProxyMeshJobResult, ProxyMeshSettings
 from xml_to_usda.runtime_paths import resolve_runtime_paths
 
 
@@ -97,6 +100,48 @@ def test_start_conversion_process_uses_non_daemon_worker(monkeypatch) -> None:
     assert dummy_context.process is not None
     assert dummy_context.process.started is True
     assert dummy_context.process.daemon is False
+
+
+def test_start_proxy_mesh_process_uses_file_based_worker(monkeypatch) -> None:
+    class _DummyPopen:
+        def __init__(self, args, **kwargs) -> None:
+            self.args = args
+            self.kwargs = kwargs
+            self.terminated = False
+
+        def poll(self):
+            return None if not self.terminated else 1
+
+        def wait(self, timeout=None):
+            self.terminated = True
+            return 0
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    popen_calls: list[_DummyPopen] = []
+
+    def fake_popen(args, **kwargs):
+        process = _DummyPopen(args, **kwargs)
+        popen_calls.append(process)
+        return process
+
+    monkeypatch.setattr("xml_to_usda.conversion_process.subprocess.Popen", fake_popen)
+
+    process, queue, cancel_event = start_proxy_mesh_process(
+        ConversionRequest(input_paths=("input.xml",), output_path="output.usda"),
+        ProxyMeshSettings(),
+        action="export",
+    )
+
+    assert popen_calls
+    assert process.is_alive() is True
+    assert "--request" in popen_calls[0].args
+    assert popen_calls[0].kwargs["stdout"] is not None
+    assert popen_calls[0].kwargs["stderr"] is not None
+    cancel_event.set()
+    assert process.is_alive() is False
+    close_process_queue(queue)
 
 
 def test_drain_process_queue_returns_all_pending_events() -> None:
@@ -231,3 +276,56 @@ def test_conversion_process_entry_marks_cancelled_when_cancel_event_is_set(
     assert job_result.result is None
     assert job_result.cancelled is True
     assert job_result.error_message == "Conversion cancelled by user."
+
+
+def test_proxy_mesh_process_entry_exports_proxy_usda(monkeypatch, tmp_path: Path) -> None:
+    request = ConversionRequest(
+        input_paths=(str(SIMPLE_TREE_01),),
+        output_path=str(tmp_path / "worker_proxy.usda"),
+    )
+    queue = _RecordingQueue()
+
+    monkeypatch.setattr("xml_to_usda.conversion_process.apply_process_profile", lambda _profile: None)
+
+    _proxy_mesh_process_entry(
+        request=request,
+        settings=ProxyMeshSettings(final_polycount=5000),
+        action="export",
+        message_queue=queue,
+        cancel_event=threading.Event(),
+    )
+    events = drain_process_queue(queue)
+
+    assert events[-1][0] == "result"
+    job_result = events[-1][1]
+    assert isinstance(job_result, ProxyMeshJobResult)
+    assert job_result.error_message is None
+    assert job_result.export is not None
+    assert job_result.export.output_path == str(tmp_path / "worker_proxy_proxy.usda")
+    assert Path(job_result.export.output_path).exists()
+
+
+def test_proxy_mesh_process_entry_reports_error_result_on_failure(monkeypatch, tmp_path: Path) -> None:
+    request = ConversionRequest(
+        input_paths=(str(tmp_path / "missing_input.xml"),),
+        output_path=str(tmp_path / "worker_proxy.usda"),
+    )
+    queue = _RecordingQueue()
+
+    monkeypatch.setattr("xml_to_usda.conversion_process.apply_process_profile", lambda _profile: None)
+
+    _proxy_mesh_process_entry(
+        request=request,
+        settings=ProxyMeshSettings(final_polycount=5000),
+        action="export",
+        message_queue=queue,
+        cancel_event=threading.Event(),
+    )
+    events = drain_process_queue(queue)
+
+    assert events[-2][0] == "error_traceback"
+    assert events[-1][0] == "result"
+    job_result = events[-1][1]
+    assert isinstance(job_result, ProxyMeshJobResult)
+    assert job_result.export is None
+    assert job_result.error_message is not None

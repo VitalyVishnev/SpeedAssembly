@@ -7,6 +7,7 @@ pytestmark = pytest.mark.qt
 from types import SimpleNamespace
 
 from xml_to_usda.models import ConversionMode, CpuProfile, MaterialPolicy
+from xml_to_usda.proxy_mesh_service import ProxyMeshSettings
 from xml_to_usda.qt_ui.operator_state import (
     OperatorState,
     apply_preset_to_operator_state,
@@ -91,6 +92,7 @@ def test_qt_operator_state_save_preserves_nested_records(tmp_path) -> None:
             BaseMaterialSettingRecord(source_id=7, source_name="Bark", ue_asset_path="/Game/Bark.Bark"),
         ),
         part_mesh_settings=(PartSourceSettingRecord(source_name="Twig"),),
+        proxy_mesh_settings=ProxyMeshSettings(final_polycount=16000, density_resolution=96),
     )
     save_gui_settings(settings_path, original_snapshot)
 
@@ -117,6 +119,7 @@ def test_qt_operator_state_save_preserves_nested_records(tmp_path) -> None:
     assert reloaded.base_material_settings == original_snapshot.base_material_settings
     assert reloaded.part_mesh_settings == original_snapshot.part_mesh_settings
     assert reloaded.wind_group_settings == original_snapshot.wind_group_settings
+    assert reloaded.proxy_mesh_settings == original_snapshot.proxy_mesh_settings
 
 
 def test_qt_operator_state_loads_global_tab_records_without_input_key() -> None:
@@ -135,6 +138,7 @@ def test_qt_operator_state_saves_tab_records_as_global_state(tmp_path) -> None:
     settings_path = tmp_path / "gui_settings.json"
     deps = SimpleNamespace(load_gui_settings=load_gui_settings, save_gui_settings=save_gui_settings)
     previous_snapshot = GuiSettingsSnapshot(last_input_path="old.xml", last_output_path="old.usda")
+    proxy_settings = ProxyMeshSettings(final_polycount=9000, bounds_inflation=1.25, density_resolution=72)
 
     snapshot = save_nested_input_settings(
         deps,
@@ -143,6 +147,7 @@ def test_qt_operator_state_saves_tab_records_as_global_state(tmp_path) -> None:
         base_material_records=(BaseMaterialSettingRecord(source_id=2, source_name="Leaf"),),
         part_source_records=(PartSourceSettingRecord(source_name="Branch"),),
         wind_group_records={"1": WindGroupSettingRecord(shift_top=0.2)},
+        proxy_mesh_settings=proxy_settings,
         settings_path=settings_path,
     )
     reloaded = load_gui_settings(settings_path)
@@ -150,6 +155,7 @@ def test_qt_operator_state_saves_tab_records_as_global_state(tmp_path) -> None:
     assert snapshot.base_material_settings == (BaseMaterialSettingRecord(source_id=2, source_name="Leaf"),)
     assert snapshot.part_mesh_settings == (PartSourceSettingRecord(source_name="Branch"),)
     assert snapshot.wind_group_settings == {"1": WindGroupSettingRecord(shift_top=0.2)}
+    assert snapshot.proxy_mesh_settings == proxy_settings
     assert reloaded == snapshot
 
 

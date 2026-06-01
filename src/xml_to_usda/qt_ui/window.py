@@ -48,7 +48,8 @@ from ..fbx_payload_cache import (
     sweep_fbx_payload_cache,
 )
 from ..gui_formatters import format_wind_group_summary, format_wind_json_result
-from ..models import CleanupPolicy, ConversionMode
+from ..models import CleanupPolicy, ConversionMode, ConversionRequest, OutputMode, PrototypeSourceMode
+from ..proxy_mesh_service import ProxyMeshResult, ProxyMeshSettings
 from ..runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
 from ..settings_service import (
     FACTORY_DEFAULT_PRESET_NAME,
@@ -80,6 +81,7 @@ from .persistence import (
     save_ui_shell_state,
     save_ui_theme_overrides,
 )
+from .proxy_preview import ProxyPreviewDialog
 from .theme import (
     ResolvedTheme,
     ThemeOverrides,
@@ -587,11 +589,16 @@ class MainWindow(QWidget):
         self._support_dialog: SupportDialog | None = None
         self._adjust_ui_dialog: AdjustUiDialog | None = None
         self._global_settings_dialog: GlobalSettingsDialog | None = None
+        self._proxy_preview_dialog: ProxyPreviewDialog | None = None
+        self._proxy_mesh_settings = ProxyMeshSettings()
+        self._proxy_mesh_preview_result: ProxyMeshResult | None = None
+        self._proxy_mesh_preview_input_path = ""
 
         self._operator_state, self._operator_snapshot = load_operator_state(
             self._deps,
             settings_path=self._operator_settings_path,
         )
+        self._proxy_mesh_settings = self._operator_snapshot.proxy_mesh_settings
         self._conversion_mode = self._operator_state.conversion_mode.value
         self._runtime_paths = resolve_runtime_paths(
             settings_dir=SETTINGS_DIR,
@@ -790,8 +797,12 @@ class MainWindow(QWidget):
         self.generate_button = QPushButton("Generate Wind JSON", self)
         self.generate_button.setObjectName("PrimaryActionButton")
         self.generate_button.clicked.connect(self.run_generate_wind_json)
+        self.generate_proxy_button = QPushButton("Generate Proxy Mesh", self)
+        self.generate_proxy_button.setObjectName("PrimaryActionButton")
+        self.generate_proxy_button.clicked.connect(self.run_generate_proxy_mesh)
         self._action_buttons = [
             self.generate_button,
+            self.generate_proxy_button,
         ]
 
         right_column = QVBoxLayout()
@@ -800,6 +811,7 @@ class MainWindow(QWidget):
         right_column.setSpacing(max(6, spacing - 4))
         right_column.addWidget(self.convert_action_frame)
         right_column.addWidget(self.generate_button)
+        right_column.addWidget(self.generate_proxy_button)
         right_column.addStretch(1)
 
         layout.addWidget(self.source_button, 0, 0)
@@ -874,6 +886,8 @@ class MainWindow(QWidget):
         self.geometry_panel = GeometryTabPanel(
             browse_fbx=self._browse_part_fbx,
             on_change=self._handle_geometry_state_changed,
+            on_preview_proxy_requested=self.open_proxy_preview_dialog,
+            on_proxy_settings_changed=self._handle_proxy_settings_changed,
         )
         self.materials_panel = MaterialsTabPanel(
             deps=self._deps,
@@ -1273,6 +1287,7 @@ class MainWindow(QWidget):
             is_ground_cover=self._operator_state.is_ground_cover,
             gust_attenuation=self._operator_state.gust_attenuation,
         )
+        self.geometry_panel.apply_proxy_settings(self._proxy_mesh_settings)
         self._conversion_mode = self._operator_state.conversion_mode.value
         if hasattr(self, "_conversion_mode_actions"):
             for key, action in self._conversion_mode_actions.items():
@@ -1402,6 +1417,9 @@ class MainWindow(QWidget):
         self.generate_button.setEnabled(
             has_input and not self._conversion_running and not self._wind_refresh_running and not self._wind_json_running
         )
+        proxy_running = self._background_jobs.proxy_mesh_running
+        self.generate_proxy_button.setEnabled(has_input and not self._conversion_running and not proxy_running)
+        self.geometry_panel.preview_proxy_button.setEnabled(has_input and not self._conversion_running and not proxy_running)
 
     def _handle_convert_button_clicked(self) -> None:
         # One operator-facing control handles both states. Clicking during an
@@ -1621,6 +1639,8 @@ class MainWindow(QWidget):
         input_changed = normalized_text != previous_input
         if input_changed:
             self._current_dynamic_wind = None
+            self._proxy_mesh_preview_result = None
+            self._proxy_mesh_preview_input_path = ""
             self._pending_generate_after_refresh = False
             self._set_default_output_from_source(previous_input, previous_auto_output)
         if not self._persistence_suspended:
@@ -1688,6 +1708,7 @@ class MainWindow(QWidget):
                 base_material_records=self.materials_panel.serialize_base_material_records(),
                 part_source_records=self.materials_panel.serialize_part_source_records(),
                 wind_group_records=self.wind_panel.serialize_settings(),
+                proxy_mesh_settings=self._proxy_mesh_settings,
                 settings_path=self._operator_settings_path,
             )
         except OSError:
@@ -1712,6 +1733,10 @@ class MainWindow(QWidget):
             cpu_profile=self._operator_state.cpu_profile,
         )
         self._handle_tab_state_changed()
+
+    def _handle_proxy_settings_changed(self) -> None:
+        self._proxy_mesh_settings = self.geometry_panel.proxy_settings()
+        self._schedule_operator_state_save()
 
     def _reload_input_dependent_tabs(self) -> None:
         input_path = self.source_input.text().strip()
@@ -1876,6 +1901,136 @@ class MainWindow(QWidget):
             is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
         )
         self._background_jobs.start_wind_json_generation(request)
+
+    def open_proxy_preview_dialog(self) -> None:
+        self._source_refresh_timer.stop()
+        self._proxy_mesh_settings = self.geometry_panel.proxy_settings()
+        try:
+            request = self._build_proxy_request()
+        except ValueError as exc:
+            self._report_error("Missing input", str(exc))
+            return
+
+        def _start_preview(settings):
+            return self._deps.start_proxy_mesh_process(
+                request,
+                settings,
+                action="preview",
+            )
+
+        input_path = request.input_paths[0]
+        dialog = ProxyPreviewDialog(
+            settings=self._proxy_mesh_settings,
+            start_preview=_start_preview,
+            run_preview_locally=lambda settings: self._deps.generate_proxy_mesh_from_request(request, settings),
+            drain_queue=self._deps.drain_process_queue,
+            close_queue=self._deps.close_process_queue,
+            initial_proxy=self._proxy_preview_result_for_input(input_path),
+            report_preview_error=self._record_proxy_preview_error,
+            on_preview_ready=lambda proxy, current_input=input_path: self._cache_proxy_preview_result(
+                current_input,
+                proxy,
+            ),
+            on_preview_closed=lambda settings, proxy, current_input=input_path: self._apply_proxy_preview_state(
+                current_input,
+                settings,
+                proxy,
+            ),
+            parent=self,
+        )
+        self._proxy_preview_dialog = dialog
+        dialog.show()
+
+    def run_generate_proxy_mesh(self) -> None:
+        self._source_refresh_timer.stop()
+        self._proxy_mesh_settings = self.geometry_panel.proxy_settings()
+        try:
+            request = self._build_proxy_request()
+        except ValueError as exc:
+            self._report_error("Missing input", str(exc))
+            return
+        proxy = self._current_preview_proxy_for_export(request.input_paths[0])
+        if proxy is not None:
+            self._background_jobs.start_generated_proxy_mesh_export(request, proxy)
+            return
+        self._background_jobs.start_proxy_mesh_export(request, self._proxy_mesh_settings)
+
+    def _proxy_preview_result_for_input(self, input_path: str) -> ProxyMeshResult | None:
+        if self._proxy_mesh_preview_input_path != input_path:
+            return None
+        return self._proxy_mesh_preview_result
+
+    def _current_preview_proxy_for_export(self, input_path: str) -> ProxyMeshResult | None:
+        dialog = self._proxy_preview_dialog
+        if (
+            dialog is not None
+            and dialog.isVisible()
+            and dialog.current_proxy is not None
+            and self._proxy_mesh_preview_input_path == input_path
+        ):
+            return dialog.current_proxy
+        return self._proxy_preview_result_for_input(input_path)
+
+    def _cache_proxy_preview_result(self, input_path: str, proxy: ProxyMeshResult) -> None:
+        self._proxy_mesh_preview_input_path = input_path
+        self._proxy_mesh_preview_result = proxy
+
+    def _apply_proxy_preview_state(
+        self,
+        input_path: str,
+        settings: ProxyMeshSettings,
+        proxy: ProxyMeshResult | None,
+    ) -> None:
+        self._proxy_mesh_settings = settings
+        self.geometry_panel.apply_proxy_settings(settings)
+        if proxy is not None and proxy.settings == settings:
+            self._cache_proxy_preview_result(input_path, proxy)
+        else:
+            self._proxy_mesh_preview_result = None
+            self._proxy_mesh_preview_input_path = ""
+        self._schedule_operator_state_save()
+
+    def _handle_proxy_mesh_export_result(self, result) -> None:
+        self._set_status(f"Wrote Proxy Mesh USDA to {result.output_path}")
+        self._append_log(f"Proxy Mesh complete\nWrote Proxy Mesh USDA to {result.output_path}")
+
+    def _record_proxy_preview_error(self, message: str) -> None:
+        self._append_log(f"Proxy Mesh preview error\n{message}")
+        runtime_log_path = self._runtime_paths.settings_dir / "gui_runtime.log"
+        try:
+            self._runtime_paths.settings_dir.mkdir(parents=True, exist_ok=True)
+            with runtime_log_path.open("a", encoding="utf-8") as handle:
+                handle.write(f"\nERROR Proxy Mesh preview failed\n{message}\n")
+        except OSError:
+            pass
+
+    def _build_proxy_request(self) -> ConversionRequest:
+        input_path = self.source_input.text().strip()
+        if not input_path:
+            raise ValueError("Select a source XML file before generating a proxy mesh.")
+        prototype_configs = self.materials_panel.collect_prototype_source_configs()
+        base_overrides = self.materials_panel.collect_base_material_overrides()
+        use_explicit_material_contract = bool(base_overrides) or any(
+            config.mode != PrototypeSourceMode.XML_MESH for config in prototype_configs
+        )
+        return ConversionRequest(
+            input_paths=(input_path,),
+            output_path=self.output_input.text().strip() or None,
+            output_mode=OutputMode.SELF_CONTAINED,
+            material_policy=self._operator_state.material_policy,
+            bark_material_path=self._operator_state.bark_material_path or None,
+            leaves_material_path=self._operator_state.leaves_material_path or None,
+            single_material_path=self._operator_state.single_material_path or None,
+            base_material_overrides=base_overrides,
+            udim_material_settings=self.materials_panel.collect_udim_material_settings(),
+            cpu_profile=self._operator_state.cpu_profile,
+            cleanup_policy=self._current_cleanup_policy(),
+            use_explicit_material_contract=use_explicit_material_contract,
+            prototype_source_configs=prototype_configs,
+            conversion_mode=self._operator_state.conversion_mode,
+            fbx_cache_max_bytes=self._fbx_cache_max_bytes(),
+            fbx_cache_max_age_seconds=self._fbx_cache_max_age_seconds(),
+        )
 
     def cancel_conversion(self) -> None:
         self._background_jobs.cancel_conversion()

@@ -9,6 +9,7 @@ import sys
 from importlib.resources import files
 
 from ..fbx_worker_subprocess import FBX_WORKER_COMMAND
+from ..proxy_mesh_worker_subprocess import PROXY_MESH_WORKER_COMMAND
 
 WINDOWS_APP_USER_MODEL_ID = "XMLtoUSDAConverter.XMLtoUSDAConverter"
 
@@ -31,12 +32,18 @@ def application_icon_path() -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _suppress_windows_native_error_dialogs()
     multiprocessing.freeze_support()
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == FBX_WORKER_COMMAND:
         from ..fbx_worker_entry import main as fbx_worker_main
 
         return fbx_worker_main(argv)
+    if argv and argv[0] == PROXY_MESH_WORKER_COMMAND:
+        from ..proxy_mesh_worker_subprocess import run_proxy_mesh_worker_request_file
+
+        request_path = argv[argv.index("--request") + 1] if "--request" in argv else ""
+        return run_proxy_mesh_worker_request_file(request_path)
 
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -73,3 +80,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.smoke_exit_ms > 0:
         QTimer.singleShot(args.smoke_exit_ms, app.quit)
     return app.exec()
+
+
+def _suppress_windows_native_error_dialogs() -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        SEM_FAILCRITICALERRORS = 0x0001
+        SEM_NOGPFAULTERRORBOX = 0x0002
+        SEM_NOOPENFILEERRORBOX = 0x8000
+        ctypes.windll.kernel32.SetErrorMode(
+            SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX
+        )
+    except Exception:
+        return

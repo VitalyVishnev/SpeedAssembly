@@ -12,6 +12,7 @@ pytest.importorskip("pytestqt")
 pytestmark = pytest.mark.qt
 
 from PySide6.QtCore import Qt
+from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from xml_to_usda.conversion_service import ConversionLaunchPlan
@@ -40,8 +41,11 @@ from xml_to_usda.models import (
     WindJsonResult,
     UdimMode,
 )
+from xml_to_usda.proxy_mesh_service import ProxyMeshJobResult, ProxyMeshResult, ProxyMeshSettings
 from xml_to_usda.qt_ui.dependencies import QtUiDependencies
 from xml_to_usda.qt_ui.persistence import UiShellState, load_ui_shell_state
+from xml_to_usda.qt_ui import proxy_preview
+from xml_to_usda.qt_ui.proxy_preview import ProxyPreviewDialog, build_preview_cube_mesh
 from xml_to_usda.qt_ui.theme import load_theme
 from xml_to_usda.qt_ui.window import MainWindow
 from xml_to_usda.runtime_paths import RuntimePaths
@@ -57,6 +61,18 @@ from xml_to_usda.wind_service import WindGenerationRequest, WindInspectionPlan, 
 
 
 def _build_fake_deps(calls: dict[str, object]) -> QtUiDependencies:
+    class _FinishedProcess:
+        exitcode = 0
+
+        def is_alive(self) -> bool:
+            return False
+
+        def join(self, timeout=None) -> None:
+            return None
+
+        def terminate(self) -> None:
+            return None
+
     def prepare_conversion_plan(**kwargs):
         calls["prepare_conversion_plan"] = kwargs
         request = ConversionRequest(
@@ -133,6 +149,82 @@ def _build_fake_deps(calls: dict[str, object]) -> QtUiDependencies:
             ),
         )
 
+    def _fake_proxy_result(settings: ProxyMeshSettings) -> ProxyMeshResult:
+        from array import array
+
+        from xml_to_usda.models import GeometryBuffer
+
+        return ProxyMeshResult(
+            mesh=GeometryBuffer(
+                name="ProxyMesh",
+                point_components=array("f", [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]),
+                face_vertex_counts=array("i", [3]),
+                face_vertex_indices=array("i", [0, 1, 2]),
+            ),
+            settings=settings,
+            method=settings.method,
+            source_instance_count=1,
+            included_base_mesh=True,
+        )
+
+    def generate_proxy_mesh_from_request(request, settings):
+        calls["generate_proxy_mesh_from_request"] = {
+            "request": request,
+            "settings": settings,
+        }
+        return _fake_proxy_result(settings)
+
+    def export_proxy_usda_from_request(request, settings):
+        calls["export_proxy_usda_from_request"] = {
+            "request": request,
+            "settings": settings,
+        }
+        class Result:
+            input_path = request.input_paths[0]
+            output_path = str(Path(request.output_path).with_name(f"{Path(request.output_path).stem}_proxy.usda"))
+            proxy = _fake_proxy_result(settings)
+            usda_text = "#usda 1.0"
+
+        return Result()
+
+    def export_generated_proxy_usda_from_request(request, proxy):
+        calls["export_generated_proxy_usda_from_request"] = {
+            "request": request,
+            "proxy": proxy,
+        }
+        class Result:
+            input_path = request.input_paths[0]
+            output_path = str(Path(request.output_path).with_name(f"{Path(request.output_path).stem}_proxy.usda"))
+            usda_text = "#usda 1.0"
+
+        return Result()
+
+    def start_proxy_mesh_process(request, settings, action):
+        calls.setdefault("start_proxy_mesh_process_events", []).append(
+            {
+                "request": request,
+                "settings": settings,
+                "action": action,
+            }
+        )
+        calls["start_proxy_mesh_process"] = {
+            "request": request,
+            "settings": settings,
+            "action": action,
+        }
+        if action == "preview":
+            return _FinishedProcess(), [("result", ProxyMeshJobResult(proxy=generate_proxy_mesh_from_request(request, settings)))], object()
+        if action != "export":
+            raise AssertionError("unexpected proxy process action")
+        return _FinishedProcess(), [("result", ProxyMeshJobResult(export=export_proxy_usda_from_request(request, settings)))], object()
+
+    def drain_process_queue(queue):
+        if isinstance(queue, list):
+            events = list(queue)
+            queue.clear()
+            return events
+        return []
+
     def discover_base_material_rows(input_path, persisted_records=()):
         calls["discover_base_material_rows"] = {
             "input_path": input_path,
@@ -179,8 +271,9 @@ def _build_fake_deps(calls: dict[str, object]) -> QtUiDependencies:
     return QtUiDependencies(
         prepare_conversion_plan=prepare_conversion_plan,
         start_conversion_process=lambda request, runtime_paths=None: (_ for _ in ()).throw(AssertionError("unexpected async process")),
+        start_proxy_mesh_process=start_proxy_mesh_process,
         close_process_queue=lambda queue: None,
-        drain_process_queue=lambda queue: [],
+        drain_process_queue=drain_process_queue,
         convert_request=convert_request,
         discover_base_material_rows=discover_base_material_rows,
         discover_part_prototype_rows=discover_part_prototype_rows,
@@ -193,6 +286,9 @@ def _build_fake_deps(calls: dict[str, object]) -> QtUiDependencies:
         WindGenerationRequest=WindGenerationRequest,
         generate_wind_json_from_request=generate_wind_json_from_request,
         derive_wind_json_output_path=derive_wind_json_output_path,
+        generate_proxy_mesh_from_request=generate_proxy_mesh_from_request,
+        export_proxy_usda_from_request=export_proxy_usda_from_request,
+        export_generated_proxy_usda_from_request=export_generated_proxy_usda_from_request,
         format_wind_error=lambda payload: f"{payload.get('type', 'Exception')}: {payload.get('message', '')}",
         should_retry_wind_error=lambda error_type, message: False,
         sys=__import__("sys"),
@@ -668,6 +764,288 @@ def test_qt_window_refreshes_wind_and_generates_json(monkeypatch, qtbot, tmp_pat
     assert request.is_ground_cover is True
     assert request.group_settings[0].is_trunk_group is False
     assert "Wind groups: 1" in window._log_text
+
+
+def test_proxy_preview_can_show_diagnostic_cube_without_generating_proxy(qtbot) -> None:
+    calls: dict[str, object] = {}
+    dialog = ProxyPreviewDialog(
+        settings=ProxyMeshSettings(final_polycount=5000, density_resolution=12),
+        start_preview=lambda settings: (_ for _ in ()).throw(AssertionError("unexpected process preview")),
+        run_preview_locally=lambda settings: calls.setdefault("run_preview_locally", settings),
+        drain_queue=lambda queue: [],
+        close_queue=lambda queue: None,
+        use_local_preview=True,
+        preview_mesh=build_preview_cube_mesh(),
+    )
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    qtbot.waitUntil(lambda: dialog.current_proxy is not None, timeout=3000)
+
+    assert dialog.current_proxy.mesh.name == "ViewportCubePreview"
+    assert dialog.status_label.text() == "Viewport cube preview: 6 polygons / 8 points"
+    assert "run_preview_locally" not in calls
+
+
+def test_proxy_preview_replaces_mesh_without_clearing_or_refitting_camera(qtbot) -> None:
+    class _FinishedProcess:
+        exitcode = 0
+
+        def is_alive(self) -> bool:
+            return False
+
+        def join(self, timeout=None) -> None:
+            return None
+
+        def terminate(self) -> None:
+            return None
+
+    calls: dict[str, object] = {}
+    request = ConversionRequest(input_paths=("tree.xml",), output_path="tree.usda")
+
+    def start_preview(settings):
+        proxy = _build_fake_deps(calls).generate_proxy_mesh_from_request(request, settings)
+        return _FinishedProcess(), [("result", ProxyMeshJobResult(proxy=proxy))], object()
+
+    dialog = ProxyPreviewDialog(
+        settings=ProxyMeshSettings(final_polycount=2400, density_resolution=64),
+        start_preview=start_preview,
+        run_preview_locally=lambda settings: (_ for _ in ()).throw(AssertionError("unexpected local preview")),
+        drain_queue=lambda queue: list(queue),
+        close_queue=lambda queue: queue.clear() if hasattr(queue, "clear") else None,
+    )
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    qtbot.waitUntil(lambda: dialog.current_proxy is not None, timeout=3000)
+    first_proxy = dialog.current_proxy
+    dialog.viewport._distance = 42.0
+
+    dialog.polycount_spin.setValue(3600)
+    dialog.polycount_spin.editingFinished.emit()
+
+    assert dialog.current_proxy is first_proxy
+    assert dialog.viewport._mesh is first_proxy.mesh
+    qtbot.waitUntil(lambda: dialog.current_proxy.settings.final_polycount == 3600, timeout=3000)
+
+    assert dialog.viewport._distance == pytest.approx(42.0)
+    assert not hasattr(dialog, "regenerate_button")
+
+
+def test_qt_window_opens_proxy_preview_from_geometry_tab(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    calls: dict[str, object] = {}
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps(calls),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+    window.output_input.setText(str(tmp_path / "tree.usda"))
+    window.geometry_panel.proxy_polycount_spin.setValue(2400)
+    window.geometry_panel.proxy_base_priority_spin.setValue(0.72)
+
+    assert window.geometry_panel.proxy_method_combo.count() == 1
+    assert window.geometry_panel.proxy_method_combo.currentData() == "density_field"
+    assert window.geometry_panel.preview_proxy_button.isEnabled()
+
+    qtbot.mouseClick(window.geometry_panel.preview_proxy_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window._proxy_preview_dialog.current_proxy is not None, timeout=3000)
+
+    assert window._proxy_preview_dialog is not None
+    assert window._proxy_preview_dialog.isVisible()
+    assert isinstance(window._proxy_preview_dialog.viewport, QOpenGLWidget)
+    assert window._proxy_preview_dialog.method_combo.count() == 1
+    assert window._proxy_preview_dialog.method_combo.currentData() == "density_field"
+    assert window._proxy_preview_dialog.density_resolution_spin.value() == 64
+    assert calls["start_proxy_mesh_process"]["action"] == "preview"
+    assert calls["generate_proxy_mesh_from_request"]["settings"].method == "density_field"
+    assert calls["generate_proxy_mesh_from_request"]["settings"].final_polycount == 2400
+    assert calls["generate_proxy_mesh_from_request"]["settings"].base_mesh_priority == pytest.approx(0.72)
+    assert calls["generate_proxy_mesh_from_request"]["request"].output_path == str(tmp_path / "tree.usda")
+
+    window._proxy_preview_dialog.polycount_spin.setValue(3600)
+    window._proxy_preview_dialog.polycount_spin.editingFinished.emit()
+    qtbot.waitUntil(lambda: calls["generate_proxy_mesh_from_request"]["settings"].final_polycount == 3600, timeout=3000)
+
+    assert calls["generate_proxy_mesh_from_request"]["settings"].final_polycount == 3600
+
+    window._proxy_preview_dialog.density_resolution_spin.setValue(18)
+    window._proxy_preview_dialog.density_resolution_spin.editingFinished.emit()
+    qtbot.waitUntil(lambda: calls["generate_proxy_mesh_from_request"]["settings"].density_resolution == 18, timeout=3000)
+
+    assert calls["generate_proxy_mesh_from_request"]["settings"].density_resolution == 18
+
+    window._proxy_preview_dialog.base_priority_spin.setValue(0.21)
+    window._proxy_preview_dialog.base_priority_spin.editingFinished.emit()
+    qtbot.waitUntil(lambda: calls["generate_proxy_mesh_from_request"]["settings"].base_mesh_priority == pytest.approx(0.21), timeout=3000)
+    qtbot.waitUntil(lambda: window._proxy_preview_dialog.current_proxy.settings.base_mesh_priority == pytest.approx(0.21), timeout=3000)
+
+    assert calls["generate_proxy_mesh_from_request"]["settings"].base_mesh_priority == pytest.approx(0.21)
+
+    window._proxy_preview_dialog.close()
+    qtbot.waitUntil(lambda: not window._proxy_preview_dialog.isVisible(), timeout=3000)
+    qtbot.waitUntil(
+        lambda: load_gui_settings(tmp_path / "gui_settings.json").proxy_mesh_settings.base_mesh_priority
+        == pytest.approx(0.21),
+        timeout=3000,
+    )
+
+    saved_settings = load_gui_settings(tmp_path / "gui_settings.json").proxy_mesh_settings
+    assert saved_settings.final_polycount == 3600
+    assert saved_settings.density_resolution == 18
+    assert window.geometry_panel.proxy_settings().final_polycount == 3600
+    assert window.geometry_panel.proxy_settings().base_mesh_priority == pytest.approx(0.21)
+
+    qtbot.mouseClick(window.generate_proxy_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Wrote Proxy Mesh USDA" in window.status_label.text(), timeout=3000)
+
+    assert calls["export_generated_proxy_usda_from_request"]["proxy"].settings.final_polycount == 3600
+    assert calls["export_generated_proxy_usda_from_request"]["proxy"].settings.density_resolution == 18
+    assert [event["action"] for event in calls["start_proxy_mesh_process_events"]] == [
+        "preview",
+        "preview",
+        "preview",
+        "preview",
+    ]
+
+
+def test_proxy_preview_keeps_stalled_process_isolated_without_local_fallback(monkeypatch, qtbot) -> None:
+    class _StalledProcess:
+        exitcode = None
+
+        def __init__(self) -> None:
+            self.terminated = False
+
+        def is_alive(self) -> bool:
+            return not self.terminated
+
+        def join(self, timeout=None) -> None:
+            return None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    calls: dict[str, object] = {}
+    process = _StalledProcess()
+    monkeypatch.setattr(proxy_preview, "PROCESS_PREVIEW_STATUS_SECONDS", 0.01)
+
+    def start_preview(settings):
+        calls["start_preview"] = settings
+        return process, [], object()
+
+    def run_preview_locally(settings):
+        calls["run_preview_locally"] = settings
+        return _build_fake_deps(calls).generate_proxy_mesh_from_request(
+            ConversionRequest(input_paths=("tree.xml",), output_path="tree.usda"),
+            settings,
+        )
+
+    dialog = ProxyPreviewDialog(
+        settings=ProxyMeshSettings(final_polycount=5000, density_resolution=12),
+        start_preview=start_preview,
+        run_preview_locally=run_preview_locally,
+        drain_queue=lambda queue: [],
+        close_queue=lambda queue: None,
+    )
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    qtbot.waitUntil(lambda: dialog.status_label.text() == "Generating in isolated worker process...", timeout=3000)
+
+    assert process.terminated is False
+    assert "run_preview_locally" not in calls
+
+
+def test_proxy_preview_retries_transient_worker_error_once(qtbot) -> None:
+    class _FinishedProcess:
+        exitcode = 0
+
+        def is_alive(self) -> bool:
+            return False
+
+        def join(self, timeout=None) -> None:
+            return None
+
+        def terminate(self) -> None:
+            return None
+
+    calls: dict[str, object] = {"starts": 0, "errors": []}
+
+    def start_preview(settings):
+        calls["starts"] += 1
+        if calls["starts"] == 1:
+            return (
+                _FinishedProcess(),
+                [
+                    ("error_traceback", "Traceback\nTypeError: bad operand type for unary -: 'type'"),
+                    ("result", ProxyMeshJobResult(error_message="bad operand type for unary -: 'type'")),
+                ],
+                object(),
+            )
+        return (
+            _FinishedProcess(),
+            [("result", ProxyMeshJobResult(proxy=_build_fake_deps(calls).generate_proxy_mesh_from_request(ConversionRequest(input_paths=("tree.xml",)), settings)))],
+            object(),
+        )
+
+    dialog = ProxyPreviewDialog(
+        settings=ProxyMeshSettings(final_polycount=10000, density_resolution=128),
+        start_preview=start_preview,
+        run_preview_locally=lambda settings: (_ for _ in ()).throw(AssertionError("unexpected local preview")),
+        drain_queue=lambda queue: list(queue),
+        close_queue=lambda queue: queue.clear() if queue is not None else None,
+        report_preview_error=lambda message: calls["errors"].append(message),
+    )
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    qtbot.waitUntil(lambda: dialog.current_proxy is not None, timeout=3000)
+
+    assert calls["starts"] == 2
+    assert len(calls["errors"]) == 1
+    assert "bad operand type for unary" in calls["errors"][0]
+    assert dialog.status_label.text() == "1 polygons / 3 points"
+
+
+def test_qt_window_generates_proxy_usda_beside_main_output(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    calls: dict[str, object] = {}
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps(calls),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    output_path = tmp_path / "exports" / "tree.usda"
+    output_path.parent.mkdir()
+    window.source_input.setText(str(tree_xml))
+    window.output_input.setText(str(output_path))
+
+    qtbot.mouseClick(window.generate_proxy_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Wrote Proxy Mesh USDA" in window.status_label.text(), timeout=3000)
+
+    assert calls["start_proxy_mesh_process"]["action"] == "export"
+    assert "export_proxy_usda_from_request" in calls
+    assert calls["export_proxy_usda_from_request"]["request"].output_path == str(output_path)
+    assert "Wrote Proxy Mesh USDA" in window.status_label.text()
 
 
 def test_qt_window_autofills_output_path_from_selected_xml(qtbot, tmp_path) -> None:

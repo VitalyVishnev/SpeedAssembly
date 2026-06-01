@@ -8,6 +8,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $env:PYTHONNOUSERSITE = '1'
+$env:PYTHONUSERBASE = Join-Path (Join-Path $PSScriptRoot '..') '.pyinstaller-userbase'
 
 function Get-VenvExecutable([string]$RepoRoot) {
     $pythonExe = Join-Path $RepoRoot '.venv310\Scripts\python.exe'
@@ -164,8 +165,6 @@ try {
             'PySide6.QtMultimedia',
             'PySide6.QtMultimediaWidgets',
             'PySide6.QtNfc',
-            'PySide6.QtOpenGL',
-            'PySide6.QtOpenGLWidgets',
             'PySide6.QtPdf',
             'PySide6.QtPdfWidgets',
             'PySide6.QtPositioning',

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from xml_to_usda.models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode, UdimMode
+from xml_to_usda.proxy_mesh_service import ProxyMeshSettings
 from xml_to_usda.settings_service import (
     BaseMaterialSettingRecord,
     GUI_SETTINGS_SCHEMA_VERSION,
@@ -101,6 +102,12 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
                 ),
             ),
         ),
+        proxy_mesh_settings=ProxyMeshSettings(
+            final_polycount=12000,
+            bounds_inflation=1.4,
+            density_resolution=96,
+            base_mesh_priority=0.22,
+        ),
         fbx_cache_max_size_gb=42,
         fbx_cache_max_age_days=7,
     )
@@ -118,6 +125,10 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert "part_mesh_settings_by_input_path" not in payload
     assert "wind_group_settings_by_input_path" not in payload
     assert payload["part_mesh_settings"][0]["fbx_material_mode"] == "material_slots"
+    assert payload["proxy_mesh_settings"]["final_polycount"] == 12000
+    assert payload["proxy_mesh_settings"]["bounds_inflation"] == 1.4
+    assert payload["proxy_mesh_settings"]["density_resolution"] == 96
+    assert payload["proxy_mesh_settings"]["base_mesh_priority"] == 0.22
     assert payload["fbx_cache_max_size_gb"] == 42
     assert payload["fbx_cache_max_age_days"] == 7
     assert payload["part_mesh_settings"][0]["fbx_material_slot_overrides"] == [
@@ -147,6 +158,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert restored.single_material_path == snapshot.single_material_path
     assert restored.wind_group_settings == snapshot.wind_group_settings
     assert restored.base_material_settings == snapshot.base_material_settings
+    assert restored.proxy_mesh_settings == snapshot.proxy_mesh_settings
     assert len(restored.part_mesh_settings) == 1
     restored_part = restored.part_mesh_settings[0]
     assert restored_part.source_name == "Twig_01"

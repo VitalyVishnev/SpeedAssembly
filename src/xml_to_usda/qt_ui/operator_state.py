@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..models import ConversionMode, CpuProfile, MaterialPolicy
+from ..proxy_mesh_service import ProxyMeshSettings
 from ..settings_service import (
     BaseMaterialSettingRecord,
     GuiPresetRecord,
@@ -84,6 +85,7 @@ def save_operator_state(
         wind_group_settings=previous_snapshot.wind_group_settings,
         base_material_settings=previous_snapshot.base_material_settings,
         part_mesh_settings=previous_snapshot.part_mesh_settings,
+        proxy_mesh_settings=previous_snapshot.proxy_mesh_settings,
         active_preset_name=previous_snapshot.active_preset_name,
         presets=previous_snapshot.presets,
     )
@@ -117,6 +119,7 @@ def save_nested_input_settings(
     base_material_records: tuple[BaseMaterialSettingRecord, ...],
     part_source_records: tuple[PartSourceSettingRecord, ...],
     wind_group_records: dict[str, WindGroupSettingRecord],
+    proxy_mesh_settings: ProxyMeshSettings | None = None,
     settings_path: str | Path | None = None,
 ) -> GuiSettingsSnapshot:
     """Persist current operator defaults plus global tab settings without replacing shared file-path history."""
@@ -127,6 +130,7 @@ def save_nested_input_settings(
         wind_group_settings=dict(wind_group_records),
         base_material_settings=base_material_records,
         part_mesh_settings=part_source_records,
+        proxy_mesh_settings=proxy_mesh_settings or previous_snapshot.proxy_mesh_settings,
         fbx_cache_max_size_gb=previous_snapshot.fbx_cache_max_size_gb,
         fbx_cache_max_age_days=previous_snapshot.fbx_cache_max_age_days,
         active_preset_name=previous_snapshot.active_preset_name,

@@ -5,6 +5,8 @@ Summary: Observed-schema SpeedTree Raw XML to USDA converter scaffold for UE 5.7
 Author: OpenAI Codex
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
+Requires-Dist: numpy<2,>=1.26
+Requires-Dist: fast-simplification<1,>=0.1.9
 Provides-Extra: ui-next
 Requires-Dist: PySide6<7,>=6.8; extra == "ui-next"
 Provides-Extra: dev
@@ -55,6 +57,8 @@ python -m xml_to_usda convert path\to\tree.xml path\to\tree.usda --preserve-temp
 python -m xml_to_usda gui
 ```
 
+`gui` launches the supported PySide6 shell. The old Tk launcher is retired and no longer supported.
+
 `part_sources.json` is a JSON object keyed by prototype name or `Mesh_<id>`, for example:
 
 ```json
@@ -104,7 +108,7 @@ Huge FBX branch replacement notes:
   - `vertex_color_split`
   - `single_material`
   - `material_slots`
-- the GUI workflow intentionally exposes explicit repeated-part material modes instead of `auto`; `auto` remains a compatibility/config mode, not the recommended interactive workflow
+- the GUI workflow intentionally exposes explicit repeated-part material modes instead of `auto`; `auto` stays in CLI/JSON workflows, not the recommended interactive workflow
 - `auto` uses vertex-color split only when vertex colors exist and produce more than one bucket
 - if vertex colors are missing, incomplete, or effectively uniform, `auto` falls back to a single material section
 - explicit `vertex_color_split` is strict: it must produce a usable split or the conversion fails with a detailed reason
@@ -117,6 +121,9 @@ Huge FBX branch replacement notes:
 - if every `material_slots` path is blank, conversion fails loudly
 - huge FBX jobs stream USDA directly to disk instead of building one giant in-memory string
 - runtime conversion temp files live in a separate cache root under `%LOCALAPPDATA%/XMLtoUSDAConverter/cache/jobs`
+- explicit `.fbx` Part Mesh payloads are cached under `%LOCALAPPDATA%/XMLtoUSDAConverter/cache/fbx-payloads` using the FBX path, file size, timestamp, and import read-options as the cache key
+- the FBX payload cache defaults to `20 GB` / `14 days`; the title-bar gear opens global cache controls for refresh, clear, and policy changes
+- corrupt/stale FBX cache entries fall back to a normal FBX import instead of changing conversion output
 - by default the converter removes per-job runtime temp data on success, cancel, and failure
 - the GUI `Preserve temp files for debugging` switch and CLI `--preserve-temp-files` flag keep the job manifest/temp dir for inspection
 - stale runtime job dirs older than 24 hours are swept on startup
@@ -124,12 +131,19 @@ Huge FBX branch replacement notes:
 - `balanced` is the default and recommended profile for normal work because it prioritizes stable completion and system responsiveness
 - GUI errors are now non-modal by default: failures are written to the in-app `Log` panel and to `~/.xml_to_usda/gui_runtime.log` instead of blocking the screen with modal error popups
 - wind-group slider settings are now persisted per input XML, so different trees do not overwrite each other's wind tuning
-- the GUI runs large conversions in a dedicated worker process instead of inside the Tk process
+- the GUI runs large conversions in a dedicated worker process instead of inside the UI process
 - multiple explicit FBX prototype imports are fanned out through a `spawn` process pool, so different huge branch FBX files can import in parallel
 - `balanced` now matters most when there are multiple independent heavy stages or prototype FBX imports; one single giant FBX is still largely limited by the Autodesk SDK's own single-file import path
 - because of that, a huge job can legitimately show low total `% CPU` in Task Manager while still behaving correctly
+- repeated-part FBX import skips vertex color reads for `single_material` and `material_slots`, and skips material slot face-section reads unless `material_slots` is selected
 - current optimization priority is stability, diagnostics, and predictable UE-facing output rather than forcing maximum all-core utilization on a single huge FBX
 - packaged frozen runs now prefer sequential multi-FBX prototype import for stability, while launcher/dev runs may still import multiple prototypes in parallel
+
+Developer benchmark helper:
+
+```powershell
+python -m xml_to_usda benchmark-fbx "D:\3D Personal\XMLtoUSD_miscFiles\SM_BigBranch_01_HIGH.fbx" --material-mode single_material
+```
 
 Autodesk FBX SDK note:
 
@@ -148,47 +162,49 @@ Material-policy note:
 
 ## Build helpers
 
-Fast launcher build:
+Primary one-file PySide6 release build:
 
 ```powershell
-.\scripts\build_gui_exe.cmd
+.\scripts\build_qt_gui_exe.cmd -Package
 ```
 
-Standalone PyInstaller build (cleans stale PyInstaller state by default):
+Explicit clean rebuild for release:
 
 ```powershell
-.\scripts\build_gui_exe.cmd -Package
+.\scripts\build_qt_gui_exe.cmd -Package -Clean
 ```
 
-Explicit clean rebuild (same package result):
+Release artifact:
 
-```powershell
-.\scripts\build_gui_exe.cmd -Package -Clean
-```
+- `dist-next\XMLtoUSDAConverter.exe`
 
-Watch mode for repeated rebuilds:
-
-```powershell
-.\scripts\watch_gui_exe.cmd
-```
-
-Output exe path:
-
-- `dist\XMLtoUSDAConverter.exe`
+The release exe is a single-file PyInstaller package. It launches the PySide6
+operator UI normally and reuses the same executable for `fbx-worker` helper
+mode during packaged FBX imports, so a sidecar `XMLtoUSDAWorker.exe` is not
+required for the primary `dist-next` release.
 
 Notes:
 
-- the default build is a fast launcher copy from `.venv310\Scripts\xml-to-usda-gui.exe`
-- the fast build depends on the local `.venv310`
-- `-Package` removes stale build/dist state first, then runs PyInstaller with `--clean` to produce the standalone executable
-- every launcher or package build now writes `dist\build_info.json`
+- `dist-next` is the primary operator release path
+- the old Tk release path is retired and not supported
+- the primary `-Package` build removes stale `build-next` / `dist-next` state first, then runs PyInstaller with `--clean` to produce the standalone executable
+- every package build writes `dist-next\build_info.json`
 - on startup the GUI writes a `Build info:` banner into the in-app `Log`, including build time, build mode, and a short git summary when available
 - on startup the GUI also writes a `Runtime info:` banner into the in-app `Log`, including whether the app is frozen, which executable launched it, and which runtime paths are active
+- the exe is portable as an app binary, but UI settings and runtime cache still live under the user's profile (`~\.xml_to_usda` and `%LOCALAPPDATA%\XMLtoUSDAConverter`)
 
 ## Docs
 
 - `AGENTS.md`
   Mission, hard rules, and canonical terminology.
+- `docs/PROJECT_MAP.md`
+  Navigation entry point for architecture reviews and AI-assisted exploration.
+- `docs/GLOSSARY.md`
+  Project domain vocabulary for architecture suggestions.
+- `docs/ARCHITECTURE.md`
+  Module map, interfaces, seams, adapters, and architecture review checklist.
+- `docs/DECISIONS.md`
+  Architecture decisions that should not be re-litigated without new evidence.
 - `docs/ue_import_contract.md`
   Importer-facing USDA structure and required UE/USD contract.
 - `docs/speedtree_mapping.md`
@@ -203,7 +219,7 @@ Notes:
 ## Repo areas
 
 - `samples/` holds controlled XML inputs and generated outputs.
-- `docs/` holds the compact project documentation set.
+- `docs/` holds the normative project docs plus architecture-review entry points.
 - `vault/` holds reference USDA, UE schema, importer source, and related research artifacts.
 
 

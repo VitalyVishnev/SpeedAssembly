@@ -23,6 +23,7 @@ from ..gui_formatters import (
     format_telemetry_status,
 )
 from ..models import ConversionJobResult, ConversionRequest, ConversionTelemetry
+from ..proxy_mesh_service import ProxyMeshJobResult
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,15 @@ class QtBackgroundJobsController:
 
         self._wind_refresh_thread: threading.Thread | None = None
         self._wind_json_thread: threading.Thread | None = None
+        self._proxy_mesh_process = None
+        self._proxy_mesh_queue = None
+        self._proxy_mesh_cancel_event = None
+        self._proxy_mesh_request = None
+        self._proxy_mesh_settings = None
+        self._proxy_mesh_retry_count = 0
+        self._proxy_mesh_error_traceback: str | None = None
+        self._proxy_mesh_result_received = False
+        self._proxy_mesh_thread: threading.Thread | None = None
 
     @property
     def conversion_running(self) -> bool:
@@ -69,6 +79,13 @@ class QtBackgroundJobsController:
     @property
     def wind_json_running(self) -> bool:
         return self._wind_json_thread is not None and self._wind_json_thread.is_alive()
+
+    @property
+    def proxy_mesh_running(self) -> bool:
+        return bool(
+            (self._proxy_mesh_process is not None and self._proxy_mesh_process.is_alive())
+            or (self._proxy_mesh_thread is not None and self._proxy_mesh_thread.is_alive())
+        )
 
     def start_conversion(self, *, request: ConversionRequest, run_async: bool) -> None:
         if self.conversion_running:
@@ -212,6 +229,72 @@ class QtBackgroundJobsController:
                 )
             )
 
+    def start_proxy_mesh_export(self, request, settings) -> None:
+        if self.proxy_mesh_running:
+            self._window._set_status("Proxy Mesh generation already running...")
+            return
+        self._proxy_mesh_error_traceback = None
+        self._proxy_mesh_result_received = False
+        self._proxy_mesh_request = request
+        self._proxy_mesh_settings = settings
+        self._proxy_mesh_retry_count = 0
+        self._window._set_status("Generating Proxy Mesh...")
+        if not self._start_proxy_mesh_process(request, settings):
+            return
+        self._window._update_action_state()
+        self._ensure_polling()
+
+    def start_generated_proxy_mesh_export(self, request, proxy) -> None:
+        if self.proxy_mesh_running:
+            self._window._set_status("Proxy Mesh generation already running...")
+            return
+        self._proxy_mesh_error_traceback = None
+        self._proxy_mesh_result_received = False
+        self._proxy_mesh_request = request
+        self._proxy_mesh_settings = proxy.settings
+        self._proxy_mesh_retry_count = 0
+        self._window._set_status("Writing Proxy Mesh...")
+        self._proxy_mesh_thread = threading.Thread(
+            target=self._run_generated_proxy_mesh_export_worker,
+            kwargs={"request": request, "proxy": proxy},
+            daemon=True,
+        )
+        self._proxy_mesh_thread.start()
+        self._window._update_action_state()
+        self._ensure_polling()
+
+    def _start_proxy_mesh_process(self, request, settings) -> bool:
+        try:
+            process, message_queue, cancel_event = self._deps.start_proxy_mesh_process(
+                request,
+                settings,
+                action="export",
+            )
+        except Exception as exc:
+            self.close_proxy_mesh_process()
+            self._window._report_error("Proxy Mesh generation failed", str(exc), status="Proxy Mesh generation failed.")
+            return False
+        self._proxy_mesh_process = process
+        self._proxy_mesh_queue = message_queue
+        self._proxy_mesh_cancel_event = cancel_event
+        return True
+
+    def _run_proxy_mesh_export_worker(self, *, request, settings) -> None:
+        try:
+            result = self._deps.export_proxy_usda_from_request(request, settings)
+            self._event_queue.put(("proxy_mesh_result", ProxyMeshJobResult(export=result)))
+        except Exception as exc:
+            self._event_queue.put(("proxy_mesh_error_traceback", traceback.format_exc()))
+            self._event_queue.put(("proxy_mesh_result", ProxyMeshJobResult(error_message=str(exc))))
+
+    def _run_generated_proxy_mesh_export_worker(self, *, request, proxy) -> None:
+        try:
+            result = self._deps.export_generated_proxy_usda_from_request(request, proxy)
+            self._event_queue.put(("proxy_mesh_result", ProxyMeshJobResult(export=result)))
+        except Exception as exc:
+            self._event_queue.put(("proxy_mesh_error_traceback", traceback.format_exc()))
+            self._event_queue.put(("proxy_mesh_result", ProxyMeshJobResult(error_message=str(exc))))
+
     def shutdown(self) -> None:
         self._poll_timer.stop()
         if self._conversion_cancel_event is not None:
@@ -223,7 +306,18 @@ class QtBackgroundJobsController:
                 with suppress(Exception):
                     self._conversion_process.terminate()
                     self._conversion_process.join(timeout=0.2)
+        if self._proxy_mesh_process is not None and self._proxy_mesh_process.is_alive():
+            if self._proxy_mesh_cancel_event is not None:
+                with suppress(Exception):
+                    self._proxy_mesh_cancel_event.set()
+            with suppress(Exception):
+                self._proxy_mesh_process.join(timeout=0.2)
+            if self._proxy_mesh_process.is_alive():
+                with suppress(Exception):
+                    self._proxy_mesh_process.terminate()
+                    self._proxy_mesh_process.join(timeout=0.2)
         self.close_conversion_process()
+        self.close_proxy_mesh_process()
 
     def _ensure_polling(self) -> None:
         if not self._poll_timer.isActive():
@@ -266,6 +360,11 @@ class QtBackgroundJobsController:
                     details=self._deps.format_wind_error(payload),
                     status="Wind JSON generation failed.",
                 )
+            elif event_name == "proxy_mesh_error_traceback":
+                self._proxy_mesh_error_traceback = str(payload)
+            elif event_name == "proxy_mesh_result":
+                self._proxy_mesh_result_received = True
+                self._handle_proxy_mesh_job_result(payload)
 
         if self._conversion_queue is not None:
             for event_name, payload in self._deps.drain_process_queue(self._conversion_queue):
@@ -285,7 +384,23 @@ class QtBackgroundJobsController:
         elif self._conversion_thread is not None and self._conversion_thread.is_alive():
             keep_polling = True
 
-        if self.wind_refresh_running or self.wind_json_running:
+        if self._proxy_mesh_queue is not None:
+            for event_name, payload in self._deps.drain_process_queue(self._proxy_mesh_queue):
+                keep_polling = True
+                if event_name == "error_traceback":
+                    self._proxy_mesh_error_traceback = str(payload)
+                elif event_name == "result":
+                    self._proxy_mesh_result_received = True
+                    self._handle_proxy_mesh_job_result(payload)
+
+        if self._proxy_mesh_process is not None and self._proxy_mesh_process.is_alive():
+            keep_polling = True
+        elif self._proxy_mesh_process is not None and not self._proxy_mesh_result_received:
+            self._handle_proxy_mesh_process_crash()
+        elif self._proxy_mesh_thread is not None and self._proxy_mesh_thread.is_alive():
+            keep_polling = True
+
+        if self.wind_refresh_running or self.wind_json_running or self.proxy_mesh_running:
             keep_polling = True
 
         if keep_polling:
@@ -380,6 +495,50 @@ class QtBackgroundJobsController:
         self._window._set_status(f"Wrote USDA to {result.output_path}")
         self._window._show_info("Conversion complete", f"Wrote USDA to {result.output_path}")
 
+    def _handle_proxy_mesh_process_crash(self) -> None:
+        exit_code = self._proxy_mesh_process.exitcode if self._proxy_mesh_process is not None else None
+        if self._proxy_mesh_retry_count < 1 and self._proxy_mesh_request is not None and self._proxy_mesh_settings is not None:
+            request = self._proxy_mesh_request
+            settings = self._proxy_mesh_settings
+            self._proxy_mesh_retry_count += 1
+            self._close_proxy_mesh_process_handles()
+            self._window._set_status(f"Proxy Mesh worker crashed once (exit code {exit_code}). Retrying...")
+            self._start_proxy_mesh_process(request, settings)
+            return
+        crash_message = f"Proxy Mesh worker process crashed unexpectedly (exit code {exit_code})"
+        if self._proxy_mesh_error_traceback:
+            crash_message = f"{crash_message}\n\n{self._proxy_mesh_error_traceback}"
+        self._handle_proxy_mesh_job_result(
+            ProxyMeshJobResult(
+                cancelled=bool(self._proxy_mesh_cancel_event and self._proxy_mesh_cancel_event.is_set()),
+                error_message=crash_message,
+            )
+        )
+
+    def _handle_proxy_mesh_job_result(self, job_result) -> None:
+        error_traceback = self._proxy_mesh_error_traceback
+        self.close_proxy_mesh_process()
+        self._window._update_action_state()
+        if job_result.error_message:
+            log_message = job_result.error_message
+            if error_traceback:
+                log_message = f"{log_message}\n\n{error_traceback}"
+            self._window._report_error(
+                "Proxy Mesh generation failed",
+                job_result.error_message,
+                details=log_message,
+                status="Proxy Mesh generation failed.",
+            )
+            return
+        if job_result.export is None:
+            self._window._report_error(
+                "Proxy Mesh generation failed",
+                "Proxy Mesh worker finished without an export result.",
+                status="Proxy Mesh generation failed.",
+            )
+            return
+        self._window._handle_proxy_mesh_export_result(job_result.export)
+
     def close_conversion_process(self) -> None:
         self._deps.close_process_queue(self._conversion_queue)
         self._conversion_process = None
@@ -390,3 +549,18 @@ class QtBackgroundJobsController:
         self._conversion_error_traceback = None
         self._last_conversion_telemetry = None
         self._conversion_thread = None
+
+    def close_proxy_mesh_process(self) -> None:
+        self._close_proxy_mesh_process_handles()
+        self._proxy_mesh_request = None
+        self._proxy_mesh_settings = None
+        self._proxy_mesh_retry_count = 0
+
+    def _close_proxy_mesh_process_handles(self) -> None:
+        self._deps.close_process_queue(self._proxy_mesh_queue)
+        self._proxy_mesh_process = None
+        self._proxy_mesh_queue = None
+        self._proxy_mesh_cancel_event = None
+        self._proxy_mesh_error_traceback = None
+        self._proxy_mesh_result_received = False
+        self._proxy_mesh_thread = None

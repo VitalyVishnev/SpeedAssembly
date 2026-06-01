@@ -50,3 +50,5 @@ def test_qt_package_script_builds_release_zip() -> None:
     assert "'--additional-hooks-dir', $hooksPath" in script_text
     assert "'--add-data', \"$qtUiStagingRoot;xml_to_usda/qt_ui\"" in script_text
     assert "'--exclude-module', $exclude" in script_text
+    assert "'PySide6.QtOpenGL'" not in script_text
+    assert "'PySide6.QtOpenGLWidgets'" not in script_text

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode, UdimMode
+from .proxy_mesh_service import PROXY_METHOD_DENSITY_FIELD, ProxyMeshSettings
 
 
 GUI_SETTINGS_SCHEMA_VERSION = 1
@@ -99,6 +100,7 @@ class GuiSettingsSnapshot:
     wind_group_settings: dict[str, WindGroupSettingRecord] = field(default_factory=dict)
     base_material_settings: tuple[BaseMaterialSettingRecord, ...] = ()
     part_mesh_settings: tuple[PartSourceSettingRecord, ...] = ()
+    proxy_mesh_settings: ProxyMeshSettings = field(default_factory=ProxyMeshSettings)
     fbx_cache_max_size_gb: int = 20
     fbx_cache_max_age_days: int = 14
     active_preset_name: str = FACTORY_DEFAULT_PRESET_NAME
@@ -131,6 +133,7 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
     wind_group_settings = _parse_wind_group_settings(payload.get("wind_group_settings"))
     base_material_settings = _parse_base_material_settings(payload.get("base_material_settings"))
     part_mesh_settings = _parse_part_mesh_settings(payload.get("part_mesh_settings"))
+    proxy_mesh_settings = _parse_proxy_mesh_settings(payload.get("proxy_mesh_settings"))
 
     return GuiSettingsSnapshot(
         last_input_path=str(payload.get("last_input_path", "")),
@@ -147,6 +150,7 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
         wind_group_settings=wind_group_settings,
         base_material_settings=base_material_settings,
         part_mesh_settings=part_mesh_settings,
+        proxy_mesh_settings=proxy_mesh_settings,
         fbx_cache_max_size_gb=_coerce_positive_int(payload.get("fbx_cache_max_size_gb"), 20),
         fbx_cache_max_age_days=_coerce_positive_int(payload.get("fbx_cache_max_age_days"), 14),
         active_preset_name=active_preset_name,
@@ -173,6 +177,7 @@ def save_gui_settings(settings_path: str | Path, snapshot: GuiSettingsSnapshot) 
         "wind_group_settings": _serialize_wind_group_settings(snapshot.wind_group_settings),
         "base_material_settings": _serialize_base_material_settings(snapshot.base_material_settings),
         "part_mesh_settings": _serialize_part_mesh_settings(snapshot.part_mesh_settings),
+        "proxy_mesh_settings": _serialize_proxy_mesh_settings(snapshot.proxy_mesh_settings),
         "fbx_cache_max_size_gb": _coerce_positive_int(snapshot.fbx_cache_max_size_gb, 20),
         "fbx_cache_max_age_days": _coerce_positive_int(snapshot.fbx_cache_max_age_days, 14),
     }
@@ -376,6 +381,23 @@ def _parse_part_mesh_settings(raw_value) -> tuple[PartSourceSettingRecord, ...]:
     return tuple(records)
 
 
+def _parse_proxy_mesh_settings(raw_value) -> ProxyMeshSettings:
+    if not isinstance(raw_value, dict):
+        return ProxyMeshSettings()
+    defaults = ProxyMeshSettings()
+    method = str(raw_value.get("method", defaults.method))
+    if method != PROXY_METHOD_DENSITY_FIELD:
+        method = defaults.method
+    base_mesh_priority = _coerce_float(raw_value.get("base_mesh_priority"), defaults.base_mesh_priority)
+    return ProxyMeshSettings(
+        method=method,
+        final_polycount=_coerce_positive_int(raw_value.get("final_polycount"), defaults.final_polycount),
+        bounds_inflation=max(0.01, _coerce_float(raw_value.get("bounds_inflation"), defaults.bounds_inflation)),
+        density_resolution=_coerce_positive_int(raw_value.get("density_resolution"), defaults.density_resolution),
+        base_mesh_priority=max(0.0, min(1.0, base_mesh_priority)),
+    )
+
+
 def _parse_preset(name: str, payload: dict) -> GuiPresetRecord:
     _require_schema_version(payload, context="preset")
     return GuiPresetRecord(
@@ -516,6 +538,16 @@ def _serialize_wind_group_settings(
             "shift_top": round(float(record.shift_top), 4),
         }
         for key, record in settings.items()
+    }
+
+
+def _serialize_proxy_mesh_settings(settings: ProxyMeshSettings) -> dict[str, object]:
+    return {
+        "method": settings.method,
+        "final_polycount": int(settings.final_polycount),
+        "bounds_inflation": round(float(settings.bounds_inflation), 4),
+        "density_resolution": int(settings.density_resolution),
+        "base_mesh_priority": round(float(settings.base_mesh_priority), 4),
     }
 
 

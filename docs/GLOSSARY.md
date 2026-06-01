@@ -53,6 +53,12 @@ architecture terms above are more precise.
   Assembly: one Assembly Root, rigid renderable prototypes, and repeated static
   Assembly Parts placed through PointInstancer, without skeletons or skeletal
   binding arrays.
+- **Proxy Mesh**
+  A separate companion USDA asset for the main tree export. It starts from the
+  `Canonical Tree Model`, is derived from the `Resolved Assembly Model`, uses
+  `Leaf References` input for repeated-part multiplicity, and writes as a
+  sibling `.usda` file with a `_proxy` suffix. It is geometry-only and is not a
+  separate export mode.
 - **Assembly Root**
   Root prim of the USDA scene. It marks the scene as a Nanite Assembly and, in
   skeletal assembly mode, points UE at the descendant Main Skeleton.
