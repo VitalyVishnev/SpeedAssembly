@@ -152,7 +152,7 @@ class ProxyPreviewDialog(QDialog):
         self.density_resolution_slider, self.density_resolution_spin = _build_int_slider_row(
             settings_panel,
             minimum=2,
-            maximum=128,
+            maximum=256,
             value=int(settings.density_resolution),
             step=1,
         )

@@ -95,10 +95,18 @@ def _set_combo_value(combo: QComboBox, value: str) -> None:
         combo.setCurrentIndex(index)
 
 
-def _make_path_edit(text: str, parent: QWidget, *, placeholder: str) -> QLineEdit:
+def _make_path_edit(
+    text: str,
+    parent: QWidget,
+    *,
+    placeholder: str,
+    max_width: int | None = None,
+) -> QLineEdit:
     edit = QLineEdit(text, parent)
     edit.setObjectName("PathInput")
     edit.setPlaceholderText(placeholder)
+    if max_width is not None:
+        edit.setMaximumWidth(int(max_width))
     return edit
 
 
@@ -112,10 +120,12 @@ def _make_udim_controls(parent: QWidget, *, mode: UdimMode, udim_id: int) -> tup
     ):
         mode_combo.addItem(label, value)
     _set_combo_value(mode_combo, mode.value)
+    mode_combo.setFixedWidth(144)
     udim_id_spin = QSpinBox(parent)
     udim_id_spin.setRange(1001, 1999)
     udim_id_spin.setValue(int(udim_id))
     udim_id_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+    udim_id_spin.setFixedWidth(56)
     return mode_combo, udim_id_spin
 
 
@@ -1007,10 +1017,15 @@ class MaterialsTabPanel(QWidget):
             row = QFrame(card)
             row_layout = QGridLayout(row)
             row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setHorizontalSpacing(10)
+            row_layout.setHorizontalSpacing(6)
             row_layout.addWidget(QLabel(spec.source_name or f"Material_{spec.source_id}", row), 0, 0)
             row_layout.addWidget(QLabel(str(spec.source_id), row), 0, 1)
-            path_edit = _make_path_edit(spec.ue_asset_path, row, placeholder="/Game/Path/Material.Material")
+            path_edit = _make_path_edit(
+                spec.ue_asset_path,
+                row,
+                placeholder="/Game/Path/Material.Material",
+                max_width=220,
+            )
             path_edit.textChanged.connect(lambda _text: self._on_change())
             row_layout.addWidget(path_edit, 0, 2)
             udim_mode_combo, udim_id_spin = _make_udim_controls(
@@ -1057,7 +1072,7 @@ class MaterialsTabPanel(QWidget):
             row_card_layout.addWidget(header_label)
 
             form = QGridLayout()
-            form.setHorizontalSpacing(10)
+            form.setHorizontalSpacing(6)
             form.setVerticalSpacing(8)
             mode_combo = NoWheelComboBox(row_card)
             mode_combo.addItem("Vertex Color Split", FbxMaterialMode.VERTEX_COLOR_SPLIT.value)
@@ -1065,19 +1080,34 @@ class MaterialsTabPanel(QWidget):
             mode_combo.setObjectName("InteractiveCombo")
             _set_combo_value(mode_combo, spec.fbx_material_mode.value)
 
-            single_edit = _make_path_edit(spec.single_material_path, row_card, placeholder="/Game/Path/Material.Material")
+            single_edit = _make_path_edit(
+                spec.single_material_path,
+                row_card,
+                placeholder="/Game/Path/Material.Material",
+                max_width=190,
+            )
             single_udim_mode_combo, single_udim_id_spin = _make_udim_controls(
                 row_card,
                 mode=spec.single_material_udim_mode,
                 udim_id=spec.single_material_udim_id,
             )
-            black_edit = _make_path_edit(spec.black_material_path, row_card, placeholder="/Game/Path/Black.Material")
+            black_edit = _make_path_edit(
+                spec.black_material_path,
+                row_card,
+                placeholder="/Game/Path/Black.Material",
+                max_width=190,
+            )
             black_udim_mode_combo, black_udim_id_spin = _make_udim_controls(
                 row_card,
                 mode=spec.black_material_udim_mode,
                 udim_id=spec.black_material_udim_id,
             )
-            white_edit = _make_path_edit(spec.white_material_path, row_card, placeholder="/Game/Path/White.Material")
+            white_edit = _make_path_edit(
+                spec.white_material_path,
+                row_card,
+                placeholder="/Game/Path/White.Material",
+                max_width=190,
+            )
             white_udim_mode_combo, white_udim_id_spin = _make_udim_controls(
                 row_card,
                 mode=spec.white_material_udim_mode,
@@ -1247,9 +1277,14 @@ class MaterialsTabPanel(QWidget):
         widget = QFrame(row.slots_frame)
         layout = QGridLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setHorizontalSpacing(10)
+        layout.setHorizontalSpacing(6)
         label = QLabel(f"{slot_spec.slot_name} ({slot_spec.face_count} faces)", widget)
-        edit = _make_path_edit(slot_spec.ue_asset_path, widget, placeholder="/Game/Path/Material.Material")
+        edit = _make_path_edit(
+            slot_spec.ue_asset_path,
+            widget,
+            placeholder="/Game/Path/Material.Material",
+            max_width=190,
+        )
         udim_mode_combo, udim_id_spin = _make_udim_controls(widget, mode=slot_spec.udim_mode, udim_id=slot_spec.udim_id)
         edit.textChanged.connect(lambda _text: self._on_change())
         udim_mode_combo.currentIndexChanged.connect(lambda _index: self._on_change())

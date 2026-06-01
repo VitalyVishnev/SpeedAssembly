@@ -211,9 +211,18 @@ def test_proxy_generation_rejects_invalid_base_mesh_priority() -> None:
         generate_proxy_mesh(_model(repeated_count=1), ProxyMeshSettings(base_mesh_priority=1.5))
 
 
-def test_proxy_generation_rejects_mesh_that_exceeds_polycount_budget() -> None:
-    with pytest.raises(ProxyMeshError, match="polycount budget"):
-        generate_proxy_mesh(_model(repeated_count=2), ProxyMeshSettings(final_polycount=5))
+def test_proxy_generation_saturates_when_budget_is_below_reachable_mesh_minimum() -> None:
+    result = generate_proxy_mesh(_model(repeated_count=2), ProxyMeshSettings(final_polycount=1))
+
+    assert result.mesh.face_count >= 1
+    assert result.mesh.point_count > 0
+
+
+def test_proxy_generation_saturates_when_budget_is_above_extracted_surface() -> None:
+    result = generate_proxy_mesh(_model(repeated_count=2), ProxyMeshSettings(final_polycount=500_000))
+
+    assert result.mesh.face_count > 0
+    assert result.mesh.face_count < 500_000
 
 
 def test_density_field_simplifies_extracted_surface_with_qem() -> None:

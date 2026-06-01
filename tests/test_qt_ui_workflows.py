@@ -867,6 +867,7 @@ def test_qt_window_opens_proxy_preview_from_geometry_tab(monkeypatch, qtbot, tmp
     assert window._proxy_preview_dialog.method_combo.count() == 1
     assert window._proxy_preview_dialog.method_combo.currentData() == "density_field"
     assert window._proxy_preview_dialog.density_resolution_spin.value() == 64
+    assert window._proxy_preview_dialog.density_resolution_spin.maximum() == 256
     assert calls["start_proxy_mesh_process"]["action"] == "preview"
     assert calls["generate_proxy_mesh_from_request"]["settings"].method == "density_field"
     assert calls["generate_proxy_mesh_from_request"]["settings"].final_polycount == 2400

@@ -794,24 +794,38 @@ class MainWindow(QWidget):
         convert_action_layout.addWidget(self.convert_button, 1)
         convert_action_layout.addWidget(self.convert_action_divider, 0)
         convert_action_layout.addWidget(self.convert_mode_button, 0)
-        self.generate_button = QPushButton("Generate Wind JSON", self)
-        self.generate_button.setObjectName("PrimaryActionButton")
+        self.generate_button = QPushButton("Generate\nWind JSON", self)
+        self.generate_button.setObjectName("GenerateWindButton")
         self.generate_button.clicked.connect(self.run_generate_wind_json)
-        self.generate_proxy_button = QPushButton("Generate Proxy Mesh", self)
-        self.generate_proxy_button.setObjectName("PrimaryActionButton")
+        self.generate_button.setMinimumHeight(54)
+        self.generate_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.generate_proxy_button = QPushButton("Generate\nProxy Mesh", self)
+        self.generate_proxy_button.setObjectName("GenerateProxyButton")
         self.generate_proxy_button.clicked.connect(self.run_generate_proxy_mesh)
+        self.generate_proxy_button.setMinimumHeight(54)
+        self.generate_proxy_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._action_buttons = [
             self.generate_button,
             self.generate_proxy_button,
         ]
+
+        self.generate_action_frame = QFrame(self)
+        self.generate_action_frame.setObjectName("SplitActionFrame")
+        generate_action_layout = QHBoxLayout(self.generate_action_frame)
+        generate_action_layout.setContentsMargins(0, 0, 0, 0)
+        generate_action_layout.setSpacing(0)
+        generate_action_layout.addWidget(self.generate_button, 1)
+        self.generate_action_divider = QFrame(self.generate_action_frame)
+        self.generate_action_divider.setObjectName("GenerateActionDivider")
+        generate_action_layout.addWidget(self.generate_action_divider, 0)
+        generate_action_layout.addWidget(self.generate_proxy_button, 1)
 
         right_column = QVBoxLayout()
         self._action_column_layout = right_column
         right_column.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
         right_column.setSpacing(max(6, spacing - 4))
         right_column.addWidget(self.convert_action_frame)
-        right_column.addWidget(self.generate_button)
-        right_column.addWidget(self.generate_proxy_button)
+        right_column.addWidget(self.generate_action_frame)
         right_column.addStretch(1)
 
         layout.addWidget(self.source_button, 0, 0)

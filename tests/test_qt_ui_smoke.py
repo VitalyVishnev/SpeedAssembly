@@ -216,6 +216,24 @@ def test_qt_shell_enables_actions_when_paths_present(qtbot, tmp_path) -> None:
     assert window.generate_button.isEnabled()
 
 
+def test_qt_shell_groups_generate_actions_into_a_split_button(qtbot, tmp_path) -> None:
+    theme = load_theme()
+    window = MainWindow(
+        theme,
+        UiShellState(),
+        dependencies=build_default_dependencies(),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    assert window.generate_button.text() == "Generate\nWind JSON"
+    assert window.generate_proxy_button.text() == "Generate\nProxy Mesh"
+    assert window.generate_action_frame.layout().count() == 3
+    assert window.generate_action_divider.objectName() == "GenerateActionDivider"
+
+
 def test_qt_title_bar_shows_global_settings_gear_instead_of_title(qtbot, tmp_path) -> None:
     theme = load_theme()
     window = MainWindow(

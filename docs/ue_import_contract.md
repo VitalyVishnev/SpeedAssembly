@@ -180,6 +180,24 @@ For `static_assembly` mode, the required importer-facing shape is:
 
 The static assembly root name is derived from the assembly/output stem, not from the skeletal `Tree` contract.
 
+## Proxy mesh companion contract
+
+Proxy Mesh export is a companion asset, not a `ConversionMode` and not part of
+the Nanite Assembly import contract.
+
+For proxy exports:
+
+- the converter writes a separate `_proxy.usda` sibling file
+- the file contains one geometry-only static `Mesh` under one `Xform`
+- no `NaniteAssemblyRootAPI` is authored
+- no `PointInstancer` is authored
+- no skeletons, `SkelBindingAPI`, or `primvars:skel:*` fields are authored
+- no material bindings are authored in the current proxy file
+- UE is expected to import the result as a plain Static Mesh
+
+The proxy file is intended for low-cost shadowing and Distance Field workflows.
+It must not redefine or weaken the main skeletal/static assembly contracts.
+
 ## External reuse debugging rule
 
 When an external `PartMesh` override appears to be ignored, check the generated USDA first:

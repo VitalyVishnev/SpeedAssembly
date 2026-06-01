@@ -98,12 +98,6 @@ def generate_proxy_mesh(model: CanonicalTreeModel, settings: ProxyMeshSettings |
         included_base = sources.base_mesh is not None
         mesh = _build_density_field_mesh(sources, resolved_settings)
 
-    if mesh.face_count > resolved_settings.final_polycount:
-        raise ProxyMeshError(
-            f"Proxy method {resolved_settings.method} produced {mesh.face_count} polygons, "
-            f"above the polycount budget {resolved_settings.final_polycount}."
-        )
-
     return ProxyMeshResult(
         mesh=mesh,
         settings=resolved_settings,
@@ -220,13 +214,7 @@ def _build_instance_bounds_mesh(boxes: tuple["_Bounds", ...], settings: ProxyMes
     builder = _ProxyMeshBuilder()
     for box in boxes:
         builder.add_box(box, name="Box")
-    mesh = builder.build("ProxyMesh")
-    if mesh.face_count > settings.final_polycount:
-        raise ProxyMeshError(
-            f"Proxy method {settings.method} produced {mesh.face_count} polygons, "
-            f"above the polycount budget {settings.final_polycount}."
-        )
-    return mesh
+    return builder.build("ProxyMesh")
 
 
 def _build_density_field_mesh(sources: _DensityFieldSources, settings: ProxyMeshSettings) -> GeometryBuffer:
@@ -248,15 +236,10 @@ def _build_density_field_mesh(sources: _DensityFieldSources, settings: ProxyMesh
         remaining_budget -= base_mesh.face_count
 
     if sources.foliage_instances:
-        if remaining_budget < 6:
-            raise ProxyMeshError(
-                f"Proxy method {settings.method} cannot fit foliage volume inside "
-                f"the remaining polycount budget {remaining_budget}."
-            )
         foliage_mesh = _build_foliage_density_field_mesh(
             sources.foliage_instances,
             settings=settings,
-            target_triangle_count=remaining_budget,
+            target_triangle_count=max(1, remaining_budget),
         )
         buffers.append(foliage_mesh)
 
@@ -271,12 +254,7 @@ def _base_mesh_budget(mesh: GeometryBuffer, *, settings: ProxyMeshSettings, has_
     _points, triangles = _triangulated_mesh_arrays(mesh)
     source_triangle_count = max(1, len(triangles))
     if not has_foliage:
-        return settings.final_polycount
-    if settings.final_polycount < 7:
-        raise ProxyMeshError(
-            f"Proxy method {settings.method} cannot fit a closed proxy mesh inside "
-            f"the polycount budget {settings.final_polycount}."
-        )
+        return max(1, settings.final_polycount)
     available_for_base = max(1, settings.final_polycount - 6)
     weighted_budget = int(round(available_for_base * settings.base_mesh_priority))
     return max(1, min(source_triangle_count, weighted_budget, available_for_base))
@@ -312,6 +290,7 @@ def _simplify_polygon_mesh(
     points, triangles = _triangulated_mesh_arrays(mesh)
     if len(triangles) == 0:
         raise ProxyMeshError(f"Proxy method {method} produced no surface triangles.")
+    target_triangle_count = max(1, int(target_triangle_count))
     if len(triangles) <= target_triangle_count:
         return _geometry_buffer_from_triangles(points, triangles, name=mesh.name)
     try:
@@ -326,13 +305,7 @@ def _simplify_polygon_mesh(
         )
     except Exception as exc:
         raise ProxyMeshError(f"Proxy QEM simplification failed: {exc}") from exc
-    simplified = _geometry_buffer_from_triangles(simplified_points, simplified_triangles, name=mesh.name)
-    if simplified.face_count > target_triangle_count:
-        raise ProxyMeshError(
-            f"Proxy method {method} produced {simplified.face_count} polygons, "
-            f"above the polycount budget {target_triangle_count}."
-        )
-    return simplified
+    return _geometry_buffer_from_triangles(simplified_points, simplified_triangles, name=mesh.name)
 
 
 def _triangulated_mesh_arrays(mesh: GeometryBuffer):
