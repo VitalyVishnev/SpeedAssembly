@@ -17,7 +17,7 @@ from xml_to_usda.models import CpuProfile, MaterialPolicy
 from xml_to_usda.qt_ui.panels import SliderSpinEditor
 from xml_to_usda.qt_ui.persistence import UiShellState
 from xml_to_usda.qt_ui.window import MainWindow
-from xml_to_usda.qt_ui.theme import ThemeOverrides, load_theme
+from xml_to_usda.qt_ui.theme import ThemeOverrides, load_bundled_theme, load_theme
 from xml_to_usda.settings_service import GuiSettingsSnapshot, load_gui_settings
 from xml_to_usda.fbx_payload_cache import FbxPayloadCacheSummary
 
@@ -232,6 +232,15 @@ def test_qt_shell_groups_generate_actions_into_a_split_button(qtbot, tmp_path) -
     assert window.generate_proxy_button.text() == "Generate\nProxy Mesh"
     assert window.generate_action_frame.layout().count() == 3
     assert window.generate_action_divider.objectName() == "GenerateActionDivider"
+    assert window.generate_action_frame.width() == window.convert_action_frame.width()
+    assert window.generate_action_frame.height() == window.convert_action_frame.height()
+    assert window.generate_button.width() + window.generate_proxy_button.width() + window.generate_action_divider.width() == window.generate_action_frame.width()
+    assert window.generate_button.height() > 0
+    assert window.generate_proxy_button.height() > 0
+
+
+def test_qt_shell_bundled_theme_bakes_reduced_left_column_width() -> None:
+    assert load_bundled_theme().layout["left_column_width"] == 300
 
 
 def test_qt_title_bar_shows_global_settings_gear_instead_of_title(qtbot, tmp_path) -> None:

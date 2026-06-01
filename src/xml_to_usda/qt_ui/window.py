@@ -797,13 +797,9 @@ class MainWindow(QWidget):
         self.generate_button = QPushButton("Generate\nWind JSON", self)
         self.generate_button.setObjectName("GenerateWindButton")
         self.generate_button.clicked.connect(self.run_generate_wind_json)
-        self.generate_button.setMinimumHeight(54)
-        self.generate_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.generate_proxy_button = QPushButton("Generate\nProxy Mesh", self)
         self.generate_proxy_button.setObjectName("GenerateProxyButton")
         self.generate_proxy_button.clicked.connect(self.run_generate_proxy_mesh)
-        self.generate_proxy_button.setMinimumHeight(54)
-        self.generate_proxy_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._action_buttons = [
             self.generate_button,
             self.generate_proxy_button,
@@ -819,6 +815,8 @@ class MainWindow(QWidget):
         self.generate_action_divider.setObjectName("GenerateActionDivider")
         generate_action_layout.addWidget(self.generate_action_divider, 0)
         generate_action_layout.addWidget(self.generate_proxy_button, 1)
+        generate_action_layout.setStretch(0, 1)
+        generate_action_layout.setStretch(2, 1)
 
         right_column = QVBoxLayout()
         self._action_column_layout = right_column
@@ -1225,8 +1223,15 @@ class MainWindow(QWidget):
         self.convert_action_frame.setFixedHeight(button_height)
         self.convert_button.setFixedSize(max(72, action_width - gear_width - 1), button_height)
         self.convert_mode_button.setFixedSize(gear_width, button_height)
-        for button in self._action_buttons:
-            button.setFixedSize(action_width, button_height)
+        self.generate_action_frame.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.generate_action_frame.setFixedWidth(action_width)
+        self.generate_action_frame.setFixedHeight(button_height)
+        generate_left_width = max(1, (action_width - 1) // 2)
+        generate_right_width = max(1, action_width - generate_left_width - 1)
+        self.generate_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.generate_proxy_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.generate_button.setFixedSize(generate_left_width, button_height)
+        self.generate_proxy_button.setFixedSize(generate_right_width, button_height)
 
         refresh_width = int(self._theme.chrome.get("wind_refresh_button_width", 164))
         refresh_height = int(self._theme.chrome.get("wind_refresh_button_height", 28))

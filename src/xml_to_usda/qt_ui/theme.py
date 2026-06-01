@@ -533,7 +533,7 @@ QPushButton#GenerateProxyButton {{
     color: {button_text};
     border-radius: {button_radius}px;
     min-width: 0px;
-    min-height: 52px;
+    min-height: {button_height}px;
     padding: 4px 10px;
 }}
 QPushButton#GenerateWindButton {{
