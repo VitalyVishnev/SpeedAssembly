@@ -555,6 +555,7 @@ class MainWindow(QWidget):
         base_theme: ThemeSpec | None = None,
         theme_overrides: ThemeOverrides | None = None,
         theme_overrides_path=None,
+        build_signature: str | None = None,
     ) -> None:
         super().__init__()
         self._design_theme = theme
@@ -567,6 +568,7 @@ class MainWindow(QWidget):
         )
         self._theme_export_path = default_ui_theme_export_path()
         self._state = state
+        self._build_signature = build_signature or state.help_prompt_build_signature
         self._deps = dependencies
         self._state_path = state_path
         self._operator_settings_path = Path(operator_settings_path) if operator_settings_path is not None else SETTINGS_PATH
@@ -654,7 +656,6 @@ class MainWindow(QWidget):
 
         self.title_bar = TitleBar(self, self._theme)
         outer.addWidget(self.title_bar, 0)
-        self._build_help_callout()
 
         body = QWidget(self)
         self._body_widget = body
@@ -673,10 +674,16 @@ class MainWindow(QWidget):
         self._update_panel_metrics()
 
         outer.addWidget(body, 1)
+        self._build_help_callout()
 
     def _build_help_callout(self) -> None:
-        self.help_callout = QFrame(self)
+        self.help_callout = QFrame(
+            self,
+            Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint,
+        )
         self.help_callout.setObjectName("TutorialCallout")
+        self.help_callout.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.help_callout.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.help_callout.setFixedWidth(360)
         layout = QVBoxLayout(self.help_callout)
         layout.setContentsMargins(16, 14, 14, 14)
@@ -690,6 +697,7 @@ class MainWindow(QWidget):
         self.help_callout_title.setWordWrap(True)
         self.help_callout_dismiss_button = QPushButton("x", self.help_callout)
         self.help_callout_dismiss_button.setObjectName("TutorialCalloutCloseButton")
+        self.help_callout_dismiss_button.setText("\u00d7")
         self.help_callout_dismiss_button.clicked.connect(self.dismiss_help_prompt)
         header.addWidget(self.help_callout_title, 1)
         header.addWidget(self.help_callout_dismiss_button, 0, Qt.AlignmentFlag.AlignTop)
@@ -1288,11 +1296,13 @@ class MainWindow(QWidget):
         # split action column and stacked buttons at their intended sizes.
         self._apply_theme_to_layout()
         self._update_panel_metrics()
+        self._sync_help_overlay_geometry()
         self.panel.updateGeometry()
         self.panel.update()
         self.updateGeometry()
         self.update()
         self._update_action_state()
+        self._apply_help_prompt_state()
 
     def _apply_operator_state_to_widgets(self) -> None:
         self._persistence_suspended = True
@@ -1582,10 +1592,13 @@ class MainWindow(QWidget):
 
     def _apply_help_prompt_state(self) -> None:
         visible = not self._state.help_prompt_dismissed
-        self.help_callout.setVisible(visible)
         if visible:
+            self.help_callout.adjustSize()
             self._position_help_callout()
+            self.help_callout.show()
             self.help_callout.raise_()
+        else:
+            self.help_callout.hide()
 
     def _position_help_callout(self) -> None:
         if not hasattr(self, "help_callout") or not hasattr(self, "title_bar"):
@@ -1595,6 +1608,11 @@ class MainWindow(QWidget):
         x = max(margin, min(anchor.x(), self.width() - self.help_callout.width() - margin))
         y = anchor.y() + margin
         self.help_callout.move(x, y)
+
+    def _sync_help_overlay_geometry(self) -> None:
+        if hasattr(self, "help_callout") and not self._state.help_prompt_dismissed:
+            self._position_help_callout()
+            self.help_callout.raise_()
 
     def open_adjust_ui_dialog(self) -> None:
         if self._adjust_ui_dialog is None:
@@ -1955,10 +1973,13 @@ class MainWindow(QWidget):
                 settings,
                 proxy,
             ),
-            parent=self,
+            parent=None,
         )
+        dialog.setStyleSheet(self.styleSheet())
         self._proxy_preview_dialog = dialog
         dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def run_generate_proxy_mesh(self) -> None:
         self._source_refresh_timer.stop()
@@ -2110,6 +2131,7 @@ class MainWindow(QWidget):
         self._connect_screen_scale_updates()
         self._refresh_runtime_scale_for_current_screen()
         self._apply_native_corner_preference()
+        self._sync_help_overlay_geometry()
         self._position_help_callout()
         QTimer.singleShot(0, self._refresh_layout_after_show)
 
@@ -2123,7 +2145,8 @@ class MainWindow(QWidget):
         if not self.isMaximized():
             self._restore_geometry = QRect(self.geometry())
         self._update_panel_metrics()
-        self._position_help_callout()
+        self._sync_help_overlay_geometry()
+        self._apply_help_prompt_state()
         self.panel.update()
         self.update()
 
@@ -2172,6 +2195,8 @@ class MainWindow(QWidget):
     def closeEvent(self, event) -> None:  # type: ignore[override]
         self._source_refresh_timer.stop()
         self._settings_save_timer.stop()
+        if self._proxy_preview_dialog is not None:
+            self._proxy_preview_dialog.close()
         self._save_operator_state()
         self._background_jobs.shutdown()
         geometry = self.normalGeometry() if self.isMaximized() else self.geometry()
@@ -2184,6 +2209,7 @@ class MainWindow(QWidget):
                 is_maximized=self.isMaximized(),
                 theme_name=self._design_theme.name,
                 help_prompt_dismissed=self._state.help_prompt_dismissed,
+                help_prompt_build_signature=self._build_signature,
                 active_tab_name=self.tabs.tabText(self.tabs.currentIndex()),
             ),
             self._state_path,

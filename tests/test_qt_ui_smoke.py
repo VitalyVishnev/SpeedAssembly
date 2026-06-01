@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QAbstractSpinBox, QMessageBox
 
 from xml_to_usda.qt_ui.dependencies import build_default_dependencies
 from xml_to_usda.qt_ui.entry import main
+from xml_to_usda.qt_ui.entry import _build_signature_from_executable_path
 from xml_to_usda.models import CpuProfile, MaterialPolicy
 from xml_to_usda.qt_ui.panels import SliderSpinEditor
 from xml_to_usda.qt_ui.persistence import UiShellState
@@ -150,6 +151,7 @@ def test_qt_entry_main_launches_and_exits_cleanly(monkeypatch) -> None:
             base_theme=None,
             theme_overrides=None,
             theme_overrides_path=None,
+            build_signature=None,
         ):
             self.shown = False
 
@@ -189,6 +191,15 @@ def test_qt_entry_application_icon_is_bundled() -> None:
     assert icon_path.endswith("Icon.ico")
     with open(icon_path, "rb") as icon_file:
         assert icon_file.read(6)[:4] == b"\x00\x00\x01\x00"
+
+
+def test_qt_entry_build_signature_can_come_from_single_executable(tmp_path) -> None:
+    executable_path = tmp_path / "XMLtoUSDAConverter.exe"
+    executable_path.write_bytes(b"abc")
+
+    signature = _build_signature_from_executable_path(executable_path)
+
+    assert signature == f"exe|3|{executable_path.stat().st_mtime_ns}"
 
 
 def test_qt_shell_enables_actions_when_paths_present(qtbot, tmp_path) -> None:

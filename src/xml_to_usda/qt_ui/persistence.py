@@ -20,6 +20,7 @@ class UiShellState:
     is_maximized: bool = False
     theme_name: str = "default"
     help_prompt_dismissed: bool = False
+    help_prompt_build_signature: str = ""
     active_tab_name: str = "Wind"
 
 
@@ -43,7 +44,12 @@ def default_ui_theme_export_path() -> Path:
     return _default_ui_path("ui_next_theme_export.json")
 
 
-def load_ui_shell_state(path: str | Path | None = None) -> UiShellState:
+def load_ui_shell_state(
+    path: str | Path | None = None,
+    *,
+    current_build_signature: str | None = None,
+    build_info_path: str | Path | None = None,
+) -> UiShellState:
     state_path = _resolve_optional_path(path, default_ui_state_path())
     if not state_path.exists():
         return UiShellState()
@@ -51,6 +57,13 @@ def load_ui_shell_state(path: str | Path | None = None) -> UiShellState:
         payload = json.loads(state_path.read_text(encoding="utf-8"))
     except Exception:
         return UiShellState()
+    if current_build_signature is None:
+        current_build_signature = _load_build_signature(build_info_path)
+    stored_build_signature = str(payload.get("help_prompt_build_signature", ""))
+    help_prompt_dismissed = bool(payload.get("help_prompt_dismissed", False))
+    if current_build_signature and stored_build_signature != current_build_signature:
+        help_prompt_dismissed = False
+        stored_build_signature = current_build_signature
     return UiShellState(
         x=int(payload.get("x", 120)),
         y=int(payload.get("y", 80)),
@@ -58,7 +71,8 @@ def load_ui_shell_state(path: str | Path | None = None) -> UiShellState:
         height=max(640, int(payload.get("height", 860))),
         is_maximized=bool(payload.get("is_maximized", False)),
         theme_name=str(payload.get("theme_name", "default")),
-        help_prompt_dismissed=bool(payload.get("help_prompt_dismissed", False)),
+        help_prompt_dismissed=help_prompt_dismissed,
+        help_prompt_build_signature=stored_build_signature,
         active_tab_name=str(payload.get("active_tab_name", "Wind")),
     )
 
@@ -67,6 +81,27 @@ def save_ui_shell_state(state: UiShellState, path: str | Path | None = None) -> 
     state_path = _resolve_optional_path(path, default_ui_state_path())
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(json.dumps(asdict(state), indent=2), encoding="utf-8")
+
+
+def _load_build_signature(path: str | Path | None) -> str:
+    if path is None:
+        return ""
+    try:
+        build_info_path = Path(path)
+        if not build_info_path.exists():
+            return ""
+        payload = json.loads(build_info_path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    built_at = str(payload.get("built_at", "")).strip()
+    build_mode = str(payload.get("build_mode", "")).strip()
+    git_head = str(payload.get("git_head", "")).strip()
+    exe_path = str(payload.get("exe_path", "")).strip()
+    if not any((built_at, build_mode, git_head, exe_path)):
+        return ""
+    return "|".join(part for part in (build_mode, git_head, built_at, exe_path) if part)
 
 
 def load_ui_theme_overrides(path: str | Path | None = None) -> ThemeOverrides:

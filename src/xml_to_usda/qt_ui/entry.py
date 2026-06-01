@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import json
 import multiprocessing
 import sys
 from importlib.resources import files
+from pathlib import Path
 
+from ..diagnostics_bundle import default_build_info_path
 from ..fbx_worker_subprocess import FBX_WORKER_COMMAND
 from ..proxy_mesh_worker_subprocess import PROXY_MESH_WORKER_COMMAND
 
@@ -63,7 +66,9 @@ def main(argv: list[str] | None = None) -> int:
     from .theme import ThemeOverrides, load_bundled_theme, merge_theme
     from .window import MainWindow
 
-    state = load_ui_shell_state()
+    build_info_path = default_build_info_path()
+    current_help_prompt_signature = _current_help_prompt_build_signature(build_info_path)
+    state = load_ui_shell_state(current_build_signature=current_help_prompt_signature)
     theme_name = args.theme or state.theme_name
     base_theme = load_bundled_theme(theme_name)
     theme_overrides = load_ui_theme_overrides()
@@ -75,7 +80,14 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("XML to USDA Converter")
     app.setWindowIcon(QIcon(application_icon_path()))
-    window = MainWindow(theme, state, dependencies=deps, base_theme=base_theme, theme_overrides=theme_overrides)
+    window = MainWindow(
+        theme,
+        state,
+        dependencies=deps,
+        base_theme=base_theme,
+        theme_overrides=theme_overrides,
+        build_signature=current_help_prompt_signature,
+    )
     window.show()
     if args.smoke_exit_ms > 0:
         QTimer.singleShot(args.smoke_exit_ms, app.quit)
@@ -94,3 +106,36 @@ def _suppress_windows_native_error_dialogs() -> None:
         )
     except Exception:
         return
+
+
+def _current_help_prompt_build_signature(build_info_path: Path | None) -> str:
+    signature = _build_signature_from_build_info_path(build_info_path)
+    if signature:
+        return signature
+    return _build_signature_from_executable_path(Path(sys.executable))
+
+
+def _build_signature_from_build_info_path(path) -> str:
+    if path is None:
+        return ""
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    built_at = str(payload.get("built_at", "")).strip()
+    build_mode = str(payload.get("build_mode", "")).strip()
+    git_head = str(payload.get("git_head", "")).strip()
+    exe_path = str(payload.get("exe_path", "")).strip()
+    if not any((built_at, build_mode, git_head, exe_path)):
+        return ""
+    return "|".join(part for part in (build_mode, git_head, built_at, exe_path) if part)
+
+
+def _build_signature_from_executable_path(path: Path) -> str:
+    try:
+        stat = path.stat()
+    except OSError:
+        return ""
+    return f"exe|{stat.st_size}|{stat.st_mtime_ns}"

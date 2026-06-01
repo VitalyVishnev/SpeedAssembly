@@ -54,6 +54,7 @@ GL_ONE_MINUS_SRC_ALPHA = 0x0303
 GL_SRC_ALPHA = 0x0302
 GL_TRIANGLES = 0x0004
 PROCESS_PREVIEW_STATUS_SECONDS = 10.0
+PROXY_PREVIEW_MAX_POLYCOUNT = 100_000
 
 
 class ProxyPreviewDialog(QDialog):
@@ -130,11 +131,11 @@ class ProxyPreviewDialog(QDialog):
         self.polycount_slider, self.polycount_spin = _build_int_slider_row(
             settings_panel,
             minimum=6,
-            maximum=500_000,
-            value=int(settings.final_polycount or DEFAULT_PROXY_POLYCOUNT),
+            maximum=PROXY_PREVIEW_MAX_POLYCOUNT,
+            value=min(PROXY_PREVIEW_MAX_POLYCOUNT, int(settings.final_polycount or DEFAULT_PROXY_POLYCOUNT)),
             step=100,
         )
-        self.polycount_spin.setValue(int(settings.final_polycount or DEFAULT_PROXY_POLYCOUNT))
+        self.polycount_spin.setValue(min(PROXY_PREVIEW_MAX_POLYCOUNT, int(settings.final_polycount or DEFAULT_PROXY_POLYCOUNT)))
         settings_layout.addWidget(QLabel("Final Polycount", settings_panel))
         settings_layout.addLayout(_slider_row(self.polycount_slider, self.polycount_spin))
 
@@ -425,7 +426,8 @@ def _build_int_slider_row(
     spin.setValue(value)
     spin.setKeyboardTracking(False)
     spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-    spin.setFixedWidth(70)
+    digit_width = spin.fontMetrics().horizontalAdvance(str(maximum))
+    spin.setFixedWidth(max(92, digit_width + 24))
 
     slider.valueChanged.connect(lambda raw: _sync_int_spin(spin, raw, step))
     spin.editingFinished.connect(lambda: _sync_int_slider(slider, spin.value()))

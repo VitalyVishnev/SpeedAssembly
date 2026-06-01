@@ -864,8 +864,11 @@ def test_qt_window_opens_proxy_preview_from_geometry_tab(monkeypatch, qtbot, tmp
     assert window._proxy_preview_dialog is not None
     assert window._proxy_preview_dialog.isVisible()
     assert isinstance(window._proxy_preview_dialog.viewport, QOpenGLWidget)
+    assert window._proxy_preview_dialog.parent() is None
     assert window._proxy_preview_dialog.method_combo.count() == 1
     assert window._proxy_preview_dialog.method_combo.currentData() == "density_field"
+    assert window._proxy_preview_dialog.polycount_spin.maximum() == 100000
+    assert window._proxy_preview_dialog.polycount_spin.width() >= window._proxy_preview_dialog.polycount_spin.fontMetrics().horizontalAdvance("100000")
     assert window._proxy_preview_dialog.density_resolution_spin.value() == 64
     assert window._proxy_preview_dialog.density_resolution_spin.maximum() == 256
     assert calls["start_proxy_mesh_process"]["action"] == "preview"
@@ -1304,8 +1307,13 @@ def test_qt_window_shows_and_persists_dismissed_first_launch_tutorial_callout(qt
     window.show()
 
     assert window.help_callout.isVisible()
+    assert window.help_callout.isWindow()
     assert "Start here for the tutorial" in window.help_callout_title.text()
+    assert window.help_callout_dismiss_button.text() == "\u00d7"
     assert window.help_callout.y() > window.title_bar.y()
+
+    qtbot.wait(50)
+    assert window.help_callout.isVisible()
 
     qtbot.mouseClick(window.help_callout_dismiss_button, Qt.MouseButton.LeftButton)
 
