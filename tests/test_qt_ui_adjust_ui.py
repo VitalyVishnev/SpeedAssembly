@@ -11,7 +11,7 @@ pytest.importorskip("pytestqt")
 pytestmark = pytest.mark.qt
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QMessageBox, QScrollArea
 
 from xml_to_usda.qt_ui.dependencies import build_default_dependencies
 from xml_to_usda.qt_ui.persistence import UiShellState
@@ -37,6 +37,31 @@ def test_adjust_ui_dialog_opens(qtbot, tmp_path) -> None:
 
     assert window._adjust_ui_dialog is not None
     assert window._adjust_ui_dialog.windowTitle().startswith("Adjust UI")
+
+
+def test_adjust_ui_scrollable_surfaces_keep_vertical_scrollbar_visible(qtbot, tmp_path) -> None:
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=build_default_dependencies(),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+        base_theme=load_bundled_theme(),
+        theme_overrides=ThemeOverrides(theme_name="default", payload={}),
+        theme_overrides_path=tmp_path / "ui_next_theme_overrides.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+    window.open_adjust_ui_dialog()
+    dialog = window._adjust_ui_dialog
+    assert dialog is not None
+
+    page_scrolls = dialog.pages.findChildren(QScrollArea)
+
+    assert page_scrolls
+    assert dialog.category_list.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+    for scroll in page_scrolls:
+        assert scroll.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOn
 
 
 def test_adjust_ui_live_preview_and_save(qtbot, tmp_path) -> None:

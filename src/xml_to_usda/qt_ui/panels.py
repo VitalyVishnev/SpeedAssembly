@@ -57,6 +57,7 @@ from ..settings_service import (
     PartSourceSettingRecord,
     WindGroupSettingRecord,
 )
+from .scrollbars import keep_vertical_scrollbar_visible
 
 UDIM_MODE_COMBO_WIDTH = 180
 UDIM_ID_SPIN_WIDTH = 76
@@ -71,6 +72,16 @@ def _make_scroll_host(parent: QWidget) -> tuple[QWidget, QVBoxLayout]:
     layout.setSpacing(12)
     layout.addStretch(1)
     return container, layout
+
+
+def _make_scroll_area(parent: QWidget) -> QScrollArea:
+    scroll = QScrollArea(parent)
+    keep_vertical_scrollbar_visible(scroll)
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    scroll.viewport().setObjectName("ScrollViewport")
+    scroll.viewport().setAutoFillBackground(False)
+    return scroll
 
 
 def _clear_layout(layout) -> None:
@@ -291,12 +302,8 @@ class WindTabPanel(QWidget):
         controls_layout.setColumnStretch(3, 1)
         outer.addWidget(controls)
 
-        self.scroll = QScrollArea(self)
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll = _make_scroll_area(self)
         self.scroll_container, self.scroll_layout = _make_scroll_host(self)
-        self.scroll.viewport().setObjectName("ScrollViewport")
-        self.scroll.viewport().setAutoFillBackground(False)
         self.scroll.setWidget(self.scroll_container)
         outer.addWidget(self.scroll, 1)
 
@@ -520,12 +527,8 @@ class GeometryTabPanel(QWidget):
         proxy_layout.setColumnStretch(1, 1)
         outer.addWidget(proxy_card)
 
-        self.scroll = QScrollArea(self)
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll = _make_scroll_area(self)
         self.scroll_container, self.scroll_layout = _make_scroll_host(self)
-        self.scroll.viewport().setObjectName("ScrollViewport")
-        self.scroll.viewport().setAutoFillBackground(False)
         self.scroll.setWidget(self.scroll_container)
         outer.addWidget(self.scroll, 1)
 
@@ -743,12 +746,8 @@ class MaterialsTabPanel(QWidget):
         self.summary_label.setWordWrap(True)
         outer.addWidget(self.summary_label)
 
-        self.scroll = QScrollArea(self)
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll = _make_scroll_area(self)
         self.scroll_container, self.scroll_layout = _make_scroll_host(self)
-        self.scroll.viewport().setObjectName("ScrollViewport")
-        self.scroll.viewport().setAutoFillBackground(False)
         self.scroll.setWidget(self.scroll_container)
         outer.addWidget(self.scroll, 1)
 

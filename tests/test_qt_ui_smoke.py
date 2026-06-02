@@ -81,6 +81,30 @@ def test_qt_shell_title_help_button_fits_its_label_width(qtbot, tmp_path) -> Non
     assert help_button.width() >= help_button.fontMetrics().horizontalAdvance(help_button.text()) + 32
 
 
+def test_qt_shell_scrollable_surfaces_keep_vertical_scrollbar_visible(qtbot, tmp_path) -> None:
+    theme = load_theme()
+    window = MainWindow(
+        theme,
+        UiShellState(),
+        dependencies=build_default_dependencies(),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    window.open_log_dialog()
+
+    assert window._log_dialog is not None
+    for widget in (
+        window._log_dialog.editor,
+        window.wind_panel.scroll,
+        window.geometry_panel.scroll,
+        window.materials_panel.scroll,
+    ):
+        assert widget.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+
+
 def test_qt_shell_factory_defaults_preset_control_stays_compact(qtbot, tmp_path) -> None:
     theme = load_theme()
     window = MainWindow(

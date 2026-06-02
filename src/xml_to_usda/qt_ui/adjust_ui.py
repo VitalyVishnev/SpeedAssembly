@@ -44,6 +44,7 @@ from .theme import (
     merge_theme,
     set_nested_value,
 )
+from .scrollbars import keep_vertical_scrollbar_visible
 
 
 @dataclass(frozen=True)
@@ -376,6 +377,7 @@ class AdjustUiDialog(QDialog):
 
         self.category_list = QListWidget(self)
         self.category_list.setObjectName("AdjustUiCategoryList")
+        keep_vertical_scrollbar_visible(self.category_list)
         self.category_list.setMinimumWidth(210)
         body.addWidget(self.category_list, 0)
 
@@ -443,6 +445,7 @@ class AdjustUiDialog(QDialog):
             self.category_list.addItem(category)
             container = QWidget(self)
             scroll = QScrollArea(self)
+            keep_vertical_scrollbar_visible(scroll)
             scroll.setWidgetResizable(True)
             scroll.setObjectName("ScrollContainer")
             scroll.setWidget(container)

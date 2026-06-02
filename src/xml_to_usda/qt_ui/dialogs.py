@@ -7,6 +7,7 @@ from collections.abc import Callable
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout
 
 from .help_deck import HELP_SLIDES, HelpSlide
+from .scrollbars import keep_vertical_scrollbar_visible
 
 
 class TextDialog(QDialog):
@@ -19,6 +20,7 @@ class TextDialog(QDialog):
         layout.setContentsMargins(12, 12, 12, 12)
 
         self.editor = QPlainTextEdit(self)
+        keep_vertical_scrollbar_visible(self.editor)
         self.editor.setReadOnly(read_only)
         self.editor.setPlainText(text)
         layout.addWidget(self.editor)
