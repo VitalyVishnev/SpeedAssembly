@@ -59,6 +59,11 @@ architecture terms above are more precise.
   `Leaf References` input for repeated-part multiplicity, and writes as a
   sibling `.usda` file with a `_proxy` suffix. It is geometry-only and is not a
   separate export mode.
+- **Proxy Mesh Source Request**
+  The narrowed request projection used by Proxy Mesh preview/export. It carries
+  the source XML path, proxy output path, output mode, CPU profile, and FBX
+  cache limits, but not main-export material overrides, prototype replacement,
+  UDIM settings, or conversion mode intent.
 - **Assembly Root**
   Root prim of the USDA scene. It marks the scene as a Nanite Assembly and, in
   skeletal assembly mode, points UE at the descendant Main Skeleton.
@@ -216,6 +221,11 @@ architecture terms above are more precise.
 - **Authored Material Binding**
   USDA material prims, `material:binding` relationships, and `GeomSubset`
   authoring written for the selected export mode.
+- **UDIM Material Setting**
+  Per-material Operator Intent that either shifts primary face-varying UVs or
+  writes a full-size secondary UV channel for resolved inline geometry. It is
+  keyed by resolved material id and does not edit external Unreal asset
+  prototypes.
 - **Source Name**
   Name observed in source data, such as XML object names, `Meshes/Mesh/@Name`,
   material names, or source filenames. Source Names are metadata unless a

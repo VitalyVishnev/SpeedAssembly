@@ -2,20 +2,28 @@ from __future__ import annotations
 
 import multiprocessing
 import pickle
+import shutil
 import subprocess
 import sys
 import tempfile
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from queue import Empty
 from pathlib import Path
 
 from .job_control import apply_process_profile
 from .models import ConversionJobResult, ConversionRequest
 from .pipeline import convert_request
+from .conversion_worker_subprocess import (
+    CONVERSION_WORKER_COMMAND,
+    ConversionWorkerRequest,
+    read_conversion_worker_error,
+    write_conversion_worker_request,
+)
 from .proxy_mesh_service import (
     ProxyMeshJobResult,
     ProxyMeshSettings,
+    ProxyMeshSourceRequest,
 )
 from .proxy_mesh_worker_subprocess import (
     PROXY_MESH_WORKER_COMMAND,
@@ -36,25 +44,41 @@ def start_conversion_process(
     runtime_paths,
 ):
     suppress_windows_native_error_dialogs()
-    context = get_spawn_context()
-    message_queue = context.Queue()
-    cancel_event = context.Event()
-    process = context.Process(
-        target=_conversion_process_entry,
-        kwargs={
-            "request": request,
-            "runtime_paths": runtime_paths,
-            "message_queue": message_queue,
-            "cancel_event": cancel_event,
-        },
-        daemon=False,
+    request_path = _create_conversion_temp_path(".request.pkl")
+    result_path = _create_conversion_temp_path(".result.pkl")
+    error_path = _create_conversion_temp_path(".error.json")
+    event_dir = Path(tempfile.mkdtemp(prefix="xml_to_usda_conversion_events_"))
+    write_conversion_worker_request(
+        request_path,
+        ConversionWorkerRequest(
+            request=request,
+            runtime_paths=runtime_paths,
+            result_path=str(result_path),
+            error_path=str(error_path),
+            event_dir=str(event_dir),
+        ),
     )
-    process.start()
-    return process, message_queue, cancel_event
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    process = subprocess.Popen(
+        _resolve_conversion_worker_command(request_path),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=creation_flags,
+    )
+    return (
+        _SubprocessWorkerProcess(process),
+        _ConversionWorkerQueue(
+            request_path=request_path,
+            result_path=result_path,
+            error_path=error_path,
+            event_dir=event_dir,
+        ),
+        _SubprocessCancelEvent(process),
+    )
 
 
 def start_proxy_mesh_process(
-    request: ConversionRequest,
+    request: ProxyMeshSourceRequest,
     settings: ProxyMeshSettings,
     *,
     action: str,
@@ -81,9 +105,9 @@ def start_proxy_mesh_process(
         creationflags=creation_flags,
     )
     return (
-        _ProxyMeshWorkerProcess(process),
+        _SubprocessWorkerProcess(process),
         _ProxyMeshWorkerQueue(request_path=request_path, result_path=result_path, error_path=error_path),
-        _ProxyMeshCancelEvent(process),
+        _SubprocessCancelEvent(process),
     )
 
 
@@ -147,7 +171,7 @@ def _conversion_process_entry(
 
 def _proxy_mesh_process_entry(
     *,
-    request: ConversionRequest,
+    request: ProxyMeshSourceRequest,
     settings: ProxyMeshSettings,
     action: str,
     message_queue,
@@ -158,14 +182,14 @@ def _proxy_mesh_process_entry(
         apply_process_profile(request.cpu_profile)
         if bool(cancel_event.is_set()):
             raise RuntimeError("Proxy mesh generation cancelled by user.")
-        from .proxy_mesh_service import export_proxy_usda_from_request, generate_proxy_mesh_from_request
+        from .proxy_mesh_service import export_proxy_usda_from_source_request, generate_proxy_mesh_from_source_request
 
         if action == "preview":
-            proxy = generate_proxy_mesh_from_request(request, settings)
+            proxy = generate_proxy_mesh_from_source_request(request, settings)
             message_queue.put(("result", ProxyMeshJobResult(proxy=proxy)))
             return
         if action == "export":
-            export = export_proxy_usda_from_request(request, settings)
+            export = export_proxy_usda_from_source_request(request, settings)
             message_queue.put(("result", ProxyMeshJobResult(export=export)))
             return
         raise ValueError(f"Unsupported proxy mesh worker action: {action}")
@@ -181,8 +205,9 @@ def _proxy_mesh_process_entry(
             )
         )
 
+
 @dataclass
-class _ProxyMeshWorkerProcess:
+class _SubprocessWorkerProcess:
     process: subprocess.Popen
 
     @property
@@ -203,7 +228,7 @@ class _ProxyMeshWorkerProcess:
 
 
 @dataclass
-class _ProxyMeshCancelEvent:
+class _SubprocessCancelEvent:
     process: subprocess.Popen
 
     def is_set(self) -> bool:
@@ -212,6 +237,54 @@ class _ProxyMeshCancelEvent:
     def set(self) -> None:
         if self.process.poll() is None:
             self.process.terminate()
+
+
+@dataclass
+class _ConversionWorkerQueue:
+    request_path: Path
+    result_path: Path
+    error_path: Path
+    event_dir: Path
+    delivered_events: set[str] = field(default_factory=set)
+    delivered_result: bool = False
+
+    def drain(self) -> list[tuple[str, object]]:
+        events: list[tuple[str, object]] = []
+        for event_path in sorted(self.event_dir.glob("*.event.pkl")):
+            event_name = event_path.name
+            if event_name in self.delivered_events:
+                continue
+            with event_path.open("rb") as handle:
+                events.append(pickle.load(handle))
+            self.delivered_events.add(event_name)
+
+        if self.delivered_result:
+            return events
+        if self.error_path.exists():
+            self.delivered_result = True
+            message, formatted_traceback = read_conversion_worker_error(self.error_path)
+            result = _read_conversion_job_result(self.result_path, fallback_error_message=message)
+            return events + [
+                ("error_traceback", formatted_traceback),
+                ("result", result),
+            ]
+        if not self.result_path.exists():
+            return events
+        self.delivered_result = True
+        return events + [("result", _read_conversion_job_result(self.result_path))]
+
+    def close(self) -> None:
+        for path in (self.request_path, self.result_path, self.error_path):
+            try:
+                path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        try:
+            shutil.rmtree(self.event_dir)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
 
 
 @dataclass
@@ -247,7 +320,15 @@ class _ProxyMeshWorkerQueue:
 
 
 def _create_proxy_temp_path(suffix: str) -> Path:
-    handle = tempfile.NamedTemporaryFile(prefix="xml_to_usda_proxy_", suffix=suffix, delete=False)
+    return _create_temp_path("xml_to_usda_proxy_", suffix)
+
+
+def _create_conversion_temp_path(suffix: str) -> Path:
+    return _create_temp_path("xml_to_usda_conversion_", suffix)
+
+
+def _create_temp_path(prefix: str, suffix: str) -> Path:
+    handle = tempfile.NamedTemporaryFile(prefix=prefix, suffix=suffix, delete=False)
     path = Path(handle.name)
     handle.close()
     try:
@@ -255,6 +336,30 @@ def _create_proxy_temp_path(suffix: str) -> Path:
     except Exception:
         pass
     return path
+
+
+def _read_conversion_job_result(path: Path, *, fallback_error_message: str = "") -> ConversionJobResult:
+    if not path.exists():
+        return ConversionJobResult(
+            error_message=fallback_error_message or "Conversion worker finished without a result."
+        )
+    with path.open("rb") as handle:
+        payload = pickle.load(handle)
+    if isinstance(payload, ConversionJobResult):
+        return payload
+    return ConversionJobResult(error_message="Conversion worker returned an invalid result payload.")
+
+
+def _resolve_conversion_worker_command(request_path: Path) -> list[str]:
+    if bool(getattr(sys, "frozen", False)):
+        worker_dir_executable = Path(sys.executable).parent / "XMLtoUSDAWorker" / "XMLtoUSDAWorker.exe"
+        if worker_dir_executable.exists():
+            return [str(worker_dir_executable), CONVERSION_WORKER_COMMAND, "--request", str(request_path)]
+        worker_executable = Path(sys.executable).with_name("XMLtoUSDAWorker.exe")
+        if worker_executable.exists():
+            return [str(worker_executable), CONVERSION_WORKER_COMMAND, "--request", str(request_path)]
+        return [sys.executable, CONVERSION_WORKER_COMMAND, "--request", str(request_path)]
+    return [sys.executable, "-m", "xml_to_usda", CONVERSION_WORKER_COMMAND, "--request", str(request_path)]
 
 
 def _resolve_proxy_mesh_worker_command(request_path: Path) -> list[str]:

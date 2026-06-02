@@ -30,9 +30,9 @@ class QtUiDependencies:
     WindGenerationRequest: object
     generate_wind_json_from_request: object
     derive_wind_json_output_path: object
-    generate_proxy_mesh_from_request: object
-    export_proxy_usda_from_request: object
-    export_generated_proxy_usda_from_request: object
+    generate_proxy_mesh_from_source_request: object
+    export_proxy_usda_from_source_request: object
+    export_generated_proxy_usda_from_source_request: object
     format_wind_error: object
     should_retry_wind_error: object
     sys: object
@@ -61,9 +61,9 @@ def build_default_dependencies() -> QtUiDependencies:
         should_retry_wind_error,
     )
     from ..proxy_mesh_service import (
-        export_generated_proxy_usda_from_request,
-        export_proxy_usda_from_request,
-        generate_proxy_mesh_from_request,
+        export_generated_proxy_usda_from_source_request,
+        export_proxy_usda_from_source_request,
+        generate_proxy_mesh_from_source_request,
     )
 
     return QtUiDependencies(
@@ -84,9 +84,9 @@ def build_default_dependencies() -> QtUiDependencies:
         WindGenerationRequest=WindGenerationRequest,
         generate_wind_json_from_request=generate_wind_json_from_request,
         derive_wind_json_output_path=derive_wind_json_output_path,
-        generate_proxy_mesh_from_request=generate_proxy_mesh_from_request,
-        export_proxy_usda_from_request=export_proxy_usda_from_request,
-        export_generated_proxy_usda_from_request=export_generated_proxy_usda_from_request,
+        generate_proxy_mesh_from_source_request=generate_proxy_mesh_from_source_request,
+        export_proxy_usda_from_source_request=export_proxy_usda_from_source_request,
+        export_generated_proxy_usda_from_source_request=export_generated_proxy_usda_from_source_request,
         format_wind_error=format_wind_error,
         should_retry_wind_error=should_retry_wind_error,
         sys=sys,

@@ -70,6 +70,7 @@ Current Proxy Mesh status:
 - Proxy Mesh preview/export is implemented as a companion workflow, not as a new
   main conversion mode
 - the current shipping method is `density_field`
+- `instance_bounds` remains an explicit debug baseline, not the shipping method
 - base geometry is simplified directly from the base mesh
 - repeated parts from `LeafReferences` become instanced foliage volume kernels,
   are accumulated into one density field, extracted as one surface, then reduced
@@ -90,6 +91,11 @@ Current Proxy Mesh status:
   above the extracted source surface it returns the full extracted surface
 - `Density Resolution` defaults to `64` and the preview window allows values up
   to `256`
+- `Bounds Inflation` defaults to `1.0`; `Base Mesh Priority` defaults to `0.33`
+  and controls how much target budget is reserved for base geometry when
+  foliage is present
+- invalid persisted proxy settings are coerced back to the supported
+  `density_field` method and positive/clamped numeric ranges
 - UE import as a Static Mesh has been manually confirmed; Distance Field and
   shadow quality validation remain pending
 
@@ -135,7 +141,7 @@ The remaining acceptance criterion is breadth, not a known functional blocker.
 - unique geometry survives as the `Base Skeletal Tree`
 - repeated geometry imports through `PointInstancer`
 - materials work for the baseline import path, including UE-backed material overrides
-- material-policy behavior is documented and regression-tested for `source_material_roles`, `single_material`, and `vertex_color_split`
+- material-policy behavior is documented and regression-tested for `source_materials`, legacy `source_material_roles`, `single_material`, and `vertex_color_split`
 - explicit repeated-part material behavior is regression-tested for `single_material`, `vertex_color_split`, and `material_slots`
 - transforms and skeletal bindings are visually sane in UE
 - automated regression fixtures cover the supported structural cases

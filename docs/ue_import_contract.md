@@ -189,6 +189,7 @@ For proxy exports:
 
 - the converter writes a separate `_proxy.usda` sibling file
 - the file contains one geometry-only static `Mesh` under one `Xform`
+- the proxy root uses `defaultPrim`, `metersPerUnit = 1`, and `upAxis = "Y"`
 - no `NaniteAssemblyRootAPI` is authored
 - no `PointInstancer` is authored
 - no skeletons, `SkelBindingAPI`, or `primvars:skel:*` fields are authored
@@ -197,6 +198,9 @@ For proxy exports:
 
 The proxy file is intended for low-cost shadowing and Distance Field workflows.
 It must not redefine or weaken the main skeletal/static assembly contracts.
+Current proxy generation is source-normalized XML based: explicit FBX/Unreal
+prototype replacement, material overrides, and UDIM settings from the main
+conversion request are not applied to the proxy companion asset.
 
 ## External reuse debugging rule
 
@@ -241,8 +245,12 @@ For the current contract:
 
 The exporter now has explicit material-policy modes:
 
+- `source_materials`
+  - default mode
+  - preserve authored XML material sections and source material names
+  - do not infer semantic bark/leaves roles from numeric XML ids
 - `source_material_roles`
-  - CLI/JSON mode only
+  - legacy compatibility mode only
   - raw XML material ids `1` and `2` are still interpreted as primary/leaves semantic slots
   - the old missing-role validation remains active only in this mode
 - `single_material`
@@ -293,10 +301,16 @@ This name is covered by automated USDA regression tests and has been manually
 validated in UE 5.7.x on the current baseline sample. Broader real-sample
 coverage is still required before treating it as fully generalized.
 
+GUI UDIM controls exist on base XML material rows and on repeated-part material
+rows. Repeated-part UDIM settings are resolved only for inline geometry created
+by `single_material`, `vertex_color_split`, or FBX `material_slots`; external
+Unreal asset prototypes keep their own UV data.
+
 Raw SpeedTree XML material ids must be treated as opaque Source Material
-metadata. `source_material_roles` may infer bark/leaves buckets from authored
-source usage, but it must not treat numeric ids like `1/2` as a required
-contract.
+metadata. The default `source_materials` policy preserves those ids only as
+internal keys. Legacy `source_material_roles` may infer bark/leaves buckets from
+authored source usage, but it must not treat numeric ids like `1/2` as a
+generic contract.
 They are not semantic bark/leaves roles for the generic pipeline contract.
 
 ## Current validated defaults

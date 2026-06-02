@@ -16,12 +16,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .job_control import apply_process_profile
-from .models import ConversionRequest
 from .proxy_mesh_service import (
     ProxyMeshJobResult,
     ProxyMeshSettings,
-    export_proxy_usda_from_request,
-    generate_proxy_mesh_from_request,
+    ProxyMeshSourceRequest,
+    export_proxy_usda_from_source_request,
+    generate_proxy_mesh_from_source_request,
 )
 from .runtime_error_mode import suppress_windows_native_error_dialogs
 
@@ -31,7 +31,7 @@ PROXY_MESH_WORKER_COMMAND = "proxy-mesh-worker"
 
 @dataclass(frozen=True)
 class ProxyMeshWorkerRequest:
-    request: ConversionRequest
+    request: ProxyMeshSourceRequest
     settings: ProxyMeshSettings
     action: str
     result_path: str
@@ -66,11 +66,11 @@ def run_proxy_mesh_worker_request_file(path: str | Path) -> int:
         apply_process_profile(request.request.cpu_profile)
         if request.action == "preview":
             result = ProxyMeshJobResult(
-                proxy=generate_proxy_mesh_from_request(request.request, request.settings)
+                proxy=generate_proxy_mesh_from_source_request(request.request, request.settings)
             )
         elif request.action == "export":
             result = ProxyMeshJobResult(
-                export=export_proxy_usda_from_request(request.request, request.settings)
+                export=export_proxy_usda_from_source_request(request.request, request.settings)
             )
         else:
             raise ValueError(f"Unsupported proxy mesh worker action: {request.action}")

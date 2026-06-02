@@ -65,7 +65,7 @@ def test_prepare_conversion_plan_builds_default_material_request() -> None:
         output_path="out.usda",
         cpu_profile=CpuProfile.BALANCED,
         cleanup_policy=CleanupPolicy.EPHEMERAL,
-        material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
+        material_policy=MaterialPolicy.SOURCE_MATERIALS,
         bark_material_path="/Game/TestMaterials/M_Bark_Test",
         leaves_material_path="/Game/TestMaterials/M_Leaves_Test",
         single_material_path=None,
@@ -77,9 +77,9 @@ def test_prepare_conversion_plan_builds_default_material_request() -> None:
     assert plan.run_async is False
     assert plan.request.input_paths == (str(SIMPLE_TREE_01),)
     assert plan.request.output_path == "out.usda"
-    assert plan.request.material_policy == MaterialPolicy.SOURCE_MATERIAL_ROLES
-    assert plan.request.bark_material_path == "/Game/TestMaterials/M_Bark_Test"
-    assert plan.request.leaves_material_path == "/Game/TestMaterials/M_Leaves_Test"
+    assert plan.request.material_policy == MaterialPolicy.SOURCE_MATERIALS
+    assert plan.request.bark_material_path is None
+    assert plan.request.leaves_material_path is None
     assert plan.request.single_material_path is None
     assert plan.request.use_explicit_material_contract is False
     assert plan.request.conversion_mode == ConversionMode.SKELETAL_ASSEMBLY

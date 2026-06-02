@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from xml_to_usda.models import MeshData, SourceObject, Vector3
+from xml_to_usda.models import MeshData, MeshSection, SourceObject, Vector3
 from xml_to_usda.normalizer import (
     _build_base_mesh,
     _extract_assembly_parts_from_leaf_references,
@@ -105,6 +105,118 @@ def test_canonical_model_matches_when_source_node_index_is_prebuilt() -> None:
     model_without_shared_index = normalize_to_canonical(document, analysis.report)
 
     assert model_without_shared_index == model_from_analysis
+
+
+def test_object_mesh_reads_all_sibling_triangle_material_blocks(tmp_path: Path) -> None:
+    source_path = tmp_path / "multi_triangle_blocks.xml"
+    source_path.write_text(
+        """
+        <SpeedTreeRaw>
+            <Materials>
+                <Material ID="10" Name="Bark" />
+                <Material ID="11" Name="Cap" />
+            </Materials>
+            <Bones>
+                <Bone ID="20" ParentID="-1" Name="Root" StartX="0" StartY="0" StartZ="0" Generator="Group_0" />
+            </Bones>
+            <Objects>
+                <Object ID="1" Name="Group_cap" AbsX="0" AbsY="0" AbsZ="0" RelX="0" RelY="0" RelZ="0">
+                    <Points Count="4">
+                        <X>0 1 0 0</X>
+                        <Y>0 0 1 0</Y>
+                        <Z>0 0 0 1</Z>
+                    </Points>
+                    <Vertices Count="4">
+                        <TexcoordU>0 1 0 0</TexcoordU>
+                        <TexcoordV>0 0 1 1</TexcoordV>
+                        <BoneID>20 20 20 20</BoneID>
+                    </Vertices>
+                    <Triangles Material="10" Count="1">
+                        <PointIndices>0 1 2</PointIndices>
+                        <VertexIndices>0 1 2</VertexIndices>
+                    </Triangles>
+                    <Triangles Material="11" Count="1">
+                        <PointIndices>0 2 3</PointIndices>
+                        <VertexIndices>0 2 3</VertexIndices>
+                    </Triangles>
+                </Object>
+            </Objects>
+        </SpeedTreeRaw>
+        """,
+        encoding="utf-8",
+    )
+    document = read_source_xml(source_path)
+    report = inspect_xml(document)
+
+    model = normalize_to_canonical(document, report)
+
+    assert model.base_mesh is not None
+    assert model.base_mesh.face_vertex_counts == (3, 3)
+    assert model.base_mesh.face_vertex_indices == (0, 1, 2, 0, 2, 3)
+    assert model.base_mesh.skel_joint_indices == (0, 0, 0, 0)
+    assert model.base_mesh.sections == (
+        MeshSection(material_id=10, face_indices=(0,)),
+        MeshSection(material_id=11, face_indices=(1,)),
+    )
+    assert not any("did not resolve to any skeletal binding" in warning for warning in model.metadata.warnings)
+
+
+def test_object_reads_all_sibling_leaf_reference_blocks(tmp_path: Path) -> None:
+    source_path = tmp_path / "multi_leaf_reference_blocks.xml"
+    source_path.write_text(
+        """
+        <SpeedTreeRaw>
+            <Materials>
+                <Material ID="10" Name="Needles" />
+            </Materials>
+            <Bones>
+                <Bone ID="20" ParentID="-1" Name="Root" StartX="0" StartY="0" StartZ="0" Generator="Group_0" />
+            </Bones>
+            <Objects>
+                <Object ID="1" Name="Branch" AbsX="0" AbsY="0" AbsZ="0" RelX="0" RelY="0" RelZ="0">
+                    <LeafReferences Material="10" Count="1">
+                        <X>0</X>
+                        <Y>0</Y>
+                        <Z>0</Z>
+                        <Scale>1</Scale>
+                        <RotAxisX>0</RotAxisX>
+                        <RotAxisY>0</RotAxisY>
+                        <RotAxisZ>1</RotAxisZ>
+                        <RotAngle>0</RotAngle>
+                        <MeshID>1</MeshID>
+                        <MeshLOD>0</MeshLOD>
+                        <BoneID>20</BoneID>
+                    </LeafReferences>
+                    <LeafReferences Material="10" Count="1">
+                        <X>1</X>
+                        <Y>0</Y>
+                        <Z>0</Z>
+                        <Scale>1</Scale>
+                        <RotAxisX>0</RotAxisX>
+                        <RotAxisY>0</RotAxisY>
+                        <RotAxisZ>1</RotAxisZ>
+                        <RotAngle>0</RotAngle>
+                        <MeshID>2</MeshID>
+                        <MeshLOD>0</MeshLOD>
+                        <BoneID>20</BoneID>
+                    </LeafReferences>
+                </Object>
+            </Objects>
+        </SpeedTreeRaw>
+        """,
+        encoding="utf-8",
+    )
+    document = read_source_xml(source_path)
+    analysis = analyze_xml(document)
+
+    model = normalize_to_canonical(document, analysis.report, source_nodes=analysis.source_nodes)
+
+    assert analysis.report.leaf_mesh_distribution == {"1": 1, "2": 1}
+    assert analysis.report.leaf_binding_distribution == {"20": 2}
+    assert analysis.report.leaf_source_object_distribution == {"1": 2}
+    assert len(model.assembly_parts) == 2
+    assert [part.prototype_key for part in model.assembly_parts] == ["Mesh_1", "Mesh_2"]
+    assert [part.bind_joint for part in model.assembly_parts] == ["bone_020", "bone_020"]
 
 
 def test_speedtree_xml_without_units_uses_meter_source_scale() -> None:

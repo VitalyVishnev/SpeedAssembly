@@ -64,7 +64,7 @@ def resolve_assembly_model(
     source_model: CanonicalTreeModel,
     *,
     output_mode: OutputMode = OutputMode.SELF_CONTAINED,
-    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES,
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIALS,
     bark_material_path: str | None = None,
     leaves_material_path: str | None = None,
     single_material_path: str | None = None,
@@ -111,7 +111,7 @@ def resolve_assembly_model(
 def load_resolved_assembly_model(
     input_path: str,
     output_mode: OutputMode = OutputMode.SELF_CONTAINED,
-    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES,
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIALS,
     bark_material_path: str | None = None,
     leaves_material_path: str | None = None,
     single_material_path: str | None = None,
@@ -159,7 +159,7 @@ def load_resolved_assembly_model(
 def load_canonical_model(
     input_path: str,
     output_mode: OutputMode = OutputMode.SELF_CONTAINED,
-    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES,
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIALS,
     bark_material_path: str | None = None,
     leaves_material_path: str | None = None,
     single_material_path: str | None = None,

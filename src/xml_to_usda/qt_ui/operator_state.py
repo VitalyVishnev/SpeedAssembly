@@ -34,7 +34,7 @@ class OperatorState:
     cpu_profile: CpuProfile = CpuProfile.BALANCED
     preserve_temp_files: bool = False
     conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
-    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIALS
     bark_material_path: str = ""
     leaves_material_path: str = ""
     single_material_path: str = ""

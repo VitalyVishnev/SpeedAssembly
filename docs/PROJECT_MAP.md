@@ -62,6 +62,7 @@ free of UI, process, launcher, and package-build behavior.
 - `src/xml_to_usda/prototype_keys.py`
 - `src/xml_to_usda/payload_partition.py`
 - `src/xml_to_usda/geometry_buffers.py`
+- `src/xml_to_usda/udim_resolver.py`
 
 ### Application modules
 
@@ -79,6 +80,7 @@ contracts.
 - `src/xml_to_usda/prototype_resolution.py`
 - `src/xml_to_usda/material_assignment_resolution.py`
 - `src/xml_to_usda/source_analysis.py`
+- `src/xml_to_usda/udim_settings.py`
 
 ### Infrastructure modules
 

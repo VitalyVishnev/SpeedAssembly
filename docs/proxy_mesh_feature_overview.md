@@ -24,6 +24,12 @@ The proxy exists only as a companion asset for rendering, shadows, and distance-
 - The proxy file name uses the main USDA stem plus the `_proxy` suffix.
 - If no output path is set, proxy export follows the same fallback behavior as Wind JSON generation and derives the file name from the input source path.
 - The proxy is derived from `CanonicalTreeModel` source-normalized data, not from raw XML traversal.
+- The current request path loads proxy source data through the static-assembly
+  canonical projection and does not apply main-export explicit FBX replacement,
+  Unreal asset reuse, material overrides, or UDIM settings.
+- UI preview/export and the isolated worker pass `ProxyMeshSourceRequest`
+  instead of full `ConversionRequest`; this keeps the proxy interface limited
+  to source path, output path, output mode, CPU profile, and FBX cache limits.
 - The proxy uses repeated-part instancing as input. All `LeafReferences` instances are part of the proxy input set.
 - The proxy does not pre-cull repeated parts just because they are small.
 - The proxy output is one polygonal mesh prim inside one USD(A) file.
@@ -46,6 +52,9 @@ The proxy exists only as a companion asset for rendering, shadows, and distance-
     surface instead of failing
 - `Density Resolution` defaults to `64`; the preview control allows values up
   to `256`.
+- `Bounds Inflation` defaults to `1.0`.
+- `Base Mesh Priority` defaults to `0.33` and is clamped to `0..1` when loaded
+  from persisted settings.
 - Proxy settings are persisted with the Qt GUI settings and restored on the
   next launch/open.
 - Preview and export run through isolated worker process infrastructure when
@@ -66,6 +75,12 @@ branches until there is evidence that they solve a real vegetation class better.
 - the surface is simplified with QEM through `fast-simplification`
 - `Base Mesh Priority` controls how much of the requested budget is reserved
   for base geometry before foliage volume simplification
+
+### `instance_bounds`
+
+- builds inflated transformed bounds boxes for base geometry and repeated parts
+- remains a deterministic debug baseline
+- is not exposed as the shipping Qt method
 
 ### `triangle_soup`
 
@@ -177,7 +192,9 @@ work is quality validation and method tuning, not basic end-to-end wiring.
 
 - The proxy starts from `CanonicalTreeModel`.
 - The proxy must include all repeated-part instances from `LeafReferences`.
-- The proxy may reuse resolved prototype payloads already available in the canonical model.
+- The proxy may reuse normalized prototype payloads already available in the
+  canonical model, but it does not use main-export FBX or Unreal replacement
+  Operator Intent.
 - The proxy keeps the main tree's overall stage-space scale and pivot behavior.
 - The proxy must not invent fallback geometry if source facts are insufficient.
 - If proxy generation cannot safely resolve the needed tree facts, it fails loudly and reports the missing assumption.

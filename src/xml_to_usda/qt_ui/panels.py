@@ -58,6 +58,10 @@ from ..settings_service import (
     WindGroupSettingRecord,
 )
 
+UDIM_MODE_COMBO_WIDTH = 180
+UDIM_ID_SPIN_WIDTH = 76
+UDIM_ID_LABEL_SPACING = 4
+
 
 def _make_scroll_host(parent: QWidget) -> tuple[QWidget, QVBoxLayout]:
     container = QWidget(parent)
@@ -120,13 +124,25 @@ def _make_udim_controls(parent: QWidget, *, mode: UdimMode, udim_id: int) -> tup
     ):
         mode_combo.addItem(label, value)
     _set_combo_value(mode_combo, mode.value)
-    mode_combo.setFixedWidth(144)
+    mode_combo.setFixedWidth(UDIM_MODE_COMBO_WIDTH)
     udim_id_spin = QSpinBox(parent)
     udim_id_spin.setRange(1001, 1999)
     udim_id_spin.setValue(int(udim_id))
     udim_id_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-    udim_id_spin.setFixedWidth(56)
+    udim_id_spin.setAlignment(Qt.AlignmentFlag.AlignRight)
+    udim_id_spin.setFixedWidth(UDIM_ID_SPIN_WIDTH)
     return mode_combo, udim_id_spin
+
+
+def _make_udim_id_cell(parent: QWidget, label: QLabel, spin: QSpinBox) -> QWidget:
+    cell = QWidget(parent)
+    layout = QHBoxLayout(cell)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(UDIM_ID_LABEL_SPACING)
+    label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    layout.addWidget(label, 0)
+    layout.addWidget(spin, 0)
+    return cell
 
 
 class NoWheelComboBox(QComboBox):
@@ -671,18 +687,21 @@ class PartMaterialRowWidgets:
     single_edit: QLineEdit
     single_udim_label: QLabel
     single_udim_mode_combo: NoWheelComboBox
+    single_udim_id_cell: QWidget
     single_udim_id_label: QLabel
     single_udim_id_spin: QSpinBox
     black_label: QLabel
     black_edit: QLineEdit
     black_udim_label: QLabel
     black_udim_mode_combo: NoWheelComboBox
+    black_udim_id_cell: QWidget
     black_udim_id_label: QLabel
     black_udim_id_spin: QSpinBox
     white_label: QLabel
     white_edit: QLineEdit
     white_udim_label: QLabel
     white_udim_mode_combo: NoWheelComboBox
+    white_udim_id_cell: QWidget
     white_udim_id_label: QLabel
     white_udim_id_spin: QSpinBox
     slots_frame: QFrame
@@ -1019,7 +1038,6 @@ class MaterialsTabPanel(QWidget):
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setHorizontalSpacing(6)
             row_layout.addWidget(QLabel(spec.source_name or f"Material_{spec.source_id}", row), 0, 0)
-            row_layout.addWidget(QLabel(str(spec.source_id), row), 0, 1)
             path_edit = _make_path_edit(
                 spec.ue_asset_path,
                 row,
@@ -1027,16 +1045,16 @@ class MaterialsTabPanel(QWidget):
                 max_width=220,
             )
             path_edit.textChanged.connect(lambda _text: self._on_change())
-            row_layout.addWidget(path_edit, 0, 2)
+            row_layout.addWidget(path_edit, 0, 1)
             udim_mode_combo, udim_id_spin = _make_udim_controls(
                 row,
                 mode=spec.udim_mode,
                 udim_id=spec.udim_id,
             )
             udim_mode_combo.currentIndexChanged.connect(lambda _index: self._on_change())
-            row_layout.addWidget(udim_mode_combo, 0, 3)
+            row_layout.addWidget(udim_mode_combo, 0, 2)
             udim_id_spin.valueChanged.connect(lambda _value: self._on_change())
-            row_layout.addWidget(udim_id_spin, 0, 4)
+            row_layout.addWidget(udim_id_spin, 0, 3)
             self._base_rows.append(
                 BaseMaterialRowWidgets(
                     source_id=spec.source_id,
@@ -1117,12 +1135,15 @@ class MaterialsTabPanel(QWidget):
             single_label = QLabel("Single Material", row_card)
             single_udim_label = QLabel("UDIM", row_card)
             single_udim_id_label = QLabel("ID", row_card)
+            single_udim_id_cell = _make_udim_id_cell(row_card, single_udim_id_label, single_udim_id_spin)
             black_label = QLabel("Black Material", row_card)
             black_udim_label = QLabel("UDIM", row_card)
             black_udim_id_label = QLabel("ID", row_card)
+            black_udim_id_cell = _make_udim_id_cell(row_card, black_udim_id_label, black_udim_id_spin)
             white_label = QLabel("White Material", row_card)
             white_udim_label = QLabel("UDIM", row_card)
             white_udim_id_label = QLabel("ID", row_card)
+            white_udim_id_cell = _make_udim_id_cell(row_card, white_udim_id_label, white_udim_id_spin)
 
             form.addWidget(material_mode_label, 0, 0)
             form.addWidget(mode_combo, 0, 1)
@@ -1130,20 +1151,17 @@ class MaterialsTabPanel(QWidget):
             form.addWidget(single_edit, 1, 1)
             form.addWidget(single_udim_label, 1, 2)
             form.addWidget(single_udim_mode_combo, 1, 3)
-            form.addWidget(single_udim_id_label, 1, 4)
-            form.addWidget(single_udim_id_spin, 1, 5)
+            form.addWidget(single_udim_id_cell, 1, 4, 1, 2)
             form.addWidget(black_label, 2, 0)
             form.addWidget(black_edit, 2, 1)
             form.addWidget(black_udim_label, 2, 2)
             form.addWidget(black_udim_mode_combo, 2, 3)
-            form.addWidget(black_udim_id_label, 2, 4)
-            form.addWidget(black_udim_id_spin, 2, 5)
+            form.addWidget(black_udim_id_cell, 2, 4, 1, 2)
             form.addWidget(white_label, 3, 0)
             form.addWidget(white_edit, 3, 1)
             form.addWidget(white_udim_label, 3, 2)
             form.addWidget(white_udim_mode_combo, 3, 3)
-            form.addWidget(white_udim_id_label, 3, 4)
-            form.addWidget(white_udim_id_spin, 3, 5)
+            form.addWidget(white_udim_id_cell, 3, 4, 1, 2)
             row_card_layout.addLayout(form)
 
             slots_frame = QFrame(row_card)
@@ -1161,18 +1179,21 @@ class MaterialsTabPanel(QWidget):
                 single_edit=single_edit,
                 single_udim_label=single_udim_label,
                 single_udim_mode_combo=single_udim_mode_combo,
+                single_udim_id_cell=single_udim_id_cell,
                 single_udim_id_label=single_udim_id_label,
                 single_udim_id_spin=single_udim_id_spin,
                 black_label=black_label,
                 black_edit=black_edit,
                 black_udim_label=black_udim_label,
                 black_udim_mode_combo=black_udim_mode_combo,
+                black_udim_id_cell=black_udim_id_cell,
                 black_udim_id_label=black_udim_id_label,
                 black_udim_id_spin=black_udim_id_spin,
                 white_label=white_label,
                 white_edit=white_edit,
                 white_udim_label=white_udim_label,
                 white_udim_mode_combo=white_udim_mode_combo,
+                white_udim_id_cell=white_udim_id_cell,
                 white_udim_id_label=white_udim_id_label,
                 white_udim_id_spin=white_udim_id_spin,
                 slots_frame=slots_frame,
@@ -1212,6 +1233,8 @@ class MaterialsTabPanel(QWidget):
         row.single_udim_label.setVisible(single_visible)
         row.single_udim_mode_combo.setVisible(single_visible)
         row.single_udim_mode_combo.setEnabled(single_visible)
+        row.single_udim_id_cell.setVisible(single_visible)
+        row.single_udim_id_cell.setEnabled(single_visible)
         row.single_udim_id_label.setVisible(single_visible)
         row.single_udim_id_spin.setVisible(single_visible)
         row.single_udim_id_spin.setEnabled(single_visible)
@@ -1221,6 +1244,8 @@ class MaterialsTabPanel(QWidget):
         row.black_udim_label.setVisible(split_visible)
         row.black_udim_mode_combo.setVisible(split_visible)
         row.black_udim_mode_combo.setEnabled(split_visible)
+        row.black_udim_id_cell.setVisible(split_visible)
+        row.black_udim_id_cell.setEnabled(split_visible)
         row.black_udim_id_label.setVisible(split_visible)
         row.black_udim_id_spin.setVisible(split_visible)
         row.black_udim_id_spin.setEnabled(split_visible)
@@ -1230,6 +1255,8 @@ class MaterialsTabPanel(QWidget):
         row.white_udim_label.setVisible(split_visible)
         row.white_udim_mode_combo.setVisible(split_visible)
         row.white_udim_mode_combo.setEnabled(split_visible)
+        row.white_udim_id_cell.setVisible(split_visible)
+        row.white_udim_id_cell.setEnabled(split_visible)
         row.white_udim_id_label.setVisible(split_visible)
         row.white_udim_id_spin.setVisible(split_visible)
         row.white_udim_id_spin.setEnabled(split_visible)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pickle
 from pathlib import Path
 from queue import Empty
 import threading
@@ -12,9 +13,14 @@ from xml_to_usda.conversion_process import (
     start_conversion_process,
     start_proxy_mesh_process,
 )
+from xml_to_usda.conversion_worker_subprocess import (
+    ConversionWorkerRequest,
+    run_conversion_worker_request_file,
+    write_conversion_worker_request,
+)
 from xml_to_usda.models import ConversionJobResult, ConversionRequest
 from xml_to_usda.pipeline import convert_request
-from xml_to_usda.proxy_mesh_service import ProxyMeshJobResult, ProxyMeshSettings
+from xml_to_usda.proxy_mesh_service import ProxyMeshJobResult, ProxyMeshSettings, ProxyMeshSourceRequest
 from xml_to_usda.runtime_paths import resolve_runtime_paths
 
 
@@ -85,21 +91,53 @@ def _test_runtime_paths(tmp_path: Path):
     )
 
 
-def test_start_conversion_process_uses_non_daemon_worker(monkeypatch) -> None:
-    dummy_context = _DummyContext()
-    monkeypatch.setattr("xml_to_usda.conversion_process.get_spawn_context", lambda: dummy_context)
+def _read_pickled_events(event_dir: Path) -> list[tuple[str, object]]:
+    events: list[tuple[str, object]] = []
+    for path in sorted(event_dir.glob("*.event.pkl")):
+        with path.open("rb") as handle:
+            events.append(pickle.load(handle))
+    return events
+
+
+def test_start_conversion_process_uses_file_based_worker(monkeypatch, tmp_path: Path) -> None:
+    class _DummyPopen:
+        def __init__(self, args, **kwargs) -> None:
+            self.args = args
+            self.kwargs = kwargs
+            self.terminated = False
+
+        def poll(self):
+            return None if not self.terminated else 1
+
+        def wait(self, timeout=None):
+            self.terminated = True
+            return 0
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    popen_calls: list[_DummyPopen] = []
+
+    def fake_popen(args, **kwargs):
+        process = _DummyPopen(args, **kwargs)
+        popen_calls.append(process)
+        return process
+
+    monkeypatch.setattr("xml_to_usda.conversion_process.subprocess.Popen", fake_popen)
 
     process, queue, cancel_event = start_conversion_process(
         ConversionRequest(input_paths=("input.xml",), output_path="output.usda"),
-        runtime_paths=object(),
+        runtime_paths=_test_runtime_paths(tmp_path),
     )
 
-    assert process is dummy_context.process
-    assert queue is dummy_context.queue
-    assert cancel_event is dummy_context.event
-    assert dummy_context.process is not None
-    assert dummy_context.process.started is True
-    assert dummy_context.process.daemon is False
+    assert popen_calls
+    assert process.is_alive() is True
+    assert "--request" in popen_calls[0].args
+    assert popen_calls[0].kwargs["stdout"] is not None
+    assert popen_calls[0].kwargs["stderr"] is not None
+    cancel_event.set()
+    assert process.is_alive() is False
+    close_process_queue(queue)
 
 
 def test_start_proxy_mesh_process_uses_file_based_worker(monkeypatch) -> None:
@@ -129,7 +167,7 @@ def test_start_proxy_mesh_process_uses_file_based_worker(monkeypatch) -> None:
     monkeypatch.setattr("xml_to_usda.conversion_process.subprocess.Popen", fake_popen)
 
     process, queue, cancel_event = start_proxy_mesh_process(
-        ConversionRequest(input_paths=("input.xml",), output_path="output.usda"),
+        ProxyMeshSourceRequest(input_path="input.xml", output_path="output.usda"),
         ProxyMeshSettings(),
         action="export",
     )
@@ -213,6 +251,47 @@ def test_conversion_process_entry_success_matches_direct_convert_request(
     assert job_result.result.usda_document.text == expected_result.usda_document.text
 
 
+def test_conversion_worker_request_file_writes_telemetry_and_result(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    runtime_paths = _test_runtime_paths(tmp_path)
+    request = ConversionRequest(
+        input_paths=(str(SIMPLE_TREE_01),),
+        output_path=str(tmp_path / "worker_file_success.usda"),
+    )
+    request_path = tmp_path / "conversion.request.pkl"
+    result_path = tmp_path / "conversion.result.pkl"
+    error_path = tmp_path / "conversion.error.json"
+    event_dir = tmp_path / "events"
+
+    monkeypatch.setattr("xml_to_usda.conversion_worker_subprocess.apply_process_profile", lambda _profile: None)
+    write_conversion_worker_request(
+        request_path,
+        ConversionWorkerRequest(
+            request=request,
+            runtime_paths=runtime_paths,
+            result_path=str(result_path),
+            error_path=str(error_path),
+            event_dir=str(event_dir),
+        ),
+    )
+
+    exit_code = run_conversion_worker_request_file(request_path)
+
+    assert exit_code == 0
+    assert error_path.exists() is False
+    assert sorted(path.name for path in event_dir.glob("*.event.pkl"))
+    events = _read_pickled_events(event_dir)
+    assert any(event_name == "telemetry" for event_name, _payload in events)
+    with result_path.open("rb") as handle:
+        job_result = pickle.load(handle)
+    assert isinstance(job_result, ConversionJobResult)
+    assert job_result.error_message is None
+    assert job_result.result is not None
+    assert job_result.result.output_path == str(tmp_path / "worker_file_success.usda")
+
+
 def test_conversion_process_entry_reports_traceback_then_error_result_on_failure(
     monkeypatch,
     tmp_path: Path,
@@ -279,8 +358,8 @@ def test_conversion_process_entry_marks_cancelled_when_cancel_event_is_set(
 
 
 def test_proxy_mesh_process_entry_exports_proxy_usda(monkeypatch, tmp_path: Path) -> None:
-    request = ConversionRequest(
-        input_paths=(str(SIMPLE_TREE_01),),
+    request = ProxyMeshSourceRequest(
+        input_path=str(SIMPLE_TREE_01),
         output_path=str(tmp_path / "worker_proxy.usda"),
     )
     queue = _RecordingQueue()
@@ -306,8 +385,8 @@ def test_proxy_mesh_process_entry_exports_proxy_usda(monkeypatch, tmp_path: Path
 
 
 def test_proxy_mesh_process_entry_reports_error_result_on_failure(monkeypatch, tmp_path: Path) -> None:
-    request = ConversionRequest(
-        input_paths=(str(tmp_path / "missing_input.xml"),),
+    request = ProxyMeshSourceRequest(
+        input_path=str(tmp_path / "missing_input.xml"),
         output_path=str(tmp_path / "worker_proxy.usda"),
     )
     queue = _RecordingQueue()

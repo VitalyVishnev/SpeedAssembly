@@ -141,8 +141,12 @@ Current material-policy baseline:
 
 Supported exporter material policies:
 
+- `source_materials`
+  - default mode
+  - preserves authored XML material sections as opaque Source Materials
+  - does not infer bark/leaves semantics from numeric XML ids
 - `source_material_roles`
-  - CLI/JSON mode only
+  - legacy compatibility mode only
   - keeps the old semantic expectation that material id `1` is primary and id `2` is leaves
   - keeps the old missing-role validation only in this mode
 - `single_material`
@@ -156,8 +160,9 @@ Supported exporter material policies:
   - any gray or other non-white value is assigned to material id `2`
   - if usable vertex colors are missing, the exporter warns and assigns the mesh to material id `1`
 
-Outside `source_material_roles`, authored XML material ids are preserved only as
-Source Material metadata on canonical materials and instances.
+In `source_materials`, authored XML material ids remain internal source keys for
+material rows, UDIM settings, and section references. They are not shown as
+operator-facing semantics.
 
 Current GUI material workflow, stage 1:
 
@@ -166,19 +171,36 @@ Current GUI material workflow, stage 1:
   `Materials/Material`, but only for ids used by unique base-tree geometry
   under `Objects/Object`
 - each base-material row exposes:
-  - source `ID`
   - source `Name`
   - one Unreal material path
+  - one UDIM mode and UDIM id
 - multiple XML Source Material rows may intentionally point at the same Unreal material path
 - repeated part prototypes do not reuse those base-material rows as their only control surface
 - repeated part rows currently expose:
   - `single_material`
   - `vertex_color_split`
   - `material_slots` for `FBX file` rows
+- repeated part rows also expose UDIM mode/id controls for:
+  - the single-material row
+  - black and white split buckets
+  - each used FBX material slot row
+- repeated-part UDIM settings become resolved material settings only after the
+  chosen repeated-part material mode creates concrete inline material ids
 - `vertex_color_split` is an explicit black/white split for repeated-part materials
 - `material_slots` derives its Source Material slot list from the imported FBX payload instead of from SpeedTree XML
 - only FBX slots actually used by imported faces are exposed
 - repeated FBX material names are merged into one logical slot row
+
+Proxy Mesh source mapping:
+
+- proxy generation consumes the source-normalized `CanonicalTreeModel`
+- it includes base geometry when present and every `LeafReferences` repeated
+  part instance
+- it uses source XML prototype payloads or already available normalized payloads
+  as proxy input
+- it intentionally does not apply main-export explicit FBX replacement, Unreal
+  asset reuse, material overrides, or UDIM settings
+- proxy generation supports exactly one input XML per request
 
 Naming policy:
 

@@ -241,7 +241,7 @@ def _inspect_objects(
         object_id = obj.attrib.get("ID")
         points_node = None
         triangles_node = None
-        leaf_ref_node = None
+        leaf_ref_nodes: list[ET.Element] = []
         spine_node = None
         for child in obj:
             tag = child.tag
@@ -249,8 +249,8 @@ def _inspect_objects(
                 points_node = child
             elif tag == "Triangles" and triangles_node is None:
                 triangles_node = child
-            elif tag == "LeafReferences" and leaf_ref_node is None:
-                leaf_ref_node = child
+            elif tag == "LeafReferences":
+                leaf_ref_nodes.append(child)
             elif tag == "Spine" and spine_node is None:
                 spine_node = child
         if object_id is not None:
@@ -261,7 +261,7 @@ def _inspect_objects(
 
         if points_node is not None and triangles_node is not None:
             class_counts["mesh_object"] += 1
-        elif leaf_ref_node is not None:
+        elif leaf_ref_nodes:
             class_counts["leaf_reference_host"] += 1
         else:
             class_counts["other"] += 1
@@ -273,11 +273,12 @@ def _inspect_objects(
             spine_object_count += 1
             class_counts["spine_object"] += 1
 
-        if leaf_ref_node is None:
+        if not leaf_ref_nodes:
             continue
-        bone_counts.update(_read_tokens(leaf_ref_node.findtext("BoneID")))
-        mesh_counts.update(_read_tokens(leaf_ref_node.findtext("MeshID")))
-        source_object_counts[obj.attrib.get("ID", "Object")] += 1
+        for leaf_ref_node in leaf_ref_nodes:
+            bone_counts.update(_read_tokens(leaf_ref_node.findtext("BoneID")))
+            mesh_counts.update(_read_tokens(leaf_ref_node.findtext("MeshID")))
+            source_object_counts[obj.attrib.get("ID", "Object")] += 1
 
     for object_id in parents:
         if children_by_parent.get(object_id):

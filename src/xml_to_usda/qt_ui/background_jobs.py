@@ -281,7 +281,7 @@ class QtBackgroundJobsController:
 
     def _run_proxy_mesh_export_worker(self, *, request, settings) -> None:
         try:
-            result = self._deps.export_proxy_usda_from_request(request, settings)
+            result = self._deps.export_proxy_usda_from_source_request(request, settings)
             self._event_queue.put(("proxy_mesh_result", ProxyMeshJobResult(export=result)))
         except Exception as exc:
             self._event_queue.put(("proxy_mesh_error_traceback", traceback.format_exc()))
@@ -289,7 +289,7 @@ class QtBackgroundJobsController:
 
     def _run_generated_proxy_mesh_export_worker(self, *, request, proxy) -> None:
         try:
-            result = self._deps.export_generated_proxy_usda_from_request(request, proxy)
+            result = self._deps.export_generated_proxy_usda_from_source_request(request, proxy)
             self._event_queue.put(("proxy_mesh_result", ProxyMeshJobResult(export=result)))
         except Exception as exc:
             self._event_queue.put(("proxy_mesh_error_traceback", traceback.format_exc()))

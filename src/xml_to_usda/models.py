@@ -88,6 +88,7 @@ class ConversionMode(StrEnum):
 
 
 class MaterialPolicy(StrEnum):
+    SOURCE_MATERIALS = "source_materials"
     SOURCE_MATERIAL_ROLES = "source_material_roles"
     SINGLE_MATERIAL = "single_material"
     VERTEX_COLOR_SPLIT = "vertex_color_split"
@@ -98,15 +99,17 @@ class MaterialPolicy(StrEnum):
         if isinstance(raw, cls):
             return raw
         if raw is None:
-            return cls.SOURCE_MATERIAL_ROLES
+            return cls.SOURCE_MATERIALS
         normalized = str(raw).strip()
+        if normalized == cls.SOURCE_MATERIAL_ROLES.value:
+            return cls.SOURCE_MATERIALS
         return cls(normalized)
 
     @classmethod
     def cli_choices(cls) -> tuple[str, ...]:
         """Return the supported canonical CLI values."""
         return (
-            cls.SOURCE_MATERIAL_ROLES.value,
+            cls.SOURCE_MATERIALS.value,
             cls.SINGLE_MATERIAL.value,
             cls.VERTEX_COLOR_SPLIT.value,
         )
@@ -580,7 +583,7 @@ class ExportMetadata:
     warnings: tuple[str, ...] = ()
     unknown_sections: tuple[str, ...] = ()
     output_mode: OutputMode = OutputMode.SELF_CONTAINED
-    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIALS
     conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
 
 
@@ -706,7 +709,7 @@ class ConversionRequest:
     output_directory: str | None = None
     output_naming_template: str | None = None
     output_mode: OutputMode = OutputMode.SELF_CONTAINED
-    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIALS
     bark_material_path: str | None = None
     leaves_material_path: str | None = None
     single_material_path: str | None = None

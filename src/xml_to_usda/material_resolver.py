@@ -78,6 +78,13 @@ def apply_material_policy(
             cpu_profile=cpu_profile,
             cancel_event=cancel_event,
         )
+    if material_policy == MaterialPolicy.SOURCE_MATERIALS:
+        if not base_material_overrides:
+            return model
+        return replace(
+            model,
+            materials=_apply_base_material_overrides(model.materials, base_material_overrides, normalize_asset_path),
+        )
     if material_policy == MaterialPolicy.SOURCE_MATERIAL_ROLES:
         return _apply_source_role_material_policy(model, bark_material_path, leaves_material_path, normalize_asset_path)
     if material_policy == MaterialPolicy.SINGLE_MATERIAL:

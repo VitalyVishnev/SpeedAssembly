@@ -73,7 +73,7 @@ class GuiPresetRecord:
     cpu_profile: CpuProfile = CpuProfile.BALANCED
     preserve_temp_files: bool = False
     conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
-    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIALS
     bark_material_path: str = ""
     leaves_material_path: str = ""
     single_material_path: str = ""
@@ -91,7 +91,7 @@ class GuiSettingsSnapshot:
     cpu_profile: CpuProfile = CpuProfile.BALANCED
     preserve_temp_files: bool = False
     conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
-    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIALS
     bark_material_path: str = ""
     leaves_material_path: str = ""
     single_material_path: str = ""
@@ -141,7 +141,7 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
         cpu_profile=_parse_cpu_profile(payload.get("cpu_profile")),
         preserve_temp_files=bool(payload.get("preserve_temp_files", False)),
         conversion_mode=_parse_conversion_mode(payload.get("conversion_mode")),
-        material_policy=_parse_gui_material_policy(payload.get("material_policy", MaterialPolicy.SOURCE_MATERIAL_ROLES.value)),
+        material_policy=_parse_gui_material_policy(payload.get("material_policy", MaterialPolicy.SOURCE_MATERIALS.value)),
         bark_material_path=str(payload.get("bark_material_path", "")),
         leaves_material_path=str(payload.get("leaves_material_path", "")),
         single_material_path=str(payload.get("single_material_path", "")),
@@ -245,7 +245,7 @@ def _parse_gui_material_policy(raw_value) -> MaterialPolicy:
     try:
         return MaterialPolicy.parse(raw_value)
     except ValueError:
-        return MaterialPolicy.SOURCE_MATERIAL_ROLES
+        return MaterialPolicy.SOURCE_MATERIALS
 
 
 def _parse_fbx_material_mode(raw_value) -> FbxMaterialMode:
@@ -406,7 +406,7 @@ def _parse_preset(name: str, payload: dict) -> GuiPresetRecord:
         preserve_temp_files=bool(payload.get("preserve_temp_files", False)),
         conversion_mode=_parse_conversion_mode(payload.get("conversion_mode")),
         material_policy=_parse_gui_material_policy(
-            payload.get("material_policy", MaterialPolicy.SOURCE_MATERIAL_ROLES.value)
+            payload.get("material_policy", MaterialPolicy.SOURCE_MATERIALS.value)
         ),
         bark_material_path=str(payload.get("bark_material_path", "")),
         leaves_material_path=str(payload.get("leaves_material_path", "")),

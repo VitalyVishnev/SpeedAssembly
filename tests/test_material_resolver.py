@@ -248,12 +248,42 @@ def test_single_material_policy_succeeds_on_shifted_source_material_ids(tmp_path
     assert 'uniform asset info:unreal:sourceAsset = @/Game/Assembly/SimpleTree/Leaves1.Leaves1@' in result.usda_document.text
 
 
+def test_source_material_policy_preserves_shifted_source_material_ids(tmp_path: Path) -> None:
+    shifted_sample = _write_shifted_material_sample(tmp_path, {1: 5, 2: 6})
+    runtime_paths = _test_runtime_paths(tmp_path)
+
+    result = convert_file(str(shifted_sample), str(tmp_path / "source_materials.usda"), runtime_paths=runtime_paths)
+    _, model, diagnostics = load_canonical_model(str(shifted_sample))
+
+    assert result.usda_document is not None
+    assert {material.source_id for material in model.materials} == {5, 6}
+    assert {material.source_material_ids for material in model.materials} == {(5,), (6,)}
+    assert model.base_mesh is not None
+    assert {section.material_id for section in model.base_mesh.sections} == {5}
+    assert all(
+        prototype.mesh is None or {section.material_id for section in prototype.mesh.sections} <= {5, 6}
+        for prototype in model.prototypes
+    )
+    assert not any(
+        issue.severity == "error" and issue.code == "missing_material_definition"
+        for issue in diagnostics
+    )
+
+
 def test_source_role_policy_remaps_shifted_source_material_ids_to_role_materials(tmp_path: Path) -> None:
     shifted_sample = _write_shifted_material_sample(tmp_path, {1: 5, 2: 6})
     runtime_paths = _test_runtime_paths(tmp_path)
 
-    result = convert_file(str(shifted_sample), str(tmp_path / "legacy_shifted.usda"), runtime_paths=runtime_paths)
-    _, model, diagnostics = load_canonical_model(str(shifted_sample))
+    result = convert_file(
+        str(shifted_sample),
+        str(tmp_path / "legacy_shifted.usda"),
+        material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
+        runtime_paths=runtime_paths,
+    )
+    _, model, diagnostics = load_canonical_model(
+        str(shifted_sample),
+        material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
+    )
 
     assert result.usda_document is not None
     assert {material.source_id for material in model.materials} == {1, 2}

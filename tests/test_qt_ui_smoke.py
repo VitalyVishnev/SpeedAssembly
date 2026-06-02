@@ -9,13 +9,13 @@ pytest.importorskip("pytestqt")
 pytestmark = pytest.mark.qt
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QAbstractSpinBox, QMessageBox
+from PySide6.QtWidgets import QAbstractSpinBox, QMessageBox, QWidget
 
 from xml_to_usda.qt_ui.dependencies import build_default_dependencies
 from xml_to_usda.qt_ui.entry import main
 from xml_to_usda.qt_ui.entry import _build_signature_from_executable_path
-from xml_to_usda.models import CpuProfile, MaterialPolicy
-from xml_to_usda.qt_ui.panels import SliderSpinEditor
+from xml_to_usda.models import CpuProfile, MaterialPolicy, UdimMode
+from xml_to_usda.qt_ui.panels import SliderSpinEditor, _make_udim_controls
 from xml_to_usda.qt_ui.persistence import UiShellState
 from xml_to_usda.qt_ui.window import MainWindow
 from xml_to_usda.qt_ui.theme import ThemeOverrides, load_bundled_theme, load_theme
@@ -96,6 +96,28 @@ def test_qt_shell_factory_defaults_preset_control_stays_compact(qtbot, tmp_path)
     text_width = window.preset_combo.fontMetrics().horizontalAdvance(window.preset_combo.currentText())
     assert window.preset_combo.width() >= text_width + 40
     assert window.preset_combo.width() <= text_width + 64
+
+
+def test_udim_id_spin_has_room_for_four_digit_id(qtbot) -> None:
+    host = QWidget()
+    qtbot.addWidget(host)
+
+    _mode_combo, spin = _make_udim_controls(host, mode=UdimMode.OFF, udim_id=1001)
+
+    assert spin.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.NoButtons
+    assert spin.minimumWidth() >= spin.fontMetrics().horizontalAdvance("1999") + 32
+    assert spin.maximumWidth() == spin.minimumWidth()
+
+
+def test_udim_mode_combo_has_room_for_longest_label(qtbot) -> None:
+    host = QWidget()
+    qtbot.addWidget(host)
+
+    combo, _spin = _make_udim_controls(host, mode=UdimMode.WRITE_SECONDARY_UV_OFFSET, udim_id=1001)
+
+    longest_label_width = combo.fontMetrics().horizontalAdvance("Write UV1 Offset")
+    assert combo.minimumWidth() >= longest_label_width + 64
+    assert combo.maximumWidth() == combo.minimumWidth()
 
 
 def test_qt_shell_scales_glass_panel_from_runtime_screen_scale(monkeypatch, qtbot, tmp_path) -> None:

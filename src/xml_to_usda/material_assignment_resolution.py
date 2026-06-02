@@ -24,7 +24,7 @@ from .models import (
 
 @dataclass(frozen=True)
 class MaterialAssignmentOptions:
-    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIALS
     bark_material_path: str | None = None
     leaves_material_path: str | None = None
     single_material_path: str | None = None

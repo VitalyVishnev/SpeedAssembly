@@ -1,5 +1,12 @@
 # Known Problems
 
+## UDIM Real-Sample Coverage Pending
+
+- Issue: UDIM authoring is covered by automated tests and the current baseline UE 5.7.x sample, but repeated-part and FBX material-slot UDIM rows have not yet been validated across a broad set of real SpeedTree structures.
+- Location: `src/xml_to_usda/udim_resolver.py`, `src/xml_to_usda/material_resolver.py`, `src/xml_to_usda/qt_ui/panels.py`
+- Reason for deferral: Real-sample UE import and material inspection requires a separate validation matrix beyond the current automated regression surface.
+- Likely next step: Run `write_secondary_uv_offset` and `shift_primary_uv` on base XML materials, repeated-part black/white buckets, and FBX material-slot rows across the same tree/shrub/grass sample set used for Phase 1 breadth validation.
+
 ## Proxy Mesh Distance Field And Shadow Validation Pending
 
 - Issue: The generated `_proxy.usda` asset now imports into UE as a Static Mesh, but distance-field generation and low-cost shadow usefulness have not yet been validated against UE 5.7.x scene lighting.

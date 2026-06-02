@@ -48,8 +48,8 @@ from ..fbx_payload_cache import (
     sweep_fbx_payload_cache,
 )
 from ..gui_formatters import format_wind_group_summary, format_wind_json_result
-from ..models import CleanupPolicy, ConversionMode, ConversionRequest, OutputMode, PrototypeSourceMode
-from ..proxy_mesh_service import ProxyMeshResult, ProxyMeshSettings
+from ..models import CleanupPolicy, ConversionMode, ConversionRequest, OutputMode
+from ..proxy_mesh_service import ProxyMeshResult, ProxyMeshSettings, ProxyMeshSourceRequest
 from ..runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
 from ..settings_service import (
     FACTORY_DEFAULT_PRESET_NAME,
@@ -1773,6 +1773,10 @@ class MainWindow(QWidget):
 
     def _handle_proxy_settings_changed(self) -> None:
         self._proxy_mesh_settings = self.geometry_panel.proxy_settings()
+        cached_proxy = self._proxy_mesh_preview_result
+        if cached_proxy is not None and cached_proxy.settings != self._proxy_mesh_settings:
+            self._proxy_mesh_preview_result = None
+            self._proxy_mesh_preview_input_path = ""
         self._schedule_operator_state_save()
 
     def _reload_input_dependent_tabs(self) -> None:
@@ -1943,7 +1947,7 @@ class MainWindow(QWidget):
         self._source_refresh_timer.stop()
         self._proxy_mesh_settings = self.geometry_panel.proxy_settings()
         try:
-            request = self._build_proxy_request()
+            request = self._build_proxy_source_request()
         except ValueError as exc:
             self._report_error("Missing input", str(exc))
             return
@@ -1955,11 +1959,11 @@ class MainWindow(QWidget):
                 action="preview",
             )
 
-        input_path = request.input_paths[0]
+        input_path = request.input_path
         dialog = ProxyPreviewDialog(
             settings=self._proxy_mesh_settings,
             start_preview=_start_preview,
-            run_preview_locally=lambda settings: self._deps.generate_proxy_mesh_from_request(request, settings),
+            run_preview_locally=lambda settings: self._deps.generate_proxy_mesh_from_source_request(request, settings),
             drain_queue=self._deps.drain_process_queue,
             close_queue=self._deps.close_process_queue,
             initial_proxy=self._proxy_preview_result_for_input(input_path),
@@ -1985,11 +1989,11 @@ class MainWindow(QWidget):
         self._source_refresh_timer.stop()
         self._proxy_mesh_settings = self.geometry_panel.proxy_settings()
         try:
-            request = self._build_proxy_request()
+            request = self._build_proxy_source_request()
         except ValueError as exc:
             self._report_error("Missing input", str(exc))
             return
-        proxy = self._current_preview_proxy_for_export(request.input_paths[0])
+        proxy = self._current_preview_proxy_for_export(request.input_path, self._proxy_mesh_settings)
         if proxy is not None:
             self._background_jobs.start_generated_proxy_mesh_export(request, proxy)
             return
@@ -2000,16 +2004,24 @@ class MainWindow(QWidget):
             return None
         return self._proxy_mesh_preview_result
 
-    def _current_preview_proxy_for_export(self, input_path: str) -> ProxyMeshResult | None:
+    def _current_preview_proxy_for_export(
+        self,
+        input_path: str,
+        settings: ProxyMeshSettings,
+    ) -> ProxyMeshResult | None:
         dialog = self._proxy_preview_dialog
         if (
             dialog is not None
             and dialog.isVisible()
             and dialog.current_proxy is not None
             and self._proxy_mesh_preview_input_path == input_path
+            and dialog.current_proxy.settings == settings
         ):
             return dialog.current_proxy
-        return self._proxy_preview_result_for_input(input_path)
+        proxy = self._proxy_preview_result_for_input(input_path)
+        if proxy is None or proxy.settings != settings:
+            return None
+        return proxy
 
     def _cache_proxy_preview_result(self, input_path: str, proxy: ProxyMeshResult) -> None:
         self._proxy_mesh_preview_input_path = input_path
@@ -2044,30 +2056,15 @@ class MainWindow(QWidget):
         except OSError:
             pass
 
-    def _build_proxy_request(self) -> ConversionRequest:
+    def _build_proxy_source_request(self) -> ProxyMeshSourceRequest:
         input_path = self.source_input.text().strip()
         if not input_path:
             raise ValueError("Select a source XML file before generating a proxy mesh.")
-        prototype_configs = self.materials_panel.collect_prototype_source_configs()
-        base_overrides = self.materials_panel.collect_base_material_overrides()
-        use_explicit_material_contract = bool(base_overrides) or any(
-            config.mode != PrototypeSourceMode.XML_MESH for config in prototype_configs
-        )
-        return ConversionRequest(
-            input_paths=(input_path,),
-            output_path=self.output_input.text().strip() or None,
+        return ProxyMeshSourceRequest(
+            input_path=input_path,
+            output_path=self.output_input.text().strip(),
             output_mode=OutputMode.SELF_CONTAINED,
-            material_policy=self._operator_state.material_policy,
-            bark_material_path=self._operator_state.bark_material_path or None,
-            leaves_material_path=self._operator_state.leaves_material_path or None,
-            single_material_path=self._operator_state.single_material_path or None,
-            base_material_overrides=base_overrides,
-            udim_material_settings=self.materials_panel.collect_udim_material_settings(),
             cpu_profile=self._operator_state.cpu_profile,
-            cleanup_policy=self._current_cleanup_policy(),
-            use_explicit_material_contract=use_explicit_material_contract,
-            prototype_source_configs=prototype_configs,
-            conversion_mode=self._operator_state.conversion_mode,
             fbx_cache_max_bytes=self._fbx_cache_max_bytes(),
             fbx_cache_max_age_seconds=self._fbx_cache_max_age_seconds(),
         )

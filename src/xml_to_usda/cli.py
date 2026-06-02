@@ -8,6 +8,7 @@ import time
 from .fbx_adapter import load_fbx_geometry
 from .fbx_payload_cache import FbxPayloadCacheOptions, load_fbx_payload_from_cache, store_fbx_payload_in_cache
 from .fbx_worker_subprocess import FBX_WORKER_COMMAND, run_fbx_worker_request_file
+from .conversion_worker_subprocess import CONVERSION_WORKER_COMMAND, run_conversion_worker_request_file
 from .models import CleanupPolicy, CpuProfile, FbxMaterialMode, GeometryBuffer, MaterialPolicy
 from .pipeline import convert_file, generate_wind_json, inspect_source
 from .prototype_sources import fbx_import_read_options_for_material_mode, load_prototype_source_configs_from_json
@@ -30,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     convert_parser.add_argument(
         "--material-policy",
         choices=MaterialPolicy.cli_choices(),
-        default=MaterialPolicy.SOURCE_MATERIAL_ROLES.value,
+        default=MaterialPolicy.SOURCE_MATERIALS.value,
         help="Material authoring mode.",
     )
     convert_parser.add_argument("--bark-material-path", help="Unreal material path for the primary material bucket.")
@@ -78,6 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("gui", help="Launch the primary PySide6 desktop GUI.")
     fbx_worker_parser = subparsers.add_parser(FBX_WORKER_COMMAND, help=argparse.SUPPRESS)
     fbx_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
+    conversion_worker_parser = subparsers.add_parser(CONVERSION_WORKER_COMMAND, help=argparse.SUPPRESS)
+    conversion_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
     proxy_worker_parser = subparsers.add_parser(PROXY_MESH_WORKER_COMMAND, help=argparse.SUPPRESS)
     proxy_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
     return parser
@@ -97,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(raw_argv)
     if args.command == FBX_WORKER_COMMAND:
         return run_fbx_worker_request_file(args.request)
+    if args.command == CONVERSION_WORKER_COMMAND:
+        return run_conversion_worker_request_file(args.request)
     if args.command == PROXY_MESH_WORKER_COMMAND:
         return run_proxy_mesh_worker_request_file(args.request)
     runtime_paths = resolve_runtime_paths()

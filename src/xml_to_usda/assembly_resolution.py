@@ -42,7 +42,7 @@ from .udim_resolver import apply_udim_material_settings
 @dataclass(frozen=True)
 class AssemblyResolutionOptions:
     output_mode: OutputMode = OutputMode.SELF_CONTAINED
-    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIAL_ROLES
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIALS
     bark_material_path: str | None = None
     leaves_material_path: str | None = None
     single_material_path: str | None = None

@@ -68,6 +68,10 @@ def prepare_conversion_plan(
     if material_policy == MaterialPolicy.SINGLE_MATERIAL:
         effective_bark_material_path = None
         effective_leaves_material_path = None
+    elif material_policy == MaterialPolicy.SOURCE_MATERIALS:
+        effective_bark_material_path = None
+        effective_leaves_material_path = None
+        effective_single_material_path = None
     else:
         effective_single_material_path = None
     resolved_conversion_mode = ConversionMode.parse(conversion_mode)
@@ -145,6 +149,8 @@ def _validate_material_policy_paths(
     checks: list[tuple[str, str | None]]
     if material_policy == MaterialPolicy.SINGLE_MATERIAL:
         checks = [("Single", single_material_path)]
+    elif material_policy == MaterialPolicy.SOURCE_MATERIALS:
+        checks = []
     else:
         checks = [("Bark", bark_material_path), ("Leaves", leaves_material_path)]
     for label, path in checks:
@@ -164,7 +170,7 @@ def _validate_explicit_material_contract(
             continue
         if not is_valid_unreal_asset_path(normalize_unreal_asset_path(override.ue_asset_path)):
             raise ValueError(
-                f"Base XML material path for {override.source_name} (ID {override.source_id}) must start with /Game/."
+                f"Base XML material path for {override.source_name or f'Material_{override.source_id}'} must start with /Game/."
             )
     for config in prototype_source_configs:
         source_name = config.source_name or config.source_key

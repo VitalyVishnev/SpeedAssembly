@@ -24,10 +24,11 @@ from xml_to_usda.models import (
 from xml_to_usda.proxy_mesh_service import (
     ProxyMeshError,
     ProxyMeshSettings,
+    ProxyMeshSourceRequest,
     derive_proxy_usda_output_path,
-    export_proxy_usda_from_request,
+    export_proxy_usda_from_source_request,
     export_proxy_usda,
-    generate_proxy_mesh_from_request,
+    generate_proxy_mesh_from_source_request,
     generate_proxy_mesh,
     render_proxy_usda,
 )
@@ -282,7 +283,8 @@ def test_proxy_request_generation_ignores_operator_fbx_replacement(monkeypatch) 
         ),
     )
 
-    result = generate_proxy_mesh_from_request(request, ProxyMeshSettings(final_polycount=5000))
+    source_request = ProxyMeshSourceRequest.from_conversion_request(request)
+    result = generate_proxy_mesh_from_source_request(source_request, ProxyMeshSettings(final_polycount=5000))
 
     assert result.mesh.face_count > 0
     assert calls["input_path"] == "tree.xml"
@@ -311,11 +313,17 @@ def test_proxy_request_export_ignores_operator_fbx_replacement(monkeypatch, tmp_
         ),
     )
 
-    result = export_proxy_usda_from_request(request, ProxyMeshSettings(final_polycount=5000))
+    source_request = ProxyMeshSourceRequest.from_conversion_request(request)
+    result = export_proxy_usda_from_source_request(source_request, ProxyMeshSettings(final_polycount=5000))
 
     assert result.output_path == str(tmp_path / "tree_proxy.usda")
     assert "prototype_source_configs" not in calls["kwargs"]
     assert "use_explicit_material_contract" not in calls["kwargs"]
+
+
+def test_proxy_source_request_rejects_batch_conversion_request() -> None:
+    with pytest.raises(ProxyMeshError, match="exactly one input XML"):
+        ProxyMeshSourceRequest.from_conversion_request(ConversionRequest(input_paths=("a.xml", "b.xml")))
 
 
 def test_instance_bounds_method_remains_explicit_debug_baseline() -> None:

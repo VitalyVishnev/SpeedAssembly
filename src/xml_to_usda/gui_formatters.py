@@ -16,10 +16,8 @@ def format_conversion_results(
         if request.base_material_overrides:
             lines.append("Base XML material overrides:")
             for override in request.base_material_overrides:
-                lines.append(
-                    f"  - {override.source_name or f'Material_{override.source_id}'} "
-                    f"(ID {override.source_id}): {override.ue_asset_path or '<none>'}"
-                )
+                source_name = override.source_name or f"Material_{override.source_id}"
+                lines.append(f"  - {source_name}: {override.ue_asset_path or '<none>'}")
             lines.append("")
     else:
         lines.append(f"Material policy: {request.material_policy.value}")

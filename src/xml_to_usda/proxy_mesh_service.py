@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .canonical_loader import load_canonical_model
 from .models import CanonicalTreeModel, GeometryBuffer, MeshData, Prototype, Quaternion, Vector3
-from .models import ConversionMode, ConversionRequest
+from .models import ConversionMode, ConversionRequest, CpuProfile, OutputMode
 from .naming import make_stable_prim_name
 from .output_resolution import ensure_output_path_allowed
 
@@ -36,6 +36,27 @@ class ProxyMeshSettings:
     bounds_inflation: float = 1.0
     density_resolution: int = 64
     base_mesh_priority: float = 0.33
+
+
+@dataclass(frozen=True)
+class ProxyMeshSourceRequest:
+    input_path: str
+    output_path: str = ""
+    output_mode: OutputMode = OutputMode.SELF_CONTAINED
+    cpu_profile: CpuProfile = CpuProfile.BALANCED
+    fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024
+    fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60
+
+    @classmethod
+    def from_conversion_request(cls, request: ConversionRequest) -> "ProxyMeshSourceRequest":
+        return cls(
+            input_path=_single_input_path(request),
+            output_path=request.output_path or "",
+            output_mode=request.output_mode,
+            cpu_profile=request.cpu_profile,
+            fbx_cache_max_bytes=request.fbx_cache_max_bytes,
+            fbx_cache_max_age_seconds=request.fbx_cache_max_age_seconds,
+        )
 
 
 @dataclass(frozen=True)
@@ -431,8 +452,8 @@ def export_generated_proxy_usda(
     )
 
 
-def generate_proxy_mesh_from_request(
-    request: ConversionRequest,
+def generate_proxy_mesh_from_source_request(
+    request: ProxyMeshSourceRequest,
     settings: ProxyMeshSettings | None = None,
 ) -> ProxyMeshResult:
     """Generate a proxy from source-normalized XML facts, without operator FBX replacement."""
@@ -440,8 +461,8 @@ def generate_proxy_mesh_from_request(
     return generate_proxy_mesh(model, settings)
 
 
-def export_proxy_usda_from_request(
-    request: ConversionRequest,
+def export_proxy_usda_from_source_request(
+    request: ProxyMeshSourceRequest,
     settings: ProxyMeshSettings | None = None,
 ) -> ProxyMeshExportResult:
     """Generate and write the proxy companion from source-normalized XML facts."""
@@ -449,8 +470,40 @@ def export_proxy_usda_from_request(
     return export_proxy_usda(
         model,
         input_path=input_path,
-        output_path=request.output_path or "",
+        output_path=request.output_path,
         settings=settings,
+    )
+
+
+def export_generated_proxy_usda_from_source_request(
+    request: ProxyMeshSourceRequest,
+    proxy: ProxyMeshResult,
+) -> ProxyMeshExportResult:
+    """Write a preview-generated proxy companion for the same source request."""
+    return export_generated_proxy_usda(
+        proxy,
+        input_path=request.input_path,
+        output_path=request.output_path,
+    )
+
+
+def generate_proxy_mesh_from_request(
+    request: ConversionRequest,
+    settings: ProxyMeshSettings | None = None,
+) -> ProxyMeshResult:
+    return generate_proxy_mesh_from_source_request(
+        ProxyMeshSourceRequest.from_conversion_request(request),
+        settings,
+    )
+
+
+def export_proxy_usda_from_request(
+    request: ConversionRequest,
+    settings: ProxyMeshSettings | None = None,
+) -> ProxyMeshExportResult:
+    return export_proxy_usda_from_source_request(
+        ProxyMeshSourceRequest.from_conversion_request(request),
+        settings,
     )
 
 
@@ -458,12 +511,9 @@ def export_generated_proxy_usda_from_request(
     request: ConversionRequest,
     proxy: ProxyMeshResult,
 ) -> ProxyMeshExportResult:
-    """Write a preview-generated proxy companion for the same source request."""
-    input_path = _single_input_path(request)
-    return export_generated_proxy_usda(
+    return export_generated_proxy_usda_from_source_request(
+        ProxyMeshSourceRequest.from_conversion_request(request),
         proxy,
-        input_path=input_path,
-        output_path=request.output_path or "",
     )
 
 
@@ -953,8 +1003,10 @@ def _single_input_path(request: ConversionRequest) -> str:
     return input_path
 
 
-def _load_proxy_source_model(request: ConversionRequest) -> tuple[str, CanonicalTreeModel]:
-    input_path = _single_input_path(request)
+def _load_proxy_source_model(request: ProxyMeshSourceRequest) -> tuple[str, CanonicalTreeModel]:
+    input_path = request.input_path.strip()
+    if not input_path:
+        raise ProxyMeshError("Proxy mesh generation requires a source XML path.")
     _, model, diagnostics = load_canonical_model(
         input_path,
         request.output_mode,

@@ -188,10 +188,13 @@ GUI material interpretation, stage 1:
   - if some slot rows are blank, one filled Unreal material path is reused and a warning is emitted
   - if all slot rows are blank, conversion fails
 
-Legacy/CLI material-policy interpretation:
+Material-policy interpretation:
 
+- `source_materials`
+  - default mode
+  - preserves XML material sections without assigning meaning to numeric source ids
 - `source_material_roles`
-  - CLI/JSON mode only
+  - legacy compatibility mode only
   - resolves source XML material references through semantic bark/leaves roles
   - does not require source ids to be `1/2`
 - `single_material`

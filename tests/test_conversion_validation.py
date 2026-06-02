@@ -3,7 +3,14 @@ from __future__ import annotations
 import pytest
 
 from xml_to_usda.conversion_validation import validate_conversion_request
-from xml_to_usda.models import ConversionRequest, MaterialPolicy, UdimMaterialSetting, UdimMode
+from xml_to_usda.models import (
+    ConversionRequest,
+    FbxMaterialSlotOverride,
+    MaterialPolicy,
+    PrototypeSourceConfig,
+    UdimMaterialSetting,
+    UdimMode,
+)
 
 
 def test_validate_conversion_request_rejects_empty_inputs() -> None:
@@ -41,6 +48,40 @@ def test_validate_conversion_request_rejects_invalid_udim_settings(
     request = ConversionRequest(input_paths=("a.xml",), udim_material_settings=(setting,))
 
     with pytest.raises(ValueError, match=message):
+        validate_conversion_request(request)
+
+
+@pytest.mark.parametrize(
+    "config",
+    (
+        PrototypeSourceConfig(
+            source_key="Mesh_1",
+            single_material_udim_mode=UdimMode.WRITE_SECONDARY_UV_OFFSET,
+            single_material_udim_id=1000,
+        ),
+        PrototypeSourceConfig(
+            source_key="Mesh_1",
+            black_material_udim_mode=UdimMode.SHIFT_PRIMARY_UV,
+            black_material_udim_id=1000,
+        ),
+        PrototypeSourceConfig(
+            source_key="Mesh_1",
+            fbx_material_slot_overrides=(
+                FbxMaterialSlotOverride(
+                    slot_name="Leaves",
+                    udim_mode=UdimMode.WRITE_SECONDARY_UV_OFFSET,
+                    udim_id=1000,
+                ),
+            ),
+        ),
+    ),
+)
+def test_validate_conversion_request_rejects_invalid_prototype_udim_settings(
+    config: PrototypeSourceConfig,
+) -> None:
+    request = ConversionRequest(input_paths=("a.xml",), prototype_source_configs=(config,))
+
+    with pytest.raises(ValueError, match="UDIM id must be greater than or equal to 1001."):
         validate_conversion_request(request)
 
 

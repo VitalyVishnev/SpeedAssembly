@@ -53,5 +53,5 @@ It does not override `AGENTS.md`, `docs/ue_import_contract.md`, or
 
 - Batch conversion.
 - Broader validation on additional real SpeedTree sample families.
-- GUI coverage for repeated-part and FBX material-slot UDIM rows once those
-  rows expose explicit resolved material ids.
+- Broader real-sample validation for repeated-part and FBX material-slot UDIM
+  rows.

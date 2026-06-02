@@ -273,20 +273,20 @@ def _extract_object_records(
         attrib = obj.attrib
         object_id = attrib.get("ID")
         points_node: ET.Element | None = None
-        triangles_node: ET.Element | None = None
+        triangles_nodes: list[ET.Element] = []
         vertices_node: ET.Element | None = None
-        leaf_ref_node: ET.Element | None = None
+        leaf_ref_nodes: list[ET.Element] = []
         spine_node: ET.Element | None = None
         for child in obj:
             tag = child.tag
             if tag == "Points" and points_node is None:
                 points_node = child
-            elif tag == "Triangles" and triangles_node is None:
-                triangles_node = child
+            elif tag == "Triangles":
+                triangles_nodes.append(child)
             elif tag == "Vertices" and vertices_node is None:
                 vertices_node = child
-            elif tag == "LeafReferences" and leaf_ref_node is None:
-                leaf_ref_node = child
+            elif tag == "LeafReferences":
+                leaf_ref_nodes.append(child)
             elif tag == "Spine" and spine_node is None:
                 spine_node = child
         if object_id is not None:
@@ -305,10 +305,10 @@ def _extract_object_records(
                 source_transform,
                 material_ids,
                 points_node=points_node,
-                triangles_node=triangles_node,
+                triangles_nodes=tuple(triangles_nodes),
                 vertices_node=vertices_node,
             )
-            leaf_count = _count_packed_values(leaf_ref_node, "X")
+            leaf_count = sum(_count_packed_values(leaf_ref_node, "X") for leaf_ref_node in leaf_ref_nodes)
             spine = _extract_spine(
                 obj,
                 object_id,
@@ -337,23 +337,24 @@ def _extract_object_records(
                     spine=spine,
                 )
             )
-        if leaf_ref_node is None:
+        if not leaf_ref_nodes:
             continue
 
-        payload = _read_leaf_reference_payload(obj, leaf_ref_node, messages, material_ids, source_transform)
-        if payload.count == 0:
-            continue
+        for leaf_ref_node in leaf_ref_nodes:
+            payload = _read_leaf_reference_payload(obj, leaf_ref_node, messages, material_ids, source_transform)
+            if payload.count == 0:
+                continue
 
-        for index in range(payload.count):
-            assembly_parts.append(
-                _build_leaf_reference_instance(
-                    payload,
-                    index,
-                    name=f"AssemblyPart_{len(assembly_parts):04d}",
-                    source_object_id=object_id,
-                    source_transform=source_transform,
+            for index in range(payload.count):
+                assembly_parts.append(
+                    _build_leaf_reference_instance(
+                        payload,
+                        index,
+                        name=f"AssemblyPart_{len(assembly_parts):04d}",
+                        source_object_id=object_id,
+                        source_transform=source_transform,
+                    )
                 )
-            )
     return _ObjectExtractionResult(
         source_objects=tuple(source_objects),
         assembly_parts=tuple(assembly_parts),
@@ -407,15 +408,15 @@ def _extract_object_mesh(
     material_ids: set[int],
     *,
     points_node: ET.Element | None = None,
-    triangles_node: ET.Element | None = None,
+    triangles_nodes: tuple[ET.Element, ...] = (),
     vertices_node: ET.Element | None = None,
 ) -> MeshData | None:
-    if points_node is None or triangles_node is None:
+    if points_node is None or not triangles_nodes:
         return None
     return _build_mesh_data(
         obj.attrib.get("Name", obj.tag),
         points_node,
-        triangles_node,
+        triangles_nodes,
         vertices_node,
         joint_index_by_source_id,
         messages,
@@ -427,7 +428,7 @@ def _extract_object_mesh(
 def _build_mesh_data(
     name: str,
     points_node: ET.Element,
-    triangles_node: ET.Element,
+    triangles_nodes: tuple[ET.Element, ...],
     vertices_node: ET.Element | None,
     joint_index_by_source_id: dict[int, int],
     messages: list[str],
@@ -435,8 +436,8 @@ def _build_mesh_data(
     material_ids: set[int],
 ) -> MeshData | None:
     points = _extract_packed_points(points_node, f"{name}.points", messages, source_transform)
-    face_counts, face_indices, vertex_indices, sections = _extract_packed_triangles(
-        triangles_node,
+    face_counts, face_indices, vertex_indices, sections = _extract_packed_triangle_blocks(
+        triangles_nodes,
         f"{name}.triangles",
         messages,
         material_ids,
@@ -1031,6 +1032,39 @@ def _extract_packed_triangles(
     material_id = _read_material_id(node, context, messages, material_ids)
     sections = _single_material_sections(material_id, len(counts))
     return counts, indices, vertex_indices, sections
+
+
+def _extract_packed_triangle_blocks(
+    nodes: tuple[ET.Element, ...],
+    context: str,
+    messages: list[str],
+    material_ids: set[int],
+) -> tuple[list[int], list[int], list[int], tuple[MeshSection, ...]]:
+    face_counts: list[int] = []
+    point_indices: list[int] = []
+    vertex_indices: list[int] = []
+    sections_by_material: dict[int, list[int]] = defaultdict(list)
+    face_offset = 0
+
+    for node in nodes:
+        counts, block_point_indices, block_vertex_indices, sections = _extract_packed_triangles(
+            node,
+            context,
+            messages,
+            material_ids,
+        )
+        if not counts or not block_point_indices:
+            continue
+        face_counts.extend(counts)
+        point_indices.extend(block_point_indices)
+        vertex_indices.extend(block_vertex_indices)
+        for section in sections:
+            sections_by_material[section.material_id].extend(
+                face_offset + face_index for face_index in section.face_indices
+            )
+        face_offset += len(counts)
+
+    return face_counts, point_indices, vertex_indices, _ordered_sections(sections_by_material)
 
 
 def _extract_lod_faces(

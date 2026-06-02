@@ -11,6 +11,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from ..diagnostics_bundle import default_build_info_path
+from ..conversion_worker_subprocess import CONVERSION_WORKER_COMMAND
 from ..fbx_worker_subprocess import FBX_WORKER_COMMAND
 from ..proxy_mesh_worker_subprocess import PROXY_MESH_WORKER_COMMAND
 
@@ -42,6 +43,11 @@ def main(argv: list[str] | None = None) -> int:
         from ..fbx_worker_entry import main as fbx_worker_main
 
         return fbx_worker_main(argv)
+    if argv and argv[0] == CONVERSION_WORKER_COMMAND:
+        from ..conversion_worker_subprocess import run_conversion_worker_request_file
+
+        request_path = argv[argv.index("--request") + 1] if "--request" in argv else ""
+        return run_conversion_worker_request_file(request_path)
     if argv and argv[0] == PROXY_MESH_WORKER_COMMAND:
         from ..proxy_mesh_worker_subprocess import run_proxy_mesh_worker_request_file
 

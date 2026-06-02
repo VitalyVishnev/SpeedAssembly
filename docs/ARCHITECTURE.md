@@ -46,6 +46,7 @@ Primary modules:
 - `prototype_keys.py`
 - `payload_partition.py`
 - `geometry_buffers.py`
+- `udim_resolver.py`
 - `material_resolver.py`
 - `dynamic_wind.py`
 - `source_validation.py`
@@ -79,6 +80,7 @@ Primary modules:
 - `prototype_resolution.py`
 - `material_assignment_resolution.py`
 - `source_analysis.py`
+- `udim_settings.py`
 
 Expected interface shape:
 
@@ -171,6 +173,13 @@ domain concept.
   slots. Resolution turns them into `Resolved Material Assignment` through
   policy and operator overrides. USDA writing emits `Authored Material Binding`.
   Avoid treating source material ids as authored semantic roles.
+- UDIM material seam:
+  UDIM settings are Operator Intent over resolved inline material ids. Base XML
+  material rows feed `ConversionRequest.udim_material_settings`; repeated-part
+  `single_material`, `vertex_color_split`, and FBX `material_slots` rows carry
+  UDIM settings through prototype source config and material assignment
+  resolution. `udim_resolver.py` owns UV mutation after material ids are
+  resolved; external Unreal asset prototypes are not editable inline.
 - Naming seam:
   Keep `Source Name`, `Output Stem`, `Prim Name`, `Authored Asset Name`, and
   `Unreal Asset Path` distinct. Do not infer skeleton or base asset naming from
@@ -191,7 +200,9 @@ domain concept.
   It must not traverse raw XML directly and must not author Nanite Assembly,
   skeleton, or `PointInstancer` contracts. Preview and export share the same
   `ProxyMeshResult`; export may write an already generated preview result
-  without rebuilding it.
+  without rebuilding it. UI and worker adapters pass a `ProxyMeshSourceRequest`
+  projection, not the full main `ConversionRequest`, so main-export material,
+  prototype, UDIM, and conversion-mode intent cannot leak into proxy generation.
 - Operator state seam:
   `Operator State` is the current UI selection surface. `Persisted Operator
   Settings` restore that state across sessions or input XML files. `UI Shell
