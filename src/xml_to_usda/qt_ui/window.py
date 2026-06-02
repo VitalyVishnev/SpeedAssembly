@@ -81,6 +81,7 @@ from .persistence import (
     save_ui_shell_state,
     save_ui_theme_overrides,
 )
+from .fracture_preview import FracturePreviewDialog
 from .proxy_preview import ProxyPreviewDialog
 from .theme import (
     ResolvedTheme,
@@ -591,6 +592,7 @@ class MainWindow(QWidget):
         self._support_dialog: SupportDialog | None = None
         self._adjust_ui_dialog: AdjustUiDialog | None = None
         self._global_settings_dialog: GlobalSettingsDialog | None = None
+        self._fracture_preview_dialog: FracturePreviewDialog | None = None
         self._proxy_preview_dialog: ProxyPreviewDialog | None = None
         self._proxy_mesh_settings = ProxyMeshSettings()
         self._proxy_mesh_preview_result: ProxyMeshResult | None = None
@@ -907,6 +909,8 @@ class MainWindow(QWidget):
             browse_fbx=self._browse_part_fbx,
             on_change=self._handle_geometry_state_changed,
             on_preview_proxy_requested=self.open_proxy_preview_dialog,
+            on_preview_fracture_requested=self.open_fracture_preview_dialog,
+            on_export_fracture_requested=self.run_export_fracture_usda,
             on_proxy_settings_changed=self._handle_proxy_settings_changed,
         )
         self.materials_panel = MaterialsTabPanel(
@@ -1449,6 +1453,14 @@ class MainWindow(QWidget):
         proxy_running = self._background_jobs.proxy_mesh_running
         self.generate_proxy_button.setEnabled(has_input and not self._conversion_running and not proxy_running)
         self.geometry_panel.preview_proxy_button.setEnabled(has_input and not self._conversion_running and not proxy_running)
+        fracture_preview_running = self._background_jobs.fracture_preview_running
+        self.geometry_panel.preview_fracture_button.setEnabled(
+            has_input and not self._conversion_running and not fracture_preview_running
+        )
+        fracture_running = self._background_jobs.fracture_export_running
+        self.geometry_panel.export_fracture_button.setEnabled(
+            has_input and has_output and not self._conversion_running and not fracture_running
+        )
 
     def _handle_convert_button_clicked(self) -> None:
         # One operator-facing control handles both states. Clicking during an
@@ -1873,36 +1885,40 @@ class MainWindow(QWidget):
             target_edit.setText(selected)
 
     def run_conversion(self) -> None:
-        input_path = self.source_input.text().strip()
-        output_path = self.output_input.text().strip()
         try:
-            plan = self._deps.prepare_conversion_plan(
-                input_path=input_path,
-                output_path=output_path,
-                cpu_profile=self._operator_state.cpu_profile,
-                cleanup_policy=self._current_cleanup_policy(),
-                material_policy=self._operator_state.material_policy,
-                bark_material_path=self._operator_state.bark_material_path or None,
-                leaves_material_path=self._operator_state.leaves_material_path or None,
-                single_material_path=self._operator_state.single_material_path or None,
-                base_material_overrides=self.materials_panel.collect_base_material_overrides(),
-                udim_material_settings=self.materials_panel.collect_udim_material_settings(),
-                prototype_source_configs=self.materials_panel.collect_prototype_source_configs(),
-                conversion_mode=self._operator_state.conversion_mode,
-                async_threshold_bytes=self.ASYNC_CONVERSION_THRESHOLD_BYTES,
-                fbx_cache_max_bytes=self._fbx_cache_max_bytes(),
-                fbx_cache_max_age_seconds=self._fbx_cache_max_age_seconds(),
-            )
+            plan = self._prepare_current_conversion_plan()
         except ValueError as exc:
-            message = str(exc)
-            if message == "Select a source XML file.":
-                self._report_error("Missing input", message)
-            elif message == "Select an output USDA path.":
-                self._report_error("Missing output", message)
-            else:
-                self._report_error("Invalid material path", message)
+            self._report_conversion_plan_error(exc)
             return
         self._background_jobs.start_conversion(request=plan.request, run_async=plan.run_async)
+
+    def _prepare_current_conversion_plan(self):
+        return self._deps.prepare_conversion_plan(
+            input_path=self.source_input.text().strip(),
+            output_path=self.output_input.text().strip(),
+            cpu_profile=self._operator_state.cpu_profile,
+            cleanup_policy=self._current_cleanup_policy(),
+            material_policy=self._operator_state.material_policy,
+            bark_material_path=self._operator_state.bark_material_path or None,
+            leaves_material_path=self._operator_state.leaves_material_path or None,
+            single_material_path=self._operator_state.single_material_path or None,
+            base_material_overrides=self.materials_panel.collect_base_material_overrides(),
+            udim_material_settings=self.materials_panel.collect_udim_material_settings(),
+            prototype_source_configs=self.materials_panel.collect_prototype_source_configs(),
+            conversion_mode=self._operator_state.conversion_mode,
+            async_threshold_bytes=self.ASYNC_CONVERSION_THRESHOLD_BYTES,
+            fbx_cache_max_bytes=self._fbx_cache_max_bytes(),
+            fbx_cache_max_age_seconds=self._fbx_cache_max_age_seconds(),
+        )
+
+    def _report_conversion_plan_error(self, exc: ValueError) -> None:
+        message = str(exc)
+        if message == "Select a source XML file.":
+            self._report_error("Missing input", message)
+        elif message == "Select an output USDA path.":
+            self._report_error("Missing output", message)
+        else:
+            self._report_error("Invalid material path", message)
 
     def refresh_wind_groups(self) -> None:
         self._source_refresh_timer.stop()
@@ -1985,6 +2001,25 @@ class MainWindow(QWidget):
         dialog.raise_()
         dialog.activateWindow()
 
+    def open_fracture_preview_dialog(self) -> None:
+        self._source_refresh_timer.stop()
+        settings = self.geometry_panel.fracture_preview_settings()
+        try:
+            request = self._build_fracture_preview_request()
+        except ValueError as exc:
+            self._report_error("Missing input", str(exc))
+            return
+        self._background_jobs.start_fracture_preview(request, settings)
+
+    def _handle_fracture_preview_result(self, preview) -> None:
+        dialog = FracturePreviewDialog(preview=preview, parent=None)
+        dialog.setStyleSheet(self.styleSheet())
+        self._fracture_preview_dialog = dialog
+        self._set_status(f"Fracture Preview ready: {preview.plan.actual_piece_count} piece(s).")
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
     def run_generate_proxy_mesh(self) -> None:
         self._source_refresh_timer.stop()
         self._proxy_mesh_settings = self.geometry_panel.proxy_settings()
@@ -1998,6 +2033,16 @@ class MainWindow(QWidget):
             self._background_jobs.start_generated_proxy_mesh_export(request, proxy)
             return
         self._background_jobs.start_proxy_mesh_export(request, self._proxy_mesh_settings)
+
+    def run_export_fracture_usda(self) -> None:
+        self._source_refresh_timer.stop()
+        try:
+            plan = self._prepare_current_conversion_plan()
+        except ValueError as exc:
+            self._report_conversion_plan_error(exc)
+            return
+        settings = self.geometry_panel.fracture_preview_settings().fracture
+        self._background_jobs.start_fracture_export(plan.request, settings)
 
     def _proxy_preview_result_for_input(self, input_path: str) -> ProxyMeshResult | None:
         if self._proxy_mesh_preview_input_path != input_path:
@@ -2046,6 +2091,16 @@ class MainWindow(QWidget):
         self._set_status(f"Wrote Proxy Mesh USDA to {result.output_path}")
         self._append_log(f"Proxy Mesh complete\nWrote Proxy Mesh USDA to {result.output_path}")
 
+    def _handle_fracture_export_result(self, result) -> None:
+        output_count = len(result.outputs)
+        output_lines = "\n".join(output.output_path for output in result.outputs)
+        self._set_status(f"Wrote {output_count} Fracture USDA piece(s).")
+        self._append_log(
+            f"Fracture export complete\n"
+            f"Pieces: {result.plan.actual_piece_count}\n"
+            f"{output_lines}"
+        )
+
     def _record_proxy_preview_error(self, message: str) -> None:
         self._append_log(f"Proxy Mesh preview error\n{message}")
         runtime_log_path = self._runtime_paths.settings_dir / "gui_runtime.log"
@@ -2062,6 +2117,19 @@ class MainWindow(QWidget):
             raise ValueError("Select a source XML file before generating a proxy mesh.")
         return ProxyMeshSourceRequest(
             input_path=input_path,
+            output_path=self.output_input.text().strip(),
+            output_mode=OutputMode.SELF_CONTAINED,
+            cpu_profile=self._operator_state.cpu_profile,
+            fbx_cache_max_bytes=self._fbx_cache_max_bytes(),
+            fbx_cache_max_age_seconds=self._fbx_cache_max_age_seconds(),
+        )
+
+    def _build_fracture_preview_request(self) -> ConversionRequest:
+        input_path = self.source_input.text().strip()
+        if not input_path:
+            raise ValueError("Select a source XML file before previewing fracturing.")
+        return ConversionRequest(
+            input_paths=(input_path,),
             output_path=self.output_input.text().strip(),
             output_mode=OutputMode.SELF_CONTAINED,
             cpu_profile=self._operator_state.cpu_profile,

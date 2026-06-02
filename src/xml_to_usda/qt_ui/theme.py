@@ -729,15 +729,19 @@ QListWidget#AdjustUiCategoryList::item:selected {{
     color: {window_text};
 }}
 QScrollBar:vertical {{
-    background: rgba(220, 229, 232, 0.18);
-    width: 10px;
-    margin: 4px 0px 4px 0px;
-    border-radius: 5px;
+    background: rgba(220, 229, 232, 0.22);
+    width: 14px;
+    margin: 4px 2px 4px 2px;
+    border-radius: 7px;
 }}
 QScrollBar::handle:vertical {{
-    background: rgba(220, 229, 232, 0.78);
-    border-radius: 5px;
-    min-height: 24px;
+    background: rgba(104, 119, 120, 0.76);
+    border: 1px solid rgba(232, 240, 241, 0.42);
+    border-radius: 6px;
+    min-height: 32px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: rgba(83, 100, 102, 0.88);
 }}
 QScrollBar::add-line:vertical,
 QScrollBar::sub-line:vertical,
@@ -747,15 +751,19 @@ QScrollBar::sub-page:vertical {{
     height: 0px;
 }}
 QScrollBar:horizontal {{
-    background: rgba(220, 229, 232, 0.18);
-    height: 10px;
-    margin: 0px 4px 0px 4px;
-    border-radius: 5px;
+    background: rgba(220, 229, 232, 0.22);
+    height: 14px;
+    margin: 2px 4px 2px 4px;
+    border-radius: 7px;
 }}
 QScrollBar::handle:horizontal {{
-    background: rgba(220, 229, 232, 0.78);
-    border-radius: 5px;
-    min-width: 24px;
+    background: rgba(104, 119, 120, 0.76);
+    border: 1px solid rgba(232, 240, 241, 0.42);
+    border-radius: 6px;
+    min-width: 32px;
+}}
+QScrollBar::handle:horizontal:hover {{
+    background: rgba(83, 100, 102, 0.88);
 }}
 QScrollBar::add-line:horizontal,
 QScrollBar::sub-line:horizontal,

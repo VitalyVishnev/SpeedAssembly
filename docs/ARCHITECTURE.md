@@ -203,6 +203,25 @@ domain concept.
   without rebuilding it. UI and worker adapters pass a `ProxyMeshSourceRequest`
   projection, not the full main `ConversionRequest`, so main-export material,
   prototype, UDIM, and conversion-mode intent cannot leak into proxy generation.
+- Fracturing seam:
+  Fracturing is a companion destructibility workflow over `ResolvedAssemblyModel`.
+  `fracture_service.py` owns deterministic skeleton-owned Fracture Piece
+  planning. `fracture_export_service.py` projects those pieces into per-piece
+  `Static Mesh Assembly` authoring models and delegates USDA writing to
+  `usda_writer.py`. `fracture_preview_service.py` projects the same plan into
+  diagnostic preview payloads with stable colors and lightweight geometry.
+  `qt_ui/fracture_preview.py` owns the Qt preview dialog/viewport adapter and
+  adapts those payloads into the shared matcap/grid viewport with slight
+  per-piece tinting. It must not own fracture planning or source interpretation
+  rules.
+  Fracture export must reuse resolved Operator Intent for materials and
+  prototype sources, but its authored piece files are static assemblies
+  regardless of the main export mode. Fracture preview uses source XML geometry
+  so it can stay fast and avoid heavy replacement payloads. The Qt Geometry tab
+  exposes both operations: preview passes a source-geometry request, export
+  passes the full current conversion request. Both are executed through the
+  file-based fracture worker subprocess so native worker crashes stay outside
+  the Qt UI process.
 - Operator state seam:
   `Operator State` is the current UI selection surface. `Persisted Operator
   Settings` restore that state across sessions or input XML files. `UI Shell

@@ -164,3 +164,13 @@ def test_shared_controls_use_one_hover_color() -> None:
     assert "QPushButton#WindRefreshButton" in stylesheet
     assert stylesheet.count("background: #445566;") >= 3
     assert stylesheet.count("background: #778899;") >= 6
+
+
+def test_scrollbar_style_has_visible_contrast_against_log_background() -> None:
+    stylesheet = build_stylesheet(load_theme())
+
+    assert "QScrollBar:vertical" in stylesheet
+    assert "width: 14px;" in stylesheet
+    assert "background: rgba(104, 119, 120, 0.76);" in stylesheet
+    assert "border: 1px solid rgba(232, 240, 241, 0.42);" in stylesheet
+    assert "QScrollBar::handle:vertical:hover" in stylesheet

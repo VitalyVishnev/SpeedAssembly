@@ -1,5 +1,26 @@
 # Known Problems
 
+## Fracturing Qt Preview Real-Sample Validation Pending
+
+- Issue: Fracture Preview is reachable from the Geometry tab, generated in an isolated worker process, rendered through the shared Qt matcap/grid viewport with slight per-piece tinting, and covered on the small `SimpleTree_01.xml` real sample, but it has not yet been visually validated against dense or large real XML samples.
+- Location: `src/xml_to_usda/fracture_preview_service.py`, `src/xml_to_usda/fracture_worker_subprocess.py`, `src/xml_to_usda/qt_ui/fracture_preview.py`
+- Reason for deferral: The current slice locked the operator workflow contract, renderer path, and process isolation before real-sample visual QA.
+- Likely next step: Run preview on dense and large SpeedTree samples, compare against the intact skeletal tree in neutral pose, and tune preview face budgets or color palette if inspection becomes misleading.
+
+## Fracturing Face-Ownership Cut Accuracy Pending
+
+- Issue: Fracture export currently partitions Base Mesh by whole-face skeleton ownership. It does not split triangles crossing a fracture boundary and does not author cut caps/interior surfaces.
+- Location: `src/xml_to_usda/fracture_export_service.py`
+- Reason for deferral: The first export slice needed stable root-pivoted sibling files and per-piece assembly ownership before implementing geometric cut refinement.
+- Likely next step: Add geometric boundary splitting for faces crossing selected cut sites, keeping v1 caps intentionally open unless a later UE/runtime validation changes that requirement.
+
+## Fracturing Synthetic Cut Instance Assignment Pending
+
+- Issue: The fracture planner can synthesize deterministic mid-segment base-face splits for safe pieces without repeated instances, allowing a single long trunk to split roughly in half when the hierarchy has no usable joint cut site. It still does not split a segment that owns repeated parts, because assigning those instances to one side of an intra-bone cut requires spatial side classification instead of skeleton ownership alone.
+- Location: `src/xml_to_usda/fracture_service.py`
+- Reason for deferral: Repeated-part side assignment inside one skeleton segment is a separate geometric classification problem; guessing it would break the root-pivoted static assembly contract.
+- Likely next step: Add split-plane side tests for repeated-part instance origins/bounds and reject ambiguous instances loudly instead of assigning by fallback.
+
 ## UDIM Real-Sample Coverage Pending
 
 - Issue: UDIM authoring is covered by automated tests and the current baseline UE 5.7.x sample, but repeated-part and FBX material-slot UDIM rows have not yet been validated across a broad set of real SpeedTree structures.

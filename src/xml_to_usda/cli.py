@@ -9,6 +9,7 @@ from .fbx_adapter import load_fbx_geometry
 from .fbx_payload_cache import FbxPayloadCacheOptions, load_fbx_payload_from_cache, store_fbx_payload_in_cache
 from .fbx_worker_subprocess import FBX_WORKER_COMMAND, run_fbx_worker_request_file
 from .conversion_worker_subprocess import CONVERSION_WORKER_COMMAND, run_conversion_worker_request_file
+from .fracture_worker_subprocess import FRACTURE_WORKER_COMMAND, run_fracture_worker_request_file
 from .models import CleanupPolicy, CpuProfile, FbxMaterialMode, GeometryBuffer, MaterialPolicy
 from .pipeline import convert_file, generate_wind_json, inspect_source
 from .prototype_sources import fbx_import_read_options_for_material_mode, load_prototype_source_configs_from_json
@@ -83,6 +84,8 @@ def build_parser() -> argparse.ArgumentParser:
     conversion_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
     proxy_worker_parser = subparsers.add_parser(PROXY_MESH_WORKER_COMMAND, help=argparse.SUPPRESS)
     proxy_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
+    fracture_worker_parser = subparsers.add_parser(FRACTURE_WORKER_COMMAND, help=argparse.SUPPRESS)
+    fracture_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
     return parser
 
 
@@ -104,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_conversion_worker_request_file(args.request)
     if args.command == PROXY_MESH_WORKER_COMMAND:
         return run_proxy_mesh_worker_request_file(args.request)
+    if args.command == FRACTURE_WORKER_COMMAND:
+        return run_fracture_worker_request_file(args.request)
     runtime_paths = resolve_runtime_paths()
     _report_runtime_cleanup_summary(sweep_stale_job_workspaces(runtime_paths))
 

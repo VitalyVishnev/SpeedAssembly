@@ -13,6 +13,7 @@ from pathlib import Path
 from ..diagnostics_bundle import default_build_info_path
 from ..conversion_worker_subprocess import CONVERSION_WORKER_COMMAND
 from ..fbx_worker_subprocess import FBX_WORKER_COMMAND
+from ..fracture_worker_subprocess import FRACTURE_WORKER_COMMAND
 from ..proxy_mesh_worker_subprocess import PROXY_MESH_WORKER_COMMAND
 
 WINDOWS_APP_USER_MODEL_ID = "XMLtoUSDAConverter.XMLtoUSDAConverter"
@@ -53,6 +54,11 @@ def main(argv: list[str] | None = None) -> int:
 
         request_path = argv[argv.index("--request") + 1] if "--request" in argv else ""
         return run_proxy_mesh_worker_request_file(request_path)
+    if argv and argv[0] == FRACTURE_WORKER_COMMAND:
+        from ..fracture_worker_subprocess import run_fracture_worker_request_file
+
+        request_path = argv[argv.index("--request") + 1] if "--request" in argv else ""
+        return run_fracture_worker_request_file(request_path)
 
     parser = build_parser()
     args = parser.parse_args(argv)

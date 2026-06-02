@@ -20,6 +20,17 @@ from .conversion_worker_subprocess import (
     read_conversion_worker_error,
     write_conversion_worker_request,
 )
+from .fracture_service import FractureSettings
+from .fracture_preview_service import FracturePreviewSettings
+from .fracture_worker_subprocess import (
+    FRACTURE_WORKER_ACTION_EXPORT,
+    FRACTURE_WORKER_ACTION_PREVIEW,
+    FRACTURE_WORKER_COMMAND,
+    FractureWorkerRequest,
+    read_fracture_worker_error,
+    read_fracture_worker_result,
+    write_fracture_worker_request,
+)
 from .proxy_mesh_service import (
     ProxyMeshJobResult,
     ProxyMeshSettings,
@@ -107,6 +118,54 @@ def start_proxy_mesh_process(
     return (
         _SubprocessWorkerProcess(process),
         _ProxyMeshWorkerQueue(request_path=request_path, result_path=result_path, error_path=error_path),
+        _SubprocessCancelEvent(process),
+    )
+
+
+def start_fracture_export_process(
+    request: ConversionRequest,
+    settings: FractureSettings,
+):
+    return _start_fracture_worker_process(request, settings, action=FRACTURE_WORKER_ACTION_EXPORT)
+
+
+def start_fracture_preview_process(
+    request: ConversionRequest,
+    settings: FracturePreviewSettings,
+):
+    return _start_fracture_worker_process(request, settings, action=FRACTURE_WORKER_ACTION_PREVIEW)
+
+
+def _start_fracture_worker_process(
+    request: ConversionRequest,
+    settings: FractureSettings | FracturePreviewSettings,
+    *,
+    action: str,
+):
+    suppress_windows_native_error_dialogs()
+    request_path = _create_fracture_temp_path(".request.pkl")
+    result_path = _create_fracture_temp_path(".result.pkl")
+    error_path = _create_fracture_temp_path(".error.json")
+    write_fracture_worker_request(
+        request_path,
+        FractureWorkerRequest(
+            request=request,
+            settings=settings,
+            action=action,
+            result_path=str(result_path),
+            error_path=str(error_path),
+        ),
+    )
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    process = subprocess.Popen(
+        _resolve_fracture_worker_command(request_path),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=creation_flags,
+    )
+    return (
+        _SubprocessWorkerProcess(process),
+        _FractureWorkerQueue(request_path=request_path, result_path=result_path, error_path=error_path),
         _SubprocessCancelEvent(process),
     )
 
@@ -319,12 +378,46 @@ class _ProxyMeshWorkerQueue:
                 pass
 
 
+@dataclass
+class _FractureWorkerQueue:
+    request_path: Path
+    result_path: Path
+    error_path: Path
+    delivered: bool = False
+
+    def drain(self) -> list[tuple[str, object]]:
+        if self.delivered:
+            return []
+        if self.error_path.exists():
+            self.delivered = True
+            message, formatted_traceback = read_fracture_worker_error(self.error_path)
+            return [
+                ("error_traceback", formatted_traceback),
+                ("error", message),
+            ]
+        if not self.result_path.exists():
+            return []
+        self.delivered = True
+        return [("result", read_fracture_worker_result(self.result_path))]
+
+    def close(self) -> None:
+        for path in (self.request_path, self.result_path, self.error_path):
+            try:
+                path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
 def _create_proxy_temp_path(suffix: str) -> Path:
     return _create_temp_path("xml_to_usda_proxy_", suffix)
 
 
 def _create_conversion_temp_path(suffix: str) -> Path:
     return _create_temp_path("xml_to_usda_conversion_", suffix)
+
+
+def _create_fracture_temp_path(suffix: str) -> Path:
+    return _create_temp_path("xml_to_usda_fracture_", suffix)
 
 
 def _create_temp_path(prefix: str, suffix: str) -> Path:
@@ -372,3 +465,15 @@ def _resolve_proxy_mesh_worker_command(request_path: Path) -> list[str]:
             return [str(worker_executable), PROXY_MESH_WORKER_COMMAND, "--request", str(request_path)]
         return [sys.executable, PROXY_MESH_WORKER_COMMAND, "--request", str(request_path)]
     return [sys.executable, "-m", "xml_to_usda", PROXY_MESH_WORKER_COMMAND, "--request", str(request_path)]
+
+
+def _resolve_fracture_worker_command(request_path: Path) -> list[str]:
+    if bool(getattr(sys, "frozen", False)):
+        worker_dir_executable = Path(sys.executable).parent / "XMLtoUSDAWorker" / "XMLtoUSDAWorker.exe"
+        if worker_dir_executable.exists():
+            return [str(worker_dir_executable), FRACTURE_WORKER_COMMAND, "--request", str(request_path)]
+        worker_executable = Path(sys.executable).with_name("XMLtoUSDAWorker.exe")
+        if worker_executable.exists():
+            return [str(worker_executable), FRACTURE_WORKER_COMMAND, "--request", str(request_path)]
+        return [sys.executable, FRACTURE_WORKER_COMMAND, "--request", str(request_path)]
+    return [sys.executable, "-m", "xml_to_usda", FRACTURE_WORKER_COMMAND, "--request", str(request_path)]

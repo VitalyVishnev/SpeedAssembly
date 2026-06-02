@@ -10,6 +10,8 @@ from xml_to_usda.conversion_process import (
     _proxy_mesh_process_entry,
     close_process_queue,
     drain_process_queue,
+    start_fracture_export_process,
+    start_fracture_preview_process,
     start_conversion_process,
     start_proxy_mesh_process,
 )
@@ -17,6 +19,11 @@ from xml_to_usda.conversion_worker_subprocess import (
     ConversionWorkerRequest,
     run_conversion_worker_request_file,
     write_conversion_worker_request,
+)
+from xml_to_usda.fracture_service import FractureSettings
+from xml_to_usda.fracture_preview_service import FracturePreviewSettings
+from xml_to_usda.fracture_worker_subprocess import (
+    read_fracture_worker_request,
 )
 from xml_to_usda.models import ConversionJobResult, ConversionRequest
 from xml_to_usda.pipeline import convert_request
@@ -177,6 +184,96 @@ def test_start_proxy_mesh_process_uses_file_based_worker(monkeypatch) -> None:
     assert "--request" in popen_calls[0].args
     assert popen_calls[0].kwargs["stdout"] is not None
     assert popen_calls[0].kwargs["stderr"] is not None
+    cancel_event.set()
+    assert process.is_alive() is False
+    close_process_queue(queue)
+
+
+def test_start_fracture_export_process_uses_file_based_worker(monkeypatch) -> None:
+    class _DummyPopen:
+        def __init__(self, args, **kwargs) -> None:
+            self.args = args
+            self.kwargs = kwargs
+            self.terminated = False
+
+        def poll(self):
+            return None if not self.terminated else 1
+
+        def wait(self, timeout=None):
+            self.terminated = True
+            return 0
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    popen_calls: list[_DummyPopen] = []
+
+    def fake_popen(args, **kwargs):
+        process = _DummyPopen(args, **kwargs)
+        popen_calls.append(process)
+        return process
+
+    monkeypatch.setattr("xml_to_usda.conversion_process.subprocess.Popen", fake_popen)
+
+    process, queue, cancel_event = start_fracture_export_process(
+        ConversionRequest(input_paths=("input.xml",), output_path="output.usda"),
+        FractureSettings(target_piece_count=4),
+    )
+
+    assert popen_calls
+    assert process.is_alive() is True
+    assert "--request" in popen_calls[0].args
+    request_path = Path(popen_calls[0].args[popen_calls[0].args.index("--request") + 1])
+    payload = read_fracture_worker_request(request_path)
+    assert payload.request.output_path == "output.usda"
+    assert payload.action == "export"
+    assert payload.settings.target_piece_count == 4
+    assert popen_calls[0].kwargs["stdout"] is not None
+    assert popen_calls[0].kwargs["stderr"] is not None
+    cancel_event.set()
+    assert process.is_alive() is False
+    close_process_queue(queue)
+
+
+def test_start_fracture_preview_process_uses_file_based_worker(monkeypatch) -> None:
+    class _DummyPopen:
+        def __init__(self, args, **kwargs) -> None:
+            self.args = args
+            self.kwargs = kwargs
+            self.terminated = False
+
+        def poll(self):
+            return None if not self.terminated else 1
+
+        def wait(self, timeout=None):
+            self.terminated = True
+            return 0
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    popen_calls: list[_DummyPopen] = []
+
+    def fake_popen(args, **kwargs):
+        process = _DummyPopen(args, **kwargs)
+        popen_calls.append(process)
+        return process
+
+    monkeypatch.setattr("xml_to_usda.conversion_process.subprocess.Popen", fake_popen)
+
+    process, queue, cancel_event = start_fracture_preview_process(
+        ConversionRequest(input_paths=("input.xml",), output_path="output.usda"),
+        FracturePreviewSettings(fracture=FractureSettings(target_piece_count=3)),
+    )
+
+    assert popen_calls
+    assert process.is_alive() is True
+    assert "--request" in popen_calls[0].args
+    request_path = Path(popen_calls[0].args[popen_calls[0].args.index("--request") + 1])
+    payload = read_fracture_worker_request(request_path)
+    assert payload.request.output_path == "output.usda"
+    assert payload.action == "preview"
+    assert payload.settings.fracture.target_piece_count == 3
     cancel_event.set()
     assert process.is_alive() is False
     close_process_queue(queue)

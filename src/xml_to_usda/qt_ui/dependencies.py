@@ -16,6 +16,8 @@ class QtUiDependencies:
     prepare_conversion_plan: object
     start_conversion_process: object
     start_proxy_mesh_process: object
+    start_fracture_export_process: object
+    start_fracture_preview_process: object
     close_process_queue: object
     drain_process_queue: object
     convert_request: object
@@ -33,6 +35,8 @@ class QtUiDependencies:
     generate_proxy_mesh_from_source_request: object
     export_proxy_usda_from_source_request: object
     export_generated_proxy_usda_from_source_request: object
+    generate_fracture_preview_from_conversion_request: object
+    export_fracture_usda_from_conversion_request: object
     format_wind_error: object
     should_retry_wind_error: object
     sys: object
@@ -42,7 +46,14 @@ def build_default_dependencies() -> QtUiDependencies:
     """Build the default PySide6-shell dependency bundle."""
     import sys
 
-    from ..conversion_process import close_process_queue, drain_process_queue, start_conversion_process, start_proxy_mesh_process
+    from ..conversion_process import (
+        close_process_queue,
+        drain_process_queue,
+        start_conversion_process,
+        start_fracture_export_process,
+        start_fracture_preview_process,
+        start_proxy_mesh_process,
+    )
     from ..conversion_service import prepare_conversion_plan
     from ..discovery_service import (
         discover_base_material_rows,
@@ -65,11 +76,15 @@ def build_default_dependencies() -> QtUiDependencies:
         export_proxy_usda_from_source_request,
         generate_proxy_mesh_from_source_request,
     )
+    from ..fracture_preview_service import generate_fracture_preview_from_conversion_request
+    from ..fracture_export_service import export_fracture_usda_from_conversion_request
 
     return QtUiDependencies(
         prepare_conversion_plan=prepare_conversion_plan,
         start_conversion_process=start_conversion_process,
         start_proxy_mesh_process=start_proxy_mesh_process,
+        start_fracture_export_process=start_fracture_export_process,
+        start_fracture_preview_process=start_fracture_preview_process,
         close_process_queue=close_process_queue,
         drain_process_queue=drain_process_queue,
         convert_request=convert_request,
@@ -87,6 +102,8 @@ def build_default_dependencies() -> QtUiDependencies:
         generate_proxy_mesh_from_source_request=generate_proxy_mesh_from_source_request,
         export_proxy_usda_from_source_request=export_proxy_usda_from_source_request,
         export_generated_proxy_usda_from_source_request=export_generated_proxy_usda_from_source_request,
+        generate_fracture_preview_from_conversion_request=generate_fracture_preview_from_conversion_request,
+        export_fracture_usda_from_conversion_request=export_fracture_usda_from_conversion_request,
         format_wind_error=format_wind_error,
         should_retry_wind_error=should_retry_wind_error,
         sys=sys,

@@ -23,7 +23,9 @@ from xml_to_usda.discovery_service import (
     PrototypeMaterialSlotRowSpec,
     PrototypeRowSpec,
 )
+from xml_to_usda.fracture_preview_service import FracturePreviewSettings
 from xml_to_usda.models import (
+    Color4,
     CleanupPolicy,
     ConversionPhase,
     ConversionRequest,
@@ -35,6 +37,7 @@ from xml_to_usda.models import (
     DynamicWindJointAssignment,
     DynamicWindSimulationGroup,
     FbxMaterialMode,
+    GeometryBuffer,
     MaterialPolicy,
     PrototypeSourceMode,
     UsdAssemblyDocument,
@@ -84,6 +87,9 @@ def _build_fake_deps(calls: dict[str, object]) -> QtUiDependencies:
             bark_material_path=kwargs["bark_material_path"],
             leaves_material_path=kwargs["leaves_material_path"],
             single_material_path=kwargs["single_material_path"],
+            base_material_overrides=kwargs["base_material_overrides"],
+            udim_material_settings=kwargs["udim_material_settings"],
+            prototype_source_configs=kwargs["prototype_source_configs"],
             conversion_mode=kwargs["conversion_mode"],
         )
         return ConversionLaunchPlan(request=request, run_async=False)
@@ -218,6 +224,128 @@ def _build_fake_deps(calls: dict[str, object]) -> QtUiDependencies:
             raise AssertionError("unexpected proxy process action")
         return _FinishedProcess(), [("result", ProxyMeshJobResult(export=export_proxy_usda_from_source_request(request, settings)))], object()
 
+    def generate_fracture_preview_from_conversion_request(request, settings):
+        from array import array
+
+        from xml_to_usda.fracture_preview_service import FracturePreviewPiece, FracturePreviewResult
+        from xml_to_usda.fracture_service import FracturePiece, FracturePlan
+
+        calls["generate_fracture_preview_from_conversion_request"] = {
+            "request": request,
+            "settings": settings,
+        }
+        pieces: list[FracturePreviewPiece] = []
+        for index in range(settings.fracture.target_piece_count):
+            piece = FracturePiece(
+                index=index,
+                name=f"{settings.fracture.output_stem}_fracture_{index:02d}",
+                is_root_piece=index == 0,
+                cut_joint_token=None if index == 0 else f"bone_{index:03d}",
+                joint_tokens=(f"bone_{index:03d}",),
+                base_face_indices=(index,),
+                repeated_part_indices=(),
+                repeated_part_names=(),
+            )
+            pieces.append(
+                FracturePreviewPiece(
+                    piece=piece,
+                    color=Color4(0.2 + index * 0.1, 0.4, 0.8, 1.0),
+                    base_mesh=GeometryBuffer(
+                        name=piece.name,
+                        point_components=array(
+                            "f",
+                            [
+                                float(index),
+                                0.0,
+                                0.0,
+                                float(index) + 0.5,
+                                0.0,
+                                0.0,
+                                float(index),
+                                0.5,
+                                0.0,
+                            ],
+                        ),
+                        face_vertex_counts=array("i", [3]),
+                        face_vertex_indices=array("i", [0, 1, 2]),
+                    ),
+                )
+            )
+        plan = FracturePlan(
+            method=settings.fracture.method,
+            requested_piece_count=settings.fracture.target_piece_count,
+            actual_piece_count=len(pieces),
+            output_stem=settings.fracture.output_stem,
+            main_axis_joint_tokens=(),
+            selected_cut_sites=(),
+            rejected_cut_sites=(),
+            pieces=tuple(preview_piece.piece for preview_piece in pieces),
+            diagnostics=(),
+        )
+        return FracturePreviewResult(
+            plan=plan,
+            pieces=tuple(pieces),
+            prototypes={},
+            instances=(),
+            diagnostics=(),
+        )
+
+    def start_fracture_preview_process(request, settings):
+        calls["start_fracture_preview_process"] = {
+            "request": request,
+            "settings": settings,
+        }
+        return _FinishedProcess(), [("result", generate_fracture_preview_from_conversion_request(request, settings))], object()
+
+    def export_fracture_usda_from_conversion_request(request, settings):
+        from xml_to_usda.fracture_export_service import FractureExportResult, FracturePieceExport
+        from xml_to_usda.fracture_service import FracturePiece, FracturePlan
+
+        calls["export_fracture_usda_from_conversion_request"] = {
+            "request": request,
+            "settings": settings,
+        }
+        pieces: list[FracturePiece] = []
+        outputs: list[FracturePieceExport] = []
+        for index in range(settings.target_piece_count):
+            piece = FracturePiece(
+                index=index,
+                name=f"{Path(request.output_path).stem}_fracture_{index:02d}",
+                is_root_piece=index == 0,
+                cut_joint_token=None if index == 0 else f"bone_{index:03d}",
+                joint_tokens=(f"bone_{index:03d}",),
+                base_face_indices=(index,),
+                repeated_part_indices=(),
+                repeated_part_names=(),
+            )
+            pieces.append(piece)
+            outputs.append(
+                FracturePieceExport(
+                    piece=piece,
+                    output_path=str(Path(request.output_path).with_name(f"{piece.name}.usda")),
+                    usda_document=UsdAssemblyDocument(text="#usda 1.0", diagnostics=()),
+                )
+            )
+        plan = FracturePlan(
+            method=settings.method,
+            requested_piece_count=settings.target_piece_count,
+            actual_piece_count=len(pieces),
+            output_stem=Path(request.output_path).stem,
+            main_axis_joint_tokens=(),
+            selected_cut_sites=(),
+            rejected_cut_sites=(),
+            pieces=tuple(pieces),
+            diagnostics=(),
+        )
+        return FractureExportResult(plan=plan, outputs=tuple(outputs), diagnostics=())
+
+    def start_fracture_export_process(request, settings):
+        calls["start_fracture_export_process"] = {
+            "request": request,
+            "settings": settings,
+        }
+        return _FinishedProcess(), [("result", export_fracture_usda_from_conversion_request(request, settings))], object()
+
     def drain_process_queue(queue):
         if isinstance(queue, list):
             events = list(queue)
@@ -272,6 +400,8 @@ def _build_fake_deps(calls: dict[str, object]) -> QtUiDependencies:
         prepare_conversion_plan=prepare_conversion_plan,
         start_conversion_process=lambda request, runtime_paths=None: (_ for _ in ()).throw(AssertionError("unexpected async process")),
         start_proxy_mesh_process=start_proxy_mesh_process,
+        start_fracture_export_process=start_fracture_export_process,
+        start_fracture_preview_process=start_fracture_preview_process,
         close_process_queue=lambda queue: None,
         drain_process_queue=drain_process_queue,
         convert_request=convert_request,
@@ -289,6 +419,8 @@ def _build_fake_deps(calls: dict[str, object]) -> QtUiDependencies:
         generate_proxy_mesh_from_source_request=generate_proxy_mesh_from_source_request,
         export_proxy_usda_from_source_request=export_proxy_usda_from_source_request,
         export_generated_proxy_usda_from_source_request=export_generated_proxy_usda_from_source_request,
+        generate_fracture_preview_from_conversion_request=generate_fracture_preview_from_conversion_request,
+        export_fracture_usda_from_conversion_request=export_fracture_usda_from_conversion_request,
         format_wind_error=lambda payload: f"{payload.get('type', 'Exception')}: {payload.get('message', '')}",
         should_retry_wind_error=lambda error_type, message: False,
         sys=__import__("sys"),
@@ -921,6 +1053,101 @@ def test_qt_window_opens_proxy_preview_from_geometry_tab(monkeypatch, qtbot, tmp
         "preview",
         "preview",
     ]
+
+
+def test_qt_window_opens_fracture_preview_from_geometry_tab(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    calls: dict[str, object] = {}
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps(calls),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+    window.output_input.setText(str(tmp_path / "tree.usda"))
+    window.geometry_panel.fracture_piece_count_spin.setValue(3)
+    window.geometry_panel.fracture_base_face_budget_spin.setValue(1200)
+
+    assert window.geometry_panel.fracture_method_combo.currentData() == "wind_guided_hierarchy"
+    assert window.geometry_panel.fracture_method_combo.findData("branch_base_greedy") >= 0
+    assert window.geometry_panel.preview_fracture_button.isEnabled()
+
+    qtbot.mouseClick(window.geometry_panel.preview_fracture_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(
+        lambda: window._fracture_preview_dialog is not None and window._fracture_preview_dialog.isVisible(),
+        timeout=3000,
+    )
+
+    assert isinstance(window._fracture_preview_dialog.viewport, QOpenGLWidget)
+    assert window._fracture_preview_dialog.viewport_mesh.piece_count == 3
+    assert window._fracture_preview_dialog.viewport_mesh.triangle_count == 3
+
+    assert calls["start_fracture_preview_process"]["settings"].fracture.target_piece_count == 3
+    call = calls["generate_fracture_preview_from_conversion_request"]
+    assert call["request"].input_paths == (str(tree_xml),)
+    assert call["request"].output_path == str(tmp_path / "tree.usda")
+    assert not call["request"].prototype_source_configs
+    assert isinstance(call["settings"], FracturePreviewSettings)
+    assert call["settings"].fracture.method == "wind_guided_hierarchy"
+    assert call["settings"].fracture.target_piece_count == 3
+    assert call["settings"].max_base_faces_per_piece == 1200
+
+
+def test_qt_window_exports_fracture_pieces_with_current_operator_intent(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    calls: dict[str, object] = {}
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps(calls),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    fake_fbx = tmp_path / "branch.fbx"
+    fake_fbx.write_text("", encoding="utf-8")
+    output_path = tmp_path / "tree.usda"
+    window.source_input.setText(str(tree_xml))
+    window.output_input.setText(str(output_path))
+    window.geometry_panel.fracture_piece_count_spin.setValue(4)
+    window.geometry_panel.fracture_method_combo.setCurrentIndex(
+        window.geometry_panel.fracture_method_combo.findData("pure_hierarchy")
+    )
+    geometry_row = window.geometry_panel._rows[0]
+    geometry_row.fbx_edit.setText(str(fake_fbx))
+    geometry_row.source_mode_combo.setCurrentIndex(
+        geometry_row.source_mode_combo.findData(PrototypeSourceMode.FBX_FILE.value)
+    )
+
+    assert window.geometry_panel.export_fracture_button.isEnabled()
+
+    qtbot.mouseClick(window.geometry_panel.export_fracture_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Wrote 4 Fracture USDA piece(s)." in window.status_label.text(), timeout=3000)
+
+    assert calls["start_fracture_export_process"]["settings"].target_piece_count == 4
+    call = calls["export_fracture_usda_from_conversion_request"]
+    assert call["settings"].method == "pure_hierarchy"
+    assert call["settings"].target_piece_count == 4
+    assert call["request"].input_paths == (str(tree_xml),)
+    assert call["request"].output_path == str(output_path)
+    assert call["request"].prototype_source_configs[0].mode == PrototypeSourceMode.FBX_FILE
+    assert call["request"].prototype_source_configs[0].fbx_path == str(fake_fbx)
+    assert "tree_fracture_03.usda" in window._log_text
 
 
 def test_proxy_preview_keeps_stalled_process_isolated_without_local_fallback(monkeypatch, qtbot) -> None:

@@ -64,6 +64,15 @@ architecture terms above are more precise.
   the source XML path, proxy output path, output mode, CPU profile, and FBX
   cache limits, but not main-export material overrides, prototype replacement,
   UDIM settings, or conversion mode intent.
+- **Fracturing**
+  A companion destructibility workflow over a `Resolved Assembly Model`. It
+  partitions the tree by skeleton hierarchy into root-pivoted `Static Mesh
+  Assembly` piece files that reconstruct the intact tree when spawned together
+  at the same transform.
+- **Fracture Piece**
+  One planned destructible tree piece. It owns a subset of Base Mesh faces and
+  the Repeated Part Instances assigned to that skeleton-owned region. It is not
+  a Source Prototype, Authored Prototype, or generic Assembly Part.
 - **Assembly Root**
   Root prim of the USDA scene. It marks the scene as a Nanite Assembly and, in
   skeletal assembly mode, points UE at the descendant Main Skeleton.

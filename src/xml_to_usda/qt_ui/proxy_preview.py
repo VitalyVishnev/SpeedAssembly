@@ -55,6 +55,7 @@ GL_SRC_ALPHA = 0x0302
 GL_TRIANGLES = 0x0004
 PROCESS_PREVIEW_STATUS_SECONDS = 10.0
 PROXY_PREVIEW_MAX_POLYCOUNT = 100_000
+PROXY_MATCAP_TINT_STRENGTH = 0.0
 
 
 class ProxyPreviewDialog(QDialog):
@@ -577,7 +578,7 @@ def build_preview_cube_mesh() -> GeometryBuffer:
     )
 
 
-class ProxyViewport(QOpenGLWidget):
+class MatcapViewport(QOpenGLWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setMinimumSize(480, 360)
@@ -604,13 +605,37 @@ class ProxyViewport(QOpenGLWidget):
         self._mesh_dirty = False
         self._grid_dirty = False
         self._ground_y = 0.0
+        self._matcap_tint_strength = PROXY_MATCAP_TINT_STRENGTH
+        self._gl_cleanup_context = None
 
     def has_mesh(self) -> bool:
         return self._mesh is not None and self._mesh.point_count > 0
 
+    @property
+    def vertex_count(self) -> int:
+        return self._vertex_count
+
+    @property
+    def grid_vertex_count(self) -> int:
+        return self._grid_vertex_count
+
+    @property
+    def camera_radius(self) -> float:
+        return self._radius
+
+    @property
+    def camera_distance(self) -> float:
+        return self._distance
+
+    @property
+    def matcap_tint_strength(self) -> float:
+        return self._matcap_tint_strength
+
     def set_mesh(self, mesh: GeometryBuffer | None, *, frame_camera: bool = True) -> None:
         self._mesh = mesh
         self._update_mesh_metrics(frame_camera=frame_camera)
+        self._vertex_count = int(len(_build_viewport_vertices(self._mesh)) // 10)
+        self._grid_vertex_count = int(len(_build_grid_vertices(self._target, self._radius, self._ground_y)) // 4)
         self._mesh_dirty = True
         self._grid_dirty = True
         if self.isValid():
@@ -623,7 +648,11 @@ class ProxyViewport(QOpenGLWidget):
         self.update()
 
     def initializeGL(self) -> None:  # type: ignore[override]
-        functions = self.context().functions()
+        context = self.context()
+        if self._gl_cleanup_context is not context:
+            context.aboutToBeDestroyed.connect(self._release_gl_resources)
+            self._gl_cleanup_context = context
+        functions = context.functions()
         functions.initializeOpenGLFunctions()
         functions.glClearColor(0.0, 0.0, 0.0, 1.0)
         functions.glEnable(GL_DEPTH_TEST)
@@ -641,6 +670,10 @@ class ProxyViewport(QOpenGLWidget):
         self._grid_dirty = True
         self._upload_mesh()
         self._upload_grid()
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        self._release_gl_resources()
+        super().closeEvent(event)
 
     def resizeGL(self, width: int, height: int) -> None:  # type: ignore[override]
         self.context().functions().glViewport(0, 0, max(1, width), max(1, height))
@@ -660,6 +693,9 @@ class ProxyViewport(QOpenGLWidget):
         self._program.bind()
         self._program.setUniformValue("mvp", projection * view)
         self._program.setUniformValue("normalMatrix", view.normalMatrix())
+        tint_location = self._program.uniformLocation("pieceTintStrength")
+        if tint_location >= 0:
+            self._program.setUniformValue(tint_location, float(self._matcap_tint_strength))
         self._vao.bind()
         functions.glDrawArrays(GL_TRIANGLES, 0, self._vertex_count)
         self._vao.release()
@@ -722,18 +758,21 @@ class ProxyViewport(QOpenGLWidget):
         if self._program is None or self._vertex_buffer is None or self._vao is None:
             return
         vertices = _build_viewport_vertices(self._mesh)
-        self._vertex_count = int(len(vertices) // 6)
+        self._vertex_count = int(len(vertices) // 10)
         self._vao.bind()
         self._vertex_buffer.bind()
         self._vertex_buffer.allocate(vertices.tobytes(), vertices.nbytes)
         self._program.bind()
-        stride = 6 * 4
+        stride = 10 * 4
         position_location = self._program.attributeLocation("position")
         normal_location = self._program.attributeLocation("normal")
+        piece_tint_location = self._program.attributeLocation("pieceTint")
         self._program.enableAttributeArray(position_location)
         self._program.setAttributeBuffer(position_location, GL_FLOAT, 0, 3, stride)
         self._program.enableAttributeArray(normal_location)
         self._program.setAttributeBuffer(normal_location, GL_FLOAT, 12, 3, stride)
+        self._program.enableAttributeArray(piece_tint_location)
+        self._program.setAttributeBuffer(piece_tint_location, GL_FLOAT, 24, 4, stride)
         self._program.release()
         self._vertex_buffer.release()
         self._vao.release()
@@ -799,11 +838,60 @@ class ProxyViewport(QOpenGLWidget):
         )
         return Vector3(self._target.x + offset.x, self._target.y + offset.y, self._target.z + offset.z)
 
+    def _release_gl_resources(self) -> None:
+        has_resources = any(
+            resource is not None
+            for resource in (
+                self._program,
+                self._vertex_buffer,
+                self._vao,
+                self._grid_program,
+                self._grid_buffer,
+                self._grid_vao,
+            )
+        )
+        if not has_resources:
+            return
+
+        made_current = False
+        if self.isValid():
+            self.makeCurrent()
+            made_current = True
+        try:
+            for buffer in (self._vertex_buffer, self._grid_buffer):
+                if buffer is not None:
+                    buffer.destroy()
+            for vao in (self._vao, self._grid_vao):
+                if vao is not None:
+                    vao.destroy()
+            for program in (self._program, self._grid_program):
+                if program is not None:
+                    program.release()
+                    program.removeAllShaders()
+        finally:
+            self._program = None
+            self._vertex_buffer = None
+            self._vao = None
+            self._grid_program = None
+            self._grid_buffer = None
+            self._grid_vao = None
+            self._vertex_count = 0
+            self._grid_vertex_count = 0
+            self._mesh_dirty = bool(self._mesh)
+            self._grid_dirty = True
+            if made_current:
+                self.doneCurrent()
+
+
+class ProxyViewport(MatcapViewport):
+    pass
+
 
 def _build_viewport_vertices(mesh: GeometryBuffer | None) -> np.ndarray:
     if mesh is None or mesh.point_count == 0:
         return np.asarray([], dtype=np.float32)
     points = list(_points(mesh))
+    colors = _point_colors(mesh)
     vertices: list[float] = []
     offset = 0
     for count in mesh.face_vertex_counts:
@@ -814,9 +902,24 @@ def _build_viewport_vertices(mesh: GeometryBuffer | None) -> np.ndarray:
         for index in range(1, count - 1):
             triangle = (points[indices[0]], points[indices[index]], points[indices[index + 1]])
             normal = _face_normal(triangle)
-            for point in triangle:
-                vertices.extend((point.x, point.y, point.z, normal.x, normal.y, normal.z))
+            for point_index, point in zip((indices[0], indices[index], indices[index + 1]), triangle):
+                color = colors[point_index]
+                vertices.extend((point.x, point.y, point.z, normal.x, normal.y, normal.z, color[0], color[1], color[2], color[3]))
     return np.asarray(vertices, dtype=np.float32)
+
+
+def _point_colors(mesh: GeometryBuffer) -> tuple[tuple[float, float, float, float], ...]:
+    if mesh.vertex_color_count >= mesh.point_count:
+        return tuple(
+            (
+                float(mesh.vertex_color_components[index]),
+                float(mesh.vertex_color_components[index + 1]),
+                float(mesh.vertex_color_components[index + 2]),
+                float(mesh.vertex_color_components[index + 3]),
+            )
+            for index in range(0, mesh.point_count * 4, 4)
+        )
+    return ((1.0, 1.0, 1.0, 1.0),) * mesh.point_count
 
 
 def _build_grid_vertices(target: Vector3, radius: float, ground_y: float) -> np.ndarray:
@@ -862,11 +965,14 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
         """
         attribute vec3 position;
         attribute vec3 normal;
+        attribute vec4 pieceTint;
         uniform mat4 mvp;
         uniform mat3 normalMatrix;
         varying vec3 viewNormal;
+        varying vec4 pieceColor;
         void main() {
             viewNormal = normalize(normalMatrix * normal);
+            pieceColor = pieceTint;
             gl_Position = mvp * vec4(position, 1.0);
         }
         """,
@@ -875,7 +981,9 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
     if not program.addShaderFromSourceCode(
         QOpenGLShader.ShaderTypeBit.Fragment,
         """
+        uniform float pieceTintStrength;
         varying vec3 viewNormal;
+        varying vec4 pieceColor;
         void main() {
             vec3 n = normalize(viewNormal);
             vec2 uv = n.xy * 0.5 + 0.5;
@@ -890,7 +998,9 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
             color = mix(color, high, upper * side * 0.74);
             color += rim * vec3(0.15, 0.16, 0.18);
             color = pow(color, vec3(0.88));
-            gl_FragColor = vec4(color, 1.0);
+            vec3 tint = clamp(pieceColor.rgb * 1.18, vec3(0.0), vec3(1.35));
+            color *= mix(vec3(1.0), tint, pieceTintStrength);
+            gl_FragColor = vec4(color, pieceColor.a);
         }
         """,
     ):
