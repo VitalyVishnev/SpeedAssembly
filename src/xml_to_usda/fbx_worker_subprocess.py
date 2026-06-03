@@ -25,8 +25,7 @@ from .fbx_payload_cache import (
     store_fbx_payload_in_cache,
 )
 from .models import CpuProfile, GeometryBuffer
-
-FBX_WORKER_COMMAND = "fbx-worker"
+from .worker_commands import FBX_WORKER_COMMAND
 
 
 @dataclass(frozen=True)

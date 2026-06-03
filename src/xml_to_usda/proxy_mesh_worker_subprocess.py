@@ -24,9 +24,7 @@ from .proxy_mesh_service import (
     generate_proxy_mesh_from_source_request,
 )
 from .runtime_error_mode import suppress_windows_native_error_dialogs
-
-
-PROXY_MESH_WORKER_COMMAND = "proxy-mesh-worker"
+from .worker_commands import PROXY_MESH_WORKER_COMMAND
 
 
 @dataclass(frozen=True)

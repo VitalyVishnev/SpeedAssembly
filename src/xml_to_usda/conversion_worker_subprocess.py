@@ -22,9 +22,7 @@ from .models import ConversionJobResult, ConversionRequest
 from .pipeline import convert_request
 from .runtime_error_mode import suppress_windows_native_error_dialogs
 from .runtime_paths import RuntimePaths
-
-
-CONVERSION_WORKER_COMMAND = "conversion-worker"
+from .worker_commands import CONVERSION_WORKER_COMMAND
 
 
 @dataclass(frozen=True)

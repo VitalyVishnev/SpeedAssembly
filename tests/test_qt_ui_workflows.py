@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,7 @@ from xml_to_usda.discovery_service import (
     PrototypeRowSpec,
 )
 from xml_to_usda.fracture_preview_service import FracturePreviewSettings
+from xml_to_usda.fracture_service import FractureSettings
 from xml_to_usda.models import (
     Color4,
     CleanupPolicy,
@@ -51,7 +53,7 @@ from xml_to_usda.qt_ui import proxy_preview
 from xml_to_usda.qt_ui.proxy_preview import ProxyPreviewDialog, build_preview_cube_mesh
 from xml_to_usda.qt_ui.theme import load_theme
 from xml_to_usda.qt_ui.window import MainWindow
-from xml_to_usda.runtime_paths import RuntimePaths
+from xml_to_usda.runtime_paths import RuntimePaths, resolve_runtime_paths
 from xml_to_usda.settings_service import (
     GuiPresetRecord,
     GuiSettingsSnapshot,
@@ -983,12 +985,12 @@ def test_qt_window_opens_proxy_preview_from_geometry_tab(monkeypatch, qtbot, tmp
     tree_xml.write_text("<tree/>", encoding="utf-8")
     window.source_input.setText(str(tree_xml))
     window.output_input.setText(str(tmp_path / "tree.usda"))
-    window.geometry_panel.proxy_polycount_spin.setValue(2400)
-    window.geometry_panel.proxy_base_priority_spin.setValue(0.72)
+    window._proxy_mesh_settings = ProxyMeshSettings(final_polycount=2400, base_mesh_priority=0.72)
+    window.geometry_panel.apply_proxy_settings(window._proxy_mesh_settings)
 
-    assert window.geometry_panel.proxy_method_combo.count() == 1
-    assert window.geometry_panel.proxy_method_combo.currentData() == "density_field"
     assert window.geometry_panel.preview_proxy_button.isEnabled()
+    assert not hasattr(window.geometry_panel, "proxy_polycount_spin")
+    assert not hasattr(window.geometry_panel, "proxy_base_priority_spin")
 
     qtbot.mouseClick(window.geometry_panel.preview_proxy_button, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: window._proxy_preview_dialog.current_proxy is not None, timeout=3000)
@@ -1074,20 +1076,36 @@ def test_qt_window_opens_fracture_preview_from_geometry_tab(monkeypatch, qtbot, 
     tree_xml.write_text("<tree/>", encoding="utf-8")
     window.source_input.setText(str(tree_xml))
     window.output_input.setText(str(tmp_path / "tree.usda"))
-    window.geometry_panel.fracture_piece_count_spin.setValue(3)
-    window.geometry_panel.fracture_base_face_budget_spin.setValue(1200)
+    window._fracture_preview_settings = FracturePreviewSettings(
+        fracture=FractureSettings(target_piece_count=3),
+        final_polycount=240000,
+        base_mesh_priority=0.42,
+    )
+    window.geometry_panel.apply_fracture_preview_settings(window._fracture_preview_settings)
 
-    assert window.geometry_panel.fracture_method_combo.currentData() == "wind_guided_hierarchy"
-    assert window.geometry_panel.fracture_method_combo.findData("branch_base_greedy") >= 0
     assert window.geometry_panel.preview_fracture_button.isEnabled()
+    assert not hasattr(window.geometry_panel, "fracture_polycount_spin")
 
     qtbot.mouseClick(window.geometry_panel.preview_fracture_button, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(
-        lambda: window._fracture_preview_dialog is not None and window._fracture_preview_dialog.isVisible(),
+        lambda: (
+            window._fracture_preview_dialog is not None
+            and window._fracture_preview_dialog.isVisible()
+            and window._fracture_preview_dialog.current_preview is not None
+        ),
         timeout=3000,
     )
 
     assert isinstance(window._fracture_preview_dialog.viewport, QOpenGLWidget)
+    assert window._fracture_preview_dialog.method_combo.findData("branch_base_greedy") >= 0
+    assert window._fracture_preview_dialog.method_combo.property("prominent") is True
+    assert window._fracture_preview_dialog.piece_count_spin.value() == 3
+    assert window._fracture_preview_dialog.piece_count_slider.value() == 3
+    assert window._fracture_preview_dialog.polycount_spin.value() == 240000
+    assert window._fracture_preview_dialog.polycount_slider.value() == 240000
+    assert window._fracture_preview_dialog.base_priority_spin.value() == pytest.approx(0.42)
+    assert window._fracture_preview_dialog.base_priority_slider.value() == 42
+    assert window._fracture_preview_dialog.color_strength_slider.value() == 78
     assert window._fracture_preview_dialog.viewport_mesh.piece_count == 3
     assert window._fracture_preview_dialog.viewport_mesh.triangle_count == 3
 
@@ -1099,7 +1117,206 @@ def test_qt_window_opens_fracture_preview_from_geometry_tab(monkeypatch, qtbot, 
     assert isinstance(call["settings"], FracturePreviewSettings)
     assert call["settings"].fracture.method == "wind_guided_hierarchy"
     assert call["settings"].fracture.target_piece_count == 3
-    assert call["settings"].max_base_faces_per_piece == 1200
+    assert call["settings"].final_polycount == 240000
+    assert call["settings"].base_mesh_priority == pytest.approx(0.42)
+
+    window._fracture_preview_dialog.polycount_spin.setValue(360000)
+    window._fracture_preview_dialog.polycount_spin.editingFinished.emit()
+    qtbot.waitUntil(
+        lambda: calls["generate_fracture_preview_from_conversion_request"]["settings"].final_polycount == 360000,
+        timeout=3000,
+    )
+
+    assert window._fracture_preview_settings.final_polycount == 360000
+    assert window.geometry_panel.fracture_preview_settings().final_polycount == 360000
+
+    window._fracture_preview_dialog.piece_count_slider.setValue(4)
+    window._fracture_preview_dialog.piece_count_slider.sliderReleased.emit()
+    qtbot.waitUntil(
+        lambda: calls["generate_fracture_preview_from_conversion_request"]["settings"].fracture.target_piece_count == 4,
+        timeout=3000,
+    )
+
+    assert window._fracture_preview_dialog.piece_count_spin.value() == 4
+    assert window._fracture_preview_settings.fracture.target_piece_count == 4
+
+    window._fracture_preview_dialog.color_strength_spin.setValue(0.35)
+    assert window._fracture_preview_dialog.color_strength_slider.value() == 35
+    assert window._fracture_preview_dialog.viewport.matcap_tint_strength == pytest.approx(0.35)
+
+    window._fracture_preview_dialog.color_strength_slider.setValue(92)
+    assert window._fracture_preview_dialog.color_strength_spin.value() == pytest.approx(0.92)
+    assert window._fracture_preview_dialog.viewport.matcap_tint_strength == pytest.approx(0.92)
+
+
+def test_qt_window_opens_fracture_preview_shell_while_worker_is_running(monkeypatch, qtbot, tmp_path) -> None:
+    class _RunningProcess:
+        exitcode = None
+
+        def is_alive(self) -> bool:
+            return True
+
+        def join(self, timeout=None) -> None:
+            return None
+
+        def terminate(self) -> None:
+            return None
+
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    calls: dict[str, object] = {"start_count": 0}
+
+    def start_fracture_preview_process(request, settings):
+        calls["start_count"] += 1
+        return _RunningProcess(), [], object()
+
+    deps = replace(_build_fake_deps(calls), start_fracture_preview_process=start_fracture_preview_process)
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=deps,
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+    window.output_input.setText(str(tmp_path / "tree.usda"))
+
+    qtbot.mouseClick(window.geometry_panel.preview_fracture_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(
+        lambda: window._fracture_preview_dialog is not None and window._fracture_preview_dialog.isVisible(),
+        timeout=3000,
+    )
+
+    assert calls["start_count"] == 1
+    assert window._fracture_preview_dialog.current_preview is None
+    assert window._fracture_preview_dialog.viewport.mesh is None
+    assert "Preparing preview geometry" in window._fracture_preview_dialog.loading_label.text()
+    assert window.geometry_panel.preview_fracture_button.isEnabled() is False
+
+
+def test_qt_window_opening_proxy_preview_cancels_running_fracture_preview(monkeypatch, qtbot, tmp_path) -> None:
+    class _RunningProcess:
+        exitcode = None
+
+        def __init__(self) -> None:
+            self.terminated = False
+
+        def is_alive(self) -> bool:
+            return not self.terminated
+
+        def join(self, timeout=None) -> None:
+            return None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    class _CancelEvent:
+        def __init__(self) -> None:
+            self.set_called = False
+
+        def set(self) -> None:
+            self.set_called = True
+
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    calls: dict[str, object] = {}
+    running_process = _RunningProcess()
+    cancel_event = _CancelEvent()
+
+    def start_fracture_preview_process(request, settings):
+        return running_process, [], cancel_event
+
+    deps = replace(_build_fake_deps(calls), start_fracture_preview_process=start_fracture_preview_process)
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=deps,
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+    window.output_input.setText(str(tmp_path / "tree.usda"))
+
+    qtbot.mouseClick(window.geometry_panel.preview_fracture_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window._fracture_preview_dialog is not None, timeout=3000)
+
+    qtbot.mouseClick(window.geometry_panel.preview_proxy_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window._proxy_preview_dialog is not None, timeout=3000)
+    qtbot.waitUntil(lambda: "start_proxy_mesh_process" in calls, timeout=3000)
+
+    assert cancel_event.set_called is True
+    assert running_process.terminated is True
+    assert window._background_jobs.fracture_preview_running is False
+    assert calls["start_proxy_mesh_process"]["action"] == "preview"
+
+
+def test_qt_window_opening_fracture_preview_closes_running_proxy_preview(monkeypatch, qtbot, tmp_path) -> None:
+    class _RunningProcess:
+        exitcode = None
+
+        def __init__(self) -> None:
+            self.terminated = False
+
+        def is_alive(self) -> bool:
+            return not self.terminated
+
+        def join(self, timeout=None) -> None:
+            return None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    calls: dict[str, object] = {}
+    running_proxy = _RunningProcess()
+
+    def start_proxy_mesh_process(request, settings, action):
+        calls["start_proxy_mesh_process"] = {
+            "request": request,
+            "settings": settings,
+            "action": action,
+        }
+        return running_proxy, [], object()
+
+    deps = replace(_build_fake_deps(calls), start_proxy_mesh_process=start_proxy_mesh_process)
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=deps,
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+    window.output_input.setText(str(tmp_path / "tree.usda"))
+
+    qtbot.mouseClick(window.geometry_panel.preview_proxy_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "start_proxy_mesh_process" in calls, timeout=3000)
+
+    qtbot.mouseClick(window.geometry_panel.preview_fracture_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "start_fracture_preview_process" in calls, timeout=3000)
+
+    assert running_proxy.terminated is True
+    assert window._proxy_preview_dialog is None
+    assert calls["start_fracture_preview_process"]["settings"].fracture.target_piece_count == 5
 
 
 def test_qt_window_exports_fracture_pieces_with_current_operator_intent(monkeypatch, qtbot, tmp_path) -> None:
@@ -1124,19 +1341,24 @@ def test_qt_window_exports_fracture_pieces_with_current_operator_intent(monkeypa
     output_path = tmp_path / "tree.usda"
     window.source_input.setText(str(tree_xml))
     window.output_input.setText(str(output_path))
-    window.geometry_panel.fracture_piece_count_spin.setValue(4)
-    window.geometry_panel.fracture_method_combo.setCurrentIndex(
-        window.geometry_panel.fracture_method_combo.findData("pure_hierarchy")
+    window._fracture_preview_settings = FracturePreviewSettings(
+        fracture=FractureSettings(method="pure_hierarchy", target_piece_count=4)
     )
+    window.geometry_panel.apply_fracture_preview_settings(window._fracture_preview_settings)
     geometry_row = window.geometry_panel._rows[0]
     geometry_row.fbx_edit.setText(str(fake_fbx))
     geometry_row.source_mode_combo.setCurrentIndex(
         geometry_row.source_mode_combo.findData(PrototypeSourceMode.FBX_FILE.value)
     )
 
-    assert window.geometry_panel.export_fracture_button.isEnabled()
+    qtbot.mouseClick(window.geometry_panel.preview_fracture_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(
+        lambda: window._fracture_preview_dialog is not None
+        and window._fracture_preview_dialog.current_preview is not None,
+        timeout=3000,
+    )
 
-    qtbot.mouseClick(window.geometry_panel.export_fracture_button, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(window._fracture_preview_dialog.export_button, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: "Wrote 4 Fracture USDA piece(s)." in window.status_label.text(), timeout=3000)
 
     assert calls["start_fracture_export_process"]["settings"].target_piece_count == 4
@@ -1148,6 +1370,105 @@ def test_qt_window_exports_fracture_pieces_with_current_operator_intent(monkeypa
     assert call["request"].prototype_source_configs[0].mode == PrototypeSourceMode.FBX_FILE
     assert call["request"].prototype_source_configs[0].fbx_path == str(fake_fbx)
     assert "tree_fracture_03.usda" in window._log_text
+
+
+def test_qt_window_reports_fracture_preview_crash_with_request_context(monkeypatch, qtbot, tmp_path) -> None:
+    class _CrashedProcess:
+        exitcode = 3221225477
+
+        def is_alive(self) -> bool:
+            return False
+
+        def join(self, timeout=None) -> None:
+            return None
+
+        def terminate(self) -> None:
+            return None
+
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    calls: dict[str, object] = {}
+    deps = replace(
+        _build_fake_deps(calls),
+        start_fracture_preview_process=lambda request, settings: (_CrashedProcess(), [], object()),
+    )
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=deps,
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    output_path = tmp_path / "tree.usda"
+    window.source_input.setText(str(tree_xml))
+    window.output_input.setText(str(output_path))
+    window._fracture_preview_settings = FracturePreviewSettings(
+        fracture=FractureSettings(target_piece_count=7),
+        final_polycount=123400,
+        base_mesh_priority=0.27,
+    )
+    window.geometry_panel.apply_fracture_preview_settings(window._fracture_preview_settings)
+
+    qtbot.mouseClick(window.geometry_panel.preview_fracture_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Fracture Preview failed." in window.status_label.text(), timeout=3000)
+
+    assert "Fracture preview worker process crashed unexpectedly (exit code 3221225477)" in window._log_text
+    assert "input_paths=" in window._log_text
+    assert str(tree_xml) in window._log_text
+    assert "output_path=" in window._log_text
+    assert str(output_path) in window._log_text
+    assert "method=wind_guided_hierarchy" in window._log_text
+    assert "target_piece_count=7" in window._log_text
+    assert "preview_polycount=123400" in window._log_text
+    assert "preview_base_priority=0.27" in window._log_text
+
+
+def test_qt_window_records_fracture_preview_runtime_breadcrumbs(monkeypatch, qtbot, tmp_path) -> None:
+    settings_dir = tmp_path / "settings"
+    runtime_paths = resolve_runtime_paths(
+        settings_dir=settings_dir,
+        settings_path=settings_dir / "gui_settings.json",
+        cache_root=tmp_path / "cache",
+    )
+    monkeypatch.setattr("xml_to_usda.qt_ui.window.resolve_runtime_paths", lambda **kwargs: runtime_paths)
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    calls: dict[str, object] = {}
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps(calls),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=settings_dir / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+    window.output_input.setText(str(tmp_path / "tree.usda"))
+
+    qtbot.mouseClick(window.geometry_panel.preview_fracture_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(
+        lambda: window._fracture_preview_dialog is not None
+        and window._fracture_preview_dialog.current_preview is not None,
+        timeout=3000,
+    )
+
+    runtime_log = (settings_dir / "gui_runtime.log").read_text(encoding="utf-8")
+    assert "INFO Fracture Preview requested" in runtime_log
+    assert "input_paths=" in runtime_log
+    assert str(tree_xml) in runtime_log
+    assert "INFO Fracture Preview result received" in runtime_log
+    assert "piece_count=5" in runtime_log
+    assert "INFO Fracture Preview viewport mesh ready" in runtime_log
 
 
 def test_proxy_preview_keeps_stalled_process_isolated_without_local_fallback(monkeypatch, qtbot) -> None:
@@ -1342,14 +1663,16 @@ def test_qt_window_does_not_export_stale_proxy_preview_after_settings_change(mon
     tree_xml.write_text("<tree/>", encoding="utf-8")
     window.source_input.setText(str(tree_xml))
     window.output_input.setText(str(tmp_path / "tree.usda"))
-    window.geometry_panel.proxy_polycount_spin.setValue(2400)
+    window.geometry_panel.apply_proxy_settings(ProxyMeshSettings(final_polycount=2400))
+    window._handle_proxy_settings_changed()
 
     qtbot.mouseClick(window.geometry_panel.preview_proxy_button, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: window._proxy_preview_dialog.current_proxy is not None, timeout=3000)
     window._proxy_preview_dialog.close()
     qtbot.waitUntil(lambda: window._proxy_mesh_preview_result is not None, timeout=3000)
 
-    window.geometry_panel.proxy_polycount_spin.setValue(3600)
+    window.geometry_panel.apply_proxy_settings(ProxyMeshSettings(final_polycount=3600))
+    window._handle_proxy_settings_changed()
     qtbot.waitUntil(lambda: window._proxy_mesh_preview_result is None, timeout=3000)
 
     qtbot.mouseClick(window.generate_proxy_button, Qt.MouseButton.LeftButton)

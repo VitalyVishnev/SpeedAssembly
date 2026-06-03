@@ -47,6 +47,7 @@ If theory and UE behavior disagree, UE behavior wins.
 - After all code changes run build: "$ & '.\scripts\build_qt_gui_exe.cmd' -Package"
 - Don't use unnecessary words, talk short and professional.
 - не делай костыли, сделай сразу систему так, чтобы работала. Чтобы не пришлось переделывать
+- переиспользуй готовые решения, которые есть в проекте, не изобретай велосипед
 
 ## Simplicity and Architecture Requirements
 

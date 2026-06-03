@@ -1,0 +1,104 @@
+from __future__ import annotations
+
+import builtins
+import importlib
+import sys
+from pathlib import Path
+
+from xml_to_usda.fracture_preview_service import FracturePreviewSettings
+from xml_to_usda.fracture_service import FractureSettings
+from xml_to_usda import fracture_worker_subprocess
+from xml_to_usda.fracture_worker_subprocess import (
+    FRACTURE_WORKER_ACTION_PREVIEW,
+    FractureWorkerRequest,
+    read_fracture_worker_result,
+    run_fracture_worker_request_file,
+    write_fracture_worker_request,
+)
+from xml_to_usda.models import ConversionRequest
+
+
+SIMPLE_TREE_01 = (
+    Path(__file__).resolve().parents[1]
+    / "samples"
+    / "speedtree"
+    / "simple_tree"
+    / "variants"
+    / "SimpleTree_01.xml"
+)
+
+
+def test_fracture_preview_worker_does_not_depend_on_export_service(monkeypatch, tmp_path: Path) -> None:
+    request_path = tmp_path / "preview.request.pkl"
+    result_path = tmp_path / "preview.result.pkl"
+    error_path = tmp_path / "preview.error.json"
+    write_fracture_worker_request(
+        request_path,
+        FractureWorkerRequest(
+            request=ConversionRequest(
+                input_paths=(str(SIMPLE_TREE_01),),
+                output_path=str(tmp_path / "SimpleTree_01.usda"),
+            ),
+            settings=FracturePreviewSettings(
+                fracture=FractureSettings(target_piece_count=2),
+                max_base_faces_per_piece=10,
+                max_prototype_faces=5,
+            ),
+            action=FRACTURE_WORKER_ACTION_PREVIEW,
+            result_path=str(result_path),
+            error_path=str(error_path),
+        ),
+    )
+
+    original_worker_module = sys.modules.get("xml_to_usda.fracture_worker_subprocess")
+    sys.modules.pop("xml_to_usda.fracture_worker_subprocess", None)
+    sys.modules.pop("xml_to_usda.fracture_export_service", None)
+    real_import = builtins.__import__
+
+    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name in {"xml_to_usda.fracture_export_service", "fracture_export_service"}:
+            raise AssertionError("Preview fracture worker imported export service.")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    try:
+        worker_module = importlib.import_module("xml_to_usda.fracture_worker_subprocess")
+        assert worker_module.run_fracture_worker_request_file(request_path) == 0
+    finally:
+        if original_worker_module is not None:
+            sys.modules["xml_to_usda.fracture_worker_subprocess"] = original_worker_module
+
+    result = read_fracture_worker_result(result_path)
+    assert result is not None
+    assert result.plan.actual_piece_count == 2
+    assert error_path.exists() is False
+
+
+def test_fracture_worker_request_write_does_not_leave_empty_final_file(monkeypatch, tmp_path: Path) -> None:
+    request_path = tmp_path / "preview.request.pkl"
+    result_path = tmp_path / "preview.result.pkl"
+    error_path = tmp_path / "preview.error.json"
+    request = FractureWorkerRequest(
+        request=ConversionRequest(
+            input_paths=(str(SIMPLE_TREE_01),),
+            output_path=str(tmp_path / "SimpleTree_01.usda"),
+        ),
+        settings=FracturePreviewSettings(),
+        action=FRACTURE_WORKER_ACTION_PREVIEW,
+        result_path=str(result_path),
+        error_path=str(error_path),
+    )
+
+    def fail_dump(*args, **kwargs):
+        raise RuntimeError("simulated pickle failure")
+
+    monkeypatch.setattr(fracture_worker_subprocess.pickle, "dump", fail_dump)
+
+    try:
+        write_fracture_worker_request(request_path, request)
+    except RuntimeError as exc:
+        assert str(exc) == "simulated pickle failure"
+    else:
+        raise AssertionError("Expected simulated pickle failure.")
+
+    assert request_path.exists() is False

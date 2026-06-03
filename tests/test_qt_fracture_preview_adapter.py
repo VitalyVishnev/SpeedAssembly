@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 pytest.importorskip("PySide6")
@@ -23,6 +25,7 @@ from xml_to_usda.models import (
     Vector3,
 )
 from xml_to_usda.qt_ui.fracture_preview import FRACTURE_VERTEX_STRIDE, FractureViewport, build_fracture_viewport_mesh
+from xml_to_usda.qt_ui.proxy_preview import _set_matcap_program_uniforms
 
 
 def _joint(name: str, source_id: int, parent: str | None, y: float, group: int) -> Joint:
@@ -122,9 +125,11 @@ def test_fracture_viewport_payload_triangulates_base_and_instanced_preview_geome
 
     assert mesh.name == "Oak_fracture_preview"
     assert mesh.triangle_count == 5
+    assert mesh.uploaded_triangle_count == 5
     assert mesh.piece_count == 3
     assert mesh.instance_count == 2
-    assert len(mesh.vertex_components) == mesh.triangle_count * 3 * FRACTURE_VERTEX_STRIDE
+    assert len(mesh.vertex_components) == mesh.uploaded_triangle_count * 3 * FRACTURE_VERTEX_STRIDE
+    assert len(mesh.draw_calls) == 5
 
     first_vertex = tuple(mesh.vertex_components[:FRACTURE_VERTEX_STRIDE])
     assert first_vertex[6:10] == pytest.approx(
@@ -138,7 +143,7 @@ def test_fracture_viewport_payload_triangulates_base_and_instanced_preview_geome
 
     instance_vertex_offset = 3 * 3 * FRACTURE_VERTEX_STRIDE
     first_instance_vertex = tuple(mesh.vertex_components[instance_vertex_offset:instance_vertex_offset + FRACTURE_VERTEX_STRIDE])
-    assert first_instance_vertex[0] >= 10.0
+    assert first_instance_vertex[0] < 10.0
     assert first_instance_vertex[6:10] == pytest.approx(
         (
             preview.pieces[1].color.r,
@@ -147,6 +152,51 @@ def test_fracture_viewport_payload_triangulates_base_and_instanced_preview_geome
             preview.pieces[1].color.a,
         )
     )
+    assert mesh.draw_calls[3].translate.x == pytest.approx(10.0)
+
+    second_instance_source = mesh.draw_sources[mesh.draw_calls[4].source_index]
+    second_instance_vertex_offset = second_instance_source.first_vertex * FRACTURE_VERTEX_STRIDE
+    second_instance_vertex = tuple(
+        mesh.vertex_components[second_instance_vertex_offset:second_instance_vertex_offset + FRACTURE_VERTEX_STRIDE]
+    )
+    assert second_instance_vertex[6:10] == pytest.approx(
+        (
+            preview.pieces[2].color.r,
+            preview.pieces[2].color.g,
+            preview.pieces[2].color.b,
+            preview.pieces[2].color.a,
+        )
+    )
+    assert mesh.draw_calls[4].translate.x == pytest.approx(20.0)
+
+
+def test_fracture_viewport_payload_reuses_repeated_prototype_source_for_same_piece_instances() -> None:
+    tree = _tree()
+    preview = generate_fracture_preview(
+        replace(
+            tree,
+            assembly_parts=(
+                _repeated_part("TopLeavesA", "bone_002", 10.0),
+                _repeated_part("TopLeavesB", "bone_002", 12.0),
+                _repeated_part("TopLeavesC", "bone_002", 14.0),
+            ),
+        ),
+        FracturePreviewSettings(
+            fracture=FractureSettings(target_piece_count=2, output_stem="Oak"),
+            max_base_faces_per_piece=1,
+            max_prototype_faces=1,
+        ),
+    )
+
+    mesh = build_fracture_viewport_mesh(preview)
+
+    assert mesh.instance_count == 3
+    assert mesh.triangle_count == 5
+    assert mesh.uploaded_triangle_count == 3
+    assert len(mesh.draw_sources) == 3
+    assert len(mesh.draw_calls) == 5
+    assert tuple(call.source_index for call in mesh.draw_calls[-3:]) == (2, 2, 2)
+    assert tuple(call.translate.x for call in mesh.draw_calls[-3:]) == pytest.approx((10.0, 12.0, 14.0))
 
 
 def test_fracture_viewport_accepts_colored_triangle_payload_and_frames_camera(qtbot) -> None:
@@ -166,10 +216,63 @@ def test_fracture_viewport_accepts_colored_triangle_payload_and_frames_camera(qt
 
     assert viewport.has_mesh()
     assert viewport.vertex_count == mesh.triangle_count * 3
+    assert tuple(viewport._fracture_render_payload.vertex_components[6:10]) == pytest.approx(
+        (
+            preview.pieces[0].color.r,
+            preview.pieces[0].color.g,
+            preview.pieces[0].color.b,
+            preview.pieces[0].color.a,
+        )
+    )
+    first_instance_offset = 3 * 3 * FRACTURE_VERTEX_STRIDE
+    assert tuple(
+        viewport._fracture_render_payload.vertex_components[first_instance_offset + 6:first_instance_offset + 10]
+    ) == pytest.approx(
+        (
+            preview.pieces[1].color.r,
+            preview.pieces[1].color.g,
+            preview.pieces[1].color.b,
+            preview.pieces[1].color.a,
+        )
+    )
     assert viewport.grid_vertex_count > 0
-    assert 0.0 < viewport.matcap_tint_strength <= 0.35
+    assert 0.6 <= viewport.matcap_tint_strength <= 0.9
     assert viewport.camera_radius > 0.0
     assert viewport.camera_distance == pytest.approx(viewport.camera_radius * 3.0)
+
+
+def test_matcap_tint_strength_uniform_is_set_by_name() -> None:
+    class _Program:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def uniformLocation(self, name) -> int:
+            self.calls.append(("uniformLocation", name))
+            return 7
+
+        def setUniformValue(self, name, value) -> None:
+            self.calls.append((name, value))
+
+    class _Functions:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def glUniform1f(self, location: int, value: float) -> None:
+            self.calls.append((location, value))
+
+    program = _Program()
+    functions = _Functions()
+
+    _set_matcap_program_uniforms(
+        program,
+        functions=functions,
+        mvp="mvp",
+        normal_matrix="normal",
+        piece_tint_strength=0.78,
+    )
+
+    assert ("uniformLocation", "pieceTintStrength") in program.calls
+    assert (7, pytest.approx(0.78)) in functions.calls
 
 
 def test_fracture_viewport_releases_gl_resources_with_current_context(qtbot, monkeypatch) -> None:

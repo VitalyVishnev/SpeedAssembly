@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pickle
 from array import array
 from dataclasses import replace
 
@@ -23,6 +24,7 @@ from xml_to_usda.models import (
 )
 from xml_to_usda.proxy_mesh_service import (
     ProxyMeshError,
+    ProxyMeshJobResult,
     ProxyMeshSettings,
     ProxyMeshSourceRequest,
     derive_proxy_usda_output_path,
@@ -121,6 +123,16 @@ def test_proxy_output_path_is_sibling_of_main_usda_or_input_fallback(tmp_path) -
 
     assert derive_proxy_usda_output_path(str(input_path), str(output_path)) == output_path.with_name("HeroTree_proxy.usda")
     assert derive_proxy_usda_output_path(str(input_path), "") == input_path.with_name("oak_proxy.usda")
+
+
+def test_proxy_job_result_is_stable_worker_envelope() -> None:
+    result = ProxyMeshJobResult(error_message="preview failed")
+    restored = pickle.loads(pickle.dumps(result))
+
+    assert restored.proxy is None
+    assert restored.export is None
+    assert restored.cancelled is False
+    assert restored.error_message == "preview failed"
 
 
 def test_density_field_proxy_is_default_and_includes_all_repeated_parts() -> None:

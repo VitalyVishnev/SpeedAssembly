@@ -62,16 +62,44 @@ def _strip_mesh(name: str, joint_indices: tuple[int, ...]) -> MeshData:
     )
 
 
-def _repeated_part(name: str, joint_token: str) -> RepeatedPartInstance:
+def _repeated_part(name: str, joint_token: str, *, prototype_key: str = "Mesh_1") -> RepeatedPartInstance:
     return RepeatedPartInstance(
         name=name,
-        prototype_key="Mesh_1",
+        prototype_key=prototype_key,
         position=Vector3(0.0, 0.0, 0.0),
         orientation=Quaternion(1.0, 0.0, 0.0, 0.0),
         scale=Vector3(1.0, 1.0, 1.0),
         binding=InstanceBinding(joint_tokens=(joint_token,), weights=(1.0,)),
         source_object_id=None,
         source_mesh_id=1,
+    )
+
+
+def _prototype(source_key: str, name: str, face_count: int) -> Prototype:
+    return Prototype(
+        identity=PrototypeIdentity(source_key=source_key, prim_name=name),
+        mesh=_strip_mesh(name, tuple(0 for _ in range(face_count))),
+        source_key=source_key,
+        source_mesh_id=1,
+        source_name=name,
+    )
+
+
+def _tree_with_repeated_branch_count(count: int) -> TreeAsset:
+    return TreeAsset(
+        metadata=ExportMetadata(source_path="tree.xml", source_version=None),
+        materials=(),
+        source_objects=(),
+        base_mesh=_strip_mesh("Base", (0, 1, 2, 3, 4)),
+        skeleton=(
+            _joint("root", 0, None, 0.0, 0),
+            _joint("bone_001", 1, "root", 1.0, 0),
+            _joint("bone_002", 2, "bone_001", 2.0, 0),
+            _joint("bone_003", 3, "bone_001", 1.4, 1),
+            _joint("bone_004", 4, "bone_003", 1.8, 2),
+        ),
+        assembly_parts=tuple(_repeated_part(f"Branch_{index:03d}", "bone_004") for index in range(count)),
+        prototypes=(_prototype("Mesh_1", "BranchCluster", 120),),
     )
 
 
@@ -92,14 +120,30 @@ def _tree() -> TreeAsset:
             _repeated_part("TopLeaves", "bone_002"),
             _repeated_part("BranchLeaves", "bone_004"),
         ),
+        prototypes=(_prototype("Mesh_1", "LeafCluster", 3),),
+    )
+
+
+def _tree_with_mixed_repeated_prototypes() -> TreeAsset:
+    return TreeAsset(
+        metadata=ExportMetadata(source_path="tree.xml", source_version=None),
+        materials=(),
+        source_objects=(),
+        base_mesh=_strip_mesh("Base", (0, 1, 2, 3, 4)),
+        skeleton=(
+            _joint("root", 0, None, 0.0, 0),
+            _joint("bone_001", 1, "root", 1.0, 0),
+            _joint("bone_002", 2, "bone_001", 2.0, 0),
+            _joint("bone_003", 3, "bone_001", 1.4, 1),
+            _joint("bone_004", 4, "bone_003", 1.8, 2),
+        ),
+        assembly_parts=(
+            _repeated_part("SmallBranch", "bone_002", prototype_key="Mesh_small"),
+            _repeated_part("LargeBranch", "bone_004", prototype_key="Mesh_large"),
+        ),
         prototypes=(
-            Prototype(
-                identity=PrototypeIdentity(source_key="Mesh_1", prim_name="LeafCluster"),
-                mesh=_strip_mesh("LeafCluster", (0, 0, 0)),
-                source_key="Mesh_1",
-                source_mesh_id=1,
-                source_name="LeafCluster",
-            ),
+            _prototype("Mesh_small", "SmallBranchCluster", 100),
+            _prototype("Mesh_large", "LargeBranchCluster", 1000),
         ),
     )
 
@@ -126,6 +170,40 @@ def test_fracture_preview_uses_plan_membership_stable_colors_and_simplified_geom
     assert tuple(first.prototypes) == ("Mesh_1",)
     assert first.prototypes["Mesh_1"].mesh.face_count == 1
     assert first.plan.actual_piece_count == 3
+
+
+def test_fracture_preview_distributes_target_polycount_between_base_and_repeated_parts() -> None:
+    result = generate_fracture_preview(
+        _tree_with_repeated_branch_count(25),
+        FracturePreviewSettings(
+            fracture=FractureSettings(target_piece_count=3, output_stem="Oak"),
+            final_polycount=253,
+            base_mesh_priority=0.0,
+            max_base_faces_per_piece=1,
+            max_prototype_faces=120,
+        ),
+    )
+
+    assert len(result.instances) == 25
+    assert sum(piece.base_mesh.face_count for piece in result.pieces) == 3
+    assert result.prototypes["Mesh_1"].mesh.face_count == 10
+
+
+def test_fracture_preview_simplifies_repeated_prototypes_proportionally_to_source_complexity() -> None:
+    result = generate_fracture_preview(
+        _tree_with_mixed_repeated_prototypes(),
+        FracturePreviewSettings(
+            fracture=FractureSettings(target_piece_count=3, output_stem="Oak"),
+            final_polycount=333,
+            base_mesh_priority=0.0,
+            max_base_faces_per_piece=1,
+            max_prototype_faces=1000,
+        ),
+    )
+
+    assert sum(piece.base_mesh.face_count for piece in result.pieces) == 3
+    assert result.prototypes["Mesh_small"].mesh.face_count == 30
+    assert result.prototypes["Mesh_large"].mesh.face_count == 300
 
 
 def test_fracture_preview_from_conversion_request_uses_source_xml_geometry_not_operator_replacements(

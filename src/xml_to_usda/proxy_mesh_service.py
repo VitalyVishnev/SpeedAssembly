@@ -18,6 +18,7 @@ from .models import CanonicalTreeModel, GeometryBuffer, MeshData, Prototype, Qua
 from .models import ConversionMode, ConversionRequest, CpuProfile, OutputMode
 from .naming import make_stable_prim_name
 from .output_resolution import ensure_output_path_allowed
+from .fracture_geometry import sample_face_indices
 
 
 DEFAULT_PROXY_POLYCOUNT = 5000
@@ -76,12 +77,20 @@ class ProxyMeshExportResult:
     usda_text: str
 
 
-@dataclass(frozen=True)
 class ProxyMeshJobResult:
-    proxy: ProxyMeshResult | None = None
-    export: ProxyMeshExportResult | None = None
-    cancelled: bool = False
-    error_message: str | None = None
+    __slots__ = ("proxy", "export", "cancelled", "error_message")
+
+    def __init__(
+        self,
+        proxy: ProxyMeshResult | None = None,
+        export: ProxyMeshExportResult | None = None,
+        cancelled: bool = False,
+        error_message: str | None = None,
+    ) -> None:
+        self.proxy = proxy
+        self.export = export
+        self.cancelled = cancelled
+        self.error_message = error_message
 
 
 def derive_proxy_usda_output_path(input_path: str, output_path: str) -> Path:
@@ -314,19 +323,8 @@ def _simplify_polygon_mesh(
     target_triangle_count = max(1, int(target_triangle_count))
     if len(triangles) <= target_triangle_count:
         return _geometry_buffer_from_triangles(points, triangles, name=mesh.name)
-    try:
-        import fast_simplification
-    except ImportError as exc:
-        raise ProxyMeshError("Proxy QEM simplification requires the fast-simplification package.") from exc
-    try:
-        simplified_points, simplified_triangles = fast_simplification.simplify(
-            points,
-            triangles,
-            target_count=target_triangle_count,
-        )
-    except Exception as exc:
-        raise ProxyMeshError(f"Proxy QEM simplification failed: {exc}") from exc
-    return _geometry_buffer_from_triangles(simplified_points, simplified_triangles, name=mesh.name)
+    sampled = sample_face_indices(tuple(range(len(triangles))), target_triangle_count)
+    return _geometry_buffer_from_triangles(points, triangles[list(sampled)], name=mesh.name)
 
 
 def _triangulated_mesh_arrays(mesh: GeometryBuffer):

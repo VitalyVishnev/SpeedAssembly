@@ -9,6 +9,7 @@ GUI while reusing the same conversion, discovery, wind, and settings services.
 from __future__ import annotations
 
 import os
+import time
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -50,6 +51,7 @@ from ..fbx_payload_cache import (
 from ..gui_formatters import format_wind_group_summary, format_wind_json_result
 from ..models import CleanupPolicy, ConversionMode, ConversionRequest, OutputMode
 from ..proxy_mesh_service import ProxyMeshResult, ProxyMeshSettings, ProxyMeshSourceRequest
+from ..fracture_preview_service import FracturePreviewSettings
 from ..runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
 from ..settings_service import (
     FACTORY_DEFAULT_PRESET_NAME,
@@ -595,6 +597,7 @@ class MainWindow(QWidget):
         self._fracture_preview_dialog: FracturePreviewDialog | None = None
         self._proxy_preview_dialog: ProxyPreviewDialog | None = None
         self._proxy_mesh_settings = ProxyMeshSettings()
+        self._fracture_preview_settings = FracturePreviewSettings()
         self._proxy_mesh_preview_result: ProxyMeshResult | None = None
         self._proxy_mesh_preview_input_path = ""
 
@@ -1321,6 +1324,7 @@ class MainWindow(QWidget):
             gust_attenuation=self._operator_state.gust_attenuation,
         )
         self.geometry_panel.apply_proxy_settings(self._proxy_mesh_settings)
+        self.geometry_panel.apply_fracture_preview_settings(self._fracture_preview_settings)
         self._conversion_mode = self._operator_state.conversion_mode.value
         if hasattr(self, "_conversion_mode_actions"):
             for key, action in self._conversion_mode_actions.items():
@@ -1457,10 +1461,6 @@ class MainWindow(QWidget):
         self.geometry_panel.preview_fracture_button.setEnabled(
             has_input and not self._conversion_running and not fracture_preview_running
         )
-        fracture_running = self._background_jobs.fracture_export_running
-        self.geometry_panel.export_fracture_button.setEnabled(
-            has_input and has_output and not self._conversion_running and not fracture_running
-        )
 
     def _handle_convert_button_clicked(self) -> None:
         # One operator-facing control handles both states. Clicking during an
@@ -1488,6 +1488,19 @@ class MainWindow(QWidget):
             self._log_text = text
         if self._log_dialog is not None:
             self._log_dialog.set_text(self._log_text)
+
+    def _append_runtime_log(self, title: str, message: str = "") -> None:
+        runtime_log_path = self._runtime_paths.settings_dir / "gui_runtime.log"
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        text = f"\n[{timestamp}] {title}\n"
+        if message.strip():
+            text = f"{text}{message.strip()}\n"
+        try:
+            self._runtime_paths.settings_dir.mkdir(parents=True, exist_ok=True)
+            with runtime_log_path.open("a", encoding="utf-8") as handle:
+                handle.write(text)
+        except OSError:
+            pass
 
     def _startup_log_text(self) -> str:
         return (
@@ -1961,6 +1974,10 @@ class MainWindow(QWidget):
 
     def open_proxy_preview_dialog(self) -> None:
         self._source_refresh_timer.stop()
+        if self._background_jobs.fracture_preview_running:
+            self._background_jobs.cancel_fracture_preview()
+            if self._fracture_preview_dialog is not None and self._fracture_preview_dialog.current_preview is None:
+                self._fracture_preview_dialog.set_error("Preview generation cancelled.")
         self._proxy_mesh_settings = self.geometry_panel.proxy_settings()
         try:
             request = self._build_proxy_source_request()
@@ -2003,22 +2020,116 @@ class MainWindow(QWidget):
 
     def open_fracture_preview_dialog(self) -> None:
         self._source_refresh_timer.stop()
-        settings = self.geometry_panel.fracture_preview_settings()
+        if self._proxy_preview_dialog is not None:
+            self._proxy_preview_dialog.close()
+            self._proxy_preview_dialog = None
+        if self._background_jobs.fracture_preview_running:
+            if self._fracture_preview_dialog is not None:
+                self._fracture_preview_dialog.show()
+                self._fracture_preview_dialog.raise_()
+                self._fracture_preview_dialog.activateWindow()
+            return
+        settings = self._fracture_preview_settings
         try:
             request = self._build_fracture_preview_request()
         except ValueError as exc:
             self._report_error("Missing input", str(exc))
             return
+        self._append_runtime_log(
+            "INFO Fracture Preview requested",
+            "\n".join(
+                (
+                    f"input_paths={'; '.join(str(path) for path in request.input_paths)}",
+                    f"output_path={request.output_path}",
+                    f"method={settings.fracture.method}",
+                    f"target_piece_count={settings.fracture.target_piece_count}",
+                    f"preview_polycount={settings.final_polycount}",
+                    f"preview_base_priority={settings.base_mesh_priority}",
+                    f"preview_prototype_faces={settings.max_prototype_faces}",
+                )
+            ),
+        )
+        dialog = FracturePreviewDialog(
+            settings=settings,
+            on_settings_changed=self._handle_fracture_preview_settings_changed,
+            on_export_requested=self.run_export_fracture_usda,
+            parent=None,
+        )
+        dialog.setStyleSheet(self.styleSheet())
+        self._fracture_preview_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
         self._background_jobs.start_fracture_preview(request, settings)
 
     def _handle_fracture_preview_result(self, preview) -> None:
-        dialog = FracturePreviewDialog(preview=preview, parent=None)
-        dialog.setStyleSheet(self.styleSheet())
-        self._fracture_preview_dialog = dialog
+        dialog = self._fracture_preview_dialog
+        if dialog is None:
+            dialog = FracturePreviewDialog(
+                settings=self._fracture_preview_settings,
+                on_settings_changed=self._handle_fracture_preview_settings_changed,
+                on_export_requested=self.run_export_fracture_usda,
+                parent=None,
+            )
+            dialog.setStyleSheet(self.styleSheet())
+            self._fracture_preview_dialog = dialog
+        dialog.set_settings(self._fracture_preview_settings)
+        self._append_runtime_log(
+            "INFO Fracture Preview result received",
+            "\n".join(
+                (
+                    f"piece_count={preview.plan.actual_piece_count}",
+                    f"prototype_count={len(preview.prototypes)}",
+                    f"instance_count={len(preview.instances)}",
+                )
+            ),
+        )
+        self._append_runtime_log("INFO Fracture Preview preparing viewport mesh")
+        dialog.set_preview(preview)
+        viewport_mesh = dialog.viewport_mesh
+        if viewport_mesh is not None:
+            self._append_runtime_log(
+                "INFO Fracture Preview viewport mesh ready",
+                "\n".join(
+                    (
+                        f"piece_count={viewport_mesh.piece_count}",
+                        f"instance_count={viewport_mesh.instance_count}",
+                        f"uploaded_triangles={viewport_mesh.uploaded_triangle_count}",
+                        f"logical_triangles={viewport_mesh.triangle_count}",
+                    )
+                ),
+            )
         self._set_status(f"Fracture Preview ready: {preview.plan.actual_piece_count} piece(s).")
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+
+    def _handle_fracture_preview_error_message(self, message: str) -> None:
+        if self._fracture_preview_dialog is not None:
+            self._fracture_preview_dialog.set_error("Preview generation failed. See log for details.")
+
+    def _handle_fracture_preview_settings_changed(self, settings: FracturePreviewSettings) -> None:
+        self._fracture_preview_settings = settings
+        self.geometry_panel.apply_fracture_preview_settings(settings)
+        if self._background_jobs.fracture_preview_running:
+            self._background_jobs.cancel_fracture_preview()
+        try:
+            request = self._build_fracture_preview_request()
+        except ValueError as exc:
+            self._report_error("Missing input", str(exc))
+            return
+        self._append_runtime_log(
+            "INFO Fracture Preview settings changed",
+            "\n".join(
+                (
+                    f"method={settings.fracture.method}",
+                    f"target_piece_count={settings.fracture.target_piece_count}",
+                    f"preview_polycount={settings.final_polycount}",
+                    f"preview_base_priority={settings.base_mesh_priority}",
+                )
+            ),
+        )
+        self._background_jobs.start_fracture_preview(request, settings)
 
     def run_generate_proxy_mesh(self) -> None:
         self._source_refresh_timer.stop()
@@ -2041,7 +2152,7 @@ class MainWindow(QWidget):
         except ValueError as exc:
             self._report_conversion_plan_error(exc)
             return
-        settings = self.geometry_panel.fracture_preview_settings().fracture
+        settings = self._fracture_preview_settings.fracture
         self._background_jobs.start_fracture_export(plan.request, settings)
 
     def _proxy_preview_result_for_input(self, input_path: str) -> ProxyMeshResult | None:
@@ -2103,13 +2214,7 @@ class MainWindow(QWidget):
 
     def _record_proxy_preview_error(self, message: str) -> None:
         self._append_log(f"Proxy Mesh preview error\n{message}")
-        runtime_log_path = self._runtime_paths.settings_dir / "gui_runtime.log"
-        try:
-            self._runtime_paths.settings_dir.mkdir(parents=True, exist_ok=True)
-            with runtime_log_path.open("a", encoding="utf-8") as handle:
-                handle.write(f"\nERROR Proxy Mesh preview failed\n{message}\n")
-        except OSError:
-            pass
+        self._append_runtime_log("ERROR Proxy Mesh preview failed", message)
 
     def _build_proxy_source_request(self) -> ProxyMeshSourceRequest:
         input_path = self.source_input.text().strip()

@@ -9,7 +9,7 @@ services.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
@@ -35,13 +35,7 @@ from PySide6.QtWidgets import (
 
 from ..asset_paths import normalize_unreal_asset_path
 from ..discovery_service import PrototypeMaterialSlotRowSpec
-from ..fracture_preview_service import DEFAULT_FRACTURE_PREVIEW_BASE_FACE_BUDGET, FracturePreviewSettings
-from ..fracture_service import (
-    FRACTURE_METHOD_BRANCH_BASE_GREEDY,
-    FRACTURE_METHOD_PURE_HIERARCHY,
-    FRACTURE_METHOD_WIND_GUIDED_HIERARCHY,
-    FractureSettings,
-)
+from ..fracture_preview_service import FracturePreviewSettings
 from ..models import (
     BaseMaterialOverride,
     CpuProfile,
@@ -53,11 +47,7 @@ from ..models import (
     UdimMaterialSetting,
     UdimMode,
 )
-from ..proxy_mesh_service import (
-    DEFAULT_PROXY_POLYCOUNT,
-    PROXY_METHOD_DENSITY_FIELD,
-    ProxyMeshSettings,
-)
+from ..proxy_mesh_service import ProxyMeshSettings
 from ..settings_service import (
     BaseMaterialSettingRecord,
     FbxMaterialSlotSettingRecord,
@@ -497,6 +487,7 @@ class GeometryTabPanel(QWidget):
         self._on_proxy_settings_changed = on_proxy_settings_changed
         self._rows: list[GeometryRowWidgets] = []
         self._proxy_settings = ProxyMeshSettings()
+        self._fracture_preview_settings = FracturePreviewSettings()
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -506,82 +497,23 @@ class GeometryTabPanel(QWidget):
         self.summary_label.setWordWrap(True)
         outer.addWidget(self.summary_label)
 
-        proxy_card = QFrame(self)
-        proxy_card.setObjectName("PanelCard")
-        proxy_layout = QGridLayout(proxy_card)
-        proxy_layout.setContentsMargins(16, 16, 16, 16)
-        proxy_layout.setHorizontalSpacing(10)
-        proxy_layout.setVerticalSpacing(8)
-        proxy_title = QLabel("Proxy Mesh", proxy_card)
-        proxy_title.setStyleSheet("font-weight: 600;")
-        self.proxy_method_combo = NoWheelComboBox(proxy_card)
-        self.proxy_method_combo.setObjectName("InteractiveCombo")
-        self.proxy_method_combo.addItem("Density Field", PROXY_METHOD_DENSITY_FIELD)
-        self.proxy_polycount_spin = QSpinBox(proxy_card)
-        self.proxy_polycount_spin.setRange(6, 500_000)
-        self.proxy_polycount_spin.setValue(DEFAULT_PROXY_POLYCOUNT)
-        self.proxy_polycount_spin.setSingleStep(500)
-        self.proxy_polycount_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        self.proxy_base_priority_spin = SliderSpinEditor(
-            minimum=0.0,
-            maximum=1.0,
-            step=0.01,
-            value=ProxyMeshSettings().base_mesh_priority,
-            parent=proxy_card,
-        )
-        self.preview_proxy_button = QPushButton("Preview Proxy Mesh", proxy_card)
+        actions_card = QFrame(self)
+        actions_card.setObjectName("PanelCard")
+        actions_layout = QGridLayout(actions_card)
+        actions_layout.setContentsMargins(16, 16, 16, 16)
+        actions_layout.setHorizontalSpacing(10)
+        actions_layout.setVerticalSpacing(8)
+        actions_title = QLabel("Preview", actions_card)
+        actions_title.setStyleSheet("font-weight: 600;")
+        self.preview_proxy_button = QPushButton("Preview Proxy Mesh", actions_card)
         self.preview_proxy_button.clicked.connect(self._on_preview_proxy_requested)
-        self.proxy_method_combo.currentIndexChanged.connect(lambda _index: self._handle_proxy_settings_changed())
-        self.proxy_polycount_spin.valueChanged.connect(lambda _value: self._handle_proxy_settings_changed())
-        self.proxy_base_priority_spin.valueChanged.connect(lambda _value: self._handle_proxy_settings_changed())
-        proxy_layout.addWidget(proxy_title, 0, 0)
-        proxy_layout.addWidget(QLabel("Method", proxy_card), 1, 0)
-        proxy_layout.addWidget(self.proxy_method_combo, 1, 1)
-        proxy_layout.addWidget(QLabel("Final Polycount", proxy_card), 1, 2)
-        proxy_layout.addWidget(self.proxy_polycount_spin, 1, 3)
-        proxy_layout.addWidget(QLabel("Base Priority", proxy_card), 2, 0)
-        proxy_layout.addWidget(self.proxy_base_priority_spin, 2, 1, 1, 3)
-        proxy_layout.addWidget(self.preview_proxy_button, 1, 4, 2, 1)
-        proxy_layout.setColumnStretch(1, 1)
-        outer.addWidget(proxy_card)
-
-        fracture_card = QFrame(self)
-        fracture_card.setObjectName("PanelCard")
-        fracture_layout = QGridLayout(fracture_card)
-        fracture_layout.setContentsMargins(16, 16, 16, 16)
-        fracture_layout.setHorizontalSpacing(10)
-        fracture_layout.setVerticalSpacing(8)
-        fracture_title = QLabel("Fracturing", fracture_card)
-        fracture_title.setStyleSheet("font-weight: 600;")
-        self.fracture_method_combo = NoWheelComboBox(fracture_card)
-        self.fracture_method_combo.setObjectName("InteractiveCombo")
-        self.fracture_method_combo.addItem("Wind Guided Hierarchy", FRACTURE_METHOD_WIND_GUIDED_HIERARCHY)
-        self.fracture_method_combo.addItem("Pure Hierarchy", FRACTURE_METHOD_PURE_HIERARCHY)
-        self.fracture_method_combo.addItem("Branch Base Greedy", FRACTURE_METHOD_BRANCH_BASE_GREEDY)
-        self.fracture_piece_count_spin = QSpinBox(fracture_card)
-        self.fracture_piece_count_spin.setRange(1, 64)
-        self.fracture_piece_count_spin.setValue(FractureSettings().target_piece_count)
-        self.fracture_piece_count_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        self.fracture_base_face_budget_spin = QSpinBox(fracture_card)
-        self.fracture_base_face_budget_spin.setRange(1, 500_000)
-        self.fracture_base_face_budget_spin.setValue(DEFAULT_FRACTURE_PREVIEW_BASE_FACE_BUDGET)
-        self.fracture_base_face_budget_spin.setSingleStep(1000)
-        self.fracture_base_face_budget_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        self.preview_fracture_button = QPushButton("Preview Fracturing", fracture_card)
+        self.preview_fracture_button = QPushButton("Preview Fracturing", actions_card)
         self.preview_fracture_button.clicked.connect(self._on_preview_fracture_requested)
-        self.export_fracture_button = QPushButton("Export Fracture Pieces", fracture_card)
-        self.export_fracture_button.clicked.connect(self._on_export_fracture_requested)
-        fracture_layout.addWidget(fracture_title, 0, 0)
-        fracture_layout.addWidget(QLabel("Method", fracture_card), 1, 0)
-        fracture_layout.addWidget(self.fracture_method_combo, 1, 1)
-        fracture_layout.addWidget(QLabel("Target Pieces", fracture_card), 1, 2)
-        fracture_layout.addWidget(self.fracture_piece_count_spin, 1, 3)
-        fracture_layout.addWidget(QLabel("Preview Faces / Piece", fracture_card), 2, 0)
-        fracture_layout.addWidget(self.fracture_base_face_budget_spin, 2, 1, 1, 3)
-        fracture_layout.addWidget(self.preview_fracture_button, 1, 4)
-        fracture_layout.addWidget(self.export_fracture_button, 2, 4)
-        fracture_layout.setColumnStretch(1, 1)
-        outer.addWidget(fracture_card)
+        actions_layout.addWidget(actions_title, 0, 0)
+        actions_layout.addWidget(self.preview_proxy_button, 1, 0)
+        actions_layout.addWidget(self.preview_fracture_button, 1, 1)
+        actions_layout.setColumnStretch(2, 1)
+        outer.addWidget(actions_card)
 
         self.scroll = _make_scroll_area(self)
         self.scroll_container, self.scroll_layout = _make_scroll_host(self)
@@ -678,28 +610,16 @@ class GeometryTabPanel(QWidget):
         return bool(self._rows)
 
     def proxy_settings(self) -> ProxyMeshSettings:
-        return replace(
-            self._proxy_settings,
-            method=str(self.proxy_method_combo.currentData() or PROXY_METHOD_DENSITY_FIELD),
-            final_polycount=int(self.proxy_polycount_spin.value()),
-            base_mesh_priority=float(self.proxy_base_priority_spin.value()),
-        )
+        return self._proxy_settings
 
     def apply_proxy_settings(self, settings: ProxyMeshSettings) -> None:
         self._proxy_settings = settings
-        with QSignalBlocker(self.proxy_method_combo), QSignalBlocker(self.proxy_polycount_spin):
-            _set_combo_value(self.proxy_method_combo, settings.method)
-            self.proxy_polycount_spin.setValue(int(settings.final_polycount))
-        self.proxy_base_priority_spin.setValue(float(settings.base_mesh_priority))
 
     def fracture_preview_settings(self) -> FracturePreviewSettings:
-        return FracturePreviewSettings(
-            fracture=FractureSettings(
-                method=str(self.fracture_method_combo.currentData() or FRACTURE_METHOD_WIND_GUIDED_HIERARCHY),
-                target_piece_count=int(self.fracture_piece_count_spin.value()),
-            ),
-            max_base_faces_per_piece=int(self.fracture_base_face_budget_spin.value()),
-        )
+        return self._fracture_preview_settings
+
+    def apply_fracture_preview_settings(self, settings: FracturePreviewSettings) -> None:
+        self._fracture_preview_settings = settings
 
     def _handle_proxy_settings_changed(self) -> None:
         self._proxy_settings = self.proxy_settings()

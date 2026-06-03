@@ -1,5 +1,9 @@
 """SpeedTree Raw XML to USDA converter."""
 
-from .cli import main
-
 __all__ = ["main"]
+
+
+def main(argv=None) -> int:
+    from .cli import main as cli_main
+
+    return cli_main(argv)

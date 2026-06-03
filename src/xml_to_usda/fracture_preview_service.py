@@ -31,6 +31,8 @@ from .models import (
 from .output_resolution import resolve_output_path
 
 
+DEFAULT_FRACTURE_PREVIEW_POLYCOUNT = 1_000_000
+DEFAULT_FRACTURE_PREVIEW_BASE_PRIORITY = 0.33
 DEFAULT_FRACTURE_PREVIEW_BASE_FACE_BUDGET = 50_000
 DEFAULT_FRACTURE_PREVIEW_PROTOTYPE_FACE_BUDGET = 2_000
 
@@ -38,6 +40,8 @@ DEFAULT_FRACTURE_PREVIEW_PROTOTYPE_FACE_BUDGET = 2_000
 @dataclass(frozen=True)
 class FracturePreviewSettings:
     fracture: FractureSettings = field(default_factory=FractureSettings)
+    final_polycount: int = DEFAULT_FRACTURE_PREVIEW_POLYCOUNT
+    base_mesh_priority: float = DEFAULT_FRACTURE_PREVIEW_BASE_PRIORITY
     max_base_faces_per_piece: int = DEFAULT_FRACTURE_PREVIEW_BASE_FACE_BUDGET
     max_prototype_faces: int = DEFAULT_FRACTURE_PREVIEW_PROTOTYPE_FACE_BUDGET
 
@@ -104,7 +108,8 @@ def generate_fracture_preview(
     resolved_settings = settings or FracturePreviewSettings()
     _validate_preview_settings(resolved_settings)
     plan = plan_fracture(model, resolved_settings.fracture)
-    pieces = tuple(_preview_piece(model, piece, resolved_settings) for piece in plan.pieces)
+    base_face_budgets = _base_face_budgets(model, plan, resolved_settings)
+    pieces = tuple(_preview_piece(model, piece, base_face_budgets[piece.index]) for piece in plan.pieces)
     prototypes = _preview_prototypes(model, plan, resolved_settings)
     instances = _preview_instances(model, pieces)
     return FracturePreviewResult(
@@ -142,20 +147,47 @@ def _preview_settings(settings: FracturePreviewSettings | None, output_stem: str
 
 
 def _validate_preview_settings(settings: FracturePreviewSettings) -> None:
+    if settings.final_polycount <= 0:
+        raise FractureError("Fracture preview target polycount must be greater than zero.")
+    if not 0.0 <= settings.base_mesh_priority <= 1.0:
+        raise FractureError("Fracture preview base mesh priority must be between 0 and 1.")
     if settings.max_base_faces_per_piece <= 0:
         raise FractureError("Fracture preview base face budget must be greater than zero.")
     if settings.max_prototype_faces <= 0:
         raise FractureError("Fracture preview prototype face budget must be greater than zero.")
 
 
+def _base_face_budgets(
+    model: CanonicalTreeModel,
+    plan: FracturePlan,
+    settings: FracturePreviewSettings,
+) -> dict[int, int]:
+    if model.base_mesh is None:
+        raise FractureError("Fracture preview requires a base mesh.")
+    source_counts = {piece.index: len(piece.base_face_indices) for piece in plan.pieces}
+    if any(face_count <= 0 for face_count in source_counts.values()):
+        raise FractureError("Fracture preview requires every fracture piece to keep base mesh faces.")
+    has_repeated_parts = any(piece.repeated_part_indices for piece in plan.pieces)
+    if has_repeated_parts:
+        minimum_base_faces = len(source_counts)
+        target_faces = max(minimum_base_faces, int(round(settings.final_polycount * settings.base_mesh_priority)))
+    else:
+        target_faces = settings.final_polycount
+    return _proportional_face_budgets(
+        source_counts,
+        target_faces,
+        max_faces_per_item=settings.max_base_faces_per_piece,
+    )
+
+
 def _preview_piece(
     model: CanonicalTreeModel,
     piece: FracturePiece,
-    settings: FracturePreviewSettings,
+    face_budget: int,
 ) -> FracturePreviewPiece:
     if model.base_mesh is None:
         raise FractureError("Fracture preview requires a base mesh.")
-    sampled_faces = sample_face_indices(piece.base_face_indices, settings.max_base_faces_per_piece)
+    sampled_faces = sample_face_indices(piece.base_face_indices, face_budget)
     mesh = slice_mesh_faces(model.base_mesh, sampled_faces, name=f"{piece.name}_PreviewBase")
     return FracturePreviewPiece(
         piece=piece,
@@ -169,33 +201,111 @@ def _preview_prototypes(
     plan: FracturePlan,
     settings: FracturePreviewSettings,
 ) -> dict[str, FracturePreviewPrototype]:
-    used_keys = {
-        model.repeated_parts[index].prototype_key
-        for piece in plan.pieces
-        for index in piece.repeated_part_indices
-    }
+    instance_counts: dict[str, int] = {}
+    for piece in plan.pieces:
+        for repeated_part_index in piece.repeated_part_indices:
+            prototype_key = model.repeated_parts[repeated_part_index].prototype_key
+            instance_counts[prototype_key] = instance_counts.get(prototype_key, 0) + 1
+    prototype_budgets = _prototype_face_budgets(model, plan, settings)
     prototypes_by_key = {prototype.source_key: prototype for prototype in model.prototypes}
     preview_prototypes: dict[str, FracturePreviewPrototype] = {}
-    for source_key in sorted(used_keys):
+    for source_key in sorted(instance_counts):
         prototype = prototypes_by_key.get(source_key)
         if prototype is None:
             raise FractureError(f"Fracture preview repeated part references missing prototype {source_key}.")
-        preview_prototypes[source_key] = _preview_prototype(prototype, settings)
+        preview_prototypes[source_key] = _preview_prototype(
+            prototype,
+            face_budget=prototype_budgets[source_key],
+        )
     return preview_prototypes
 
 
 def _preview_prototype(
     prototype: Prototype,
-    settings: FracturePreviewSettings,
+    *,
+    face_budget: int,
 ) -> FracturePreviewPrototype:
     mesh = _prototype_mesh(prototype)
-    sampled_faces = sample_face_indices(tuple(range(len(mesh.face_vertex_counts))), settings.max_prototype_faces)
-    preview_mesh = slice_mesh_faces(mesh, sampled_faces, name=f"{prototype.identity.prim_name}_Preview")
+    preview_mesh = _simplify_preview_mesh(mesh, face_budget, name=f"{prototype.identity.prim_name}_Preview")
     return FracturePreviewPrototype(
         source_key=prototype.source_key,
         source_name=prototype.source_name,
         mesh=geometry_buffer_from_mesh(preview_mesh),
     )
+
+
+def _simplify_preview_mesh(mesh: MeshData, target_face_count: int, *, name: str) -> MeshData:
+    source_face_count = len(mesh.face_vertex_counts)
+    if source_face_count <= target_face_count:
+        return slice_mesh_faces(mesh, tuple(range(source_face_count)), name=name)
+    sampled_faces = sample_face_indices(tuple(range(source_face_count)), target_face_count)
+    return slice_mesh_faces(mesh, sampled_faces, name=name)
+
+
+def _prototype_face_budgets(
+    model: CanonicalTreeModel,
+    plan: FracturePlan,
+    settings: FracturePreviewSettings,
+) -> dict[str, int]:
+    instance_counts: dict[str, int] = {}
+    for piece in plan.pieces:
+        for repeated_part_index in piece.repeated_part_indices:
+            prototype_key = model.repeated_parts[repeated_part_index].prototype_key
+            instance_counts[prototype_key] = instance_counts.get(prototype_key, 0) + 1
+    if not instance_counts:
+        return {}
+
+    prototype_meshes: dict[str, MeshData] = {}
+    prototypes_by_key = {prototype.source_key: prototype for prototype in model.prototypes}
+    for source_key in sorted(instance_counts):
+        prototype = prototypes_by_key.get(source_key)
+        if prototype is None:
+            raise FractureError(f"Fracture preview repeated part references missing prototype {source_key}.")
+        mesh = _prototype_mesh(prototype)
+        if len(mesh.face_vertex_counts) <= 0:
+            raise FractureError(f"Fracture preview prototype {prototype.identity.prim_name} has no faces.")
+        prototype_meshes[source_key] = mesh
+
+    base_budgets = _base_face_budgets(model, plan, settings)
+    foliage_target = max(1, settings.final_polycount - sum(base_budgets.values()))
+    logical_source_counts = {
+        source_key: len(mesh.face_vertex_counts) * instance_counts[source_key]
+        for source_key, mesh in prototype_meshes.items()
+    }
+    total_logical_source_faces = sum(logical_source_counts.values())
+    if total_logical_source_faces <= foliage_target:
+        return {
+            source_key: min(len(mesh.face_vertex_counts), settings.max_prototype_faces)
+            for source_key, mesh in prototype_meshes.items()
+        }
+
+    budgets: dict[str, int] = {}
+    for source_key, mesh in prototype_meshes.items():
+        source_face_count = len(mesh.face_vertex_counts)
+        weighted_budget = round(source_face_count * foliage_target / total_logical_source_faces)
+        budgets[source_key] = max(1, min(source_face_count, settings.max_prototype_faces, int(weighted_budget)))
+    return budgets
+
+
+def _proportional_face_budgets(
+    source_counts: dict[int, int],
+    target_faces: int,
+    *,
+    max_faces_per_item: int,
+) -> dict[int, int]:
+    total_source_faces = sum(source_counts.values())
+    if total_source_faces <= 0:
+        return {key: 0 for key in source_counts}
+    if total_source_faces <= target_faces:
+        return {
+            key: max(1, min(source_count, max_faces_per_item))
+            for key, source_count in source_counts.items()
+        }
+    budgets: dict[int, int] = {}
+    for key, source_count in source_counts.items():
+        weighted_budget = round(source_count * target_faces / total_source_faces)
+        budgets[key] = max(1, min(source_count, max_faces_per_item, int(weighted_budget)))
+    return budgets
 
 
 def _preview_instances(

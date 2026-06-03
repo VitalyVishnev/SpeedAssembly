@@ -631,6 +631,10 @@ class MatcapViewport(QOpenGLWidget):
     def matcap_tint_strength(self) -> float:
         return self._matcap_tint_strength
 
+    def set_matcap_tint_strength(self, value: float) -> None:
+        self._matcap_tint_strength = max(0.0, min(1.0, float(value)))
+        self.update()
+
     def set_mesh(self, mesh: GeometryBuffer | None, *, frame_camera: bool = True) -> None:
         self._mesh = mesh
         self._update_mesh_metrics(frame_camera=frame_camera)
@@ -691,11 +695,13 @@ class MatcapViewport(QOpenGLWidget):
         if self._program is None or self._vao is None or self._vertex_count <= 0:
             return
         self._program.bind()
-        self._program.setUniformValue("mvp", projection * view)
-        self._program.setUniformValue("normalMatrix", view.normalMatrix())
-        tint_location = self._program.uniformLocation("pieceTintStrength")
-        if tint_location >= 0:
-            self._program.setUniformValue(tint_location, float(self._matcap_tint_strength))
+        _set_matcap_program_uniforms(
+            self._program,
+            functions=functions,
+            mvp=projection * view,
+            normal_matrix=view.normalMatrix(),
+            piece_tint_strength=self._matcap_tint_strength,
+        )
         self._vao.bind()
         functions.glDrawArrays(GL_TRIANGLES, 0, self._vertex_count)
         self._vao.release()
@@ -767,12 +773,15 @@ class MatcapViewport(QOpenGLWidget):
         position_location = self._program.attributeLocation("position")
         normal_location = self._program.attributeLocation("normal")
         piece_tint_location = self._program.attributeLocation("pieceTint")
-        self._program.enableAttributeArray(position_location)
-        self._program.setAttributeBuffer(position_location, GL_FLOAT, 0, 3, stride)
-        self._program.enableAttributeArray(normal_location)
-        self._program.setAttributeBuffer(normal_location, GL_FLOAT, 12, 3, stride)
-        self._program.enableAttributeArray(piece_tint_location)
-        self._program.setAttributeBuffer(piece_tint_location, GL_FLOAT, 24, 4, stride)
+        if position_location >= 0:
+            self._program.enableAttributeArray(position_location)
+            self._program.setAttributeBuffer(position_location, GL_FLOAT, 0, 3, stride)
+        if normal_location >= 0:
+            self._program.enableAttributeArray(normal_location)
+            self._program.setAttributeBuffer(normal_location, GL_FLOAT, 12, 3, stride)
+        if piece_tint_location >= 0:
+            self._program.enableAttributeArray(piece_tint_location)
+            self._program.setAttributeBuffer(piece_tint_location, GL_FLOAT, 24, 4, stride)
         self._program.release()
         self._vertex_buffer.release()
         self._vao.release()
@@ -998,8 +1007,9 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
             color = mix(color, high, upper * side * 0.74);
             color += rim * vec3(0.15, 0.16, 0.18);
             color = pow(color, vec3(0.88));
-            vec3 tint = clamp(pieceColor.rgb * 1.18, vec3(0.0), vec3(1.35));
-            color *= mix(vec3(1.0), tint, pieceTintStrength);
+            float luma = dot(color, vec3(0.299, 0.587, 0.114));
+            vec3 tintedMatcap = pieceColor.rgb * clamp(0.28 + luma * 1.22, 0.0, 1.35);
+            color = mix(color, tintedMatcap, pieceTintStrength);
             gl_FragColor = vec4(color, pieceColor.a);
         }
         """,
@@ -1008,6 +1018,21 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
     if not program.link():
         raise RuntimeError(program.log())
     return program
+
+
+def _set_matcap_program_uniforms(
+    program: QOpenGLShaderProgram,
+    *,
+    functions,
+    mvp: QMatrix4x4,
+    normal_matrix,
+    piece_tint_strength: float,
+) -> None:
+    program.setUniformValue("mvp", mvp)
+    program.setUniformValue("normalMatrix", normal_matrix)
+    tint_location = program.uniformLocation("pieceTintStrength")
+    if tint_location >= 0:
+        functions.glUniform1f(tint_location, float(piece_tint_strength))
 
 
 def _build_grid_program() -> QOpenGLShaderProgram:
