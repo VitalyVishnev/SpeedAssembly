@@ -203,6 +203,9 @@ domain concept.
   without rebuilding it. UI and worker adapters pass a `ProxyMeshSourceRequest`
   projection, not the full main `ConversionRequest`, so main-export material,
   prototype, UDIM, and conversion-mode intent cannot leak into proxy generation.
+  Proxy simplification is part of the proxy service contract and must preserve
+  connected topology through the QEM backend. Do not replace it with
+  diagnostic face sampling.
 - Fracturing seam:
   Fracturing is a companion destructibility workflow over `ResolvedAssemblyModel`.
   `fracture_service.py` owns deterministic skeleton-owned Fracture Piece
@@ -222,6 +225,10 @@ domain concept.
   passes the full current conversion request. Both are executed through the
   file-based fracture worker subprocess so native worker crashes stay outside
   the Qt UI process.
+  Fracture Preview may use deterministic sampling for viewport payload budgets,
+  but that is a preview adapter policy, not a reusable mesh simplification
+  policy. Worker result files are authoritative: UI polling must drain result
+  and error files before classifying a stopped worker as crashed.
 - Operator state seam:
   `Operator State` is the current UI selection surface. `Persisted Operator
   Settings` restore that state across sessions or input XML files. `UI Shell

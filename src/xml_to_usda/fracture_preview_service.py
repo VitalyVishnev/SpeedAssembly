@@ -109,8 +109,9 @@ def generate_fracture_preview(
     _validate_preview_settings(resolved_settings)
     plan = plan_fracture(model, resolved_settings.fracture)
     base_face_budgets = _base_face_budgets(model, plan, resolved_settings)
+    prototype_budgets = _prototype_face_budgets(model, plan, resolved_settings, base_face_budgets)
     pieces = tuple(_preview_piece(model, piece, base_face_budgets[piece.index]) for piece in plan.pieces)
-    prototypes = _preview_prototypes(model, plan, resolved_settings)
+    prototypes = _preview_prototypes(model, plan, prototype_budgets)
     instances = _preview_instances(model, pieces)
     return FracturePreviewResult(
         plan=plan,
@@ -199,17 +200,11 @@ def _preview_piece(
 def _preview_prototypes(
     model: CanonicalTreeModel,
     plan: FracturePlan,
-    settings: FracturePreviewSettings,
+    prototype_budgets: dict[str, int],
 ) -> dict[str, FracturePreviewPrototype]:
-    instance_counts: dict[str, int] = {}
-    for piece in plan.pieces:
-        for repeated_part_index in piece.repeated_part_indices:
-            prototype_key = model.repeated_parts[repeated_part_index].prototype_key
-            instance_counts[prototype_key] = instance_counts.get(prototype_key, 0) + 1
-    prototype_budgets = _prototype_face_budgets(model, plan, settings)
     prototypes_by_key = {prototype.source_key: prototype for prototype in model.prototypes}
     preview_prototypes: dict[str, FracturePreviewPrototype] = {}
-    for source_key in sorted(instance_counts):
+    for source_key in sorted(prototype_budgets):
         prototype = prototypes_by_key.get(source_key)
         if prototype is None:
             raise FractureError(f"Fracture preview repeated part references missing prototype {source_key}.")
@@ -246,27 +241,14 @@ def _prototype_face_budgets(
     model: CanonicalTreeModel,
     plan: FracturePlan,
     settings: FracturePreviewSettings,
+    base_budgets: dict[int, int],
 ) -> dict[str, int]:
-    instance_counts: dict[str, int] = {}
-    for piece in plan.pieces:
-        for repeated_part_index in piece.repeated_part_indices:
-            prototype_key = model.repeated_parts[repeated_part_index].prototype_key
-            instance_counts[prototype_key] = instance_counts.get(prototype_key, 0) + 1
+    instance_counts = _prototype_instance_counts(model, plan)
     if not instance_counts:
         return {}
 
-    prototype_meshes: dict[str, MeshData] = {}
-    prototypes_by_key = {prototype.source_key: prototype for prototype in model.prototypes}
-    for source_key in sorted(instance_counts):
-        prototype = prototypes_by_key.get(source_key)
-        if prototype is None:
-            raise FractureError(f"Fracture preview repeated part references missing prototype {source_key}.")
-        mesh = _prototype_mesh(prototype)
-        if len(mesh.face_vertex_counts) <= 0:
-            raise FractureError(f"Fracture preview prototype {prototype.identity.prim_name} has no faces.")
-        prototype_meshes[source_key] = mesh
+    prototype_meshes = _prototype_meshes_by_key(model, instance_counts)
 
-    base_budgets = _base_face_budgets(model, plan, settings)
     foliage_target = max(1, settings.final_polycount - sum(base_budgets.values()))
     logical_source_counts = {
         source_key: len(mesh.face_vertex_counts) * instance_counts[source_key]
@@ -285,6 +267,35 @@ def _prototype_face_budgets(
         weighted_budget = round(source_face_count * foliage_target / total_logical_source_faces)
         budgets[source_key] = max(1, min(source_face_count, settings.max_prototype_faces, int(weighted_budget)))
     return budgets
+
+
+def _prototype_instance_counts(
+    model: CanonicalTreeModel,
+    plan: FracturePlan,
+) -> dict[str, int]:
+    instance_counts: dict[str, int] = {}
+    for piece in plan.pieces:
+        for repeated_part_index in piece.repeated_part_indices:
+            prototype_key = model.repeated_parts[repeated_part_index].prototype_key
+            instance_counts[prototype_key] = instance_counts.get(prototype_key, 0) + 1
+    return instance_counts
+
+
+def _prototype_meshes_by_key(
+    model: CanonicalTreeModel,
+    instance_counts: dict[str, int],
+) -> dict[str, MeshData]:
+    prototypes_by_key = {prototype.source_key: prototype for prototype in model.prototypes}
+    prototype_meshes: dict[str, MeshData] = {}
+    for source_key in sorted(instance_counts):
+        prototype = prototypes_by_key.get(source_key)
+        if prototype is None:
+            raise FractureError(f"Fracture preview repeated part references missing prototype {source_key}.")
+        mesh = _prototype_mesh(prototype)
+        if len(mesh.face_vertex_counts) <= 0:
+            raise FractureError(f"Fracture preview prototype {prototype.identity.prim_name} has no faces.")
+        prototype_meshes[source_key] = mesh
+    return prototype_meshes
 
 
 def _proportional_face_budgets(

@@ -85,10 +85,11 @@ def plan_fracture(model: CanonicalTreeModel, settings: FractureSettings | None =
 
     graph = _build_skeleton_graph(model.skeleton)
     base_face_owner_by_index = _base_face_owner_by_index(model, graph)
+    subtree_base_face_counts = _subtree_base_face_counts(graph, base_face_owner_by_index)
     main_axis = _select_main_axis(graph, resolved_settings.method)
     candidate_cut_sites, candidate_diagnostics = _candidate_cut_sites(
         graph,
-        base_face_owner_by_index,
+        subtree_base_face_counts,
         method=resolved_settings.method,
         main_axis=main_axis,
     )
@@ -239,13 +240,13 @@ def _select_main_axis(graph: _SkeletonGraph, method: str) -> tuple[str, ...]:
 
 def _candidate_cut_sites(
     graph: _SkeletonGraph,
-    base_face_owner_by_index: tuple[str, ...],
+    subtree_base_face_counts: dict[str, int],
     *,
     method: str,
     main_axis: tuple[str, ...],
 ) -> tuple[tuple[FractureCutSite, ...], tuple[ValidationIssue, ...]]:
     if method == FRACTURE_METHOD_BRANCH_BASE_GREEDY:
-        return _branch_base_candidates(graph, base_face_owner_by_index, main_axis), ()
+        return _branch_base_candidates(graph, subtree_base_face_counts, main_axis), ()
 
     diagnostics: tuple[ValidationIssue, ...] = ()
     if method == FRACTURE_METHOD_WIND_GUIDED_HIERARCHY and not any(
@@ -260,18 +261,18 @@ def _candidate_cut_sites(
         )
 
     candidates: list[FractureCutSite] = []
-    midpoint = _main_axis_midpoint(graph, main_axis, base_face_owner_by_index)
+    midpoint = _main_axis_midpoint(graph, main_axis, subtree_base_face_counts)
     if midpoint is not None:
         candidates.append(FractureCutSite(joint_token=midpoint, kind="joint", reason="main_axis_midpoint"))
 
-    candidates.extend(_branch_base_candidates(graph, base_face_owner_by_index, main_axis))
-    candidates.extend(_remaining_hierarchy_candidates(graph, base_face_owner_by_index, candidates))
+    candidates.extend(_branch_base_candidates(graph, subtree_base_face_counts, main_axis))
+    candidates.extend(_remaining_hierarchy_candidates(graph, subtree_base_face_counts, candidates))
     return tuple(_dedupe_cut_sites(candidates)), diagnostics
 
 
 def _branch_base_candidates(
     graph: _SkeletonGraph,
-    base_face_owner_by_index: tuple[str, ...],
+    subtree_base_face_counts: dict[str, int],
     main_axis: tuple[str, ...],
 ) -> tuple[FractureCutSite, ...]:
     main_axis_set = set(main_axis)
@@ -281,12 +282,12 @@ def _branch_base_candidates(
         if token not in graph.roots
         and token not in main_axis_set
         and graph.joint_by_name[token].parent in main_axis_set
-        and _subtree_base_face_count(graph, base_face_owner_by_index, token) > 0
+        and subtree_base_face_counts.get(token, 0) > 0
     ]
     candidates.sort(
         key=lambda token: (
             _generator_level_sort_key(graph.joint_by_name[token]),
-            -_subtree_base_face_count(graph, base_face_owner_by_index, token),
+            -subtree_base_face_counts[token],
             graph.depth_by_name[token],
             token,
         )
@@ -296,7 +297,7 @@ def _branch_base_candidates(
 
 def _remaining_hierarchy_candidates(
     graph: _SkeletonGraph,
-    base_face_owner_by_index: tuple[str, ...],
+    subtree_base_face_counts: dict[str, int],
     existing: list[FractureCutSite],
 ) -> tuple[FractureCutSite, ...]:
     existing_tokens = {cut_site.joint_token for cut_site in existing}
@@ -305,11 +306,11 @@ def _remaining_hierarchy_candidates(
         for token in graph.joint_by_name
         if token not in graph.roots
         and token not in existing_tokens
-        and _subtree_base_face_count(graph, base_face_owner_by_index, token) > 0
+        and subtree_base_face_counts.get(token, 0) > 0
     ]
     candidates.sort(
         key=lambda token: (
-            -_subtree_base_face_count(graph, base_face_owner_by_index, token),
+            -subtree_base_face_counts[token],
             graph.depth_by_name[token],
             token,
         )
@@ -320,12 +321,12 @@ def _remaining_hierarchy_candidates(
 def _main_axis_midpoint(
     graph: _SkeletonGraph,
     main_axis: tuple[str, ...],
-    base_face_owner_by_index: tuple[str, ...],
+    subtree_base_face_counts: dict[str, int],
 ) -> str | None:
     candidates = [
         token
         for token in main_axis[1:]
-        if _subtree_base_face_count(graph, base_face_owner_by_index, token) > 0
+        if subtree_base_face_counts.get(token, 0) > 0
     ]
     if not candidates:
         return None
@@ -614,22 +615,14 @@ def _generator_level_sort_key(joint: Joint) -> int:
     return joint.generator_level if joint.generator_level is not None else 999_999
 
 
-def _subtree_base_face_count(
+def _subtree_base_face_counts(
     graph: _SkeletonGraph,
     base_face_owner_by_index: tuple[str, ...],
-    root_token: str,
-) -> int:
-    descendants = _descendants_inclusive(graph, root_token)
-    return sum(1 for token in base_face_owner_by_index if token in descendants)
-
-
-def _descendants_inclusive(graph: _SkeletonGraph, root_token: str) -> set[str]:
-    descendants: set[str] = set()
-
-    def visit(token: str) -> None:
-        descendants.add(token)
-        for child in graph.children_by_name[token]:
-            visit(child)
-
-    visit(root_token)
-    return descendants
+) -> dict[str, int]:
+    counts = {joint.name: 0 for joint in graph.joints}
+    for owner_token in base_face_owner_by_index:
+        current: str | None = owner_token
+        while current is not None:
+            counts[current] += 1
+            current = graph.joint_by_name[current].parent
+    return counts

@@ -75,6 +75,9 @@ Current Proxy Mesh status:
 - repeated parts from `LeafReferences` become instanced foliage volume kernels,
   are accumulated into one density field, extracted as one surface, then reduced
   with QEM through `fast-simplification`
+- Proxy Mesh simplification must remain real QEM simplification. Deterministic
+  face sampling was tested and rejected because it creates disconnected triangle
+  clouds and leaves dead source vertices.
 - the preview uses a real Qt OpenGL viewport with orbit camera, wheel zoom,
   Matcap-style shading, and a floor grid
 - preview generation runs in an isolated Proxy Mesh worker process so native
@@ -98,6 +101,24 @@ Current Proxy Mesh status:
   `density_field` method and positive/clamped numeric ranges
 - UE import as a Static Mesh has been manually confirmed; Distance Field and
   shadow quality validation remain pending
+
+Current Fracturing status:
+
+- Fracturing is a companion destructibility workflow, not a main conversion
+  mode
+- preview uses source-normalized XML geometry, stable per-piece colors, the
+  shared Qt matcap/grid viewport, and an isolated Fracture worker process
+- export uses resolved Operator Intent and writes per-piece root-pivoted Static
+  Mesh Assembly USDA files
+- preview worker result files are the success source of truth; an exit code `0`
+  with a result file must not be reported as a crash
+- preview color tint is applied through the shared matcap shader with a direct
+  OpenGL scalar uniform write; PySide scalar uniform overloads were unreliable
+  for this path
+- lightweight deterministic face sampling is allowed only for Fracture Preview
+  payload reduction; it must not replace Proxy Mesh QEM simplification
+- dense Spruce preview/export has been manually validated enough to continue
+  iteration; final UE destructibility/runtime validation remains pending
 
 The only remaining open item before `Phase 1` can be considered complete is broader validation on multiple real SpeedTree structures with different tree and grass shapes:
 

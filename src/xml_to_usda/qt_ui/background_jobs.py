@@ -517,22 +517,16 @@ class QtBackgroundJobsController:
         elif self._fracture_export_process is not None and not self._fracture_export_result_received:
             self._handle_fracture_export_process_crash()
 
-        if self._fracture_preview_queue is not None:
-            for event_name, payload in self._deps.drain_process_queue(self._fracture_preview_queue):
-                keep_polling = True
-                if event_name == "error_traceback":
-                    self._fracture_preview_error_traceback = str(payload)
-                elif event_name == "error":
-                    self._fracture_preview_result_received = True
-                    self._handle_fracture_preview_error(str(payload))
-                elif event_name == "result":
-                    self._fracture_preview_result_received = True
-                    self._handle_fracture_preview_result(payload)
+        if self._drain_fracture_preview_queue():
+            keep_polling = True
 
         if self._fracture_preview_process is not None and self._fracture_preview_process.is_alive():
             keep_polling = True
         elif self._fracture_preview_process is not None and not self._fracture_preview_result_received:
-            self._handle_fracture_preview_process_crash()
+            if self._drain_fracture_preview_queue():
+                keep_polling = True
+            if self._fracture_preview_process is not None and not self._fracture_preview_result_received:
+                self._handle_fracture_preview_process_crash()
 
         if (
             self.wind_refresh_running
@@ -546,6 +540,22 @@ class QtBackgroundJobsController:
         if keep_polling:
             return
         self._poll_timer.stop()
+
+    def _drain_fracture_preview_queue(self) -> bool:
+        if self._fracture_preview_queue is None:
+            return False
+        received_event = False
+        for event_name, payload in self._deps.drain_process_queue(self._fracture_preview_queue):
+            received_event = True
+            if event_name == "error_traceback":
+                self._fracture_preview_error_traceback = str(payload)
+            elif event_name == "error":
+                self._fracture_preview_result_received = True
+                self._handle_fracture_preview_error(str(payload))
+            elif event_name == "result":
+                self._fracture_preview_result_received = True
+                self._handle_fracture_preview_result(payload)
+        return received_event
 
     def _handle_wind_refresh_error(self, payload: _WindErrorPayload) -> None:
         self._window._clear_pending_generate_after_refresh()

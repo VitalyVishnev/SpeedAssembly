@@ -14,6 +14,7 @@ from xml_to_usda.fracture_worker_subprocess import (
     read_fracture_worker_result,
     run_fracture_worker_request_file,
     write_fracture_worker_request,
+    write_fracture_worker_result,
 )
 from xml_to_usda.models import ConversionRequest
 
@@ -102,3 +103,21 @@ def test_fracture_worker_request_write_does_not_leave_empty_final_file(monkeypat
         raise AssertionError("Expected simulated pickle failure.")
 
     assert request_path.exists() is False
+
+
+def test_fracture_worker_result_write_does_not_leave_empty_final_file(monkeypatch, tmp_path: Path) -> None:
+    result_path = tmp_path / "preview.result.pkl"
+
+    def fail_dump(*args, **kwargs):
+        raise RuntimeError("simulated result pickle failure")
+
+    monkeypatch.setattr(fracture_worker_subprocess.pickle, "dump", fail_dump)
+
+    try:
+        write_fracture_worker_result(result_path, object())
+    except RuntimeError as exc:
+        assert str(exc) == "simulated result pickle failure"
+    else:
+        raise AssertionError("Expected simulated result pickle failure.")
+
+    assert result_path.exists() is False

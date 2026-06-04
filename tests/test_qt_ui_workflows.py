@@ -1429,6 +1429,76 @@ def test_qt_window_reports_fracture_preview_crash_with_request_context(monkeypat
     assert "preview_base_priority=0.27" in window._log_text
 
 
+def test_qt_window_accepts_fracture_preview_result_after_process_exit_race(monkeypatch, qtbot, tmp_path) -> None:
+    class _ExitedProcess:
+        exitcode = 0
+
+        def is_alive(self) -> bool:
+            return False
+
+        def join(self, timeout=None) -> None:
+            return None
+
+        def terminate(self) -> None:
+            return None
+
+    class _DelayedResultQueue:
+        def __init__(self, result) -> None:
+            self.result = result
+            self.drain_count = 0
+
+        def drain(self):
+            self.drain_count += 1
+            if self.drain_count == 1:
+                return []
+            return [("result", self.result)]
+
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    calls: dict[str, object] = {}
+    base_deps = _build_fake_deps(calls)
+
+    def start_fracture_preview_process(request, settings):
+        result = base_deps.generate_fracture_preview_from_conversion_request(request, settings)
+        return _ExitedProcess(), _DelayedResultQueue(result), object()
+
+    def drain_process_queue(queue):
+        if hasattr(queue, "drain"):
+            return queue.drain()
+        return base_deps.drain_process_queue(queue)
+
+    deps = replace(
+        base_deps,
+        start_fracture_preview_process=start_fracture_preview_process,
+        drain_process_queue=drain_process_queue,
+    )
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=deps,
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+    window.output_input.setText(str(tmp_path / "tree.usda"))
+
+    qtbot.mouseClick(window.geometry_panel.preview_fracture_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(
+        lambda: window._fracture_preview_dialog is not None
+        and window._fracture_preview_dialog.current_preview is not None,
+        timeout=3000,
+    )
+
+    assert "Fracture Preview failed" not in window.status_label.text()
+    assert "Fracture preview worker process crashed unexpectedly" not in window._log_text
+
+
 def test_qt_window_records_fracture_preview_runtime_breadcrumbs(monkeypatch, qtbot, tmp_path) -> None:
     settings_dir = tmp_path / "settings"
     runtime_paths = resolve_runtime_paths(

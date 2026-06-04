@@ -18,7 +18,6 @@ from .models import CanonicalTreeModel, GeometryBuffer, MeshData, Prototype, Qua
 from .models import ConversionMode, ConversionRequest, CpuProfile, OutputMode
 from .naming import make_stable_prim_name
 from .output_resolution import ensure_output_path_allowed
-from .fracture_geometry import sample_face_indices
 
 
 DEFAULT_PROXY_POLYCOUNT = 5000
@@ -323,8 +322,19 @@ def _simplify_polygon_mesh(
     target_triangle_count = max(1, int(target_triangle_count))
     if len(triangles) <= target_triangle_count:
         return _geometry_buffer_from_triangles(points, triangles, name=mesh.name)
-    sampled = sample_face_indices(tuple(range(len(triangles))), target_triangle_count)
-    return _geometry_buffer_from_triangles(points, triangles[list(sampled)], name=mesh.name)
+    try:
+        import fast_simplification
+    except ImportError as exc:
+        raise ProxyMeshError("Proxy QEM simplification requires the fast-simplification package.") from exc
+    try:
+        simplified_points, simplified_triangles = fast_simplification.simplify(
+            points,
+            triangles,
+            target_count=target_triangle_count,
+        )
+    except Exception as exc:
+        raise ProxyMeshError(f"Proxy QEM simplification failed: {exc}") from exc
+    return _geometry_buffer_from_triangles(simplified_points, simplified_triangles, name=mesh.name)
 
 
 def _triangulated_mesh_arrays(mesh: GeometryBuffer):

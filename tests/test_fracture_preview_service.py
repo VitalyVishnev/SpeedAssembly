@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
+import pytest
+
 from xml_to_usda.fracture_preview_service import FracturePreviewSettings, generate_fracture_preview
-from xml_to_usda.fracture_service import FractureSettings
+from xml_to_usda.fracture_service import FractureError, FractureSettings
 from xml_to_usda.models import (
     ConversionRequest,
     ExportMetadata,
@@ -204,6 +208,43 @@ def test_fracture_preview_simplifies_repeated_prototypes_proportionally_to_sourc
     assert sum(piece.base_mesh.face_count for piece in result.pieces) == 3
     assert result.prototypes["Mesh_small"].mesh.face_count == 30
     assert result.prototypes["Mesh_large"].mesh.face_count == 300
+
+
+def test_fracture_preview_repeated_instance_count_reduces_per_prototype_budget() -> None:
+    tree = _tree_with_mixed_repeated_prototypes()
+    heavy_instance_tree = replace(
+        tree,
+        assembly_parts=(
+            _repeated_part("SmallBranch", "bone_002", prototype_key="Mesh_small"),
+        )
+        + tuple(
+            _repeated_part(f"LargeBranch_{index:02d}", "bone_004", prototype_key="Mesh_large")
+            for index in range(10)
+        ),
+    )
+
+    result = generate_fracture_preview(
+        heavy_instance_tree,
+        FracturePreviewSettings(
+            fracture=FractureSettings(target_piece_count=3, output_stem="Oak"),
+            final_polycount=1103,
+            base_mesh_priority=0.0,
+            max_base_faces_per_piece=1,
+            max_prototype_faces=1000,
+        ),
+    )
+
+    assert sum(piece.base_mesh.face_count for piece in result.pieces) == 3
+    assert result.prototypes["Mesh_small"].mesh.face_count == 11
+    assert result.prototypes["Mesh_large"].mesh.face_count == 109
+
+
+def test_fracture_preview_fails_loudly_when_repeated_part_references_missing_prototype() -> None:
+    with pytest.raises(FractureError, match="missing prototype Mesh_1"):
+        generate_fracture_preview(
+            replace(_tree(), prototypes=()),
+            FracturePreviewSettings(fracture=FractureSettings(target_piece_count=3, output_stem="Oak")),
+        )
 
 
 def test_fracture_preview_from_conversion_request_uses_source_xml_geometry_not_operator_replacements(

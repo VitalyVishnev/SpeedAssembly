@@ -80,6 +80,30 @@ def _strip_mesh(name: str, triangle_count: int) -> MeshData:
     )
 
 
+def _quad_grid_mesh(name: str, width: int, height: int) -> MeshData:
+    points: list[Vector3] = []
+    for y in range(height + 1):
+        for x in range(width + 1):
+            points.append(Vector3(float(x), 0.0, float(y)))
+    face_counts: list[int] = []
+    face_indices: list[int] = []
+    row_width = width + 1
+    for y in range(height):
+        for x in range(width):
+            lower_left = y * row_width + x
+            lower_right = lower_left + 1
+            upper_left = lower_left + row_width
+            upper_right = upper_left + 1
+            face_counts.append(4)
+            face_indices.extend((lower_left, lower_right, upper_right, upper_left))
+    return MeshData(
+        name=name,
+        points=tuple(points),
+        face_vertex_counts=tuple(face_counts),
+        face_vertex_indices=tuple(face_indices),
+    )
+
+
 def _model(*, repeated_count: int = 2, prototype_payload: MeshData | GeometryBuffer | None = None) -> TreeAsset:
     if prototype_payload is None:
         prototype_payload = _triangle_mesh("LeafCluster")
@@ -249,6 +273,18 @@ def test_density_field_simplifies_extracted_surface_with_qem() -> None:
     assert set(result.mesh.face_vertex_counts) == {3}
 
 
+def test_proxy_simplification_keeps_connected_surface_instead_of_sampling_triangle_cloud() -> None:
+    source = _quad_grid_mesh("ConnectedBase", 18, 18)
+    base_only = replace(_model(repeated_count=0), base_mesh=source, prototypes=())
+
+    result = generate_proxy_mesh(base_only, ProxyMeshSettings(final_polycount=40))
+
+    assert result.mesh.face_count <= 40
+    assert result.mesh.point_count < len(source.points)
+    assert _unused_point_count(result.mesh) == 0
+    assert _triangle_component_count(result.mesh) == 1
+
+
 def test_proxy_generation_is_deterministic_for_same_input_and_settings() -> None:
     settings = ProxyMeshSettings(final_polycount=48, density_resolution=18, bounds_inflation=1.15)
     first = generate_proxy_mesh(_model(repeated_count=6), settings)
@@ -366,3 +402,43 @@ def _mesh_signature(mesh: GeometryBuffer) -> tuple[tuple[float, ...], tuple[int,
         tuple(int(value) for value in mesh.face_vertex_counts),
         tuple(int(value) for value in mesh.face_vertex_indices),
     )
+
+
+def _unused_point_count(mesh: GeometryBuffer) -> int:
+    used = {int(index) for index in mesh.face_vertex_indices}
+    return mesh.point_count - len(used)
+
+
+def _triangle_component_count(mesh: GeometryBuffer) -> int:
+    triangles: list[tuple[int, int, int]] = []
+    offset = 0
+    for count in mesh.face_vertex_counts:
+        face = tuple(int(mesh.face_vertex_indices[offset + index]) for index in range(count))
+        offset += count
+        if count == 3:
+            triangles.append(face)
+            continue
+        for index in range(1, count - 1):
+            triangles.append((face[0], face[index], face[index + 1]))
+    if not triangles:
+        return 0
+    by_vertex: dict[int, list[int]] = {}
+    for triangle_index, triangle in enumerate(triangles):
+        for vertex_index in triangle:
+            by_vertex.setdefault(vertex_index, []).append(triangle_index)
+    seen: set[int] = set()
+    components = 0
+    for triangle_index in range(len(triangles)):
+        if triangle_index in seen:
+            continue
+        components += 1
+        stack = [triangle_index]
+        seen.add(triangle_index)
+        while stack:
+            current = stack.pop()
+            for vertex_index in triangles[current]:
+                for neighbor in by_vertex[vertex_index]:
+                    if neighbor not in seen:
+                        seen.add(neighbor)
+                        stack.append(neighbor)
+    return components

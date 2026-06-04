@@ -90,8 +90,7 @@ def run_fracture_worker_request_file(path: str | Path) -> int:
             result = generate_fracture_preview_from_conversion_request(request.request, request.settings)
         else:
             raise ValueError(f"Unsupported fracture worker action: {request.action}")
-        with Path(request.result_path).open("wb") as handle:
-            pickle.dump(result, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        write_fracture_worker_result(request.result_path, result)
         _cleanup_file(Path(request.error_path))
         return 0
     except Exception as exc:
@@ -122,6 +121,19 @@ def read_fracture_worker_result(path: str | Path) -> "FractureExportResult | Fra
         if isinstance(payload, FractureExportResult):
             return payload
     raise TypeError("Invalid Fracture worker result payload.")
+
+
+def write_fracture_worker_result(path: str | Path, result: object) -> None:
+    result_path = Path(path)
+    temp_path = result_path.with_name(f"{result_path.name}.tmp")
+    try:
+        with temp_path.open("wb") as handle:
+            pickle.dump(result, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        temp_path.replace(result_path)
+    except Exception:
+        _cleanup_file(temp_path)
+        _cleanup_file(result_path)
+        raise
 
 
 def _cleanup_file(path: Path) -> None:

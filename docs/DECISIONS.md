@@ -8,6 +8,30 @@ future architecture work should not re-litigate without new evidence.
 Importer-facing facts still belong in `docs/ue_import_contract.md`,
 `docs/speedtree_mapping.md`, and `docs/workflow_status.md`.
 
+## 2026-06-05: Preview stability must not redefine mesh quality contracts
+
+Status: Accepted
+
+Decision:
+
+- Native-risk preview work may be isolated in worker subprocesses and may use
+  cheaper diagnostic payloads when the output is explicitly viewport-only.
+- Proxy Mesh generation must keep QEM simplification through
+  `fast-simplification`; deterministic face sampling is not an acceptable proxy
+  simplification backend.
+- GUI worker polling must drain result/error files before reporting a stopped
+  worker as crashed. A stopped worker with exit code `0` and a result file is a
+  success, not a crash.
+
+Rationale:
+
+- Replacing QEM with face sampling fixed one native-crash suspicion but broke
+  proxy topology into disconnected triangle clouds.
+- Fracture Preview and Proxy Mesh have different quality contracts: one is a
+  diagnostic viewport payload, the other is an exported companion asset.
+- Packaged worker races can make the process state visible before the result
+  event is processed; the file protocol is the more reliable completion signal.
+
 ## 2026-05-19: Operator settings are global, not per-XML
 
 Status: Accepted

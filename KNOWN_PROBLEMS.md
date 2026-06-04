@@ -1,11 +1,11 @@
 # Known Problems
 
-## Fracturing Qt Preview Real-Sample Validation Pending
+## Fracturing UE Runtime Validation Pending
 
-- Issue: Fracture Preview is reachable from the Geometry tab, generated in an isolated worker process, rendered through the shared Qt matcap/grid viewport with slight per-piece tinting, and covered on the small `SimpleTree_01.xml` real sample, but it has not yet been visually validated against dense or large real XML samples.
-- Location: `src/xml_to_usda/fracture_preview_service.py`, `src/xml_to_usda/fracture_worker_subprocess.py`, `src/xml_to_usda/qt_ui/fracture_preview.py`
-- Reason for deferral: The current slice locked the operator workflow contract, renderer path, and process isolation before real-sample visual QA.
-- Likely next step: Run preview on dense and large SpeedTree samples, compare against the intact skeletal tree in neutral pose, and tune preview face budgets or color palette if inspection becomes misleading.
+- Issue: Fracture Preview and export are stable enough on the dense Spruce sample for iteration, but the final runtime replacement workflow has not yet been validated in UE 5.7.x with vehicle impact/destruction behavior.
+- Location: `src/xml_to_usda/fracture_service.py`, `src/xml_to_usda/fracture_export_service.py`, `src/xml_to_usda/fracture_preview_service.py`, `src/xml_to_usda/qt_ui/fracture_preview.py`
+- Reason for deferral: UE runtime replacement requires an engine scene and destruction test harness, not just USDA import or Qt preview.
+- Likely next step: Import the intact tree and exported fracture pieces into UE 5.7.x, replace the skeletal tree with the root-pivoted Static Mesh Assembly pieces at runtime, and compare neutral-pose visual alignment.
 
 ## Fracturing Face-Ownership Cut Accuracy Pending
 
@@ -55,3 +55,10 @@
 - Location: `src/xml_to_usda/conversion_process.py`, `src/xml_to_usda/qt_ui/proxy_preview.py`, `src/xml_to_usda/qt_ui/background_jobs.py`
 - Reason for deferral: The immediate operator blocker is preventing the GUI from crashing or freezing during proxy preview/export. Fixing the native access violation requires a separate focused pass through XML reading/normalization memory behavior.
 - Likely next step: Add a reproducible stress test around repeated `load_canonical_model` calls for `SkeletyalAssemblyTest_Spruce_Big_low.xml`, then audit `xml_reader.py`/`normalizer.py` for unsafe C-extension or array lifetime interactions.
+
+## Preview Worker Native Crash Root Cause Pending
+
+- Issue: Isolated Proxy Mesh and Fracture Preview workers now keep native access violations outside the Qt shell, and false crash reports are guarded by result-file draining, but the original native crash source was not proven.
+- Location: `src/xml_to_usda/conversion_process.py`, `src/xml_to_usda/fracture_worker_subprocess.py`, `src/xml_to_usda/proxy_mesh_worker_subprocess.py`
+- Reason for deferral: The operator-facing workflow is stable, and speculative removal of native simplification broke Proxy Mesh quality.
+- Likely next step: Reproduce native failures with a focused packaged-worker stress loop before changing geometry backends or normalizer internals again.
