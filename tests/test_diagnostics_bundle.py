@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 import zipfile
 
-from xml_to_usda.diagnostics_bundle import DiagnosticsBundleRequest, export_diagnostics_bundle
+from xml_to_usda.diagnostics_bundle import (
+    DiagnosticsBundleRequest,
+    build_diagnostics_bundle_request,
+    export_diagnostics_bundle,
+)
+from xml_to_usda.runtime_paths import RuntimeCleanupSummary, RuntimePaths
 
 
 def test_diagnostics_bundle_exports_local_reproduction_artifacts(tmp_path) -> None:
@@ -64,3 +69,47 @@ def test_diagnostics_bundle_exports_local_reproduction_artifacts(tmp_path) -> No
         assert summary["runtime_summary"]["cache_root"] == str(cache_root)
         assert archive.read("runtime/latest_job_manifest.json") == b'{"job_id": "new"}'
         assert b"Traceback line 2" in archive.read("logs/gui_runtime.log")
+
+
+def test_diagnostics_bundle_request_builder_projects_runtime_context(tmp_path) -> None:
+    runtime_paths = RuntimePaths(
+        settings_dir=tmp_path / "settings",
+        settings_path=tmp_path / "settings" / "gui_settings.json",
+        cache_root=tmp_path / "cache",
+        jobs_root=tmp_path / "cache" / "jobs",
+    )
+    cleanup_summary = RuntimeCleanupSummary(
+        removed_jobs=2,
+        removed_partial_outputs=1,
+        failed_jobs=3,
+    )
+    bundle_path = tmp_path / "support" / "bundle.zip"
+
+    request = build_diagnostics_bundle_request(
+        bundle_path=bundle_path,
+        settings_path=runtime_paths.settings_path,
+        runtime_paths=runtime_paths,
+        runtime_cleanup_summary=cleanup_summary,
+        active_preset_name="Production",
+        selected_input_path="oak.xml",
+        selected_output_path="oak.usda",
+        in_app_log_text="last error",
+        build_info_path=tmp_path / "build_info.json",
+    )
+
+    assert request.bundle_path == bundle_path
+    assert request.settings_path == runtime_paths.settings_path
+    assert request.runtime_log_path == runtime_paths.settings_dir / "gui_runtime.log"
+    assert request.jobs_root == runtime_paths.jobs_root
+    assert request.active_preset_name == "Production"
+    assert request.selected_input_path == "oak.xml"
+    assert request.selected_output_path == "oak.usda"
+    assert request.in_app_log_text == "last error"
+    assert request.runtime_summary == {
+        "settings_dir": str(runtime_paths.settings_dir),
+        "cache_root": str(runtime_paths.cache_root),
+        "jobs_root": str(runtime_paths.jobs_root),
+        "removed_stale_jobs": 2,
+        "removed_stale_partial_outputs": 1,
+        "failed_cleanup_jobs": 3,
+    }

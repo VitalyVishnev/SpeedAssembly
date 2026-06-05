@@ -19,15 +19,85 @@ from .fracture_service import FractureError, FracturePiece, FracturePlan, Fractu
 from .fracture_geometry import slice_mesh_faces
 from .job_control import throw_if_cancelled
 from .models import (
+    BaseMaterialOverride,
     CanonicalTreeModel,
     ConversionMode,
     ConversionRequest,
+    CpuProfile,
+    MaterialPolicy,
+    OutputMode,
     PrototypeStrategy,
+    PrototypeSourceConfig,
     ResolvedAssemblyModel,
     UsdAssemblyDocument,
+    UdimMaterialSetting,
     ValidationIssue,
 )
-from .output_resolution import ensure_output_path_allowed, resolve_output_path
+from .output_resolution import ensure_output_path_allowed, render_output_file_name
+
+
+@dataclass(frozen=True)
+class FractureExportRequest:
+    input_path: str
+    output_path: str = ""
+    output_directory: str = ""
+    output_naming_template: str | None = None
+    output_mode: OutputMode = OutputMode.SELF_CONTAINED
+    material_policy: MaterialPolicy = MaterialPolicy.SOURCE_MATERIALS
+    bark_material_path: str | None = None
+    leaves_material_path: str | None = None
+    single_material_path: str | None = None
+    base_material_overrides: tuple[BaseMaterialOverride, ...] = ()
+    udim_material_settings: tuple[UdimMaterialSetting, ...] = ()
+    cpu_profile: CpuProfile = CpuProfile.BALANCED
+    use_explicit_material_contract: bool = False
+    prototype_source_configs: tuple[PrototypeSourceConfig, ...] = ()
+    conversion_mode: ConversionMode = ConversionMode.STATIC_ASSEMBLY
+    fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024
+    fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60
+
+    @classmethod
+    def from_conversion_request(cls, request: ConversionRequest) -> "FractureExportRequest":
+        return cls(
+            input_path=_single_conversion_input_path(request),
+            output_path=request.output_path or "",
+            output_directory=request.output_directory or "",
+            output_naming_template=request.output_naming_template,
+            output_mode=request.output_mode,
+            material_policy=request.material_policy,
+            bark_material_path=request.bark_material_path,
+            leaves_material_path=request.leaves_material_path,
+            single_material_path=request.single_material_path,
+            base_material_overrides=request.base_material_overrides,
+            udim_material_settings=request.udim_material_settings,
+            cpu_profile=request.cpu_profile,
+            use_explicit_material_contract=request.use_explicit_material_contract,
+            prototype_source_configs=request.prototype_source_configs,
+            conversion_mode=ConversionMode.STATIC_ASSEMBLY,
+            fbx_cache_max_bytes=request.fbx_cache_max_bytes,
+            fbx_cache_max_age_seconds=request.fbx_cache_max_age_seconds,
+        )
+
+    def as_conversion_request(self) -> ConversionRequest:
+        return ConversionRequest(
+            input_paths=(self.input_path,),
+            output_path=self.output_path or None,
+            output_directory=self.output_directory or None,
+            output_naming_template=self.output_naming_template,
+            output_mode=self.output_mode,
+            material_policy=self.material_policy,
+            bark_material_path=self.bark_material_path,
+            leaves_material_path=self.leaves_material_path,
+            single_material_path=self.single_material_path,
+            base_material_overrides=self.base_material_overrides,
+            udim_material_settings=self.udim_material_settings,
+            cpu_profile=self.cpu_profile,
+            use_explicit_material_contract=self.use_explicit_material_contract,
+            prototype_source_configs=self.prototype_source_configs,
+            conversion_mode=self.conversion_mode,
+            fbx_cache_max_bytes=self.fbx_cache_max_bytes,
+            fbx_cache_max_age_seconds=self.fbx_cache_max_age_seconds,
+        )
 from .usda_writer import write_resolved_usda_document
 
 
@@ -53,8 +123,26 @@ def export_fracture_usda_from_conversion_request(
     cancel_event=None,
 ) -> FractureExportResult:
     """Resolve one conversion request's Operator Intent and export fracture pieces."""
-    validate_conversion_request(request)
-    input_path = _single_input_path(request)
+    return export_fracture_usda_from_export_request(
+        FractureExportRequest.from_conversion_request(request),
+        settings,
+        telemetry_callback=telemetry_callback,
+        cancel_event=cancel_event,
+    )
+
+
+def export_fracture_usda_from_export_request(
+    request: FractureExportRequest,
+    settings: FractureSettings | None = None,
+    *,
+    telemetry_callback=None,
+    cancel_event=None,
+) -> FractureExportResult:
+    """Resolve fracture export intent and export static assembly pieces."""
+    validate_conversion_request(request.as_conversion_request())
+    input_path = request.input_path.strip()
+    if not input_path:
+        raise FractureError("Fracture export requires a source XML path.")
     output_path = _request_output_path(request, input_path)
     _, resolved = load_resolved_assembly_model(
         input_path,
@@ -68,7 +156,7 @@ def export_fracture_usda_from_conversion_request(
         cpu_profile=request.cpu_profile,
         use_explicit_material_contract=request.use_explicit_material_contract,
         prototype_source_configs=request.prototype_source_configs,
-        conversion_mode=ConversionMode.STATIC_ASSEMBLY,
+        conversion_mode=request.conversion_mode,
         output_stem=output_path.stem,
         fbx_cache_max_bytes=request.fbx_cache_max_bytes,
         fbx_cache_max_age_seconds=request.fbx_cache_max_age_seconds,
@@ -135,19 +223,20 @@ def derive_fracture_usda_output_paths(
 
 
 def _single_input_path(request: ConversionRequest) -> str:
+    return _single_conversion_input_path(request)
+
+
+def _single_conversion_input_path(request: ConversionRequest) -> str:
     if len(request.input_paths) != 1:
         raise FractureError("Fracture export requires exactly one input XML.")
     return request.input_paths[0]
 
 
-def _request_output_path(request: ConversionRequest, input_path: str) -> Path:
+def _request_output_path(request: FractureExportRequest, input_path: str) -> Path:
     if request.output_path:
         return Path(request.output_path)
     if request.output_directory:
-        resolved = resolve_output_path(request, input_path)
-        if resolved is None:
-            raise FractureError("Fracture export requires a resolved output path.")
-        return resolved
+        return Path(request.output_directory) / render_output_file_name(Path(input_path), request.output_naming_template)
     return Path(input_path).with_suffix(".usda")
 
 

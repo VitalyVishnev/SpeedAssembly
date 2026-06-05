@@ -21,7 +21,8 @@ from xml_to_usda.conversion_worker_subprocess import (
     write_conversion_worker_request,
 )
 from xml_to_usda.fracture_service import FractureSettings
-from xml_to_usda.fracture_preview_service import FracturePreviewSettings
+from xml_to_usda.fracture_export_service import FractureExportRequest
+from xml_to_usda.fracture_preview_service import FracturePreviewSettings, FracturePreviewSourceRequest
 from xml_to_usda.fracture_worker_subprocess import (
     read_fracture_worker_request,
 )
@@ -216,7 +217,7 @@ def test_start_fracture_export_process_uses_file_based_worker(monkeypatch) -> No
     monkeypatch.setattr("xml_to_usda.conversion_process.subprocess.Popen", fake_popen)
 
     process, queue, cancel_event = start_fracture_export_process(
-        ConversionRequest(input_paths=("input.xml",), output_path="output.usda"),
+        FractureExportRequest(input_path="input.xml", output_path="output.usda"),
         FractureSettings(target_piece_count=4),
     )
 
@@ -226,6 +227,7 @@ def test_start_fracture_export_process_uses_file_based_worker(monkeypatch) -> No
     request_path = Path(popen_calls[0].args[popen_calls[0].args.index("--request") + 1])
     payload = read_fracture_worker_request(request_path)
     assert payload.request.output_path == "output.usda"
+    assert isinstance(payload.request, FractureExportRequest)
     assert payload.action == "export"
     assert payload.settings.target_piece_count == 4
     assert popen_calls[0].kwargs["stdout"] is not None
@@ -262,7 +264,7 @@ def test_start_fracture_preview_process_uses_file_based_worker(monkeypatch) -> N
     monkeypatch.setattr("xml_to_usda.conversion_process.subprocess.Popen", fake_popen)
 
     process, queue, cancel_event = start_fracture_preview_process(
-        ConversionRequest(input_paths=("input.xml",), output_path="output.usda"),
+        FracturePreviewSourceRequest(input_path="input.xml", output_path="output.usda"),
         FracturePreviewSettings(fracture=FractureSettings(target_piece_count=3)),
     )
 
@@ -272,6 +274,7 @@ def test_start_fracture_preview_process_uses_file_based_worker(monkeypatch) -> N
     request_path = Path(popen_calls[0].args[popen_calls[0].args.index("--request") + 1])
     payload = read_fracture_worker_request(request_path)
     assert payload.request.output_path == "output.usda"
+    assert isinstance(payload.request, FracturePreviewSourceRequest)
     assert payload.action == "preview"
     assert payload.settings.fracture.target_piece_count == 3
     cancel_event.set()

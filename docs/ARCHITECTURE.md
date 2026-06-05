@@ -73,7 +73,11 @@ Primary modules:
 - `discovery_service.py`
 - `settings_service.py`
 - `wind_service.py`
+- `diagnostics_bundle.py`
 - `proxy_mesh_service.py`
+- `fracture_service.py`
+- `fracture_export_service.py`
+- `fracture_preview_service.py`
 - `conversion_orchestrator.py`
 - `canonical_loader.py`
 - `assembly_resolution.py`
@@ -86,6 +90,7 @@ Expected interface shape:
 
 - convert GUI/CLI semantics into stable request models
 - validate operator-facing configuration before runtime work starts
+- build diagnostics/support requests from explicit runtime and UI values
 - keep UI widgets and Autodesk/OS details behind adapters
 
 ### Infrastructure layer
@@ -103,9 +108,11 @@ Primary modules:
 - `fbx_worker_entry.py`
 - `conversion_process.py`
 - `proxy_mesh_worker_subprocess.py`
+- `fracture_worker_subprocess.py`
 - `runtime_paths.py`
 - `output_resolution.py`
 - `job_control.py`
+- `worker_file_protocol.py`
 - `prototype_sources.py`
 - `wind_pipeline.py`
 
@@ -164,6 +171,11 @@ domain concept.
   source facts with operator intent into `ResolvedAssemblyModel`. Prototype
   source resolution and material assignment resolution sit behind this seam;
   source normalization should not apply request-specific behavior.
+- Source discovery seam:
+  `source_analysis.py` may keep fast streamed UI discovery helpers, but
+  supported prototype and base material rows must stay parity-tested against
+  `CanonicalTreeModel`. Any intentional approximation must be named in the
+  helper contract instead of silently diverging from normalization.
 - Attachment-to-binding seam:
   Source `Attachment` facts may come from SpeedTree fields such as `BoneID`.
   Skeletal exports resolve them into authored `Skeletal Binding`; static exports
@@ -194,7 +206,10 @@ domain concept.
   `ConversionRequest` describes caller intent. `Runtime Job` describes one
   executing conversion run with telemetry, cleanup, workers, helpers, and a Job
   Workspace. Launcher/dev and packaged executable behavior are Runtime Adapters
-  and must preserve the same conversion semantics.
+  and must preserve the same conversion semantics. File-based worker exchange
+  for Conversion Workers, Proxy Mesh workers, Fracture workers, and FBX Helpers
+  is concentrated in `worker_file_protocol.py`; action-specific worker modules
+  remain adapters that own their request payloads and domain calls.
 - Proxy Mesh seam:
   Proxy generation is a companion application service over `CanonicalTreeModel`.
   It must not traverse raw XML directly and must not author Nanite Assembly,
@@ -222,9 +237,9 @@ domain concept.
   regardless of the main export mode. Fracture preview uses source XML geometry
   so it can stay fast and avoid heavy replacement payloads. The Qt Geometry tab
   exposes both operations: preview passes a source-geometry request, export
-  passes the full current conversion request. Both are executed through the
-  file-based fracture worker subprocess so native worker crashes stay outside
-  the Qt UI process.
+  passes a resolved-intent `FractureExportRequest`. Both are executed through
+  the file-based fracture worker subprocess so native worker crashes stay
+  outside the Qt UI process.
   Fracture Preview may use deterministic sampling for viewport payload budgets,
   but that is a preview adapter policy, not a reusable mesh simplification
   policy. Worker result files are authoritative: UI polling must drain result

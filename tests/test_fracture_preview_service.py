@@ -4,7 +4,12 @@ from dataclasses import replace
 
 import pytest
 
-from xml_to_usda.fracture_preview_service import FracturePreviewSettings, generate_fracture_preview
+from xml_to_usda.fracture_preview_service import (
+    FracturePreviewSettings,
+    FracturePreviewSourceRequest,
+    generate_fracture_preview,
+    generate_fracture_preview_from_source_request,
+)
 from xml_to_usda.fracture_service import FractureError, FractureSettings
 from xml_to_usda.models import (
     ConversionRequest,
@@ -250,8 +255,6 @@ def test_fracture_preview_fails_loudly_when_repeated_part_references_missing_pro
 def test_fracture_preview_from_conversion_request_uses_source_xml_geometry_not_operator_replacements(
     monkeypatch,
 ) -> None:
-    from xml_to_usda.fracture_preview_service import generate_fracture_preview_from_conversion_request
-
     observed: dict[str, object] = {}
 
     def fake_load_source_tree_model(input_path, *, telemetry_callback=None, cancel_event=None):
@@ -275,8 +278,14 @@ def test_fracture_preview_from_conversion_request_uses_source_xml_geometry_not_o
         ),
     )
 
-    result = generate_fracture_preview_from_conversion_request(
-        request,
+    source_request = FracturePreviewSourceRequest.from_conversion_request(request)
+
+    assert not hasattr(source_request, "prototype_source_configs")
+    assert not hasattr(source_request, "udim_material_settings")
+    assert not hasattr(source_request, "material_policy")
+
+    result = generate_fracture_preview_from_source_request(
+        source_request,
         FracturePreviewSettings(fracture=FractureSettings(target_piece_count=2)),
     )
 

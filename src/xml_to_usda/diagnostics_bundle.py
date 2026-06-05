@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .runtime_paths import capture_runtime_context
+from .runtime_paths import RuntimeCleanupSummary, RuntimePaths, capture_runtime_context
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,40 @@ class DiagnosticsBundleRequest:
     selected_output_path: str = ""
     in_app_log_text: str = ""
     runtime_summary: dict[str, Any] = field(default_factory=dict)
+
+
+def build_diagnostics_bundle_request(
+    *,
+    bundle_path: Path,
+    settings_path: Path,
+    runtime_paths: RuntimePaths,
+    runtime_cleanup_summary: RuntimeCleanupSummary,
+    active_preset_name: str,
+    selected_input_path: str,
+    selected_output_path: str,
+    in_app_log_text: str,
+    build_info_path: Path | None = None,
+) -> DiagnosticsBundleRequest:
+    runtime_summary = {
+        "settings_dir": str(runtime_paths.settings_dir),
+        "cache_root": str(runtime_paths.cache_root),
+        "jobs_root": str(runtime_paths.jobs_root),
+        "removed_stale_jobs": runtime_cleanup_summary.removed_jobs,
+        "removed_stale_partial_outputs": runtime_cleanup_summary.removed_partial_outputs,
+        "failed_cleanup_jobs": runtime_cleanup_summary.failed_jobs,
+    }
+    return DiagnosticsBundleRequest(
+        bundle_path=bundle_path,
+        settings_path=settings_path,
+        runtime_log_path=runtime_paths.settings_dir / "gui_runtime.log",
+        build_info_path=build_info_path if build_info_path is not None else default_build_info_path(),
+        jobs_root=runtime_paths.jobs_root,
+        active_preset_name=active_preset_name,
+        selected_input_path=selected_input_path,
+        selected_output_path=selected_output_path,
+        in_app_log_text=in_app_log_text,
+        runtime_summary=runtime_summary,
+    )
 
 
 def export_diagnostics_bundle(request: DiagnosticsBundleRequest) -> Path:

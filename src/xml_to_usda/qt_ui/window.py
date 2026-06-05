@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..diagnostics_bundle import DiagnosticsBundleRequest, default_build_info_path, export_diagnostics_bundle
+from ..diagnostics_bundle import build_diagnostics_bundle_request, export_diagnostics_bundle
 from ..fbx_payload_cache import (
     FbxPayloadCacheSummary,
     clear_fbx_payload_cache,
@@ -50,8 +50,18 @@ from ..fbx_payload_cache import (
 )
 from ..gui_formatters import format_wind_group_summary, format_wind_json_result
 from ..models import CleanupPolicy, ConversionMode, ConversionRequest, OutputMode
-from ..proxy_mesh_service import ProxyMeshResult, ProxyMeshSettings, ProxyMeshSourceRequest
-from ..fracture_preview_service import FracturePreviewSettings
+from ..proxy_mesh_service import (
+    ProxyMeshResult,
+    ProxyMeshSettings,
+    ProxyMeshSourceRequest,
+    prepare_proxy_mesh_source_request,
+)
+from ..fracture_export_service import FractureExportRequest
+from ..fracture_preview_service import (
+    FracturePreviewSettings,
+    FracturePreviewSourceRequest,
+    prepare_fracture_preview_source_request,
+)
 from ..runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
 from ..settings_service import (
     FACTORY_DEFAULT_PRESET_NAME,
@@ -1579,34 +1589,23 @@ class MainWindow(QWidget):
             bundle_path = bundle_path.with_suffix(".zip")
         try:
             self._save_operator_state()
-            exported_path = export_diagnostics_bundle(self._diagnostics_bundle_request(bundle_path))
+            exported_path = export_diagnostics_bundle(
+                build_diagnostics_bundle_request(
+                    bundle_path=bundle_path,
+                    settings_path=self._operator_settings_path,
+                    runtime_paths=self._runtime_paths,
+                    runtime_cleanup_summary=self._runtime_cleanup_summary,
+                    active_preset_name=self._current_preset_name(),
+                    selected_input_path=self.source_input.text().strip(),
+                    selected_output_path=self.output_input.text().strip(),
+                    in_app_log_text=self._log_text,
+                )
+            )
         except OSError as exc:
             self._report_error("Diagnostics export failed", str(exc), status="Diagnostics export failed.")
             return
         self._set_status(f"Diagnostics bundle exported: {exported_path}")
         self._append_log(f"Diagnostics bundle exported\n{exported_path}")
-
-    def _diagnostics_bundle_request(self, bundle_path: Path) -> DiagnosticsBundleRequest:
-        runtime_summary = {
-            "settings_dir": str(self._runtime_paths.settings_dir),
-            "cache_root": str(self._runtime_paths.cache_root),
-            "jobs_root": str(self._runtime_paths.jobs_root),
-            "removed_stale_jobs": self._runtime_cleanup_summary.removed_jobs,
-            "removed_stale_partial_outputs": self._runtime_cleanup_summary.removed_partial_outputs,
-            "failed_cleanup_jobs": self._runtime_cleanup_summary.failed_jobs,
-        }
-        return DiagnosticsBundleRequest(
-            bundle_path=bundle_path,
-            settings_path=self._operator_settings_path,
-            runtime_log_path=self._runtime_paths.settings_dir / "gui_runtime.log",
-            build_info_path=default_build_info_path(),
-            jobs_root=self._runtime_paths.jobs_root,
-            active_preset_name=self._current_preset_name(),
-            selected_input_path=self.source_input.text().strip(),
-            selected_output_path=self.output_input.text().strip(),
-            in_app_log_text=self._log_text,
-            runtime_summary=runtime_summary,
-        )
 
     def _default_diagnostics_bundle_path(self) -> Path:
         return self._runtime_paths.settings_dir / "XMLtoUSDA_diagnostics.zip"
@@ -2039,7 +2038,7 @@ class MainWindow(QWidget):
             "INFO Fracture Preview requested",
             "\n".join(
                 (
-                    f"input_paths={'; '.join(str(path) for path in request.input_paths)}",
+                    f"input_path={request.input_path}",
                     f"output_path={request.output_path}",
                     f"method={settings.fracture.method}",
                     f"target_piece_count={settings.fracture.target_piece_count}",
@@ -2153,7 +2152,10 @@ class MainWindow(QWidget):
             self._report_conversion_plan_error(exc)
             return
         settings = self._fracture_preview_settings.fracture
-        self._background_jobs.start_fracture_export(plan.request, settings)
+        self._background_jobs.start_fracture_export(
+            FractureExportRequest.from_conversion_request(plan.request),
+            settings,
+        )
 
     def _proxy_preview_result_for_input(self, input_path: str) -> ProxyMeshResult | None:
         if self._proxy_mesh_preview_input_path != input_path:
@@ -2217,11 +2219,8 @@ class MainWindow(QWidget):
         self._append_runtime_log("ERROR Proxy Mesh preview failed", message)
 
     def _build_proxy_source_request(self) -> ProxyMeshSourceRequest:
-        input_path = self.source_input.text().strip()
-        if not input_path:
-            raise ValueError("Select a source XML file before generating a proxy mesh.")
-        return ProxyMeshSourceRequest(
-            input_path=input_path,
+        return prepare_proxy_mesh_source_request(
+            input_path=self.source_input.text(),
             output_path=self.output_input.text().strip(),
             output_mode=OutputMode.SELF_CONTAINED,
             cpu_profile=self._operator_state.cpu_profile,
@@ -2229,17 +2228,11 @@ class MainWindow(QWidget):
             fbx_cache_max_age_seconds=self._fbx_cache_max_age_seconds(),
         )
 
-    def _build_fracture_preview_request(self) -> ConversionRequest:
-        input_path = self.source_input.text().strip()
-        if not input_path:
-            raise ValueError("Select a source XML file before previewing fracturing.")
-        return ConversionRequest(
-            input_paths=(input_path,),
+    def _build_fracture_preview_request(self) -> FracturePreviewSourceRequest:
+        return prepare_fracture_preview_source_request(
+            input_path=self.source_input.text(),
             output_path=self.output_input.text().strip(),
-            output_mode=OutputMode.SELF_CONTAINED,
             cpu_profile=self._operator_state.cpu_profile,
-            fbx_cache_max_bytes=self._fbx_cache_max_bytes(),
-            fbx_cache_max_age_seconds=self._fbx_cache_max_age_seconds(),
         )
 
     def cancel_conversion(self) -> None:

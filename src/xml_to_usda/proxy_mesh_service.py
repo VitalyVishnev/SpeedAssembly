@@ -59,6 +59,27 @@ class ProxyMeshSourceRequest:
         )
 
 
+def prepare_proxy_mesh_source_request(
+    *,
+    input_path: str,
+    output_path: str = "",
+    output_mode: OutputMode = OutputMode.SELF_CONTAINED,
+    cpu_profile: CpuProfile = CpuProfile.BALANCED,
+    fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
+    fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60,
+) -> ProxyMeshSourceRequest:
+    if not input_path.strip():
+        raise ValueError("Select a source XML file before generating a proxy mesh.")
+    return ProxyMeshSourceRequest(
+        input_path=input_path.strip(),
+        output_path=output_path.strip(),
+        output_mode=output_mode,
+        cpu_profile=cpu_profile,
+        fbx_cache_max_bytes=fbx_cache_max_bytes,
+        fbx_cache_max_age_seconds=fbx_cache_max_age_seconds,
+    )
+
+
 @dataclass(frozen=True)
 class ProxyMeshResult:
     mesh: GeometryBuffer

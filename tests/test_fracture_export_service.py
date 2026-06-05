@@ -5,7 +5,11 @@ from pathlib import Path
 
 from usda_test_inventory import UsdaInventory
 
-from xml_to_usda.fracture_export_service import export_fracture_usda
+from xml_to_usda.fracture_export_service import (
+    FractureExportRequest,
+    export_fracture_usda,
+    export_fracture_usda_from_export_request,
+)
 from xml_to_usda.fracture_service import FractureSettings
 from xml_to_usda.models import (
     BaseMaterialOverride,
@@ -161,8 +165,6 @@ def test_fracture_export_writes_flat_static_assembly_siblings_that_reassemble_at
 
 
 def test_fracture_export_from_conversion_request_resolves_current_operator_intent(monkeypatch, tmp_path: Path) -> None:
-    from xml_to_usda.fracture_export_service import export_fracture_usda_from_conversion_request
-
     observed: dict[str, object] = {}
 
     def fake_load_resolved_assembly_model(input_path, output_mode, **kwargs):
@@ -196,8 +198,15 @@ def test_fracture_export_from_conversion_request_resolves_current_operator_inten
         conversion_mode=ConversionMode.SKELETAL_ASSEMBLY,
     )
 
-    result = export_fracture_usda_from_conversion_request(
-        request,
+    export_request = FractureExportRequest.from_conversion_request(request)
+
+    assert export_request.input_path == "tree.xml"
+    assert export_request.conversion_mode == ConversionMode.STATIC_ASSEMBLY
+    assert export_request.prototype_source_configs == request.prototype_source_configs
+    assert export_request.udim_material_settings == request.udim_material_settings
+
+    result = export_fracture_usda_from_export_request(
+        export_request,
         FractureSettings(target_piece_count=2),
     )
 

@@ -9,14 +9,19 @@ from .fbx_adapter import load_fbx_geometry
 from .fbx_payload_cache import FbxPayloadCacheOptions, load_fbx_payload_from_cache, store_fbx_payload_in_cache
 from .fbx_worker_subprocess import FBX_WORKER_COMMAND, run_fbx_worker_request_file
 from .conversion_worker_subprocess import CONVERSION_WORKER_COMMAND, run_conversion_worker_request_file
+from .conversion_orchestrator import convert_request
+from .conversion_service import prepare_conversion_plan
 from .fracture_worker_subprocess import FRACTURE_WORKER_COMMAND, run_fracture_worker_request_file
 from .models import CleanupPolicy, CpuProfile, FbxMaterialMode, GeometryBuffer, MaterialPolicy
-from .pipeline import convert_file, generate_wind_json, inspect_source
+from .pipeline import generate_wind_json, inspect_source
 from .prototype_sources import fbx_import_read_options_for_material_mode, load_prototype_source_configs_from_json
 from .proxy_mesh_worker_subprocess import PROXY_MESH_WORKER_COMMAND, run_proxy_mesh_worker_request_file
 from .runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
 from .udim_settings import load_udim_material_settings_from_json
 from .xml_reader import render_inspect_report
+
+
+CLI_ASYNC_THRESHOLD_BYTES = 2**63 - 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -182,19 +187,21 @@ def _run_convert(
         if udim_settings_path
         else ()
     )
-    result = convert_file(
-        input_path,
-        output_path,
+    plan = prepare_conversion_plan(
+        input_path=input_path,
+        output_path=output_path,
+        cpu_profile=cpu_profile,
+        cleanup_policy=cleanup_policy,
         material_policy=material_policy,
         bark_material_path=bark_material_path,
         leaves_material_path=leaves_material_path,
         single_material_path=single_material_path,
-        cpu_profile=cpu_profile,
-        cleanup_policy=cleanup_policy,
+        base_material_overrides=(),
         prototype_source_configs=prototype_source_configs,
+        async_threshold_bytes=CLI_ASYNC_THRESHOLD_BYTES,
         udim_material_settings=udim_material_settings,
-        runtime_paths=runtime_paths,
     )
+    result = convert_request(plan.request, runtime_paths=runtime_paths)[0]
     for issue in result.diagnostics:
         _print_issue(issue)
     if result.usda_document is None:

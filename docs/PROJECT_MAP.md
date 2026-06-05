@@ -73,10 +73,15 @@ contracts.
 - `src/xml_to_usda/discovery_service.py`
 - `src/xml_to_usda/settings_service.py`
 - `src/xml_to_usda/wind_service.py`
+- `src/xml_to_usda/diagnostics_bundle.py`
+  Owns local diagnostics bundle request construction and zip export.
 - `src/xml_to_usda/proxy_mesh_service.py`
+  Owns `ProxyMeshSourceRequest` and proxy companion generation/export.
 - `src/xml_to_usda/fracture_service.py`
 - `src/xml_to_usda/fracture_export_service.py`
+  Owns `FractureExportRequest` and resolved-intent fracture USDA export.
 - `src/xml_to_usda/fracture_preview_service.py`
+  Owns `FracturePreviewSourceRequest` and source-geometry fracture previews.
 - `src/xml_to_usda/conversion_orchestrator.py`
 - `src/xml_to_usda/canonical_loader.py`
 - `src/xml_to_usda/assembly_resolution.py`
@@ -100,6 +105,7 @@ environment-facing implementation details.
 - `src/xml_to_usda/output_resolution.py`
 - `src/xml_to_usda/runtime_paths.py`
 - `src/xml_to_usda/job_control.py`
+- `src/xml_to_usda/worker_file_protocol.py`
 - `src/xml_to_usda/prototype_sources.py`
 - `src/xml_to_usda/wind_pipeline.py`
 - `src/xml_to_usda/fracture_worker_subprocess.py`
@@ -143,11 +149,13 @@ Compatibility surfaces. They should remain thin.
 - Wind path:
   `wind_service.py` -> `wind_pipeline.py` -> `dynamic_wind.py`
 - Proxy Mesh path:
-  `qt_ui/window.py` or background job -> `conversion_process.py` ->
+  `qt_ui/window.py` builds `ProxyMeshSourceRequest` through
+  `proxy_mesh_service.py` -> `conversion_process.py` ->
   `proxy_mesh_worker_subprocess.py` -> `proxy_mesh_service.py` ->
   `canonical_loader.py` -> generated `GeometryBuffer` -> proxy USDA writer
 - Fracturing path:
-  `qt_ui/window.py` / `ConversionRequest` or resolved caller state ->
+  `qt_ui/window.py` builds `FracturePreviewSourceRequest` or
+  `FractureExportRequest` through fracture application services ->
   `fracture_preview_service.py` / `fracture_export_service.py` ->
   `canonical_loader.py` / `ResolvedAssemblyModel` -> `fracture_service.py`
   -> Qt preview dialog payloads or Geometry-tab-triggered per-piece

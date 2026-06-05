@@ -12,7 +12,6 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .canonical_loader import load_source_tree_model
-from .conversion_validation import validate_conversion_request
 from .fracture_geometry import sample_face_indices, slice_mesh_faces
 from .fracture_service import FractureError, FracturePiece, FracturePlan, FractureSettings, plan_fracture
 from .geometry_buffers import geometry_buffer_from_mesh, geometry_buffer_to_mesh
@@ -20,6 +19,7 @@ from .models import (
     CanonicalTreeModel,
     Color4,
     ConversionRequest,
+    CpuProfile,
     GeometryBuffer,
     MeshData,
     Prototype,
@@ -28,7 +28,7 @@ from .models import (
     ValidationIssue,
     Vector3,
 )
-from .output_resolution import resolve_output_path
+from .output_resolution import render_output_file_name
 
 
 DEFAULT_FRACTURE_PREVIEW_POLYCOUNT = 1_000_000
@@ -44,6 +44,25 @@ class FracturePreviewSettings:
     base_mesh_priority: float = DEFAULT_FRACTURE_PREVIEW_BASE_PRIORITY
     max_base_faces_per_piece: int = DEFAULT_FRACTURE_PREVIEW_BASE_FACE_BUDGET
     max_prototype_faces: int = DEFAULT_FRACTURE_PREVIEW_PROTOTYPE_FACE_BUDGET
+
+
+@dataclass(frozen=True)
+class FracturePreviewSourceRequest:
+    input_path: str
+    output_path: str = ""
+    output_directory: str = ""
+    output_naming_template: str | None = None
+    cpu_profile: CpuProfile = CpuProfile.BALANCED
+
+    @classmethod
+    def from_conversion_request(cls, request: ConversionRequest) -> "FracturePreviewSourceRequest":
+        return cls(
+            input_path=_single_conversion_input_path(request),
+            output_path=request.output_path or "",
+            output_directory=request.output_directory or "",
+            output_naming_template=request.output_naming_template,
+            cpu_profile=request.cpu_profile,
+        )
 
 
 @dataclass(frozen=True)
@@ -80,6 +99,25 @@ class FracturePreviewResult:
     diagnostics: tuple[ValidationIssue, ...]
 
 
+def prepare_fracture_preview_source_request(
+    *,
+    input_path: str,
+    output_path: str = "",
+    output_directory: str = "",
+    output_naming_template: str | None = None,
+    cpu_profile: CpuProfile = CpuProfile.BALANCED,
+) -> FracturePreviewSourceRequest:
+    if not input_path.strip():
+        raise ValueError("Select a source XML file before previewing fracturing.")
+    return FracturePreviewSourceRequest(
+        input_path=input_path.strip(),
+        output_path=output_path.strip(),
+        output_directory=output_directory.strip(),
+        output_naming_template=output_naming_template,
+        cpu_profile=cpu_profile,
+    )
+
+
 def generate_fracture_preview_from_conversion_request(
     request: ConversionRequest,
     settings: FracturePreviewSettings | None = None,
@@ -88,8 +126,25 @@ def generate_fracture_preview_from_conversion_request(
     cancel_event=None,
 ) -> FracturePreviewResult:
     """Load source XML geometry and build a diagnostic fracture preview."""
-    validate_conversion_request(request)
-    input_path = _single_input_path(request)
+    return generate_fracture_preview_from_source_request(
+        FracturePreviewSourceRequest.from_conversion_request(request),
+        settings,
+        telemetry_callback=telemetry_callback,
+        cancel_event=cancel_event,
+    )
+
+
+def generate_fracture_preview_from_source_request(
+    request: FracturePreviewSourceRequest,
+    settings: FracturePreviewSettings | None = None,
+    *,
+    telemetry_callback=None,
+    cancel_event=None,
+) -> FracturePreviewResult:
+    """Load source XML geometry and build a diagnostic fracture preview."""
+    input_path = request.input_path.strip()
+    if not input_path:
+        raise FractureError("Fracture preview requires a source XML path.")
     preview_settings = _preview_settings(settings, _preview_output_stem(request, input_path))
     _report, source_model, source_diagnostics = load_source_tree_model(
         input_path,
@@ -122,20 +177,17 @@ def generate_fracture_preview(
     )
 
 
-def _single_input_path(request: ConversionRequest) -> str:
+def _single_conversion_input_path(request: ConversionRequest) -> str:
     if len(request.input_paths) != 1:
         raise FractureError("Fracture preview requires exactly one input XML.")
     return request.input_paths[0]
 
 
-def _preview_output_stem(request: ConversionRequest, input_path: str) -> str:
+def _preview_output_stem(request: FracturePreviewSourceRequest, input_path: str) -> str:
     if request.output_path:
         return Path(request.output_path).stem
     if request.output_directory:
-        resolved = resolve_output_path(request, input_path)
-        if resolved is None:
-            raise FractureError("Fracture preview requires a resolved output path.")
-        return resolved.stem
+        return Path(render_output_file_name(Path(input_path), request.output_naming_template)).stem
     return Path(input_path).stem
 
 

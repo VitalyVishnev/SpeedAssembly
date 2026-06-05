@@ -52,13 +52,14 @@ def test_frozen_fbx_helper_falls_back_to_gui_executable_without_sidecar(
     monkeypatch,
 ) -> None:
     import xml_to_usda.fbx_import_supervisor as supervisor_module
+    import xml_to_usda.worker_file_protocol as worker_file_protocol
 
     request_path = tmp_path / "worker_request.json"
     gui_executable = tmp_path / "XMLtoUSDAConverter.exe"
     gui_executable.write_bytes(b"")
 
-    monkeypatch.setattr(supervisor_module.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(supervisor_module.sys, "executable", str(gui_executable))
+    monkeypatch.setattr(worker_file_protocol.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(worker_file_protocol.sys, "executable", str(gui_executable))
 
     command = supervisor_module._resolve_helper_command(request_path)
 

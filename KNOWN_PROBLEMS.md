@@ -1,5 +1,12 @@
 # Known Problems
 
+## Qt Shell Preset And Preview Cache Ownership Pending
+
+- Issue: `MainWindow` still owns preset dialog orchestration and Proxy Mesh preview cache lifecycle. Phase 4 only extracted diagnostics bundle request construction and removed an obsolete dependency entry; a broader controller split was deferred.
+- Location: `src/xml_to_usda/qt_ui/window.py`
+- Reason for deferral: Current preset handling is tightly coupled to dialogs/widgets, and preview cache state does not yet have enough shared lifecycle behavior to justify a separate controller without creating a shallow abstraction.
+- Likely next step: Revisit when a concrete preset workflow change or a second preview-cache consumer appears; then extract only the behavior that hides real complexity behind a smaller interface.
+
 ## Fracturing UE Runtime Validation Pending
 
 - Issue: Fracture Preview and export are stable enough on the dense Spruce sample for iteration, but the final runtime replacement workflow has not yet been validated in UE 5.7.x with vehicle impact/destruction behavior.

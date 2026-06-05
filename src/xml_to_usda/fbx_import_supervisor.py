@@ -15,11 +15,7 @@ evidence that a lower helper count is required.
 
 from __future__ import annotations
 
-import os
-import pickle
 import subprocess
-import sys
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +29,8 @@ from .fbx_worker_subprocess import (
 from .fbx_payload_cache import FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS, FBX_PAYLOAD_CACHE_MAX_BYTES
 from .job_control import cpu_worker_count, emit_telemetry, throw_if_cancelled
 from .models import ConversionPhase, CpuProfile
+from .worker_file_protocol import cleanup_file, create_temp_path, read_pickle_payload, resolve_worker_command
+
 
 @dataclass(frozen=True)
 class FbxImportTask:
@@ -246,15 +244,7 @@ def _launch_helper(task: FbxImportTask) -> _RunningHelper:
 
 
 def _resolve_helper_command(request_path: Path) -> list[str]:
-    if bool(getattr(sys, "frozen", False)):
-        worker_dir_executable = Path(sys.executable).parent / "XMLtoUSDAWorker" / "XMLtoUSDAWorker.exe"
-        if worker_dir_executable.exists():
-            return [str(worker_dir_executable), FBX_WORKER_COMMAND, "--request", str(request_path)]
-        worker_executable = Path(sys.executable).with_name("XMLtoUSDAWorker.exe")
-        if worker_executable.exists():
-            return [str(worker_executable), FBX_WORKER_COMMAND, "--request", str(request_path)]
-        return [sys.executable, FBX_WORKER_COMMAND, "--request", str(request_path)]
-    return [sys.executable, "-m", "xml_to_usda", FBX_WORKER_COMMAND, "--request", str(request_path)]
+    return resolve_worker_command(FBX_WORKER_COMMAND, request_path)
 
 
 def _finalize_helper(helper: _RunningHelper, *, exit_code: int):
@@ -305,23 +295,15 @@ def _terminate_helper(helper: _RunningHelper) -> None:
 
 
 def _create_temp_path(suffix: str) -> Path:
-    file_descriptor, raw_path = tempfile.mkstemp(prefix="xml_to_usda_fbx_helper_", suffix=suffix)
-    os.close(file_descriptor)
-    path = Path(raw_path)
-    _cleanup_temp_path(path)
-    return path
+    return create_temp_path("xml_to_usda_fbx_helper_", suffix)
 
 
 def _cleanup_temp_path(path: Path) -> None:
-    try:
-        path.unlink(missing_ok=True)
-    except Exception:
-        pass
+    cleanup_file(path)
 
 
 def _load_payload_file(path: Path) -> object:
     try:
-        with path.open("rb") as handle:
-            return pickle.load(handle)
+        return read_pickle_payload(path)
     finally:
         _cleanup_temp_path(path)

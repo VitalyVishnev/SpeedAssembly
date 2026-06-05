@@ -727,12 +727,16 @@ class QtBackgroundJobsController:
         if request is None:
             lines.append("  request=<none>")
         else:
-            input_paths = "; ".join(str(path) for path in request.input_paths)
+            if hasattr(request, "input_path"):
+                input_line = f"  input_path={request.input_path}"
+            else:
+                input_paths = "; ".join(str(path) for path in request.input_paths)
+                input_line = f"  input_paths={input_paths}"
             lines.extend(
                 (
-                    f"  input_paths={input_paths}",
+                    input_line,
                     f"  output_path={request.output_path}",
-                    f"  output_directory={request.output_directory}",
+                    f"  output_directory={getattr(request, 'output_directory', '')}",
                     f"  cpu_profile={request.cpu_profile.value}",
                 )
             )

@@ -4,6 +4,9 @@ Layer: application/domain boundary.
 
 These helpers inspect source XML and derive report/discovery data without
 performing full conversion orchestration or USDA writing.
+
+Fast discovery helpers are UI adapters, but supported prototype and base
+material rows must remain parity-tested against `CanonicalTreeModel`.
 """
 
 from __future__ import annotations

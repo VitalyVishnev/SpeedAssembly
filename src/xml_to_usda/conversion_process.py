@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import multiprocessing
-import pickle
 import shutil
 import subprocess
-import sys
 import tempfile
 import traceback
 from dataclasses import dataclass, field
@@ -21,7 +19,8 @@ from .conversion_worker_subprocess import (
     write_conversion_worker_request,
 )
 from .fracture_service import FractureSettings
-from .fracture_preview_service import FracturePreviewSettings
+from .fracture_export_service import FractureExportRequest
+from .fracture_preview_service import FracturePreviewSettings, FracturePreviewSourceRequest
 from .fracture_worker_subprocess import (
     FRACTURE_WORKER_ACTION_EXPORT,
     FRACTURE_WORKER_ACTION_PREVIEW,
@@ -43,6 +42,12 @@ from .proxy_mesh_worker_subprocess import (
     write_proxy_mesh_worker_request,
 )
 from .runtime_error_mode import suppress_windows_native_error_dialogs
+from .worker_file_protocol import (
+    cleanup_file,
+    create_temp_path,
+    read_pickle_payload,
+    resolve_worker_command,
+)
 
 
 def get_spawn_context() -> multiprocessing.context.BaseContext:
@@ -123,21 +128,21 @@ def start_proxy_mesh_process(
 
 
 def start_fracture_export_process(
-    request: ConversionRequest,
+    request: FractureExportRequest,
     settings: FractureSettings,
 ):
     return _start_fracture_worker_process(request, settings, action=FRACTURE_WORKER_ACTION_EXPORT)
 
 
 def start_fracture_preview_process(
-    request: ConversionRequest,
+    request: FracturePreviewSourceRequest,
     settings: FracturePreviewSettings,
 ):
     return _start_fracture_worker_process(request, settings, action=FRACTURE_WORKER_ACTION_PREVIEW)
 
 
 def _start_fracture_worker_process(
-    request: ConversionRequest,
+    request: FractureExportRequest | FracturePreviewSourceRequest,
     settings: FractureSettings | FracturePreviewSettings,
     *,
     action: str,
@@ -313,8 +318,7 @@ class _ConversionWorkerQueue:
             event_name = event_path.name
             if event_name in self.delivered_events:
                 continue
-            with event_path.open("rb") as handle:
-                events.append(pickle.load(handle))
+            events.append(read_pickle_payload(event_path))
             self.delivered_events.add(event_name)
 
         if self.delivered_result:
@@ -335,7 +339,7 @@ class _ConversionWorkerQueue:
     def close(self) -> None:
         for path in (self.request_path, self.result_path, self.error_path):
             try:
-                path.unlink(missing_ok=True)
+                cleanup_file(path)
             except Exception:
                 pass
         try:
@@ -365,15 +369,14 @@ class _ProxyMeshWorkerQueue:
             ]
         if not self.result_path.exists():
             return []
-        with self.result_path.open("rb") as handle:
-            payload = pickle.load(handle)
+        payload = read_pickle_payload(self.result_path)
         self.delivered = True
         return [("result", payload)]
 
     def close(self) -> None:
         for path in (self.request_path, self.result_path, self.error_path):
             try:
-                path.unlink(missing_ok=True)
+                cleanup_file(path)
             except Exception:
                 pass
 
@@ -403,7 +406,7 @@ class _FractureWorkerQueue:
     def close(self) -> None:
         for path in (self.request_path, self.result_path, self.error_path):
             try:
-                path.unlink(missing_ok=True)
+                cleanup_file(path)
             except Exception:
                 pass
 
@@ -421,14 +424,7 @@ def _create_fracture_temp_path(suffix: str) -> Path:
 
 
 def _create_temp_path(prefix: str, suffix: str) -> Path:
-    handle = tempfile.NamedTemporaryFile(prefix=prefix, suffix=suffix, delete=False)
-    path = Path(handle.name)
-    handle.close()
-    try:
-        path.unlink(missing_ok=True)
-    except Exception:
-        pass
-    return path
+    return create_temp_path(prefix, suffix)
 
 
 def _read_conversion_job_result(path: Path, *, fallback_error_message: str = "") -> ConversionJobResult:
@@ -436,44 +432,19 @@ def _read_conversion_job_result(path: Path, *, fallback_error_message: str = "")
         return ConversionJobResult(
             error_message=fallback_error_message or "Conversion worker finished without a result."
         )
-    with path.open("rb") as handle:
-        payload = pickle.load(handle)
+    payload = read_pickle_payload(path)
     if isinstance(payload, ConversionJobResult):
         return payload
     return ConversionJobResult(error_message="Conversion worker returned an invalid result payload.")
 
 
 def _resolve_conversion_worker_command(request_path: Path) -> list[str]:
-    if bool(getattr(sys, "frozen", False)):
-        worker_dir_executable = Path(sys.executable).parent / "XMLtoUSDAWorker" / "XMLtoUSDAWorker.exe"
-        if worker_dir_executable.exists():
-            return [str(worker_dir_executable), CONVERSION_WORKER_COMMAND, "--request", str(request_path)]
-        worker_executable = Path(sys.executable).with_name("XMLtoUSDAWorker.exe")
-        if worker_executable.exists():
-            return [str(worker_executable), CONVERSION_WORKER_COMMAND, "--request", str(request_path)]
-        return [sys.executable, CONVERSION_WORKER_COMMAND, "--request", str(request_path)]
-    return [sys.executable, "-m", "xml_to_usda", CONVERSION_WORKER_COMMAND, "--request", str(request_path)]
+    return resolve_worker_command(CONVERSION_WORKER_COMMAND, request_path)
 
 
 def _resolve_proxy_mesh_worker_command(request_path: Path) -> list[str]:
-    if bool(getattr(sys, "frozen", False)):
-        worker_dir_executable = Path(sys.executable).parent / "XMLtoUSDAWorker" / "XMLtoUSDAWorker.exe"
-        if worker_dir_executable.exists():
-            return [str(worker_dir_executable), PROXY_MESH_WORKER_COMMAND, "--request", str(request_path)]
-        worker_executable = Path(sys.executable).with_name("XMLtoUSDAWorker.exe")
-        if worker_executable.exists():
-            return [str(worker_executable), PROXY_MESH_WORKER_COMMAND, "--request", str(request_path)]
-        return [sys.executable, PROXY_MESH_WORKER_COMMAND, "--request", str(request_path)]
-    return [sys.executable, "-m", "xml_to_usda", PROXY_MESH_WORKER_COMMAND, "--request", str(request_path)]
+    return resolve_worker_command(PROXY_MESH_WORKER_COMMAND, request_path)
 
 
 def _resolve_fracture_worker_command(request_path: Path) -> list[str]:
-    if bool(getattr(sys, "frozen", False)):
-        worker_dir_executable = Path(sys.executable).parent / "XMLtoUSDAWorker" / "XMLtoUSDAWorker.exe"
-        if worker_dir_executable.exists():
-            return [str(worker_dir_executable), FRACTURE_WORKER_COMMAND, "--request", str(request_path)]
-        worker_executable = Path(sys.executable).with_name("XMLtoUSDAWorker.exe")
-        if worker_executable.exists():
-            return [str(worker_executable), FRACTURE_WORKER_COMMAND, "--request", str(request_path)]
-        return [sys.executable, FRACTURE_WORKER_COMMAND, "--request", str(request_path)]
-    return [sys.executable, "-m", "xml_to_usda", FRACTURE_WORKER_COMMAND, "--request", str(request_path)]
+    return resolve_worker_command(FRACTURE_WORKER_COMMAND, request_path)

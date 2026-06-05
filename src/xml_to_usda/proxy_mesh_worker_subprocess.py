@@ -9,8 +9,6 @@ do not travel through multiprocessing queues.
 
 from __future__ import annotations
 
-import json
-import pickle
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +23,13 @@ from .proxy_mesh_service import (
 )
 from .runtime_error_mode import suppress_windows_native_error_dialogs
 from .worker_commands import PROXY_MESH_WORKER_COMMAND
+from .worker_file_protocol import (
+    cleanup_file,
+    read_error_payload,
+    read_pickle_payload,
+    write_error_payload,
+    write_pickle_atomic,
+)
 
 
 @dataclass(frozen=True)
@@ -37,24 +42,18 @@ class ProxyMeshWorkerRequest:
 
 
 def write_proxy_mesh_worker_request(path: str | Path, request: ProxyMeshWorkerRequest) -> None:
-    with Path(path).open("wb") as handle:
-        pickle.dump(request, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    write_pickle_atomic(path, request)
 
 
 def read_proxy_mesh_worker_request(path: str | Path) -> ProxyMeshWorkerRequest:
-    with Path(path).open("rb") as handle:
-        payload = pickle.load(handle)
+    payload = read_pickle_payload(path)
     if not isinstance(payload, ProxyMeshWorkerRequest):
         raise TypeError("Invalid Proxy Mesh worker request payload.")
     return payload
 
 
 def read_proxy_mesh_worker_error(path: str | Path) -> tuple[str, str] | None:
-    error_path = Path(path)
-    if not error_path.exists():
-        return None
-    payload = json.loads(error_path.read_text(encoding="utf-8"))
-    return str(payload.get("message", "")), str(payload.get("traceback", ""))
+    return read_error_payload(path)
 
 
 def run_proxy_mesh_worker_request_file(path: str | Path) -> int:
@@ -72,25 +71,9 @@ def run_proxy_mesh_worker_request_file(path: str | Path) -> int:
             )
         else:
             raise ValueError(f"Unsupported proxy mesh worker action: {request.action}")
-        with Path(request.result_path).open("wb") as handle:
-            pickle.dump(result, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        _cleanup_file(Path(request.error_path))
+        write_pickle_atomic(request.result_path, result)
+        cleanup_file(request.error_path)
         return 0
     except Exception as exc:
-        Path(request.error_path).write_text(
-            json.dumps(
-                {
-                    "message": str(exc),
-                    "traceback": traceback.format_exc(),
-                }
-            ),
-            encoding="utf-8",
-        )
+        write_error_payload(request.error_path, message=str(exc), formatted_traceback=traceback.format_exc())
         return 1
-
-
-def _cleanup_file(path: Path) -> None:
-    try:
-        path.unlink(missing_ok=True)
-    except Exception:
-        pass

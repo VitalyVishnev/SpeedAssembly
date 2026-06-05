@@ -26,7 +26,6 @@ class QtUiDependencies:
     inspect_fbx_material_slot_rows: object
     load_gui_settings: object
     save_gui_settings: object
-    resolve_input_settings_key: object
     prepare_wind_inspection_plan: object
     inspect_wind_groups: object
     WindGenerationRequest: object
@@ -35,8 +34,8 @@ class QtUiDependencies:
     generate_proxy_mesh_from_source_request: object
     export_proxy_usda_from_source_request: object
     export_generated_proxy_usda_from_source_request: object
-    generate_fracture_preview_from_conversion_request: object
-    export_fracture_usda_from_conversion_request: object
+    generate_fracture_preview_from_source_request: object
+    export_fracture_usda_from_export_request: object
     format_wind_error: object
     should_retry_wind_error: object
     sys: object
@@ -61,7 +60,7 @@ def build_default_dependencies() -> QtUiDependencies:
         inspect_fbx_material_slot_rows,
     )
     from ..pipeline import convert_request
-    from ..settings_service import load_gui_settings, resolve_input_settings_key, save_gui_settings
+    from ..settings_service import load_gui_settings, save_gui_settings
     from ..wind_service import (
         WindGenerationRequest,
         derive_wind_json_output_path,
@@ -76,8 +75,8 @@ def build_default_dependencies() -> QtUiDependencies:
         export_proxy_usda_from_source_request,
         generate_proxy_mesh_from_source_request,
     )
-    from ..fracture_preview_service import generate_fracture_preview_from_conversion_request
-    from ..fracture_export_service import export_fracture_usda_from_conversion_request
+    from ..fracture_preview_service import generate_fracture_preview_from_source_request
+    from ..fracture_export_service import export_fracture_usda_from_export_request
 
     return QtUiDependencies(
         prepare_conversion_plan=prepare_conversion_plan,
@@ -93,7 +92,6 @@ def build_default_dependencies() -> QtUiDependencies:
         inspect_fbx_material_slot_rows=inspect_fbx_material_slot_rows,
         load_gui_settings=load_gui_settings,
         save_gui_settings=save_gui_settings,
-        resolve_input_settings_key=resolve_input_settings_key,
         prepare_wind_inspection_plan=prepare_wind_inspection_plan,
         inspect_wind_groups=inspect_wind_groups,
         WindGenerationRequest=WindGenerationRequest,
@@ -102,8 +100,8 @@ def build_default_dependencies() -> QtUiDependencies:
         generate_proxy_mesh_from_source_request=generate_proxy_mesh_from_source_request,
         export_proxy_usda_from_source_request=export_proxy_usda_from_source_request,
         export_generated_proxy_usda_from_source_request=export_generated_proxy_usda_from_source_request,
-        generate_fracture_preview_from_conversion_request=generate_fracture_preview_from_conversion_request,
-        export_fracture_usda_from_conversion_request=export_fracture_usda_from_conversion_request,
+        generate_fracture_preview_from_source_request=generate_fracture_preview_from_source_request,
+        export_fracture_usda_from_export_request=export_fracture_usda_from_export_request,
         format_wind_error=format_wind_error,
         should_retry_wind_error=should_retry_wind_error,
         sys=sys,

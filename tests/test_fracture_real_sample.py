@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from xml_to_usda.fracture_export_service import export_fracture_usda_from_conversion_request
-from xml_to_usda.fracture_preview_service import FracturePreviewSettings, generate_fracture_preview_from_conversion_request
+from xml_to_usda.fracture_export_service import FractureExportRequest, export_fracture_usda_from_export_request
+from xml_to_usda.fracture_preview_service import (
+    FracturePreviewSettings,
+    FracturePreviewSourceRequest,
+    generate_fracture_preview_from_source_request,
+)
 from xml_to_usda.fracture_service import FractureSettings
 from xml_to_usda.models import ConversionRequest
 
@@ -24,16 +28,16 @@ def test_fracture_preview_and_export_on_real_simple_tree_sample(tmp_path: Path) 
         output_path=str(tmp_path / "SimpleTree_01.usda"),
     )
 
-    preview = generate_fracture_preview_from_conversion_request(
-        request,
+    preview = generate_fracture_preview_from_source_request(
+        FracturePreviewSourceRequest.from_conversion_request(request),
         FracturePreviewSettings(
             fracture=FractureSettings(target_piece_count=5),
             max_base_faces_per_piece=200,
             max_prototype_faces=100,
         ),
     )
-    export = export_fracture_usda_from_conversion_request(
-        request,
+    export = export_fracture_usda_from_export_request(
+        FractureExportRequest.from_conversion_request(request),
         FractureSettings(target_piece_count=5),
     )
 

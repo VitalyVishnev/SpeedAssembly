@@ -10,8 +10,6 @@ queues, and the packaged executable can be launched in a minimal helper mode.
 
 from __future__ import annotations
 
-import json
-import pickle
 import traceback
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -26,6 +24,14 @@ from .fbx_payload_cache import (
 )
 from .models import CpuProfile, GeometryBuffer
 from .worker_commands import FBX_WORKER_COMMAND
+from .worker_file_protocol import (
+    cleanup_file,
+    read_error_payload,
+    read_json_payload,
+    write_error_payload,
+    write_json_atomic,
+    write_pickle_atomic,
+)
 
 
 @dataclass(frozen=True)
@@ -43,27 +49,25 @@ class FbxWorkerRequest:
 
 
 def write_fbx_worker_request(path: str | Path, request: FbxWorkerRequest) -> None:
-    Path(path).write_text(
-        json.dumps(
-            {
-                "fbx_path": request.fbx_path,
-                "prototype_name": request.prototype_name,
-                "cpu_profile": request.cpu_profile.value,
-                "strict_vertex_colors": request.strict_vertex_colors,
-                "read_vertex_colors": request.read_vertex_colors,
-                "read_material_slots": request.read_material_slots,
-                "fbx_cache_max_bytes": request.fbx_cache_max_bytes,
-                "fbx_cache_max_age_seconds": request.fbx_cache_max_age_seconds,
-                "result_path": request.result_path,
-                "error_path": request.error_path,
-            }
-        ),
-        encoding="utf-8",
+    write_json_atomic(
+        path,
+        {
+            "fbx_path": request.fbx_path,
+            "prototype_name": request.prototype_name,
+            "cpu_profile": request.cpu_profile.value,
+            "strict_vertex_colors": request.strict_vertex_colors,
+            "read_vertex_colors": request.read_vertex_colors,
+            "read_material_slots": request.read_material_slots,
+            "fbx_cache_max_bytes": request.fbx_cache_max_bytes,
+            "fbx_cache_max_age_seconds": request.fbx_cache_max_age_seconds,
+            "result_path": request.result_path,
+            "error_path": request.error_path,
+        },
     )
 
 
 def read_fbx_worker_request(path: str | Path) -> FbxWorkerRequest:
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    payload = read_json_payload(path)
     return FbxWorkerRequest(
         fbx_path=str(payload["fbx_path"]),
         prototype_name=str(payload["prototype_name"]),
@@ -79,11 +83,7 @@ def read_fbx_worker_request(path: str | Path) -> FbxWorkerRequest:
 
 
 def read_fbx_worker_error(path: str | Path) -> tuple[str, str] | None:
-    error_path = Path(path)
-    if not error_path.exists():
-        return None
-    payload = json.loads(error_path.read_text(encoding="utf-8"))
-    return str(payload.get("message", "")), str(payload.get("traceback", ""))
+    return read_error_payload(path)
 
 
 def run_fbx_worker_request_file(path: str | Path) -> int:
@@ -115,25 +115,9 @@ def run_fbx_worker_request_file(path: str | Path) -> int:
                 )
         elif isinstance(payload, GeometryBuffer) and payload.name != request.prototype_name:
             payload = replace(payload, name=request.prototype_name)
-        with Path(request.result_path).open("wb") as handle:
-            pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        _cleanup_file(Path(request.error_path))
+        write_pickle_atomic(request.result_path, payload)
+        cleanup_file(request.error_path)
         return 0
     except Exception as exc:
-        Path(request.error_path).write_text(
-            json.dumps(
-                {
-                    "message": str(exc),
-                    "traceback": traceback.format_exc(),
-                }
-            ),
-            encoding="utf-8",
-        )
+        write_error_payload(request.error_path, message=str(exc), formatted_traceback=traceback.format_exc())
         return 1
-
-
-def _cleanup_file(path: Path) -> None:
-    try:
-        path.unlink(missing_ok=True)
-    except Exception:
-        pass
