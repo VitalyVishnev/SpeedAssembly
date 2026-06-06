@@ -110,6 +110,7 @@ Primary modules:
 - `proxy_mesh_worker_subprocess.py`
 - `fracture_worker_subprocess.py`
 - `runtime_paths.py`
+- `runtime_trace.py`
 - `output_resolution.py`
 - `job_control.py`
 - `worker_file_protocol.py`
@@ -130,6 +131,8 @@ Owns operator interaction as adapters over application interfaces.
 Primary modules:
 
 - `qt_ui/`
+- `qt_ui/trace.py`
+- `qt_ui/smoke.py`
 - `gui.py`
 - `gui_formatters.py`
 
@@ -138,6 +141,7 @@ Expected interface shape:
 - collect operator state
 - call application modules
 - render results and diagnostics
+- write structured trace and packaged smoke reports for reproduction
 - avoid owning conversion semantics
 
 ## Stable public facades

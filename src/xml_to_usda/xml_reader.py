@@ -5,8 +5,19 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from collections import Counter, defaultdict
 from pathlib import Path
+from typing import Iterable
+
+import defusedxml.ElementTree as DefusedET
+from defusedxml.common import DefusedXmlException
 
 from .models import ObservedXmlSchemaReport, SourceXmlDocument
+from .source_limits import (
+    DEFAULT_SOURCE_LIMITS,
+    SourceBudgetTracker,
+    SourceLimits,
+    enforce_source_file_budget,
+    enforce_source_tree_budgets,
+)
 
 
 KNOWN_SECTION_HINTS = {
@@ -74,11 +85,47 @@ class SourceXmlAnalysis:
     source_nodes: SourceNodeIndex
 
 
-def read_source_xml(path: str | Path) -> SourceXmlDocument:
+def read_source_xml(path: str | Path, *, limits: SourceLimits = DEFAULT_SOURCE_LIMITS) -> SourceXmlDocument:
     xml_path = Path(path)
-    tree = ET.parse(xml_path)
+    tree = parse_source_xml_tree(xml_path, limits=limits)
     root = tree.getroot()
     return SourceXmlDocument(source_path=str(xml_path), root_tag=root.tag, tree=tree)
+
+
+def parse_source_xml_tree(path: str | Path, *, limits: SourceLimits = DEFAULT_SOURCE_LIMITS) -> ET.ElementTree:
+    enforce_source_file_budget(path, limits)
+    try:
+        tree = DefusedET.parse(Path(path))
+    except DefusedXmlException as exc:
+        raise ValueError("SpeedTree XML must not contain DTD or entity declarations.") from exc
+    enforce_source_tree_budgets(tree.getroot(), limits=limits)
+    return tree
+
+
+def iterparse_source_xml(
+    path: str | Path,
+    *,
+    events: tuple[str, ...],
+    limits: SourceLimits = DEFAULT_SOURCE_LIMITS,
+) -> Iterable[tuple[str, ET.Element]]:
+    enforce_source_file_budget(path, limits)
+    tracker = SourceBudgetTracker(limits=limits)
+    depth = 0
+    try:
+        for event, elem in DefusedET.iterparse(Path(path), events=events):
+            if event == "start":
+                depth += 1
+                tracker.observe_element(elem, depth=depth)
+            elif event == "end":
+                if "start" not in events:
+                    tracker.observe_element(elem)
+                yield event, elem
+                if "start" in events:
+                    depth = max(0, depth - 1)
+                continue
+            yield event, elem
+    except DefusedXmlException as exc:
+        raise ValueError("SpeedTree XML must not contain DTD or entity declarations.") from exc
 
 
 def inspect_xml(document: SourceXmlDocument) -> ObservedXmlSchemaReport:

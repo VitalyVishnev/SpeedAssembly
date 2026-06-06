@@ -141,6 +141,12 @@ The primary standalone package build path has also been stabilized:
 - `.\scripts\build_qt_gui_exe.cmd -Package` now clears stale `build-next/` and `dist-next/` state before invoking PyInstaller
 - PyInstaller is also run with `--clean` so the package path does not reuse incremental analysis output from older runs
 - the previous "looks stuck" behavior was a stale-package-state problem, not a converter logic regression
+- packaged builds now run high-risk GUI smoke by default after release zip
+  assembly; the smoke covers startup, Fracture Preview, Proxy Preview,
+  conversion worker launch, and diagnostics export through the packaged Qt
+  executable
+- packaged smoke is a GUI/runtime gate only. It does not replace manual UE
+  5.7.x import validation for importer-facing changes.
 
 The earlier importer-facing concerns are treated as closed by the current validation set.
 

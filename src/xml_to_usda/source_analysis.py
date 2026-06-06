@@ -16,7 +16,7 @@ from dataclasses import replace
 
 from .models import BaseMaterialOverride, CanonicalTreeModel, ObservedXmlSchemaReport, PrototypeDiscoveryEntry
 from .normalizer import normalize_to_canonical
-from .xml_reader import analyze_xml, read_source_xml
+from .xml_reader import analyze_xml, iterparse_source_xml, read_source_xml
 
 
 def inspect_source(input_path: str) -> ObservedXmlSchemaReport:
@@ -50,7 +50,7 @@ def discover_part_prototypes(input_path: str) -> tuple[PrototypeDiscoveryEntry, 
     saw_leaf_references = False
     leaf_without_mesh_id_instance_count = 0
 
-    for _event, elem in ET.iterparse(input_path, events=("end",)):
+    for _event, elem in iterparse_source_xml(input_path, events=("end",)):
         if elem.tag == "Mesh":
             raw_mesh_id = elem.attrib.get("ID")
             if raw_mesh_id is not None and raw_mesh_id.isdigit():
@@ -106,7 +106,7 @@ def discover_source_materials(input_path: str) -> tuple[BaseMaterialOverride, ..
     used_base_material_ids: set[int] = set()
     element_stack: list[str] = []
 
-    for event, elem in ET.iterparse(input_path, events=("start", "end")):
+    for event, elem in iterparse_source_xml(input_path, events=("start", "end")):
         if event == "start":
             element_stack.append(elem.tag)
             continue

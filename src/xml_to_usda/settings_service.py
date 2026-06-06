@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode, UdimMode
-from .proxy_mesh_service import PROXY_METHOD_DENSITY_FIELD, ProxyMeshSettings
+from .proxy_mesh_service import MAX_PROXY_DENSITY_RESOLUTION, PROXY_METHOD_DENSITY_FIELD, ProxyMeshSettings
 
 
 GUI_SETTINGS_SCHEMA_VERSION = 1
@@ -103,6 +103,7 @@ class GuiSettingsSnapshot:
     proxy_mesh_settings: ProxyMeshSettings = field(default_factory=ProxyMeshSettings)
     fbx_cache_max_size_gb: int = 20
     fbx_cache_max_age_days: int = 14
+    debug_trace_enabled: bool = False
     active_preset_name: str = FACTORY_DEFAULT_PRESET_NAME
     presets: dict[str, GuiPresetRecord] = field(default_factory=dict)
 
@@ -153,6 +154,7 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
         proxy_mesh_settings=proxy_mesh_settings,
         fbx_cache_max_size_gb=_coerce_positive_int(payload.get("fbx_cache_max_size_gb"), 20),
         fbx_cache_max_age_days=_coerce_positive_int(payload.get("fbx_cache_max_age_days"), 14),
+        debug_trace_enabled=bool(payload.get("debug_trace_enabled", False)),
         active_preset_name=active_preset_name,
         presets=presets,
     )
@@ -180,6 +182,7 @@ def save_gui_settings(settings_path: str | Path, snapshot: GuiSettingsSnapshot) 
         "proxy_mesh_settings": _serialize_proxy_mesh_settings(snapshot.proxy_mesh_settings),
         "fbx_cache_max_size_gb": _coerce_positive_int(snapshot.fbx_cache_max_size_gb, 20),
         "fbx_cache_max_age_days": _coerce_positive_int(snapshot.fbx_cache_max_age_days, 14),
+        "debug_trace_enabled": bool(snapshot.debug_trace_enabled),
     }
     if snapshot.cpu_profile != CpuProfile.BALANCED:
         payload["cpu_profile"] = snapshot.cpu_profile.value
@@ -389,11 +392,12 @@ def _parse_proxy_mesh_settings(raw_value) -> ProxyMeshSettings:
     if method != PROXY_METHOD_DENSITY_FIELD:
         method = defaults.method
     base_mesh_priority = _coerce_float(raw_value.get("base_mesh_priority"), defaults.base_mesh_priority)
+    density_resolution = _coerce_positive_int(raw_value.get("density_resolution"), defaults.density_resolution)
     return ProxyMeshSettings(
         method=method,
         final_polycount=_coerce_positive_int(raw_value.get("final_polycount"), defaults.final_polycount),
         bounds_inflation=max(0.01, _coerce_float(raw_value.get("bounds_inflation"), defaults.bounds_inflation)),
-        density_resolution=_coerce_positive_int(raw_value.get("density_resolution"), defaults.density_resolution),
+        density_resolution=min(MAX_PROXY_DENSITY_RESOLUTION, density_resolution),
         base_mesh_priority=max(0.0, min(1.0, base_mesh_priority)),
     )
 

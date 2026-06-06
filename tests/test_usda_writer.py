@@ -137,6 +137,37 @@ def test_authoring_engine_matches_text_and_file_sinks_for_external_asset_prototy
     assert _normalize_usda_text(output_path.read_text(encoding="utf-8")) == _normalize_usda_text(text_output)
 
 
+def test_authoring_engine_rejects_invalid_unreal_material_path() -> None:
+    _, model, diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        material_policy="single_material",
+        single_material_path="/Game/Assembly/SimpleTree/Leaves1.Leaves1",
+    )
+    bad_material = replace(model.materials[0], ue_asset_path='/Game/Assembly/Bad"\nInjected.Injected')
+    context = build_authoring_context(replace(model, materials=(bad_material,)), diagnostics, base_mesh_name="BadMaterial")
+
+    with pytest.raises(ValueError, match="Invalid Unreal Asset Path"):
+        author_usda_text(context)
+
+
+def test_authoring_engine_rejects_invalid_external_prototype_asset_path() -> None:
+    _, model, diagnostics = load_canonical_model(
+        str(SIMPLE_TREE_01),
+        prototype_source_configs=(
+            PrototypeSourceConfig(
+                source_key="Mesh_1",
+                mode=PrototypeSourceMode.UNREAL_ASSET,
+                asset_path="/Game/TreeParts/SK_Twig01.SK_Twig01",
+            ),
+        ),
+    )
+    bad_prototype = replace(model.prototypes[0], mesh_asset_path="/Game/TreeParts/@Injected.Injected")
+    context = build_authoring_context(replace(model, prototypes=(bad_prototype,) + model.prototypes[1:]), diagnostics)
+
+    with pytest.raises(ValueError, match="Invalid Unreal Asset Path"):
+        author_usda_text(context)
+
+
 def test_mesh_with_original_scale_reports_invalid_point_payloads() -> None:
     entry = replace(
         MeshLibraryEntry(

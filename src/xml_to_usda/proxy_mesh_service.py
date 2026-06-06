@@ -21,6 +21,7 @@ from .output_resolution import ensure_output_path_allowed
 
 
 DEFAULT_PROXY_POLYCOUNT = 5000
+MAX_PROXY_DENSITY_RESOLUTION = 256
 PROXY_METHOD_DENSITY_FIELD = "density_field"
 PROXY_METHOD_INSTANCE_BOUNDS = "instance_bounds"
 
@@ -133,6 +134,8 @@ def generate_proxy_mesh(model: CanonicalTreeModel, settings: ProxyMeshSettings |
         raise ProxyMeshError("Proxy bounds inflation must be greater than zero.")
     if resolved_settings.density_resolution <= 0:
         raise ProxyMeshError("Proxy density resolution must be greater than zero.")
+    if resolved_settings.density_resolution > MAX_PROXY_DENSITY_RESOLUTION:
+        raise ProxyMeshError(f"Proxy density resolution must be between 1 and {MAX_PROXY_DENSITY_RESOLUTION}.")
     if not 0.0 <= resolved_settings.base_mesh_priority <= 1.0:
         raise ProxyMeshError("Proxy base mesh priority must be between zero and one.")
 

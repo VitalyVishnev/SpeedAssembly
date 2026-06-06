@@ -58,6 +58,14 @@ Build helpers also use `.venv310`:
 
 The primary release artifact is `dist-next\XMLtoUSDAConverter.exe`. Each package build also writes `dist-next\build_info.json`. The GUI reads that file on startup and prints a `Build info:` banner at the top of the in-app `Log`, so package testing no longer depends on the executable file timestamp.
 
+`.\scripts\build_qt_gui_exe.cmd -Package` also runs packaged high-risk smoke by
+default after the release zip is assembled. The smoke command opens the packaged
+Qt shell and exercises startup, Fracture Preview, Proxy Preview, the conversion
+worker path, and diagnostics export against the baseline sample. Its report is
+written to `dist-next\smoke\smoke_report.json`; stdout/stderr are written next
+to it. Use `-SkipSmoke` only for an explicit emergency bypass and record why it
+was skipped.
+
 Large-job execution note:
 
 - the GUI now launches big conversion jobs through a spawned worker subprocess
@@ -73,6 +81,9 @@ Large-job execution note:
 - the GUI `Preserve temp files for debugging` switch and CLI `--preserve-temp-files` flag keep the job dir and manifest on disk for investigation
 - stale job dirs older than 24 hours are cleaned during startup sweep
 - GUI-side runtime errors are appended to `~/.xml_to_usda/gui_runtime.log` so failures can be reviewed later without relying on modal popups
+- GUI-side structured trace events are appended to `~/.xml_to_usda/gui_trace.jsonl`
+  with rotation. Compact trace is always on; the Global Settings `Debug Trace`
+  switch adds expanded settings/runtime payloads for reproduction.
 - build artifacts such as `build/`, `build-next/`, `dist/`, and `dist-next/` are not part of runtime cache hygiene and are only cleaned by build helpers
 
 ## Recreate the environment

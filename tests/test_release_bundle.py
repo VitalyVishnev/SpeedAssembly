@@ -42,8 +42,12 @@ def test_release_bundle_packages_exe_examples_and_help_assets(tmp_path: Path) ->
 def test_qt_package_script_builds_release_zip() -> None:
     script_text = Path("scripts/build_qt_gui_exe.ps1").read_text(encoding="utf-8")
 
+    assert "[switch]$SkipSmoke" in script_text
     assert "xml_to_usda.release_bundle" in script_text
     assert "XMLtoUSDAConverter_release.zip" in script_text
+    assert "smoke --scenario high-risk" in script_text
+    assert "smoke_report.json" in script_text
+    assert "Packaged high-risk smoke failed" in script_text
     assert "xml_to_usda.qt_ui.release_build" in script_text
     assert "Missing application icon" in script_text
     assert "'--icon', $iconPath" in script_text

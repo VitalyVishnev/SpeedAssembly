@@ -58,6 +58,20 @@ def _buffer_mesh(name: str) -> GeometryBuffer:
     )
 
 
+def test_proxy_generation_rejects_density_resolution_above_service_cap() -> None:
+    empty_model = TreeAsset(
+        metadata=ExportMetadata(source_path="tree.xml", source_version=None),
+        materials=(),
+        source_objects=(),
+        base_mesh=None,
+        skeleton=(),
+        assembly_parts=(),
+    )
+
+    with pytest.raises(ProxyMeshError, match="must be between 1 and 256"):
+        generate_proxy_mesh(empty_model, ProxyMeshSettings(density_resolution=257))
+
+
 def _strip_mesh(name: str, triangle_count: int) -> MeshData:
     points: list[Vector3] = []
     face_indices: list[int] = []

@@ -47,6 +47,22 @@ def test_qt_entry_routes_fbx_worker_mode_before_gui_import(monkeypatch) -> None:
     assert observed == [["fbx-worker", "--request", "payload.json"]]
 
 
+def test_qt_entry_routes_smoke_mode_before_gui_import(monkeypatch) -> None:
+    observed: list[list[str]] = []
+
+    monkeypatch.setattr(
+        "xml_to_usda.qt_ui.smoke.run_smoke_cli",
+        lambda argv: observed.append(list(argv)) or 7,
+    )
+
+    from xml_to_usda.qt_ui.entry import main as qt_entry_main
+
+    exit_code = qt_entry_main(["smoke", "--scenario", "startup"])
+
+    assert exit_code == 7
+    assert observed == [["--scenario", "startup"]]
+
+
 def test_frozen_fbx_helper_falls_back_to_gui_executable_without_sidecar(
     tmp_path,
     monkeypatch,

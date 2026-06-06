@@ -74,7 +74,8 @@ contracts.
 - `src/xml_to_usda/settings_service.py`
 - `src/xml_to_usda/wind_service.py`
 - `src/xml_to_usda/diagnostics_bundle.py`
-  Owns local diagnostics bundle request construction and zip export.
+  Owns local diagnostics bundle request construction and zip export, including
+  runtime trace and packaged smoke artifacts when present.
 - `src/xml_to_usda/proxy_mesh_service.py`
   Owns `ProxyMeshSourceRequest` and proxy companion generation/export.
 - `src/xml_to_usda/fracture_service.py`
@@ -104,6 +105,8 @@ environment-facing implementation details.
 - `src/xml_to_usda/proxy_mesh_worker_subprocess.py`
 - `src/xml_to_usda/output_resolution.py`
 - `src/xml_to_usda/runtime_paths.py`
+- `src/xml_to_usda/runtime_trace.py`
+  Owns structured JSONL trace writing and rotation for local diagnostics.
 - `src/xml_to_usda/job_control.py`
 - `src/xml_to_usda/worker_file_protocol.py`
 - `src/xml_to_usda/prototype_sources.py`
@@ -120,6 +123,11 @@ Operator-facing adapters over application contracts.
 - `src/xml_to_usda/qt_ui/fracture_preview.py`
   Contains the Fracture Preview dialog and payload adapter into the shared
   matcap/grid viewport.
+- `src/xml_to_usda/qt_ui/trace.py`
+  Qt-facing facade over runtime trace logging.
+- `src/xml_to_usda/qt_ui/smoke.py`
+  Owns packaged GUI smoke scenarios and report writing for high-risk runtime
+  paths.
 - `src/xml_to_usda/gui.py`
 
 The supported UI path is PySide6. The old Tk code path is retired and should

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from xml_to_usda.cli import main as cli_main
-from xml_to_usda.fbx_adapter import load_fbx_geometry
+from xml_to_usda.fbx_adapter import FbxImportError, load_fbx_geometry
 from xml_to_usda.fbx_import_supervisor import FbxImportTask, _NativeHelperCrash
 from xml_to_usda.fbx_payload_cache import FbxPayloadCacheResult
 from xml_to_usda.fbx_worker_subprocess import (
@@ -107,6 +107,14 @@ def test_load_prototype_source_configs_from_json_reads_fbx_and_unreal_modes(tmp_
             fbx_path=None,
         ),
     )
+
+
+def test_json_geometry_backend_requires_explicit_development_flag(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("XML_TO_USDA_ENABLE_JSON_GEOMETRY_BACKEND", raising=False)
+    payload_path = _write_fbx_json_payload(tmp_path)
+
+    with pytest.raises(FbxImportError, match="JSON geometry backend is test-only"):
+        load_fbx_geometry(str(payload_path), "Twig_01", cpu_profile=CpuProfile.BALANCED)
 
 
 def test_fbx_part_source_config_replaces_inline_prototype_with_geometry_payload(tmp_path: Path) -> None:

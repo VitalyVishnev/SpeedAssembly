@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 _QT_WIDGETS_PATCHED = False
@@ -10,6 +12,11 @@ _ORIGINAL_WIDGET_SHOW = None
 
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
+
+
+@pytest.fixture(autouse=True)
+def _enable_json_geometry_test_backend(monkeypatch):
+    monkeypatch.setenv("XML_TO_USDA_ENABLE_JSON_GEOMETRY_BACKEND", "1")
 
 
 def pytest_runtest_setup(item):

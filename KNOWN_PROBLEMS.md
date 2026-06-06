@@ -1,5 +1,19 @@
 # Known Problems
 
+## Worker File Protocol Pickle Hardening Deferred
+
+- Issue: Conversion, Proxy Mesh, Fracture, and FBX worker request/result files still use `pickle` for local file-backed worker payloads.
+- Location: `src/xml_to_usda/worker_file_protocol.py`, `src/xml_to_usda/conversion_worker_subprocess.py`, `src/xml_to_usda/proxy_mesh_worker_subprocess.py`, `src/xml_to_usda/fracture_worker_subprocess.py`, `src/xml_to_usda/fbx_worker_subprocess.py`
+- Reason for deferral: The current security hardening pass intentionally excluded the two pickle findings; exploitation requires local worker-file tampering or hidden worker invocation rather than a normal malicious XML/preset path.
+- Likely next step: Replace worker IPC payloads with typed JSON or another non-executing schema and constrain worker request paths to parent-created Job Workspace roots.
+
+## FBX Payload Cache Pickle Hardening Deferred
+
+- Issue: Persistent FBX payload cache entries are still serialized and loaded with `pickle`.
+- Location: `src/xml_to_usda/fbx_payload_cache.py`
+- Reason for deferral: The current security hardening pass intentionally excluded persistent cache deserialization; cache poisoning requires write access to the runtime cache and a matching cache key.
+- Likely next step: Replace the persistent cache payload format with a non-executing typed format such as `.npz` or structured JSON plus binary arrays, then add a malicious-cache regression test.
+
 ## Qt Shell Preset And Preview Cache Ownership Pending
 
 - Issue: `MainWindow` still owns preset dialog orchestration and Proxy Mesh preview cache lifecycle. Phase 4 only extracted diagnostics bundle request construction and removed an obsolete dependency entry; a broader controller split was deferred.

@@ -28,14 +28,32 @@ SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "samples" / "speedtree" /
 
 def test_normalize_unreal_asset_path_trims_and_appends_package_name() -> None:
     assert normalize_unreal_asset_path("  /Game/Foo/Bar  ") == "/Game/Foo/Bar.Bar"
+    assert normalize_unreal_asset_path("/Game/Foo/Bar/Baz/M_Leaf") == "/Game/Foo/Bar/Baz/M_Leaf.M_Leaf"
     assert normalize_unreal_asset_path("/Game/Foo/Bar.Bar") == "/Game/Foo/Bar.Bar"
     assert normalize_unreal_asset_path("Not/Game/Path") == "Not/Game/Path"
 
 
 def test_is_valid_unreal_asset_path_requires_game_prefix() -> None:
     assert is_valid_unreal_asset_path("/Game/Foo/Bar.Bar") is True
+    assert is_valid_unreal_asset_path("/Game/Trees/Spruce/Parts/SK_Twig01.SK_Twig01") is True
     assert is_valid_unreal_asset_path("/Engine/Foo/Bar.Bar") is False
     assert is_valid_unreal_asset_path("Game/Foo/Bar.Bar") is False
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        '/Game/Foo/Bar"\n    custom token injected = "yes',
+        "/Game/Foo/@Bar.Bar",
+        "/Game/Foo/../Bar.Bar",
+        "/Game/Foo//Bar.Bar",
+        r"/Game/Foo\Bar.Bar",
+        "/Game/Foo/Bar Bar.Bar",
+        "/Game/Foo/{Bar}.Bar",
+    ],
+)
+def test_is_valid_unreal_asset_path_rejects_usda_delimiters_controls_and_traversal(path: str) -> None:
+    assert is_valid_unreal_asset_path(normalize_unreal_asset_path(path)) is False
 
 
 def test_normalize_prototype_source_key_preserves_current_mesh_alias_rules() -> None:

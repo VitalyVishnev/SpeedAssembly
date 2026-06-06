@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
-
 from .dynamic_wind import build_dynamic_wind_data, write_dynamic_wind_json
 from .models import DynamicWindData, DynamicWindSimulationGroup, Joint, WindJsonResult
 from .skeleton_rules import joint_name_from_bone_id, parse_generator_label
+from .xml_reader import iterparse_source_xml
 
 
 def inspect_wind_data(input_path: str, is_ground_cover: bool = False) -> DynamicWindData:
@@ -41,7 +40,7 @@ def generate_wind_json(
 
 def _load_wind_skeleton(input_path: str) -> tuple[Joint, ...]:
     joints: list[Joint] = []
-    for _event, elem in ET.iterparse(input_path, events=("end",)):
+    for _event, elem in iterparse_source_xml(input_path, events=("end",)):
         if elem.tag != "Bone":
             continue
         raw_bone_id = elem.attrib.get("ID")

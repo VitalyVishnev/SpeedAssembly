@@ -345,11 +345,13 @@ def test_qt_global_settings_popup_saves_cache_limits_and_sweeps(monkeypatch, qtb
     assert dialog.isVisible()
     dialog.max_size_spin.setValue(12)
     dialog.max_age_spin.setValue(3)
+    dialog.debug_trace_checkbox.setChecked(True)
     qtbot.mouseClick(dialog.apply_button, Qt.MouseButton.LeftButton)
 
     saved = load_gui_settings(settings_path)
     assert saved.fbx_cache_max_size_gb == 12
     assert saved.fbx_cache_max_age_days == 3
+    assert saved.debug_trace_enabled is True
     assert sweep_calls[-1]["max_bytes"] == 12 * 1024 * 1024 * 1024
     assert sweep_calls[-1]["max_age_seconds"] == 3 * 24 * 60 * 60
 

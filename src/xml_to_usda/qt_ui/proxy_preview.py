@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 from ..models import GeometryBuffer, Vector3
 from ..proxy_mesh_service import (
     DEFAULT_PROXY_POLYCOUNT,
+    MAX_PROXY_DENSITY_RESOLUTION,
     PROXY_METHOD_DENSITY_FIELD,
     ProxyMeshResult,
     ProxyMeshSettings,
@@ -154,7 +155,7 @@ class ProxyPreviewDialog(QDialog):
         self.density_resolution_slider, self.density_resolution_spin = _build_int_slider_row(
             settings_panel,
             minimum=2,
-            maximum=256,
+            maximum=MAX_PROXY_DENSITY_RESOLUTION,
             value=int(settings.density_resolution),
             step=1,
         )

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from itertools import islice
 from pathlib import Path
 
+from .asset_paths import is_valid_unreal_asset_path
 from .job_control import emit_telemetry, throw_if_cancelled
 from .models import (
     AuthoredAssemblyPartInstance,
@@ -1222,12 +1223,13 @@ def _render_base_animation(
 def _render_external_instancer_prototype(prototype: Prototype, contract: UeSchemaContract) -> str:
     if not prototype.mesh_asset_path:
         raise ValueError(f"Prototype {prototype.identity.prim_name} is missing Unreal asset path.")
+    mesh_asset_path = _format_unreal_token_literal(prototype.mesh_asset_path)
     return f'''def Xform "{prototype.identity.prim_name}" (
     prepend apiSchemas = ["{contract.external_ref_api}"]
     kind = "component"
 )
 {{
-    uniform token unreal:naniteAssembly:meshAssetPath = "{prototype.mesh_asset_path}"
+    uniform token unreal:naniteAssembly:meshAssetPath = {mesh_asset_path}
 }}'''
 
 
@@ -1404,14 +1406,30 @@ def _render_unreal_material_output(material: MaterialSpec, root_prim_name: str |
     material_name = _material_prim_name(material)
     shader_name = _material_unreal_shader_name(material)
     material_prefix = f"/{root_prim_name}" if root_prim_name else ""
+    source_asset = _format_unreal_asset_literal(material.ue_asset_path)
     return f'''token outputs:unreal:surface.connect = <{material_prefix}/Materials/{material_name}/{shader_name}.outputs:out>
 
 def Shader "{shader_name}"
 {{
     uniform token info:implementationSource = "sourceAsset"
-    uniform asset info:unreal:sourceAsset = @{material.ue_asset_path}@
+    uniform asset info:unreal:sourceAsset = {source_asset}
     token outputs:out
 }}'''
+
+
+def _format_unreal_token_literal(path: str) -> str:
+    _require_valid_unreal_asset_path(path)
+    return f'"{path}"'
+
+
+def _format_unreal_asset_literal(path: str) -> str:
+    _require_valid_unreal_asset_path(path)
+    return f"@{path}@"
+
+
+def _require_valid_unreal_asset_path(path: str) -> None:
+    if not is_valid_unreal_asset_path(path):
+        raise ValueError(f"Invalid Unreal Asset Path for USDA authoring: {path!r}")
 
 
 def _material_diffuse_color(material: MaterialSpec) -> str:

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .runtime_paths import RuntimeCleanupSummary, RuntimePaths, capture_runtime_context
+from .runtime_trace import rotated_trace_paths, trace_path_for_settings_dir
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,8 @@ class DiagnosticsBundleRequest:
     bundle_path: Path
     settings_path: Path
     runtime_log_path: Path | None = None
+    trace_log_path: Path | None = None
+    smoke_artifact_dir: Path | None = None
     build_info_path: Path | None = None
     jobs_root: Path | None = None
     active_preset_name: str = ""
@@ -56,6 +59,8 @@ def build_diagnostics_bundle_request(
         bundle_path=bundle_path,
         settings_path=settings_path,
         runtime_log_path=runtime_paths.settings_dir / "gui_runtime.log",
+        trace_log_path=trace_path_for_settings_dir(runtime_paths.settings_dir),
+        smoke_artifact_dir=runtime_paths.cache_root / "smoke",
         build_info_path=build_info_path if build_info_path is not None else default_build_info_path(),
         jobs_root=runtime_paths.jobs_root,
         active_preset_name=active_preset_name,
@@ -83,6 +88,13 @@ def export_diagnostics_bundle(request: DiagnosticsBundleRequest) -> Path:
             archive_name="logs/gui_runtime.log",
             missing_name="logs/gui_runtime_missing.txt",
         )
+        _write_file_or_note(
+            archive,
+            source_path=request.trace_log_path,
+            archive_name="logs/gui_trace.jsonl",
+            missing_name="logs/gui_trace_missing.txt",
+        )
+        _write_rotated_trace_logs(archive, request.trace_log_path)
         _write_text(archive, "logs/in_app_log.txt", request.in_app_log_text.strip() or "No in-app log entries.")
         _write_file_or_note(
             archive,
@@ -98,6 +110,7 @@ def export_diagnostics_bundle(request: DiagnosticsBundleRequest) -> Path:
             missing_name="runtime/latest_job_manifest_missing.txt",
         )
         _write_json(archive, "runtime/runtime_summary.json", _build_runtime_summary(request))
+        _write_smoke_artifacts(archive, request.smoke_artifact_dir)
 
     return bundle_path
 
@@ -125,6 +138,8 @@ def _build_runtime_summary(request: DiagnosticsBundleRequest) -> dict[str, objec
         "selected_output_path": request.selected_output_path,
         "settings_path": str(request.settings_path),
         "runtime_log_path": str(request.runtime_log_path) if request.runtime_log_path else "",
+        "trace_log_path": str(request.trace_log_path) if request.trace_log_path else "",
+        "smoke_artifact_dir": str(request.smoke_artifact_dir) if request.smoke_artifact_dir else "",
         "build_info_path": str(request.build_info_path) if request.build_info_path else "",
         "jobs_root": str(request.jobs_root) if request.jobs_root else "",
         "runtime_context": capture_runtime_context(),
@@ -142,6 +157,24 @@ def _latest_job_manifest(jobs_root: Path | None) -> Path | None:
     if not manifests:
         return None
     return max(manifests, key=lambda path: (_safe_mtime(path), path.parent.name))
+
+
+def _write_rotated_trace_logs(archive: zipfile.ZipFile, trace_log_path: Path | None) -> None:
+    if trace_log_path is None:
+        return
+    settings_dir = Path(trace_log_path).parent
+    for path in rotated_trace_paths(settings_dir):
+        if path.exists():
+            archive.write(path, f"logs/{path.name}")
+
+
+def _write_smoke_artifacts(archive: zipfile.ZipFile, smoke_artifact_dir: Path | None) -> None:
+    if smoke_artifact_dir is None or not Path(smoke_artifact_dir).exists():
+        _write_text(archive, "smoke/smoke_artifacts_missing.txt", f"Missing local artifact: {smoke_artifact_dir or '<not configured>'}")
+        return
+    for path in sorted(Path(smoke_artifact_dir).iterdir(), key=lambda candidate: candidate.name):
+        if path.is_file():
+            archive.write(path, f"smoke/{path.name}")
 
 
 def _safe_mtime(path: Path) -> float:

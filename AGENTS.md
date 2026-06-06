@@ -44,10 +44,11 @@ If theory and UE behavior disagree, UE behavior wins.
 - Keep side effects at the edges. Keep core transformation logic deterministic and inspectable.
 - Minimize hidden mutable state.
 - If Goal is active, do not finish goal after first iteration.
-- After all code changes run build: "$ & '.\scripts\build_qt_gui_exe.cmd' -Package"
+- After all code changes run build: "$ & '.\scripts\build_qt_gui_exe.cmd' -Package"; packaged high-risk smoke is part of this gate. If `-SkipSmoke` is used, report the reason explicitly.
 - Don't use unnecessary words, talk short and professional.
 - не делай костыли, сделай сразу систему так, чтобы работала. Чтобы не пришлось переделывать
 - переиспользуй готовые решения, которые есть в проекте, не изобретай велосипед
+- for subagents use GPT-5.4 mini (medium)
 
 ## Simplicity and Architecture Requirements
 

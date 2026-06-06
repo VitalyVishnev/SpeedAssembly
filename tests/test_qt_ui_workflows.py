@@ -1152,6 +1152,15 @@ def test_qt_window_opens_fracture_preview_from_geometry_tab(monkeypatch, qtbot, 
     assert window._fracture_preview_dialog.color_strength_spin.value() == pytest.approx(0.92)
     assert window._fracture_preview_dialog.viewport.matcap_tint_strength == pytest.approx(0.92)
 
+    trace_text = (tmp_path / "gui_trace.jsonl").read_text(encoding="utf-8")
+    assert '"kind":"ui.action"' in trace_text
+    assert '"widget":"Preview Fracturing"' in trace_text
+    assert '"kind":"job.start"' in trace_text
+    assert '"job":"fracture_preview"' in trace_text
+    assert '"kind":"worker.spawn"' in trace_text
+    assert '"worker":"fracture_preview"' in trace_text
+    assert '"kind":"viewport.upload"' in trace_text
+
 
 def test_qt_window_opens_fracture_preview_shell_while_worker_is_running(monkeypatch, qtbot, tmp_path) -> None:
     class _RunningProcess:

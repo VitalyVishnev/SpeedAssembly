@@ -110,6 +110,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
         ),
         fbx_cache_max_size_gb=42,
         fbx_cache_max_age_days=7,
+        debug_trace_enabled=True,
     )
 
     save_gui_settings(settings_path, snapshot)
@@ -131,6 +132,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert payload["proxy_mesh_settings"]["base_mesh_priority"] == 0.22
     assert payload["fbx_cache_max_size_gb"] == 42
     assert payload["fbx_cache_max_age_days"] == 7
+    assert payload["debug_trace_enabled"] is True
     assert payload["part_mesh_settings"][0]["fbx_material_slot_overrides"] == [
         {
             "slot_name": "Bark",
@@ -155,6 +157,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert restored.material_policy == snapshot.material_policy
     assert restored.fbx_cache_max_size_gb == 42
     assert restored.fbx_cache_max_age_days == 7
+    assert restored.debug_trace_enabled is True
     assert restored.single_material_path == snapshot.single_material_path
     assert restored.wind_group_settings == snapshot.wind_group_settings
     assert restored.base_material_settings == snapshot.base_material_settings
@@ -180,6 +183,23 @@ def test_load_gui_settings_uses_fbx_cache_defaults_for_legacy_payload(tmp_path: 
 
     assert restored.fbx_cache_max_size_gb == 20
     assert restored.fbx_cache_max_age_days == 14
+
+
+def test_load_gui_settings_clamps_imported_proxy_density_to_supported_cap(tmp_path: Path) -> None:
+    settings_path = tmp_path / "gui_settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "schema_version": GUI_SETTINGS_SCHEMA_VERSION,
+                "proxy_mesh_settings": {"density_resolution": 999999},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    restored = load_gui_settings(settings_path)
+
+    assert restored.proxy_mesh_settings.density_resolution == 256
 
 
 def test_save_gui_settings_preserves_base_material_udim_settings(tmp_path: Path) -> None:

@@ -35,6 +35,28 @@ def test_output_resolution_supports_batch_directory_and_template(tmp_path: Path)
     assert render_output_file_name(Path("SimpleTree_01.xml"), "{stem}_generated") == "SimpleTree_01_generated.usda"
 
 
+@pytest.mark.parametrize(
+    "template",
+    [
+        "../outside",
+        "nested/{stem}",
+        r"nested\{stem}",
+        "C:/outside/{stem}",
+        r"C:\outside\{stem}",
+        "..",
+    ],
+)
+def test_output_resolution_rejects_batch_template_paths(tmp_path: Path, template: str) -> None:
+    request = ConversionRequest(
+        input_paths=("a.xml", "b.xml"),
+        output_directory=str(tmp_path),
+        output_naming_template=template,
+    )
+
+    with pytest.raises(ValueError, match="Output naming template must produce a USDA filename"):
+        resolve_output_path(request, "D:/trees/SimpleTree_01.xml")
+
+
 def test_output_resolution_rejects_writes_inside_vault() -> None:
     illegal_output = REPO_ROOT / "vault" / "notes" / "illegal_output.usda"
 

@@ -33,7 +33,7 @@ from .models import (
     UdimMaterialSetting,
     ValidationIssue,
 )
-from .output_resolution import ensure_output_path_allowed, render_output_file_name
+from .output_resolution import ensure_output_path_allowed, render_output_file_name, resolve_output_file_in_directory
 
 
 @dataclass(frozen=True)
@@ -236,7 +236,10 @@ def _request_output_path(request: FractureExportRequest, input_path: str) -> Pat
     if request.output_path:
         return Path(request.output_path)
     if request.output_directory:
-        return Path(request.output_directory) / render_output_file_name(Path(input_path), request.output_naming_template)
+        return resolve_output_file_in_directory(
+            Path(request.output_directory),
+            render_output_file_name(Path(input_path), request.output_naming_template),
+        )
     return Path(input_path).with_suffix(".usda")
 
 

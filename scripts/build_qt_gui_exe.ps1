@@ -3,7 +3,8 @@ param(
     [switch]$Package,
     [switch]$Clean,
     [switch]$OpenOutput,
-    [switch]$SkipBootstrap
+    [switch]$SkipBootstrap,
+    [switch]$SkipSmoke
 )
 
 $ErrorActionPreference = 'Stop'
@@ -216,6 +217,25 @@ try {
         }
         Write-Host "Built: $exePath"
         Write-Host "Release zip: $bundlePath"
+        if (-not $SkipSmoke) {
+            $smokeDir = Join-Path $distPath 'smoke'
+            $smokeReportPath = Join-Path $smokeDir 'smoke_report.json'
+            $smokeStdoutPath = Join-Path $smokeDir 'smoke_stdout.txt'
+            $smokeStderrPath = Join-Path $smokeDir 'smoke_stderr.txt'
+            $smokeInputPath = Join-Path $repoRoot 'samples\speedtree\simple_tree\variants\SimpleTree_01.xml'
+            $smokeOutputPath = Join-Path $smokeDir 'SimpleTree_01.usda'
+            New-Item -ItemType Directory -Force -Path $smokeDir | Out-Null
+            Write-Host "Running packaged high-risk smoke..."
+            # smoke --scenario high-risk
+            & $exePath smoke --scenario high-risk --input $smokeInputPath --output $smokeOutputPath --report $smokeReportPath --timeout-ms 180000 > $smokeStdoutPath 2> $smokeStderrPath
+            if ($LASTEXITCODE -ne 0) {
+                throw "Packaged high-risk smoke failed. Report: $smokeReportPath"
+            }
+            Write-Host "Packaged high-risk smoke passed: $smokeReportPath"
+        }
+        else {
+            Write-Host "Skipping packaged smoke because -SkipSmoke was supplied."
+        }
         if ($OpenOutput) {
             Invoke-Item $distPath
         }

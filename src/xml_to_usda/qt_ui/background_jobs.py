@@ -137,6 +137,7 @@ class QtBackgroundJobsController:
             self._conversion_process = process
             self._conversion_queue = message_queue
             self._conversion_cancel_event = cancel_event
+            self._trace_worker("worker.spawn", "conversion", self._worker_queue_payload(message_queue))
             self._ensure_polling()
             return
 
@@ -303,6 +304,7 @@ class QtBackgroundJobsController:
         self._fracture_export_process = process
         self._fracture_export_queue = message_queue
         self._fracture_export_cancel_event = cancel_event
+        self._trace_worker("worker.spawn", "fracture_export", self._worker_queue_payload(message_queue))
         self._window._update_action_state()
         self._ensure_polling()
 
@@ -324,6 +326,7 @@ class QtBackgroundJobsController:
         self._fracture_preview_process = process
         self._fracture_preview_queue = message_queue
         self._fracture_preview_cancel_event = cancel_event
+        self._trace_worker("worker.spawn", "fracture_preview", self._worker_queue_payload(message_queue))
         self._window._update_action_state()
         self._ensure_polling()
 
@@ -355,6 +358,7 @@ class QtBackgroundJobsController:
         self._proxy_mesh_process = process
         self._proxy_mesh_queue = message_queue
         self._proxy_mesh_cancel_event = cancel_event
+        self._trace_worker("worker.spawn", "proxy_mesh", self._worker_queue_payload(message_queue))
         return True
 
     def _run_proxy_mesh_export_worker(self, *, request, settings) -> None:
@@ -578,6 +582,7 @@ class QtBackgroundJobsController:
 
     def _handle_async_process_crash(self) -> None:
         exit_code = self._conversion_process.exitcode if self._conversion_process is not None else None
+        self._trace_worker("worker.crash", "conversion", {"exit_code": exit_code})
         crash_message = f"Conversion worker process crashed unexpectedly (exit code {exit_code})"
         if self._last_conversion_telemetry is not None:
             crash_message = (
@@ -607,6 +612,11 @@ class QtBackgroundJobsController:
         request = self._conversion_request
         self._window._set_conversion_running(False)
         error_traceback = self._conversion_error_traceback
+        self._trace_worker(
+            "worker.result",
+            "conversion",
+            {"error": bool(job_result.error_message), "cancelled": bool(job_result.cancelled)},
+        )
         self.close_conversion_process()
 
         if job_result.error_message:
@@ -647,6 +657,7 @@ class QtBackgroundJobsController:
 
     def _handle_proxy_mesh_process_crash(self) -> None:
         exit_code = self._proxy_mesh_process.exitcode if self._proxy_mesh_process is not None else None
+        self._trace_worker("worker.crash", "proxy_mesh", {"exit_code": exit_code})
         if self._proxy_mesh_retry_count < 1 and self._proxy_mesh_request is not None and self._proxy_mesh_settings is not None:
             request = self._proxy_mesh_request
             settings = self._proxy_mesh_settings
@@ -668,6 +679,7 @@ class QtBackgroundJobsController:
 
     def _handle_proxy_mesh_job_result(self, job_result) -> None:
         error_traceback = self._proxy_mesh_error_traceback
+        self._trace_worker("worker.result", "proxy_mesh", {"error": bool(job_result.error_message)})
         self.close_proxy_mesh_process()
         self._window._update_action_state()
         if job_result.error_message:
@@ -692,6 +704,7 @@ class QtBackgroundJobsController:
 
     def _handle_fracture_export_process_crash(self) -> None:
         exit_code = self._fracture_export_process.exitcode if self._fracture_export_process is not None else None
+        self._trace_worker("worker.crash", "fracture_export", {"exit_code": exit_code})
         crash_message = f"Fracture export worker process crashed unexpectedly (exit code {exit_code})"
         crash_message = f"{crash_message}\n{self._format_fracture_job_context(self._fracture_export_request, self._fracture_export_settings)}"
         crash_message = f"{crash_message}\n{self._format_worker_file_context(self._fracture_export_queue)}"
@@ -701,6 +714,7 @@ class QtBackgroundJobsController:
         self._handle_fracture_export_error(crash_message)
 
     def _handle_fracture_export_result(self, result) -> None:
+        self._trace_worker("worker.result", "fracture_export", {"result": result is not None})
         self.close_fracture_export_process()
         self._window._update_action_state()
         if result is None:
@@ -714,6 +728,7 @@ class QtBackgroundJobsController:
 
     def _handle_fracture_preview_process_crash(self) -> None:
         exit_code = self._fracture_preview_process.exitcode if self._fracture_preview_process is not None else None
+        self._trace_worker("worker.crash", "fracture_preview", {"exit_code": exit_code})
         crash_message = f"Fracture preview worker process crashed unexpectedly (exit code {exit_code})"
         crash_message = f"{crash_message}\n{self._format_fracture_job_context(self._fracture_preview_request, self._fracture_preview_settings)}"
         crash_message = f"{crash_message}\n{self._format_worker_file_context(self._fracture_preview_queue)}"
@@ -782,6 +797,7 @@ class QtBackgroundJobsController:
         return "\n".join(lines)
 
     def _handle_fracture_preview_result(self, result) -> None:
+        self._trace_worker("worker.result", "fracture_preview", {"result": result is not None})
         self.close_fracture_preview_process()
         self._window._update_action_state()
         if result is None:
@@ -795,6 +811,7 @@ class QtBackgroundJobsController:
 
     def _handle_fracture_preview_error(self, message: str) -> None:
         error_traceback = self._fracture_preview_error_traceback
+        self._trace_worker("worker.error", "fracture_preview", {"message": message})
         self.close_fracture_preview_process()
         self._window._update_action_state()
         if hasattr(self._window, "_handle_fracture_preview_error_message"):
@@ -811,6 +828,7 @@ class QtBackgroundJobsController:
 
     def _handle_fracture_export_error(self, message: str) -> None:
         error_traceback = self._fracture_export_error_traceback
+        self._trace_worker("worker.error", "fracture_export", {"message": message})
         self.close_fracture_export_process()
         self._window._update_action_state()
         log_message = message
@@ -868,3 +886,24 @@ class QtBackgroundJobsController:
         self._fracture_preview_settings = None
         self._fracture_preview_error_traceback = None
         self._fracture_preview_result_received = False
+
+    def _trace_worker(self, kind: str, worker: str, data: dict[str, object] | None = None) -> None:
+        if hasattr(self._window, "_trace"):
+            self._window._trace(kind, worker=worker, data=data or {})
+
+    def _worker_queue_payload(self, queue) -> dict[str, object]:
+        payload: dict[str, object] = {}
+        for label in ("request_path", "result_path", "error_path"):
+            path = getattr(queue, label, None)
+            if path is None:
+                continue
+            try:
+                exists = path.exists()
+                size = path.stat().st_size if exists else None
+            except OSError:
+                exists = False
+                size = None
+            payload[label] = str(path)
+            payload[f"{label}_exists"] = exists
+            payload[f"{label}_size"] = size
+        return payload

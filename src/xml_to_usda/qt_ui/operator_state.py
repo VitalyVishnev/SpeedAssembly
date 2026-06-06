@@ -86,6 +86,9 @@ def save_operator_state(
         base_material_settings=previous_snapshot.base_material_settings,
         part_mesh_settings=previous_snapshot.part_mesh_settings,
         proxy_mesh_settings=previous_snapshot.proxy_mesh_settings,
+        fbx_cache_max_size_gb=previous_snapshot.fbx_cache_max_size_gb,
+        fbx_cache_max_age_days=previous_snapshot.fbx_cache_max_age_days,
+        debug_trace_enabled=previous_snapshot.debug_trace_enabled,
         active_preset_name=previous_snapshot.active_preset_name,
         presets=previous_snapshot.presets,
     )
@@ -133,6 +136,7 @@ def save_nested_input_settings(
         proxy_mesh_settings=proxy_mesh_settings or previous_snapshot.proxy_mesh_settings,
         fbx_cache_max_size_gb=previous_snapshot.fbx_cache_max_size_gb,
         fbx_cache_max_age_days=previous_snapshot.fbx_cache_max_age_days,
+        debug_trace_enabled=previous_snapshot.debug_trace_enabled,
         active_preset_name=previous_snapshot.active_preset_name,
         presets=previous_snapshot.presets,
     )

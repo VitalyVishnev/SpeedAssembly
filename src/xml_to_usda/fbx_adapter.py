@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from array import array
 from dataclasses import dataclass
@@ -374,6 +375,8 @@ def get_fbx_backend(fbx_path: str) -> FbxBackend:
     if _BACKEND_OVERRIDE is not None:
         return _BACKEND_OVERRIDE
     if Path(fbx_path).suffix.lower() == ".json":
+        if os.environ.get("XML_TO_USDA_ENABLE_JSON_GEOMETRY_BACKEND") != "1":
+            raise FbxImportError("JSON geometry backend is test-only and is not enabled for production prototype sources.")
         return JsonGeometryBackend()
     return AutodeskFbxBackend()
 

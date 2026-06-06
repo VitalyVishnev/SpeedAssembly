@@ -17,6 +17,7 @@ from ..worker_commands import (
     FRACTURE_WORKER_COMMAND,
     PROXY_MESH_WORKER_COMMAND,
 )
+from .smoke import SMOKE_COMMAND
 
 WINDOWS_APP_USER_MODEL_ID = "XMLtoUSDAConverter.XMLtoUSDAConverter"
 
@@ -61,6 +62,10 @@ def main(argv: list[str] | None = None) -> int:
 
         request_path = argv[argv.index("--request") + 1] if "--request" in argv else ""
         return run_fracture_worker_request_file(request_path)
+    if argv and argv[0] == SMOKE_COMMAND:
+        from .smoke import run_smoke_cli
+
+        return run_smoke_cli(argv[1:])
 
     parser = build_parser()
     args = parser.parse_args(argv)

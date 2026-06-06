@@ -19,8 +19,38 @@ What to know:
 Practical rule:
 
 - if the standalone build ever looks suspicious, rerun `.\scripts\build_qt_gui_exe.cmd -Package -Clean`
+- `.\scripts\build_qt_gui_exe.cmd -Package` now runs packaged high-risk smoke by default; check `dist-next\smoke\smoke_report.json` before treating a package as validated
 - do not trust an older `dist-next\XMLtoUSDAConverter.exe` timestamp as proof that the current source was packaged
 - check the GUI `Log` after startup: the top `Build info:` block is sourced from `dist-next\build_info.json` and is now the fastest way to confirm which release build you actually launched
+
+## Pytest passes but packaged GUI crashes
+
+Symptom:
+
+- automated tests or CLI checks pass
+- the packaged Qt UI crashes after a real click, preview, or conversion
+
+What to check first:
+
+1. Rebuild with `.\scripts\build_qt_gui_exe.cmd -Package`; do not use `-SkipSmoke` unless the bypass is intentional.
+2. Open `dist-next\smoke\smoke_report.json` and identify the first failed scenario/check.
+3. Export a diagnostics bundle from the Support dialog, or inspect the local files directly:
+   - `~/.xml_to_usda/gui_trace.jsonl`
+   - `~/.xml_to_usda/gui_runtime.log`
+   - `%LOCALAPPDATA%/XMLtoUSDAConverter/cache/jobs/*/job_manifest.json`
+4. Compare trace milestones with runtime log milestones.
+
+Interpretation:
+
+- if Fracture Preview has `result received` but lacks `viewport mesh ready`, the failure is in the Qt/OpenGL viewport adapter, not in fracture planning
+- if the trace stops before worker result, inspect worker request/result/error paths and the exit code in the error dialog or runtime log
+- if launcher smoke passes but packaged smoke fails, compare `runtime_context` and `build_info.json` before changing conversion logic
+
+Practical rule:
+
+- `gui_trace.jsonl` records operator actions and runtime milestones; `gui_runtime.log` remains the human-readable traceback log
+- compact trace is always on; enable `Debug Trace` in the title-bar settings dialog before reproducing hard crashes that need expanded settings and runtime details
+- packaged smoke reduces the CLI/UI gap, but it does not replace manual UE import validation
 
 ## Runtime temp files seem to accumulate
 

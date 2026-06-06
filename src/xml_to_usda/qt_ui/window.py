@@ -18,6 +18,7 @@ from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSignalBlocker, QSize,
 from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QLayout,
+    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -108,6 +109,7 @@ from .theme import (
     theme_to_payload,
     write_theme_payload,
 )
+from .trace import QtTraceLogger, trace_path_for_settings_dir
 
 
 @dataclass(frozen=True)
@@ -136,6 +138,21 @@ def _format_bytes(value: int) -> str:
             return f"{amount:.1f} {unit}" if unit != "B" else f"{int(amount)} B"
         amount /= 1024.0
     return f"{int(value)} B"
+
+
+def _widget_trace_name(widget: QWidget) -> str:
+    text = ""
+    if hasattr(widget, "text"):
+        try:
+            text = str(widget.text()).replace("\n", " ").strip()
+        except RuntimeError:
+            text = ""
+    if text:
+        return text
+    object_name = widget.objectName()
+    if object_name:
+        return object_name
+    return type(widget).__name__
 
 
 class PathLineEdit(QLineEdit):
@@ -473,8 +490,11 @@ class GlobalSettingsDialog(QDialog):
         self.max_age_spin.setObjectName("FbxCacheMaxAgeSpin")
         self.max_age_spin.setRange(1, 3650)
         self.max_age_spin.setSuffix(" days")
+        self.debug_trace_checkbox = QCheckBox("Debug Trace", self)
+        self.debug_trace_checkbox.setObjectName("DebugTraceCheckbox")
         controls.addRow("Max size", self.max_size_spin)
         controls.addRow("Max age", self.max_age_spin)
+        controls.addRow("Diagnostics", self.debug_trace_checkbox)
         layout.addLayout(controls)
 
         self.warning_label = QLabel("", self)
@@ -502,10 +522,18 @@ class GlobalSettingsDialog(QDialog):
         snapshot = self._window._operator_snapshot
         self.max_size_spin.setValue(snapshot.fbx_cache_max_size_gb)
         self.max_age_spin.setValue(snapshot.fbx_cache_max_age_days)
+        self.debug_trace_checkbox.setChecked(bool(snapshot.debug_trace_enabled))
         self.path_label.setText(str(self._window._fbx_payload_cache_root()))
 
     def set_controls_enabled(self, enabled: bool) -> None:
-        for widget in (self.max_size_spin, self.max_age_spin, self.apply_button, self.refresh_button, self.clear_button):
+        for widget in (
+            self.max_size_spin,
+            self.max_age_spin,
+            self.debug_trace_checkbox,
+            self.apply_button,
+            self.refresh_button,
+            self.clear_button,
+        ):
             widget.setEnabled(enabled)
 
     def refresh_cache_summary(self) -> None:
@@ -516,6 +544,7 @@ class GlobalSettingsDialog(QDialog):
         summary = self._window._apply_fbx_cache_settings(
             max_size_gb=self.max_size_spin.value(),
             max_age_days=self.max_age_spin.value(),
+            debug_trace_enabled=self.debug_trace_checkbox.isChecked(),
         )
         self._set_cache_summary(summary)
 
@@ -618,8 +647,24 @@ class MainWindow(QWidget):
         self._proxy_mesh_settings = self._operator_snapshot.proxy_mesh_settings
         self._conversion_mode = self._operator_state.conversion_mode.value
         self._runtime_paths = resolve_runtime_paths(
-            settings_dir=SETTINGS_DIR,
+            settings_dir=self._operator_settings_path.parent,
             settings_path=self._operator_settings_path,
+        )
+        self._trace_logger = QtTraceLogger(
+            trace_path_for_settings_dir(self._runtime_paths.settings_dir),
+            debug_enabled=self._operator_snapshot.debug_trace_enabled,
+        )
+        self._trace(
+            "app.start",
+            message="Qt shell startup",
+            data={
+                "debug_trace_enabled": self._operator_snapshot.debug_trace_enabled,
+                "settings_path": str(self._operator_settings_path),
+            },
+            debug_data={
+                "runtime_settings_dir": str(self._runtime_paths.settings_dir),
+                "runtime_cache_root": str(self._runtime_paths.cache_root),
+            },
         )
         self._runtime_cleanup_summary = sweep_stale_job_workspaces(self._runtime_paths)
         self._fbx_cache_startup_summary = self._sweep_fbx_cache()
@@ -649,6 +694,9 @@ class MainWindow(QWidget):
         self.setStyleSheet(build_stylesheet(self._theme))
 
         self._build_layout()
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
         self._install_resize_event_filters()
         self._apply_saved_state()
         self._apply_help_prompt_state()
@@ -736,6 +784,19 @@ class MainWindow(QWidget):
             child.setMouseTracking(True)
 
     def eventFilter(self, watched, event) -> bool:  # type: ignore[override]
+        if (
+            event.type() == QEvent.Type.MouseButtonRelease
+            and isinstance(watched, (QPushButton, QToolButton))
+            and watched.window() is self
+        ):
+            self._trace(
+                "ui.action",
+                action="button.click",
+                widget=_widget_trace_name(watched),
+                data={"enabled": watched.isEnabled()},
+            )
+        if isinstance(watched, QWidget) and watched.window() is not self:
+            return super().eventFilter(watched, event)
         if self.isMaximized():
             return super().eventFilter(watched, event)
 
@@ -1396,13 +1457,30 @@ class MainWindow(QWidget):
         self._append_fbx_cache_failures_to_log(summary)
         return summary
 
-    def _apply_fbx_cache_settings(self, *, max_size_gb: int, max_age_days: int) -> FbxPayloadCacheSummary:
+    def _apply_fbx_cache_settings(
+        self,
+        *,
+        max_size_gb: int,
+        max_age_days: int,
+        debug_trace_enabled: bool | None = None,
+    ) -> FbxPayloadCacheSummary:
         self._operator_snapshot = replace(
             self._operator_snapshot,
             fbx_cache_max_size_gb=max(1, int(max_size_gb)),
             fbx_cache_max_age_days=max(1, int(max_age_days)),
+            debug_trace_enabled=(
+                self._operator_snapshot.debug_trace_enabled
+                if debug_trace_enabled is None
+                else bool(debug_trace_enabled)
+            ),
         )
+        self._trace_logger = replace(self._trace_logger, debug_enabled=self._operator_snapshot.debug_trace_enabled)
         self._deps.save_gui_settings(self._operator_settings_path, self._operator_snapshot)
+        self._trace(
+            "settings.update",
+            message="Global settings saved",
+            data={"debug_trace_enabled": self._operator_snapshot.debug_trace_enabled},
+        )
         summary = self._sweep_fbx_cache()
         self._set_status("FBX cache settings saved.")
         self._append_log(
@@ -1509,6 +1587,12 @@ class MainWindow(QWidget):
             self._runtime_paths.settings_dir.mkdir(parents=True, exist_ok=True)
             with runtime_log_path.open("a", encoding="utf-8") as handle:
                 handle.write(text)
+        except OSError:
+            pass
+
+    def _trace(self, kind: str, **kwargs) -> None:
+        try:
+            self._trace_logger.log(kind, **kwargs)
         except OSError:
             pass
 
@@ -2048,6 +2132,22 @@ class MainWindow(QWidget):
                 )
             ),
         )
+        self._trace(
+            "job.start",
+            job="fracture_preview",
+            message="Fracture Preview requested",
+            data={
+                "input_path": request.input_path,
+                "output_path": request.output_path,
+                "method": settings.fracture.method,
+                "target_piece_count": settings.fracture.target_piece_count,
+                "preview_polycount": settings.final_polycount,
+            },
+            debug_data={
+                "preview_base_priority": settings.base_mesh_priority,
+                "preview_prototype_faces": settings.max_prototype_faces,
+            },
+        )
         dialog = FracturePreviewDialog(
             settings=settings,
             on_settings_changed=self._handle_fracture_preview_settings_changed,
@@ -2083,7 +2183,18 @@ class MainWindow(QWidget):
                 )
             ),
         )
+        self._trace(
+            "job.result",
+            job="fracture_preview",
+            message="Fracture Preview result received",
+            data={
+                "piece_count": preview.plan.actual_piece_count,
+                "prototype_count": len(preview.prototypes),
+                "instance_count": len(preview.instances),
+            },
+        )
         self._append_runtime_log("INFO Fracture Preview preparing viewport mesh")
+        self._trace("viewport.prepare", job="fracture_preview", message="Fracture Preview preparing viewport mesh")
         dialog.set_preview(preview)
         viewport_mesh = dialog.viewport_mesh
         if viewport_mesh is not None:
@@ -2097,6 +2208,17 @@ class MainWindow(QWidget):
                         f"logical_triangles={viewport_mesh.triangle_count}",
                     )
                 ),
+            )
+            self._trace(
+                "viewport.upload",
+                job="fracture_preview",
+                message="Fracture Preview viewport mesh ready",
+                data={
+                    "piece_count": viewport_mesh.piece_count,
+                    "instance_count": viewport_mesh.instance_count,
+                    "uploaded_triangles": viewport_mesh.uploaded_triangle_count,
+                    "logical_triangles": viewport_mesh.triangle_count,
+                },
             )
         self._set_status(f"Fracture Preview ready: {preview.plan.actual_piece_count} piece(s).")
         dialog.show()

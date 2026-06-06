@@ -19,12 +19,20 @@ def test_diagnostics_bundle_exports_local_reproduction_artifacts(tmp_path) -> No
     jobs_root.mkdir(parents=True)
     settings_path = settings_dir / "gui_settings.json"
     runtime_log_path = settings_dir / "gui_runtime.log"
+    trace_log_path = settings_dir / "gui_trace.jsonl"
+    rotated_trace_log_path = settings_dir / "gui_trace.1.jsonl"
+    smoke_artifact_dir = cache_root / "smoke"
     build_info_path = tmp_path / "dist-next" / "build_info.json"
     output_path = tmp_path / "exports" / "oak.usda"
     bundle_path = tmp_path / "support" / "diagnostics.zip"
 
     settings_path.write_text('{"active_preset_name": "Artist Preset"}', encoding="utf-8")
     runtime_log_path.write_text("Traceback line 1\nTraceback line 2", encoding="utf-8")
+    trace_log_path.write_text('{"kind":"ui.action"}\n', encoding="utf-8")
+    rotated_trace_log_path.write_text('{"kind":"app.start"}\n', encoding="utf-8")
+    smoke_artifact_dir.mkdir(parents=True)
+    (smoke_artifact_dir / "smoke_report.json").write_text('{"passed":true}', encoding="utf-8")
+    (smoke_artifact_dir / "smoke_stdout.txt").write_text("smoke ok", encoding="utf-8")
     build_info_path.parent.mkdir()
     build_info_path.write_text('{"build_mode": "package", "git_head": "abc123"}', encoding="utf-8")
     output_path.parent.mkdir()
@@ -42,6 +50,8 @@ def test_diagnostics_bundle_exports_local_reproduction_artifacts(tmp_path) -> No
             bundle_path=bundle_path,
             settings_path=settings_path,
             runtime_log_path=runtime_log_path,
+            trace_log_path=trace_log_path,
+            smoke_artifact_dir=smoke_artifact_dir,
             build_info_path=build_info_path,
             jobs_root=jobs_root,
             active_preset_name="Artist Preset",
@@ -58,10 +68,14 @@ def test_diagnostics_bundle_exports_local_reproduction_artifacts(tmp_path) -> No
         assert {
             "settings/gui_settings.json",
             "logs/gui_runtime.log",
+            "logs/gui_trace.jsonl",
+            "logs/gui_trace.1.jsonl",
             "logs/in_app_log.txt",
             "build/build_info.json",
             "runtime/runtime_summary.json",
             "runtime/latest_job_manifest.json",
+            "smoke/smoke_report.json",
+            "smoke/smoke_stdout.txt",
         }.issubset(names)
         summary = json.loads(archive.read("runtime/runtime_summary.json"))
         assert summary["active_preset_name"] == "Artist Preset"
@@ -69,6 +83,7 @@ def test_diagnostics_bundle_exports_local_reproduction_artifacts(tmp_path) -> No
         assert summary["runtime_summary"]["cache_root"] == str(cache_root)
         assert archive.read("runtime/latest_job_manifest.json") == b'{"job_id": "new"}'
         assert b"Traceback line 2" in archive.read("logs/gui_runtime.log")
+        assert b"ui.action" in archive.read("logs/gui_trace.jsonl")
 
 
 def test_diagnostics_bundle_request_builder_projects_runtime_context(tmp_path) -> None:
