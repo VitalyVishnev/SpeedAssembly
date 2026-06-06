@@ -695,7 +695,9 @@ class MatcapViewport(QOpenGLWidget):
         self._draw_grid(functions, projection * view)
         if self._program is None or self._vao is None or self._vertex_count <= 0:
             return
-        self._program.bind()
+        _prepare_opaque_mesh_draw(functions)
+        if not self._program.bind():
+            return
         _set_matcap_program_uniforms(
             self._program,
             functions=functions,
@@ -769,7 +771,10 @@ class MatcapViewport(QOpenGLWidget):
         self._vao.bind()
         self._vertex_buffer.bind()
         self._vertex_buffer.allocate(vertices.tobytes(), vertices.nbytes)
-        self._program.bind()
+        if not self._program.bind():
+            self._vertex_buffer.release()
+            self._vao.release()
+            return
         stride = 10 * 4
         position_location = self._program.attributeLocation("position")
         normal_location = self._program.attributeLocation("normal")
@@ -796,7 +801,10 @@ class MatcapViewport(QOpenGLWidget):
         self._grid_vao.bind()
         self._grid_buffer.bind()
         self._grid_buffer.allocate(vertices.tobytes(), vertices.nbytes)
-        self._grid_program.bind()
+        if not self._grid_program.bind():
+            self._grid_buffer.release()
+            self._grid_vao.release()
+            return
         stride = 4 * 4
         position_location = self._grid_program.attributeLocation("position")
         alpha_location = self._grid_program.attributeLocation("alpha")
@@ -815,7 +823,9 @@ class MatcapViewport(QOpenGLWidget):
         functions.glEnable(GL_BLEND)
         functions.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         functions.glLineWidth(1.35)
-        self._grid_program.bind()
+        if not self._grid_program.bind():
+            functions.glDisable(GL_BLEND)
+            return
         self._grid_program.setUniformValue("mvp", mvp)
         self._grid_vao.bind()
         functions.glDrawArrays(GL_LINES, 0, self._grid_vertex_count)
@@ -914,7 +924,20 @@ def _build_viewport_vertices(mesh: GeometryBuffer | None) -> np.ndarray:
             normal = _face_normal(triangle)
             for point_index, point in zip((indices[0], indices[index], indices[index + 1]), triangle):
                 color = colors[point_index]
-                vertices.extend((point.x, point.y, point.z, normal.x, normal.y, normal.z, color[0], color[1], color[2], color[3]))
+                vertices.extend(
+                    (
+                        point.x,
+                        point.y,
+                        point.z,
+                        normal.x,
+                        normal.y,
+                        normal.z,
+                        color[0],
+                        color[1],
+                        color[2],
+                        PROXY_MATCAP_TINT_STRENGTH,
+                    )
+                )
     return np.asarray(vertices, dtype=np.float32)
 
 
@@ -991,7 +1014,6 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
     if not program.addShaderFromSourceCode(
         QOpenGLShader.ShaderTypeBit.Fragment,
         """
-        uniform float pieceTintStrength;
         varying vec3 viewNormal;
         varying vec4 pieceColor;
         void main() {
@@ -1010,8 +1032,8 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
             color = pow(color, vec3(0.88));
             float luma = dot(color, vec3(0.299, 0.587, 0.114));
             vec3 tintedMatcap = pieceColor.rgb * clamp(0.28 + luma * 1.22, 0.0, 1.35);
-            color = mix(color, tintedMatcap, pieceTintStrength);
-            gl_FragColor = vec4(color, pieceColor.a);
+            color = mix(color, tintedMatcap, clamp(pieceColor.a, 0.0, 1.0));
+            gl_FragColor = vec4(color, 1.0);
         }
         """,
     ):
@@ -1029,11 +1051,15 @@ def _set_matcap_program_uniforms(
     normal_matrix,
     piece_tint_strength: float,
 ) -> None:
+    _ = functions, piece_tint_strength
     program.setUniformValue("mvp", mvp)
     program.setUniformValue("normalMatrix", normal_matrix)
-    tint_location = program.uniformLocation("pieceTintStrength")
-    if tint_location >= 0:
-        functions.glUniform1f(tint_location, float(piece_tint_strength))
+
+
+def _prepare_opaque_mesh_draw(functions) -> None:
+    functions.glDisable(GL_BLEND)
+    functions.glEnable(GL_DEPTH_TEST)
+    functions.glDepthMask(True)
 
 
 def _build_grid_program() -> QOpenGLShaderProgram:

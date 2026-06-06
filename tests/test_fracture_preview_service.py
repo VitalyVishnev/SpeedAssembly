@@ -11,6 +11,7 @@ from xml_to_usda.fracture_preview_service import (
     generate_fracture_preview_from_source_request,
 )
 from xml_to_usda.fracture_service import FractureError, FractureSettings
+from xml_to_usda.fracture_service import FRACTURE_METHOD_MANUAL_PINNED_BONES
 from xml_to_usda.models import (
     ConversionRequest,
     ExportMetadata,
@@ -179,6 +180,52 @@ def test_fracture_preview_uses_plan_membership_stable_colors_and_simplified_geom
     assert tuple(first.prototypes) == ("Mesh_1",)
     assert first.prototypes["Mesh_1"].mesh.face_count == 1
     assert first.plan.actual_piece_count == 3
+
+
+def test_fracture_preview_includes_bone_overlay_segments_and_selected_manual_cuts() -> None:
+    source_tree = _tree()
+    skeleton = list(source_tree.skeleton)
+    skeleton[2] = replace(
+        skeleton[2],
+        bind_transform=Matrix4d.from_translation(Vector3(0.0, 8.0, 0.0)),
+        rest_transform=Matrix4d.from_translation(Vector3(0.0, 1.0, 0.0)),
+    )
+    result = generate_fracture_preview(
+        replace(source_tree, skeleton=tuple(skeleton)),
+        FracturePreviewSettings(
+            fracture=FractureSettings(
+                method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
+                target_piece_count=3,
+                output_stem="Oak",
+                pinned_cut_joint_tokens=("bone_003",),
+            ),
+            max_base_faces_per_piece=1,
+            max_prototype_faces=1,
+        ),
+    )
+
+    assert tuple((segment.parent_joint_token, segment.child_joint_token) for segment in result.bone_segments) == (
+        ("root", "bone_001"),
+        ("bone_001", "bone_002"),
+        ("bone_001", "bone_003"),
+        ("bone_003", "bone_004"),
+    )
+    assert tuple(segment.child_joint_token for segment in result.bone_segments if segment.is_selected_cut) == ("bone_003",)
+    assert tuple(cut.joint_token for cut in result.plan.selected_cut_sites) == ("bone_001", "bone_003")
+    bone_002_segment = next(segment for segment in result.bone_segments if segment.child_joint_token == "bone_002")
+    assert (bone_002_segment.parent_position.x, bone_002_segment.parent_position.y, bone_002_segment.parent_position.z) == pytest.approx(
+        (0.0, 1.0, 0.0)
+    )
+    assert (bone_002_segment.child_position.x, bone_002_segment.child_position.y, bone_002_segment.child_position.z) == pytest.approx(
+        (0.0, 8.0, 0.0)
+    )
+    piece_color_by_joint = {
+        joint_token: piece.color
+        for piece in result.pieces
+        for joint_token in piece.piece.joint_tokens
+    }
+    bone_003_segment = next(segment for segment in result.bone_segments if segment.child_joint_token == "bone_003")
+    assert bone_003_segment.color == piece_color_by_joint["bone_003"]
 
 
 def test_fracture_preview_distributes_target_polycount_between_base_and_repeated_parts() -> None:

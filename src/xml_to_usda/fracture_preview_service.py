@@ -91,12 +91,23 @@ class FracturePreviewInstance:
 
 
 @dataclass(frozen=True)
+class FracturePreviewBoneSegment:
+    parent_joint_token: str
+    child_joint_token: str
+    parent_position: Vector3
+    child_position: Vector3
+    is_selected_cut: bool = False
+    color: Color4 = Color4(0.64, 0.82, 0.95, 1.0)
+
+
+@dataclass(frozen=True)
 class FracturePreviewResult:
     plan: FracturePlan
     pieces: tuple[FracturePreviewPiece, ...]
     prototypes: dict[str, FracturePreviewPrototype]
     instances: tuple[FracturePreviewInstance, ...]
     diagnostics: tuple[ValidationIssue, ...]
+    bone_segments: tuple[FracturePreviewBoneSegment, ...] = ()
 
 
 def prepare_fracture_preview_source_request(
@@ -168,12 +179,14 @@ def generate_fracture_preview(
     pieces = tuple(_preview_piece(model, piece, base_face_budgets[piece.index]) for piece in plan.pieces)
     prototypes = _preview_prototypes(model, plan, prototype_budgets)
     instances = _preview_instances(model, pieces)
+    bone_segments = _preview_bone_segments(model, resolved_settings.fracture, pieces)
     return FracturePreviewResult(
         plan=plan,
         pieces=pieces,
         prototypes=prototypes,
         instances=instances,
         diagnostics=plan.diagnostics,
+        bone_segments=bone_segments,
     )
 
 
@@ -396,6 +409,37 @@ def _preview_instance(
         scale=part.scale,
         color=preview_piece.color,
     )
+
+
+def _preview_bone_segments(
+    model: CanonicalTreeModel,
+    settings: FractureSettings,
+    pieces: tuple[FracturePreviewPiece, ...],
+) -> tuple[FracturePreviewBoneSegment, ...]:
+    joints_by_name = {joint.name: joint for joint in model.skeleton}
+    selected_tokens = set(settings.pinned_cut_joint_tokens)
+    color_by_joint_token: dict[str, Color4] = {}
+    for piece in pieces:
+        for joint_token in piece.piece.joint_tokens:
+            color_by_joint_token[joint_token] = piece.color
+    segments: list[FracturePreviewBoneSegment] = []
+    for joint in model.skeleton:
+        if joint.parent is None:
+            continue
+        parent = joints_by_name.get(joint.parent)
+        if parent is None:
+            raise FractureError(f"Fracture preview skeleton joint {joint.name} references missing parent {joint.parent}.")
+        segments.append(
+            FracturePreviewBoneSegment(
+                parent_joint_token=parent.name,
+                child_joint_token=joint.name,
+                parent_position=parent.bind_translate,
+                child_position=joint.bind_translate,
+                is_selected_cut=joint.name in selected_tokens,
+                color=color_by_joint_token.get(joint.name, Color4(0.64, 0.82, 0.95, 1.0)),
+            )
+        )
+    return tuple(segments)
 
 
 def _prototype_mesh(prototype: Prototype) -> MeshData:

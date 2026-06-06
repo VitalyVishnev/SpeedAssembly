@@ -78,6 +78,9 @@ class QtBackgroundJobsController:
         self._fracture_preview_settings = None
         self._fracture_preview_error_traceback: str | None = None
         self._fracture_preview_result_received = False
+        self._fracture_preview_retry_count = 0
+        self._fracture_preview_thread: threading.Thread | None = None
+        self._fracture_preview_generation_id = 0
 
     @property
     def conversion_running(self) -> bool:
@@ -107,7 +110,14 @@ class QtBackgroundJobsController:
 
     @property
     def fracture_preview_running(self) -> bool:
-        return bool(self._fracture_preview_process is not None and self._fracture_preview_process.is_alive())
+        return bool(
+            (self._fracture_preview_process is not None and self._fracture_preview_process.is_alive())
+            or (
+                self._fracture_preview_thread is not None
+                and self._fracture_preview_thread.is_alive()
+                and self._fracture_preview_request is not None
+            )
+        )
 
     def start_conversion(self, *, request: ConversionRequest, run_async: bool) -> None:
         if self.conversion_running:
@@ -316,21 +326,29 @@ class QtBackgroundJobsController:
         self._fracture_preview_result_received = False
         self._fracture_preview_request = request
         self._fracture_preview_settings = settings
+        self._fracture_preview_generation_id += 1
+        generation_id = self._fracture_preview_generation_id
         self._window._set_status("Generating Fracture Preview...")
-        try:
-            process, message_queue, cancel_event = self._deps.start_fracture_preview_process(request, settings)
-        except Exception as exc:
-            self.close_fracture_preview_process()
-            self._window._report_error("Fracture Preview failed", str(exc), status="Fracture Preview failed.")
-            return
-        self._fracture_preview_process = process
-        self._fracture_preview_queue = message_queue
-        self._fracture_preview_cancel_event = cancel_event
-        self._trace_worker("worker.spawn", "fracture_preview", self._worker_queue_payload(message_queue))
+        self._fracture_preview_thread = threading.Thread(
+            target=self._run_fracture_preview_worker,
+            kwargs={"request": request, "settings": settings, "generation_id": generation_id},
+            daemon=True,
+        )
+        self._fracture_preview_thread.start()
+        self._trace_worker("worker.spawn", "fracture_preview", {"mode": "thread", "generation_id": generation_id})
         self._window._update_action_state()
         self._ensure_polling()
 
+    def _run_fracture_preview_worker(self, *, request, settings, generation_id: int) -> None:
+        try:
+            result = self._deps.generate_fracture_preview_from_source_request(request, settings)
+            self._event_queue.put(("fracture_preview_result", (generation_id, result)))
+        except Exception as exc:
+            self._event_queue.put(("fracture_preview_error_traceback", (generation_id, traceback.format_exc())))
+            self._event_queue.put(("fracture_preview_error", (generation_id, str(exc))))
+
     def cancel_fracture_preview(self) -> None:
+        self._fracture_preview_generation_id += 1
         if self._fracture_preview_cancel_event is not None:
             with suppress(Exception):
                 self._fracture_preview_cancel_event.set()
@@ -469,6 +487,27 @@ class QtBackgroundJobsController:
             elif event_name == "proxy_mesh_result":
                 self._proxy_mesh_result_received = True
                 self._handle_proxy_mesh_job_result(payload)
+            elif event_name == "fracture_preview_error_traceback":
+                generation_id, formatted_traceback = payload
+                if generation_id == self._fracture_preview_generation_id:
+                    self._fracture_preview_error_traceback = str(formatted_traceback)
+            elif event_name == "fracture_preview_error":
+                generation_id, message = payload
+                if generation_id == self._fracture_preview_generation_id:
+                    self._fracture_preview_result_received = True
+                    error_message = str(message)
+                    if "Fracture job context:" not in error_message:
+                        error_message = (
+                            f"{error_message}\n"
+                            f"{self._format_fracture_job_context(self._fracture_preview_request, self._fracture_preview_settings)}\n"
+                            f"{self._format_runtime_crash_context()}"
+                        )
+                    self._handle_fracture_preview_error(error_message)
+            elif event_name == "fracture_preview_result":
+                generation_id, result = payload
+                if generation_id == self._fracture_preview_generation_id:
+                    self._fracture_preview_result_received = True
+                    self._handle_fracture_preview_result(result)
 
         if self._conversion_queue is not None:
             for event_name, payload in self._deps.drain_process_queue(self._conversion_queue):
@@ -531,6 +570,8 @@ class QtBackgroundJobsController:
                 keep_polling = True
             if self._fracture_preview_process is not None and not self._fracture_preview_result_received:
                 self._handle_fracture_preview_process_crash()
+                if self._fracture_preview_process is not None:
+                    keep_polling = True
 
         if (
             self.wind_refresh_running
@@ -729,6 +770,14 @@ class QtBackgroundJobsController:
     def _handle_fracture_preview_process_crash(self) -> None:
         exit_code = self._fracture_preview_process.exitcode if self._fracture_preview_process is not None else None
         self._trace_worker("worker.crash", "fracture_preview", {"exit_code": exit_code})
+        if self._fracture_preview_retry_count < 1 and self._fracture_preview_request is not None and self._fracture_preview_settings is not None:
+            request = self._fracture_preview_request
+            settings = self._fracture_preview_settings
+            self._fracture_preview_retry_count += 1
+            self._close_fracture_preview_process_handles()
+            self._window._set_status(f"Fracture Preview worker crashed once (exit code {exit_code}). Retrying...")
+            self.start_fracture_preview(request, settings)
+            return
         crash_message = f"Fracture preview worker process crashed unexpectedly (exit code {exit_code})"
         crash_message = f"{crash_message}\n{self._format_fracture_job_context(self._fracture_preview_request, self._fracture_preview_settings)}"
         crash_message = f"{crash_message}\n{self._format_worker_file_context(self._fracture_preview_queue)}"
@@ -811,7 +860,15 @@ class QtBackgroundJobsController:
 
     def _handle_fracture_preview_error(self, message: str) -> None:
         error_traceback = self._fracture_preview_error_traceback
-        self._trace_worker("worker.error", "fracture_preview", {"message": message})
+        if hasattr(self._window, "_trace"):
+            self._window._trace(
+                "worker.error",
+                worker="fracture_preview",
+                data={"message": message},
+                debug_data={"traceback": error_traceback or ""},
+            )
+        else:
+            self._trace_worker("worker.error", "fracture_preview", {"message": message})
         self.close_fracture_preview_process()
         self._window._update_action_state()
         if hasattr(self._window, "_handle_fracture_preview_error_message"):
@@ -878,12 +935,17 @@ class QtBackgroundJobsController:
         self._fracture_export_result_received = False
 
     def close_fracture_preview_process(self) -> None:
+        self._close_fracture_preview_process_handles()
+        self._fracture_preview_request = None
+        self._fracture_preview_settings = None
+        self._fracture_preview_retry_count = 0
+        self._fracture_preview_thread = None
+
+    def _close_fracture_preview_process_handles(self) -> None:
         self._deps.close_process_queue(self._fracture_preview_queue)
         self._fracture_preview_process = None
         self._fracture_preview_queue = None
         self._fracture_preview_cancel_event = None
-        self._fracture_preview_request = None
-        self._fracture_preview_settings = None
         self._fracture_preview_error_traceback = None
         self._fracture_preview_result_received = False
 

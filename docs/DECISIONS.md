@@ -32,6 +32,52 @@ Rationale:
 - Packaged worker races can make the process state visible before the result
   event is processed; the file protocol is the more reliable completion signal.
 
+## 2026-06-06: Manual fracture cuts are current-XML session state
+
+Status: Accepted
+
+Decision:
+
+- Manual `Fracturing by Bones` cut sites are Pinned Fracture Cut Sites over the
+  current source skeleton.
+- They are stored in the active Fracture Preview settings only for the current
+  XML session and are cleared when the selected XML changes.
+- They are not Global Remembered State, Persisted Operator Settings, or named
+  preset content.
+- Qt owns viewport picking and visual-only toggles such as `Show Bones` and
+  `Hide Repeated Parts`; `fracture_service.py` owns Fracture Piece membership,
+  manual cut validation, and automatic fill.
+
+Rationale:
+
+- Joint tokens are source-specific and can become invalid or misleading on a
+  different tree.
+- Keeping manual picks out of presets avoids hidden cross-file coupling.
+- The UI can choose bones, but it must not own the destructibility partition
+  contract.
+
+## 2026-06-06: Fracture Preview uses a local UI background thread
+
+Status: Accepted
+
+Decision:
+
+- `Fracture Preview` generation runs in a Qt-owned background thread, not in a
+  short-lived packaged frozen worker executable.
+- `Fracture Export` remains subprocess-backed because it writes authoritative
+  USDA files and should stay isolated from the Qt shell.
+- Preview settings changes invalidate older preview generations by generation
+  id; stale thread results must not update the current dialog.
+
+Rationale:
+
+- The packaged frozen executable showed intermittent native startup crashes
+  before Python could write a worker error payload.
+- Fracture Preview is read-only and interactive; repeatedly spawning frozen
+  executables while the operator changes controls is a worse runtime contract
+  than a local background thread.
+- Export isolation still protects the high-stakes authoring path.
+
 ## 2026-05-19: Operator settings are global, not per-XML
 
 Status: Accepted

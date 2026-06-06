@@ -17,8 +17,16 @@ from .models import CanonicalTreeModel, Joint, RepeatedPartInstance, ValidationI
 FRACTURE_METHOD_WIND_GUIDED_HIERARCHY = "wind_guided_hierarchy"
 FRACTURE_METHOD_PURE_HIERARCHY = "pure_hierarchy"
 FRACTURE_METHOD_BRANCH_BASE_GREEDY = "branch_base_greedy"
+FRACTURE_METHOD_MANUAL_PINNED_BONES = "manual_pinned_bones"
 
 _SUPPORTED_METHODS = {
+    FRACTURE_METHOD_WIND_GUIDED_HIERARCHY,
+    FRACTURE_METHOD_PURE_HIERARCHY,
+    FRACTURE_METHOD_BRANCH_BASE_GREEDY,
+    FRACTURE_METHOD_MANUAL_PINNED_BONES,
+}
+
+_AUTO_FILL_METHODS = {
     FRACTURE_METHOD_WIND_GUIDED_HIERARCHY,
     FRACTURE_METHOD_PURE_HIERARCHY,
     FRACTURE_METHOD_BRANCH_BASE_GREEDY,
@@ -34,6 +42,8 @@ class FractureSettings:
     method: str = FRACTURE_METHOD_WIND_GUIDED_HIERARCHY
     target_piece_count: int = 5
     output_stem: str = "Tree"
+    pinned_cut_joint_tokens: tuple[str, ...] = ()
+    manual_auto_fill_method: str = FRACTURE_METHOD_WIND_GUIDED_HIERARCHY
 
 
 @dataclass(frozen=True)
@@ -86,27 +96,28 @@ def plan_fracture(model: CanonicalTreeModel, settings: FractureSettings | None =
     graph = _build_skeleton_graph(model.skeleton)
     base_face_owner_by_index = _base_face_owner_by_index(model, graph)
     subtree_base_face_counts = _subtree_base_face_counts(graph, base_face_owner_by_index)
-    main_axis = _select_main_axis(graph, resolved_settings.method)
+    planning_method = _planning_method(resolved_settings)
+    main_axis = _select_main_axis(graph, planning_method)
     candidate_cut_sites, candidate_diagnostics = _candidate_cut_sites(
         graph,
         subtree_base_face_counts,
-        method=resolved_settings.method,
+        method=planning_method,
         main_axis=main_axis,
     )
 
-    selected: list[FractureCutSite] = []
+    selected: list[FractureCutSite] = _manual_cut_sites(resolved_settings, graph, subtree_base_face_counts)
     rejected: list[FractureCutSite] = []
     pieces = _build_pieces(
         model,
         graph,
         base_face_owner_by_index,
-        selected,
+        _ordered_cut_sites_for_settings(selected, resolved_settings, graph),
         output_stem=resolved_settings.output_stem,
     )
     for cut_site in candidate_cut_sites:
         if len(pieces) >= resolved_settings.target_piece_count:
             break
-        trial_selected = selected + [cut_site]
+        trial_selected = _ordered_cut_sites_for_settings(selected + [cut_site], resolved_settings, graph)
         trial_pieces = _build_pieces(
             model,
             graph,
@@ -115,7 +126,7 @@ def plan_fracture(model: CanonicalTreeModel, settings: FractureSettings | None =
             output_stem=resolved_settings.output_stem,
         )
         if len(trial_pieces) == len(selected) + 2 and all(piece.base_face_indices for piece in trial_pieces):
-            selected.append(cut_site)
+            selected = trial_selected
             pieces = trial_pieces
         else:
             rejected.append(cut_site)
@@ -128,7 +139,7 @@ def plan_fracture(model: CanonicalTreeModel, settings: FractureSettings | None =
         )
         selected.extend(synthetic_cut_sites)
 
-    diagnostics = candidate_diagnostics
+    diagnostics = candidate_diagnostics + _manual_piece_count_diagnostics(resolved_settings, pieces)
     if len(pieces) < resolved_settings.target_piece_count:
         diagnostics += (
             ValidationIssue(
@@ -155,13 +166,104 @@ def plan_fracture(model: CanonicalTreeModel, settings: FractureSettings | None =
     )
 
 
+def _manual_piece_count_diagnostics(
+    settings: FractureSettings,
+    pieces: tuple[FracturePiece, ...],
+) -> tuple[ValidationIssue, ...]:
+    if settings.method != FRACTURE_METHOD_MANUAL_PINNED_BONES:
+        return ()
+    if len(pieces) <= settings.target_piece_count:
+        return ()
+    return (
+        ValidationIssue(
+            severity="warning",
+            code="fracture_manual_piece_count_exceeds_target",
+            message=(
+                "Manual fracture cut sites produced more pieces than the target; "
+                f"requested {settings.target_piece_count}, actual {len(pieces)}."
+            ),
+        ),
+    )
+
+
 def _validate_settings(settings: FractureSettings) -> None:
+    if not isinstance(settings.method, str):
+        raise FractureError(f"Fracture method must be a string, got {type(settings.method).__name__}.")
     if settings.method not in _SUPPORTED_METHODS:
         raise FractureError(f"Unsupported fracture method: {settings.method}")
+    if not isinstance(settings.manual_auto_fill_method, str):
+        raise FractureError(
+            "Manual fracture auto-fill method must be a string, "
+            f"got {type(settings.manual_auto_fill_method).__name__}."
+        )
+    if settings.manual_auto_fill_method not in _AUTO_FILL_METHODS:
+        raise FractureError(f"Unsupported manual fracture auto-fill method: {settings.manual_auto_fill_method}")
+    if not isinstance(settings.target_piece_count, int):
+        raise FractureError(
+            "Fracture target piece count must be an integer, "
+            f"got {type(settings.target_piece_count).__name__}."
+        )
     if settings.target_piece_count <= 0:
         raise FractureError("Fracture target piece count must be greater than zero.")
+    if not isinstance(settings.output_stem, str):
+        raise FractureError(f"Fracture output stem must be a string, got {type(settings.output_stem).__name__}.")
     if not settings.output_stem.strip():
         raise FractureError("Fracture output stem must not be empty.")
+    if isinstance(settings.pinned_cut_joint_tokens, str) or not isinstance(settings.pinned_cut_joint_tokens, tuple):
+        raise FractureError(
+            "Manual fracture pinned cut joint tokens must be a tuple of strings, "
+            f"got {type(settings.pinned_cut_joint_tokens).__name__}."
+        )
+    for token in settings.pinned_cut_joint_tokens:
+        if not isinstance(token, str):
+            raise FractureError(
+                "Manual fracture pinned cut joint tokens must be strings, "
+                f"got {type(token).__name__}."
+            )
+
+
+def _planning_method(settings: FractureSettings) -> str:
+    if settings.method == FRACTURE_METHOD_MANUAL_PINNED_BONES:
+        return settings.manual_auto_fill_method
+    return settings.method
+
+
+def _manual_cut_sites(
+    settings: FractureSettings,
+    graph: _SkeletonGraph,
+    subtree_base_face_counts: dict[str, int],
+) -> list[FractureCutSite]:
+    if settings.method != FRACTURE_METHOD_MANUAL_PINNED_BONES:
+        return []
+    ordered_tokens = _ordered_manual_cut_tokens(settings.pinned_cut_joint_tokens, graph)
+    cut_sites: list[FractureCutSite] = []
+    for token in ordered_tokens:
+        if token in graph.roots:
+            raise FractureError(f"Manual fracture cut site {token} cannot be a skeleton root.")
+        if subtree_base_face_counts.get(token, 0) <= 0:
+            raise FractureError(f"Manual fracture cut site {token} cannot produce a Fracture Piece with base mesh faces.")
+        cut_sites.append(FractureCutSite(joint_token=token, kind="joint", reason="manual_pinned"))
+    return cut_sites
+
+
+def _ordered_manual_cut_tokens(tokens: tuple[str, ...], graph: _SkeletonGraph) -> tuple[str, ...]:
+    unique: set[str] = set()
+    for token in tokens:
+        if token not in graph.joint_by_name:
+            raise FractureError(f"Manual fracture cut site references missing skeleton joint {token}.")
+        unique.add(token)
+    return tuple(joint.name for joint in graph.joints if joint.name in unique)
+
+
+def _ordered_cut_sites_for_settings(
+    cut_sites: list[FractureCutSite],
+    settings: FractureSettings,
+    graph: _SkeletonGraph,
+) -> list[FractureCutSite]:
+    if settings.method != FRACTURE_METHOD_MANUAL_PINNED_BONES:
+        return cut_sites
+    order = graph.index_by_name
+    return sorted(cut_sites, key=lambda cut_site: order.get(cut_site.joint_token, len(order)))
 
 
 def _validate_fracture_source(model: CanonicalTreeModel) -> None:

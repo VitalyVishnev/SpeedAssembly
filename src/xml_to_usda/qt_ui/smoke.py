@@ -21,6 +21,7 @@ from typing import Callable, Any
 SMOKE_COMMAND = "smoke"
 SMOKE_SCENARIO_STARTUP = "startup"
 SMOKE_SCENARIO_FRACTURE_PREVIEW = "fracture-preview"
+SMOKE_SCENARIO_FRACTURE_PREVIEW_INTERACTIVE = "fracture-preview-interactive"
 SMOKE_SCENARIO_PROXY_PREVIEW = "proxy-preview"
 SMOKE_SCENARIO_CONVERSION_WORKER = "conversion-worker"
 SMOKE_SCENARIO_DIAGNOSTICS_EXPORT = "diagnostics-export"
@@ -34,7 +35,10 @@ HIGH_RISK_SCENARIOS: tuple[str, ...] = (
     SMOKE_SCENARIO_DIAGNOSTICS_EXPORT,
 )
 
-SMOKE_SCENARIOS: tuple[str, ...] = HIGH_RISK_SCENARIOS + (SMOKE_SCENARIO_HIGH_RISK,)
+SMOKE_SCENARIOS: tuple[str, ...] = HIGH_RISK_SCENARIOS + (
+    SMOKE_SCENARIO_FRACTURE_PREVIEW_INTERACTIVE,
+    SMOKE_SCENARIO_HIGH_RISK,
+)
 
 
 @dataclass(frozen=True)
@@ -116,6 +120,8 @@ def run_real_smoke_scenario(name: str, context: SmokeContext) -> dict[str, Any]:
         return _run_startup_smoke(context)
     if name == SMOKE_SCENARIO_FRACTURE_PREVIEW:
         return _run_fracture_preview_smoke(context)
+    if name == SMOKE_SCENARIO_FRACTURE_PREVIEW_INTERACTIVE:
+        return _run_fracture_preview_interactive_smoke(context)
     if name == SMOKE_SCENARIO_PROXY_PREVIEW:
         return _run_proxy_preview_smoke(context)
     if name == SMOKE_SCENARIO_CONVERSION_WORKER:
@@ -182,6 +188,64 @@ def _run_fracture_preview_smoke(context: SmokeContext) -> dict[str, Any]:
             data={
                 "uploaded_triangles": dialog.viewport_mesh.uploaded_triangle_count,
                 "logical_triangles": dialog.viewport_mesh.triangle_count,
+            },
+        )
+    finally:
+        _close_window(window)
+
+
+def _run_fracture_preview_interactive_smoke(context: SmokeContext) -> dict[str, Any]:
+    window = _create_smoke_window(context)
+    try:
+        input_path, output_path = _resolve_input_output(context, suffix=".usda")
+        window.source_input.setText(str(input_path))
+        window.output_input.setText(str(output_path))
+        window.open_fracture_preview_dialog()
+        _wait_until(
+            lambda: window._fracture_preview_dialog is not None
+            and window._fracture_preview_dialog.current_preview is not None,
+            timeout_ms=context.timeout_ms,
+            label="initial fracture preview result",
+        )
+        dialog = window._fracture_preview_dialog
+        _assert(dialog is not None, "fracture dialog exists")
+        dialog.piece_count_spin.setValue(9)
+        dialog.piece_count_spin.editingFinished.emit()
+        _wait_until(
+            lambda: dialog.current_preview is not None and dialog.current_preview.plan.actual_piece_count == 9,
+            timeout_ms=context.timeout_ms,
+            label="fracture preview target pieces update",
+        )
+        pure_index = dialog.method_combo.findData("pure_hierarchy")
+        _assert(pure_index >= 0, "pure hierarchy method exists")
+        dialog.method_combo.setCurrentIndex(pure_index)
+        _wait_until(
+            lambda: dialog.current_preview is not None and dialog.current_preview.plan.method == "pure_hierarchy",
+            timeout_ms=context.timeout_ms,
+            label="fracture preview method update",
+        )
+        manual_index = dialog.method_combo.findData("manual_pinned_bones")
+        _assert(manual_index >= 0, "manual pinned bones method exists")
+        dialog.method_combo.setCurrentIndex(manual_index)
+        _wait_until(
+            lambda: dialog.current_preview is not None and dialog.current_preview.plan.method == "manual_pinned_bones",
+            timeout_ms=context.timeout_ms,
+            label="fracture preview manual method update",
+        )
+        _assert(dialog.show_bones_check.isChecked(), "manual mode forces Show Bones")
+        _assert(dialog.viewport_mesh is not None, "fracture viewport mesh exists")
+        _assert(dialog.viewport_mesh.bone_segments, "bone overlay payload exists")
+        return _passed(
+            name=SMOKE_SCENARIO_FRACTURE_PREVIEW_INTERACTIVE,
+            checks=(
+                "initial.result",
+                "target.update",
+                "method.update",
+                "manual.bones",
+            ),
+            data={
+                "piece_count": dialog.current_preview.plan.actual_piece_count,
+                "bone_segments": len(dialog.viewport_mesh.bone_segments),
             },
         )
     finally:

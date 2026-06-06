@@ -6,6 +6,7 @@ import pytest
 
 from xml_to_usda.fracture_service import (
     FRACTURE_METHOD_BRANCH_BASE_GREEDY,
+    FRACTURE_METHOD_MANUAL_PINNED_BONES,
     FRACTURE_METHOD_PURE_HIERARCHY,
     FRACTURE_METHOD_WIND_GUIDED_HIERARCHY,
     FractureError,
@@ -225,3 +226,114 @@ def test_branch_base_greedy_fracture_starts_at_large_branch_roots() -> None:
     assert plan.actual_piece_count == 2
     assert tuple(cut.reason for cut in plan.selected_cut_sites) == ("branch_base",)
     assert tuple(piece.cut_joint_token for piece in plan.pieces[1:]) == ("bone_003",)
+
+
+def test_manual_pinned_bones_apply_first_and_allow_nested_fracture_pieces() -> None:
+    plan = plan_fracture(
+        _tree(),
+        FractureSettings(
+            method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
+            target_piece_count=3,
+            output_stem="Oak",
+            pinned_cut_joint_tokens=("bone_001", "bone_003"),
+        ),
+    )
+
+    assert plan.actual_piece_count == 3
+    assert tuple(cut.joint_token for cut in plan.selected_cut_sites) == ("bone_001", "bone_003")
+    assert tuple(cut.reason for cut in plan.selected_cut_sites) == ("manual_pinned", "manual_pinned")
+    assert tuple(piece.cut_joint_token for piece in plan.pieces[1:]) == ("bone_001", "bone_003")
+    assert plan.pieces[1].joint_tokens == ("bone_001", "bone_002")
+    assert plan.pieces[2].joint_tokens == ("bone_003", "bone_004")
+
+
+def test_manual_pinned_bones_use_skeleton_order_and_auto_fill_after_pins() -> None:
+    first = plan_fracture(
+        _tree(),
+        FractureSettings(
+            method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
+            target_piece_count=3,
+            output_stem="Oak",
+            pinned_cut_joint_tokens=("bone_003",),
+            manual_auto_fill_method=FRACTURE_METHOD_PURE_HIERARCHY,
+        ),
+    )
+    second = plan_fracture(
+        _tree(),
+        FractureSettings(
+            method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
+            target_piece_count=3,
+            output_stem="Oak",
+            pinned_cut_joint_tokens=("bone_003", "bone_001"),
+            manual_auto_fill_method=FRACTURE_METHOD_PURE_HIERARCHY,
+        ),
+    )
+    third = plan_fracture(
+        _tree(),
+        FractureSettings(
+            method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
+            target_piece_count=3,
+            output_stem="Oak",
+            pinned_cut_joint_tokens=("bone_001", "bone_003"),
+            manual_auto_fill_method=FRACTURE_METHOD_PURE_HIERARCHY,
+        ),
+    )
+
+    assert tuple(piece.cut_joint_token for piece in first.pieces) == (None, "bone_001", "bone_003")
+    assert tuple(piece.cut_joint_token for piece in second.pieces) == tuple(piece.cut_joint_token for piece in third.pieces)
+
+
+def test_manual_pinned_bones_preserve_manual_pieces_when_target_is_lower() -> None:
+    plan = plan_fracture(
+        _tree(),
+        FractureSettings(
+            method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
+            target_piece_count=2,
+            output_stem="Oak",
+            pinned_cut_joint_tokens=("bone_001", "bone_003"),
+        ),
+    )
+
+    assert plan.requested_piece_count == 2
+    assert plan.actual_piece_count == 3
+    assert tuple(piece.cut_joint_token for piece in plan.pieces) == (None, "bone_001", "bone_003")
+    assert any(issue.code == "fracture_manual_piece_count_exceeds_target" for issue in plan.diagnostics)
+
+
+def test_manual_pinned_bones_fail_loudly_for_missing_or_empty_cut_sites() -> None:
+    tree = _tree()
+    tree_with_empty_joint = replace(
+        tree,
+        skeleton=tree.skeleton + (_joint("bone_empty", 5, "bone_004", 2.4, 2),),
+    )
+
+    with pytest.raises(FractureError, match="missing skeleton joint bone_missing"):
+        plan_fracture(
+            tree,
+            FractureSettings(
+                method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
+                target_piece_count=2,
+                pinned_cut_joint_tokens=("bone_missing",),
+            ),
+        )
+
+    with pytest.raises(FractureError, match="cannot produce a Fracture Piece with base mesh faces"):
+        plan_fracture(
+            tree_with_empty_joint,
+            FractureSettings(
+                method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
+                target_piece_count=2,
+                pinned_cut_joint_tokens=("bone_empty",),
+            ),
+        )
+
+
+def test_fracture_settings_fail_loudly_for_invalid_manual_token_payload() -> None:
+    with pytest.raises(FractureError, match="pinned cut joint tokens must be a tuple of strings"):
+        plan_fracture(
+            _tree(),
+            FractureSettings(
+                method=FRACTURE_METHOD_WIND_GUIDED_HIERARCHY,
+                pinned_cut_joint_tokens=[].append,  # type: ignore[arg-type]
+            ),
+        )

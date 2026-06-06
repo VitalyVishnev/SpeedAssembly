@@ -1786,6 +1786,7 @@ class MainWindow(QWidget):
             self._current_dynamic_wind = None
             self._proxy_mesh_preview_result = None
             self._proxy_mesh_preview_input_path = ""
+            self._reset_fracture_manual_session_cuts()
             self._pending_generate_after_refresh = False
             self._set_default_output_from_source(previous_input, previous_auto_output)
         if not self._persistence_suspended:
@@ -1801,6 +1802,18 @@ class MainWindow(QWidget):
         if not self._persistence_suspended:
             self._schedule_operator_state_save()
         self._update_action_state()
+
+    def _reset_fracture_manual_session_cuts(self) -> None:
+        fracture = self._fracture_preview_settings.fracture
+        if not fracture.pinned_cut_joint_tokens:
+            return
+        self._fracture_preview_settings = replace(
+            self._fracture_preview_settings,
+            fracture=replace(fracture, pinned_cut_joint_tokens=()),
+        )
+        self.geometry_panel.apply_fracture_preview_settings(self._fracture_preview_settings)
+        if self._fracture_preview_dialog is not None:
+            self._fracture_preview_dialog.set_settings(self._fracture_preview_settings)
 
     def _set_default_output_from_source(
         self,

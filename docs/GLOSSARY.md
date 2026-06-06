@@ -73,6 +73,14 @@ architecture terms above are more precise.
   One planned destructible tree piece. It owns a subset of Base Mesh faces and
   the Repeated Part Instances assigned to that skeleton-owned region. It is not
   a Source Prototype, Authored Prototype, or generic Assembly Part.
+- **Fracture Cut Site**
+  Skeleton joint selected as the root of a Fracture Piece subtree. Automatic
+  methods derive cut sites from hierarchy and wind hints; manual preview picks
+  derive them from operator-selected bone segments.
+- **Pinned Fracture Cut Site**
+  A source-specific manual Fracture Cut Site stored only for the current XML
+  session. Pinned cut sites are applied before automatic fill, but final
+  Fracture Piece membership is still planned by the Fracturing module.
 - **Assembly Root**
   Root prim of the USDA scene. It marks the scene as a Nanite Assembly and, in
   skeletal assembly mode, points UE at the descendant Main Skeleton.

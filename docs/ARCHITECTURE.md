@@ -228,26 +228,32 @@ domain concept.
 - Fracturing seam:
   Fracturing is a companion destructibility workflow over `ResolvedAssemblyModel`.
   `fracture_service.py` owns deterministic skeleton-owned Fracture Piece
-  planning. `fracture_export_service.py` projects those pieces into per-piece
+  planning, including manual pinned Fracture Cut Site validation and automatic
+  fill. `fracture_export_service.py` projects those pieces into per-piece
   `Static Mesh Assembly` authoring models and delegates USDA writing to
   `usda_writer.py`. `fracture_preview_service.py` projects the same plan into
   diagnostic preview payloads with stable colors and lightweight geometry.
   `qt_ui/fracture_preview.py` owns the Qt preview dialog/viewport adapter and
   adapts those payloads into the shared matcap/grid viewport with slight
-  per-piece tinting. It must not own fracture planning or source interpretation
+  per-piece tinting. It owns viewport bone picking, x-ray skeleton overlay, and
+  visual-only visibility toggles such as `Hide Repeated Parts`; it must not own
+  Fracture Piece membership, manual cut validity, or source interpretation
   rules.
   Fracture export must reuse resolved Operator Intent for materials and
   prototype sources, but its authored piece files are static assemblies
   regardless of the main export mode. Fracture preview uses source XML geometry
   so it can stay fast and avoid heavy replacement payloads. The Qt Geometry tab
   exposes both operations: preview passes a source-geometry request, export
-  passes a resolved-intent `FractureExportRequest`. Both are executed through
-  the file-based fracture worker subprocess so native worker crashes stay
-  outside the Qt UI process.
+  passes a resolved-intent `FractureExportRequest`. Fracture export uses the
+  file-based fracture worker subprocess because it writes authoritative USDA
+  outputs. Fracture Preview runs in a Qt-owned background thread instead of a
+  packaged frozen worker process; preview is interactive, read-only, and must
+  not churn short-lived frozen executables while the operator changes controls.
   Fracture Preview may use deterministic sampling for viewport payload budgets,
   but that is a preview adapter policy, not a reusable mesh simplification
-  policy. Worker result files are authoritative: UI polling must drain result
-  and error files before classifying a stopped worker as crashed.
+  policy. Worker result files remain authoritative for subprocess-backed jobs:
+  UI polling must drain result and error files before classifying a stopped
+  worker as crashed.
 - Operator state seam:
   `Operator State` is the current UI selection surface. `Persisted Operator
   Settings` restore that state across sessions or input XML files. `UI Shell
