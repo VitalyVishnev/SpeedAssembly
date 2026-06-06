@@ -16,7 +16,7 @@ from math import sqrt
 import numpy as np
 
 from PySide6.QtCore import QSignalBlocker, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QVector3D
+from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QShortcut, QVector3D
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QCheckBox,
@@ -106,6 +106,8 @@ class FracturePreviewDialog(QDialog):
         self._on_export_requested = on_export_requested or (lambda: None)
         self._settings = settings or FracturePreviewSettings()
         self._manual_cut_tokens = self._settings.fracture.pinned_cut_joint_tokens
+        self._manual_cut_undo_stack = list(self._manual_cut_tokens)
+        self._cut_delete_buttons: dict[str, QPushButton] = {}
         self.current_preview: FracturePreviewResult | None = None
         self.viewport_mesh: FractureViewportMesh | None = None
         self.setWindowTitle("Fracture Preview")
@@ -149,7 +151,7 @@ class FracturePreviewDialog(QDialog):
         self.method_combo.addItem("Wind Guided Hierarchy", FRACTURE_METHOD_WIND_GUIDED_HIERARCHY)
         self.method_combo.addItem("Pure Hierarchy", FRACTURE_METHOD_PURE_HIERARCHY)
         self.method_combo.addItem("Branch Base Greedy", FRACTURE_METHOD_BRANCH_BASE_GREEDY)
-        self.method_combo.addItem("Fracturing by Bones", FRACTURE_METHOD_MANUAL_PINNED_BONES)
+        self.method_combo.addItem("Manual Fracturing", FRACTURE_METHOD_MANUAL_PINNED_BONES)
         self.method_combo.setProperty("prominent", True)
         self.method_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self.method_combo.setStyleSheet(
@@ -224,6 +226,14 @@ class FracturePreviewDialog(QDialog):
         settings_layout.addWidget(self.hide_repeated_parts_check)
         settings_layout.addWidget(self.reset_cuts_button)
 
+        self.cut_list_label = QLabel("Cuts", settings_panel)
+        self.cut_list_host = QWidget(settings_panel)
+        self.cut_list_layout = QVBoxLayout(self.cut_list_host)
+        self.cut_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.cut_list_layout.setSpacing(4)
+        settings_layout.addWidget(self.cut_list_label)
+        settings_layout.addWidget(self.cut_list_host)
+
         self.export_button = QPushButton("Export Fracture Pieces", settings_panel)
         self.export_button.clicked.connect(self._on_export_requested)
         settings_layout.addWidget(self.export_button)
@@ -235,6 +245,8 @@ class FracturePreviewDialog(QDialog):
 
         layout.addWidget(settings_panel, 0, 1)
         self.viewport.on_bone_cut_toggled = self._toggle_manual_cut_token
+        self.undo_cut_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
+        self.undo_cut_shortcut.activated.connect(self._undo_last_manual_cut)
         self._sync_settings_controls(self._settings)
         self.method_combo.currentIndexChanged.connect(lambda _index: self._handle_method_changed())
         self.manual_auto_fill_combo.currentIndexChanged.connect(lambda _index: self._emit_settings_changed())
@@ -268,6 +280,7 @@ class FracturePreviewDialog(QDialog):
     def set_settings(self, settings: FracturePreviewSettings) -> None:
         self._settings = settings
         self._manual_cut_tokens = settings.fracture.pinned_cut_joint_tokens
+        self._manual_cut_undo_stack = list(self._manual_cut_tokens)
         self._sync_settings_controls(settings)
 
     def set_loading(self, message: str = "Preparing preview geometry...") -> None:
@@ -282,6 +295,7 @@ class FracturePreviewDialog(QDialog):
             include_repeated_parts=not self.hide_repeated_parts_check.isChecked(),
         )
         self.viewport.set_mesh(self.viewport_mesh)
+        self.viewport.set_selected_cut_tokens(self._manual_cut_tokens)
         self.viewport.set_show_bones(self.show_bones_check.isChecked())
         self.loading_label.hide()
         self.summary_label.setText(
@@ -320,7 +334,7 @@ class FracturePreviewDialog(QDialog):
             self.polycount_spin.setValue(int(settings.final_polycount))
             self.base_priority_slider.setValue(int(round(float(settings.base_mesh_priority) * 100)))
             self.base_priority_spin.setValue(float(settings.base_mesh_priority))
-            if settings.fracture.method == FRACTURE_METHOD_MANUAL_PINNED_BONES:
+            if settings.fracture.method == FRACTURE_METHOD_MANUAL_PINNED_BONES and not self.show_bones_check.isChecked():
                 self.show_bones_check.setChecked(True)
         self._sync_manual_controls()
 
@@ -348,13 +362,14 @@ class FracturePreviewDialog(QDialog):
         self.manual_auto_fill_label.setVisible(manual)
         self.manual_auto_fill_combo.setVisible(manual)
         self.reset_cuts_button.setVisible(manual)
+        self.cut_list_label.setVisible(manual)
+        self.cut_list_host.setVisible(manual)
         if manual:
-            with QSignalBlocker(self.show_bones_check):
-                self.show_bones_check.setChecked(True)
-            self.show_bones_check.setEnabled(False)
+            self.show_bones_check.setEnabled(True)
         else:
             self.show_bones_check.setEnabled(True)
         self.viewport.set_show_bones(self.show_bones_check.isChecked())
+        self._sync_cut_list()
 
     def _handle_show_bones_changed(self, checked: bool) -> None:
         self.viewport.set_show_bones(checked)
@@ -369,16 +384,64 @@ class FracturePreviewDialog(QDialog):
         tokens = list(self._manual_cut_tokens)
         if joint_token in tokens:
             tokens.remove(joint_token)
+            self._manual_cut_undo_stack = [token for token in self._manual_cut_undo_stack if token != joint_token]
         else:
             tokens.append(joint_token)
+            self._manual_cut_undo_stack.append(joint_token)
         self._manual_cut_tokens = tuple(tokens)
+        self.viewport.set_selected_cut_tokens(self._manual_cut_tokens)
+        self._sync_cut_list()
         self._emit_settings_changed()
+
+    def _remove_manual_cut_token(self, joint_token: str) -> None:
+        if joint_token not in self._manual_cut_tokens:
+            return
+        self._manual_cut_tokens = tuple(token for token in self._manual_cut_tokens if token != joint_token)
+        self._manual_cut_undo_stack = [token for token in self._manual_cut_undo_stack if token != joint_token]
+        self.viewport.set_selected_cut_tokens(self._manual_cut_tokens)
+        self._sync_cut_list()
+        self._emit_settings_changed()
+
+    def _undo_last_manual_cut(self) -> None:
+        while self._manual_cut_undo_stack:
+            joint_token = self._manual_cut_undo_stack.pop()
+            if joint_token in self._manual_cut_tokens:
+                self._manual_cut_tokens = tuple(token for token in self._manual_cut_tokens if token != joint_token)
+                self.viewport.set_selected_cut_tokens(self._manual_cut_tokens)
+                self._sync_cut_list()
+                self._emit_settings_changed()
+                return
 
     def _reset_manual_cuts(self) -> None:
         if not self._manual_cut_tokens:
             return
         self._manual_cut_tokens = ()
+        self._manual_cut_undo_stack = []
+        self.viewport.set_selected_cut_tokens(self._manual_cut_tokens)
+        self._sync_cut_list()
         self._emit_settings_changed()
+
+    def _sync_cut_list(self) -> None:
+        while self.cut_list_layout.count():
+            item = self.cut_list_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._cut_delete_buttons = {}
+        for joint_token in self._manual_cut_tokens:
+            row = QWidget(self.cut_list_host)
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(6)
+            label = QLabel(joint_token, row)
+            button = QPushButton("x", row)
+            button.setFixedSize(24, 22)
+            button.setToolTip(f"Remove {joint_token}")
+            button.clicked.connect(lambda _checked=False, token=joint_token: self._remove_manual_cut_token(token))
+            row_layout.addWidget(label, 1)
+            row_layout.addWidget(button, 0)
+            self.cut_list_layout.addWidget(row)
+            self._cut_delete_buttons[joint_token] = button
 
 
 def _build_int_slider_row(
@@ -474,7 +537,10 @@ class FractureViewport(MatcapViewport):
         self._fracture_render_payload: FractureRenderPayload | None = None
         self._matcap_tint_strength = FRACTURE_MATCAP_TINT_STRENGTH
         self._show_bones = False
+        self._selected_cut_tokens: tuple[str, ...] = ()
+        self._hover_cut_token: str | None = None
         self.on_bone_cut_toggled = lambda _joint_token: None
+        self.setMouseTracking(True)
 
     def has_mesh(self) -> bool:
         return self._fracture_mesh is not None and self._vertex_count > 0
@@ -532,6 +598,18 @@ class FractureViewport(MatcapViewport):
 
     def set_show_bones(self, value: bool) -> None:
         self._show_bones = bool(value)
+        if not self._show_bones:
+            self._hover_cut_token = None
+        self.update()
+
+    @property
+    def hover_cut_token(self) -> str | None:
+        return self._hover_cut_token
+
+    def set_selected_cut_tokens(self, joint_tokens: tuple[str, ...]) -> None:
+        self._selected_cut_tokens = tuple(joint_tokens)
+        if self._hover_cut_token is not None and self._bone_segment_by_child_token(self._hover_cut_token) is None:
+            self._hover_cut_token = None
         self.update()
 
     def paintGL(self) -> None:  # type: ignore[override]
@@ -545,12 +623,37 @@ class FractureViewport(MatcapViewport):
             and event.modifiers() & Qt.KeyboardModifier.ControlModifier
             and self._show_bones
         ):
-            token = self.pick_bone_segment_child_token(event.position().x(), event.position().y())
+            token = self._hover_cut_token or self.pick_bone_segment_child_token(event.position().x(), event.position().y())
             if token:
                 self.on_bone_cut_toggled(token)
                 event.accept()
                 return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        if self._show_bones and not event.buttons() and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            token = self.pick_bone_segment_child_token(event.position().x(), event.position().y())
+            if token != self._hover_cut_token:
+                self._hover_cut_token = token
+                self.update()
+            event.accept()
+            return
+        if self._hover_cut_token is not None and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            self._hover_cut_token = None
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def keyReleaseEvent(self, event) -> None:  # type: ignore[override]
+        if event.key() == Qt.Key.Key_Control and self._hover_cut_token is not None:
+            self._hover_cut_token = None
+            self.update()
+        super().keyReleaseEvent(event)
+
+    def leaveEvent(self, event) -> None:  # type: ignore[override]
+        if self._hover_cut_token is not None:
+            self._hover_cut_token = None
+            self.update()
+        super().leaveEvent(event)
 
     def pick_bone_segment_child_token(self, x: float, y: float, *, max_distance: float = 14.0) -> str | None:
         mesh = self._fracture_mesh
@@ -569,6 +672,15 @@ class FractureViewport(MatcapViewport):
         if best is None or best[0] > max_distance:
             return None
         return best[1]
+
+    def _bone_segment_by_child_token(self, joint_token: str) -> FracturePreviewBoneSegment | None:
+        mesh = self._fracture_mesh
+        if mesh is None:
+            return None
+        for segment in mesh.bone_segments:
+            if segment.child_joint_token == joint_token:
+                return segment
+        return None
 
     def _project_point_to_screen(self, point: Vector3) -> tuple[float, float] | None:
         width = max(1, self.width())
@@ -642,20 +754,28 @@ class FractureViewport(MatcapViewport):
                 child = self._project_point_to_screen(segment.child_position)
                 if parent is None or child is None:
                     continue
-                halo = QPen(QColor(6, 10, 12, 210), 7.0 if segment.is_selected_cut else 6.0)
+                selected = segment.is_selected_cut or segment.child_joint_token in self._selected_cut_tokens
+                halo = QPen(QColor(6, 10, 12, 210), 7.0 if selected else 6.0)
                 halo.setCapStyle(Qt.PenCapStyle.RoundCap)
                 painter.setPen(halo)
                 painter.drawLine(int(round(parent[0])), int(round(parent[1])), int(round(child[0])), int(round(child[1])))
-                if segment.is_selected_cut:
+                if selected:
                     pen = QPen(_qcolor_from_color4(segment.color, alpha=255), 4.5)
                 else:
                     pen = QPen(_qcolor_from_color4(segment.color, alpha=230), 3.6)
                 pen.setCapStyle(Qt.PenCapStyle.RoundCap)
                 painter.setPen(pen)
                 painter.drawLine(int(round(parent[0])), int(round(parent[1])), int(round(child[0])), int(round(child[1])))
-                if segment.is_selected_cut:
+                if selected:
+                    _paint_cut_marker(painter, child, QColor(255, 245, 185, 245), radius=6.5, width=2.0)
                     painter.setPen(QPen(QColor(255, 245, 185, 245), 1.0))
                     painter.drawText(int(round(child[0])) + 5, int(round(child[1])) - 5, segment.child_joint_token)
+            if self._hover_cut_token is not None:
+                hover_segment = self._bone_segment_by_child_token(self._hover_cut_token)
+                if hover_segment is not None:
+                    hover_point = self._project_point_to_screen(hover_segment.child_position)
+                    if hover_point is not None:
+                        _paint_cut_marker(painter, hover_point, QColor(155, 235, 255, 245), radius=8.5, width=2.2)
         finally:
             painter.end()
 
@@ -821,6 +941,23 @@ def _qcolor_from_color4(color: Color4, *, alpha: int) -> QColor:
         max(0, min(255, int(round(float(color.b) * 255)))),
         max(0, min(255, int(alpha))),
     )
+
+
+def _paint_cut_marker(
+    painter: QPainter,
+    screen_point: tuple[float, float],
+    color: QColor,
+    *,
+    radius: float,
+    width: float,
+) -> None:
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(QPen(QColor(4, 8, 10, 230), width + 2.0))
+    x = float(screen_point[0])
+    y = float(screen_point[1])
+    painter.drawEllipse(int(round(x - radius)), int(round(y - radius)), int(round(radius * 2)), int(round(radius * 2)))
+    painter.setPen(QPen(color, width))
+    painter.drawEllipse(int(round(x - radius)), int(round(y - radius)), int(round(radius * 2)), int(round(radius * 2)))
 
 
 def _rotate_positions(q: Quaternion, positions: np.ndarray) -> np.ndarray:

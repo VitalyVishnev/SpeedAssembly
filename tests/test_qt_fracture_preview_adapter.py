@@ -10,6 +10,9 @@ pytest.importorskip("pytestqt")
 
 pytestmark = pytest.mark.qt
 
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtGui import QMouseEvent
+
 from xml_to_usda.fracture_preview_service import FracturePreviewSettings, generate_fracture_preview
 from xml_to_usda.fracture_service import FRACTURE_METHOD_MANUAL_PINNED_BONES, FractureSettings
 from xml_to_usda.fracture_preview_service import FracturePreviewBoneSegment
@@ -292,7 +295,7 @@ def test_fracture_viewport_accepts_colored_triangle_payload_and_frames_camera(qt
     assert viewport.camera_distance == pytest.approx(viewport.camera_radius * 3.0)
 
 
-def test_fracture_preview_dialog_forces_bones_in_manual_mode_and_hides_repeated_parts(qtbot) -> None:
+def test_fracture_preview_dialog_enables_manual_bones_visibility_and_hides_repeated_parts(qtbot) -> None:
     preview = generate_fracture_preview(
         _tree(),
         FracturePreviewSettings(
@@ -319,9 +322,13 @@ def test_fracture_preview_dialog_forces_bones_in_manual_mode_and_hides_repeated_
     qtbot.addWidget(dialog)
 
     assert dialog.show_bones_check.isChecked()
-    assert not dialog.show_bones_check.isEnabled()
+    assert dialog.show_bones_check.isEnabled()
     assert dialog.viewport.show_bones
     assert dialog.viewport_mesh.instance_count == 2
+
+    dialog.show_bones_check.setChecked(False)
+
+    assert not dialog.viewport.show_bones
 
     dialog.hide_repeated_parts_check.setChecked(True)
 
@@ -346,6 +353,37 @@ def test_fracture_preview_dialog_reset_cuts_clears_manual_session_tokens(qtbot) 
 
     assert emitted
     assert emitted[-1].fracture.pinned_cut_joint_tokens == ()
+
+
+def test_fracture_preview_dialog_lists_deletes_and_undoes_manual_cuts(qtbot) -> None:
+    emitted: list[FracturePreviewSettings] = []
+    settings = FracturePreviewSettings(
+        fracture=FractureSettings(
+            method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
+            target_piece_count=3,
+            pinned_cut_joint_tokens=("bone_002",),
+        )
+    )
+    dialog = FracturePreviewDialog(settings=settings, on_settings_changed=emitted.append)
+    qtbot.addWidget(dialog)
+
+    assert dialog.method_combo.itemText(dialog.method_combo.findData(FRACTURE_METHOD_MANUAL_PINNED_BONES)) == "Manual Fracturing"
+    assert tuple(dialog._cut_delete_buttons) == ("bone_002",)
+
+    dialog._toggle_manual_cut_token("bone_003")
+
+    assert emitted[-1].fracture.pinned_cut_joint_tokens == ("bone_002", "bone_003")
+    assert tuple(dialog._cut_delete_buttons) == ("bone_002", "bone_003")
+
+    dialog.undo_cut_shortcut.activated.emit()
+
+    assert emitted[-1].fracture.pinned_cut_joint_tokens == ("bone_002",)
+    assert tuple(dialog._cut_delete_buttons) == ("bone_002",)
+
+    dialog._cut_delete_buttons["bone_002"].click()
+
+    assert emitted[-1].fracture.pinned_cut_joint_tokens == ()
+    assert dialog._cut_delete_buttons == {}
 
 
 def test_fracture_viewport_ctrl_click_picks_nearest_bone_segment_deterministically(qtbot) -> None:
@@ -382,6 +420,77 @@ def test_fracture_viewport_ctrl_click_picks_nearest_bone_segment_deterministical
 
     assert left_screen is not None
     assert viewport.pick_bone_segment_child_token(left_screen[0], left_screen[1]) == "left"
+
+
+def test_fracture_viewport_ctrl_hover_previews_cut_target_and_click_uses_it(qtbot) -> None:
+    picked: list[str] = []
+    mesh = FractureViewportMesh(
+        name="bones",
+        vertex_components=array("f"),
+        triangle_count=0,
+        uploaded_triangle_count=0,
+        piece_count=0,
+        instance_count=0,
+        draw_sources=(),
+        draw_calls=(),
+        bone_segments=(
+            FracturePreviewBoneSegment(
+                parent_joint_token="root",
+                child_joint_token="left",
+                parent_position=Vector3(-0.75, 0.0, 0.0),
+                child_position=Vector3(-0.75, 1.0, 0.0),
+            ),
+            FracturePreviewBoneSegment(
+                parent_joint_token="root",
+                child_joint_token="right",
+                parent_position=Vector3(0.75, 0.0, 0.0),
+                child_position=Vector3(0.75, 1.0, 0.0),
+            ),
+        ),
+    )
+    viewport = FractureViewport()
+    qtbot.addWidget(viewport)
+    viewport.resize(500, 400)
+    viewport.set_mesh(mesh)
+    viewport.set_show_bones(True)
+    viewport.on_bone_cut_toggled = picked.append
+    right_screen = viewport._project_point_to_screen(Vector3(0.75, 0.5, 0.0))
+
+    assert right_screen is not None
+    qtbot.mouseMove(
+        viewport,
+        QPoint(int(round(right_screen[0])), int(round(right_screen[1]))),
+        delay=0,
+    )
+    assert viewport.hover_cut_token is None
+
+    viewport.mouseMoveEvent(
+        QMouseEvent(
+            QEvent.Type.MouseMove,
+            QPointF(float(right_screen[0]), float(right_screen[1])),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.ControlModifier,
+        )
+    )
+
+    assert viewport.hover_cut_token == "right"
+
+    viewport.mousePressEvent(
+        QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            QPointF(float(right_screen[0]), float(right_screen[1])),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.ControlModifier,
+        )
+    )
+
+    assert picked == ["right"]
+
+    viewport.set_show_bones(False)
+
+    assert viewport.hover_cut_token is None
 
 
 def test_fracture_viewport_show_bones_does_not_upload_overlay_over_grid(qtbot, monkeypatch) -> None:
