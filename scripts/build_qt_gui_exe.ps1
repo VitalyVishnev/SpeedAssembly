@@ -104,13 +104,12 @@ function Write-BuildInfo(
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $launcherScript = Join-Path $repoRoot 'scripts\launch_qt_gui.py'
-$workerLauncherScript = Join-Path $repoRoot 'scripts\launch_worker.py'
 $distPath = Join-Path $repoRoot 'dist-next'
 $buildPath = Join-Path $repoRoot 'build-next'
 $qtUiSourceRoot = Join-Path $repoRoot 'src\xml_to_usda\qt_ui'
 $qtUiStagingRoot = Join-Path $buildPath 'qt_ui_data'
 $exePath = Join-Path $distPath 'XMLtoUSDAConverter.exe'
-$workerExePath = Join-Path $distPath 'XMLtoUSDAWorker.exe'
+$distWorkerExePath = Join-Path $distPath 'XMLtoUSDAWorker.exe'
 $iconPath = Join-Path $repoRoot 'src\xml_to_usda\qt_ui\assets\Icon.ico'
 $hooksPath = Join-Path $repoRoot 'hooks'
 
@@ -225,32 +224,8 @@ try {
             throw "Expected release exe was not created: $exePath"
         }
 
-        $workerPyInstallerArgs = @(
-            '-m', 'PyInstaller',
-            '--noconfirm',
-            '--clean',
-            '--onefile',
-            '--console',
-            '--name', 'XMLtoUSDAWorker',
-            '--additional-hooks-dir', $hooksPath,
-            '--paths', (Join-Path $repoRoot 'src'),
-            '--distpath', $distPath,
-            '--workpath', (Join-Path $buildPath 'worker'),
-            '--specpath', $buildPath,
-            $workerLauncherScript
-        )
-        foreach ($exclude in @('PySide6', 'shiboken6')) {
-            $workerPyInstallerArgs += @('--exclude-module', $exclude)
-        }
-
-        Write-Host "Building dedicated worker executable with $pythonExe ..."
-        & $pythonExe -s @workerPyInstallerArgs
-        if ($LASTEXITCODE -ne 0) {
-            throw 'PyInstaller worker build failed.'
-        }
-
-        if (-not (Test-Path $workerExePath)) {
-            throw "Expected worker exe was not created: $workerExePath"
+        if (Test-Path $distWorkerExePath) {
+            throw "External worker exe must not be distributed: $distWorkerExePath"
         }
 
         Write-BuildInfo -DistPath $distPath -ExePath $exePath -PythonExe $pythonExe -RepoRoot $repoRoot -BuildMode 'release'

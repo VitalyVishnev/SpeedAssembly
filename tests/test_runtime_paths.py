@@ -91,7 +91,7 @@ def test_job_workspace_is_created_inside_runtime_cache_root(tmp_path: Path) -> N
         workspace.finalize(status="cancelled")
 
 
-def test_startup_sweep_removes_only_stale_job_workspaces(tmp_path: Path) -> None:
+def test_startup_sweep_removes_only_stale_job_workspaces(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     runtime_paths = resolve_runtime_paths(
         settings_dir=tmp_path / "settings",
         settings_path=tmp_path / "settings" / "gui_settings.json",
@@ -112,6 +112,9 @@ def test_startup_sweep_removes_only_stale_job_workspaces(tmp_path: Path) -> None
     for target in os_targets:
         target.touch()
         os.utime(target, (old_timestamp, old_timestamp))
+    isolated_temp = tmp_path / "temp"
+    isolated_temp.mkdir()
+    monkeypatch.setattr("xml_to_usda.runtime_paths.tempfile.gettempdir", lambda: str(isolated_temp))
 
     summary = sweep_stale_job_workspaces(runtime_paths, stale_after_seconds=24 * 60 * 60)
 
@@ -121,6 +124,93 @@ def test_startup_sweep_removes_only_stale_job_workspaces(tmp_path: Path) -> None
     assert not stale_dir.exists()
     assert not stale_partial.exists()
     assert fresh_dir.exists()
+
+
+def test_startup_sweep_removes_stale_project_worker_temp_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime_paths = resolve_runtime_paths(
+        settings_dir=tmp_path / "settings",
+        settings_path=tmp_path / "settings" / "gui_settings.json",
+        cache_root=tmp_path / "runtime_cache",
+    )
+    temp_root = tmp_path / "temp"
+    temp_root.mkdir()
+    stale_request = temp_root / "xml_to_usda_conversion_abcd.request.pkl"
+    stale_stderr = temp_root / "xml_to_usda_fracture_abcd.stderr.log"
+    unrelated = temp_root / "visual_studio_payload.tmp"
+    fresh_request = temp_root / "xml_to_usda_proxy_fresh.request.pkl"
+    for path in (stale_request, stale_stderr, unrelated, fresh_request):
+        path.write_text("temp", encoding="utf-8")
+    old_timestamp = time.time() - (25 * 60 * 60)
+    for path in (stale_request, stale_stderr, unrelated):
+        os.utime(path, (old_timestamp, old_timestamp))
+    monkeypatch.setattr("xml_to_usda.runtime_paths.tempfile.gettempdir", lambda: str(temp_root))
+
+    summary = sweep_stale_job_workspaces(runtime_paths, stale_after_seconds=24 * 60 * 60)
+
+    assert summary.removed_temp_files == 2
+    assert not stale_request.exists()
+    assert not stale_stderr.exists()
+    assert unrelated.exists()
+    assert fresh_request.exists()
+
+
+def test_startup_sweep_removes_stale_project_temp_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime_paths = resolve_runtime_paths(
+        settings_dir=tmp_path / "settings",
+        settings_path=tmp_path / "settings" / "gui_settings.json",
+        cache_root=tmp_path / "runtime_cache",
+    )
+    temp_root = tmp_path / "temp"
+    temp_root.mkdir()
+    event_dir = temp_root / "xml_to_usda_conversion_events_abcd"
+    project_mei = temp_root / "_MEI12345"
+    current_mei = temp_root / "_MEIcurrent"
+    foreign_mei = temp_root / "_MEIforeign"
+    for path in (event_dir, project_mei, current_mei, foreign_mei):
+        path.mkdir()
+    (project_mei / "xml_to_usda").mkdir()
+    (current_mei / "xml_to_usda").mkdir()
+    (foreign_mei / "other_app").mkdir()
+    old_timestamp = time.time() - (25 * 60 * 60)
+    for path in (event_dir, project_mei, current_mei, foreign_mei):
+        os.utime(path, (old_timestamp, old_timestamp))
+    monkeypatch.setattr("xml_to_usda.runtime_paths.tempfile.gettempdir", lambda: str(temp_root))
+    monkeypatch.setattr("xml_to_usda.runtime_paths.sys._MEIPASS", str(current_mei), raising=False)
+
+    summary = sweep_stale_job_workspaces(runtime_paths, stale_after_seconds=24 * 60 * 60)
+
+    assert summary.removed_temp_dirs == 2
+    assert not event_dir.exists()
+    assert not project_mei.exists()
+    assert current_mei.exists()
+    assert foreign_mei.exists()
+
+
+def test_startup_sweep_removes_stale_legacy_worker_runtime_dirs(tmp_path: Path) -> None:
+    runtime_paths = resolve_runtime_paths(
+        settings_dir=tmp_path / "settings",
+        settings_path=tmp_path / "settings" / "gui_settings.json",
+        cache_root=tmp_path / "runtime_cache",
+    )
+    worker_root = tmp_path / "runtime" / "worker"
+    stale_worker = worker_root / "worker-old"
+    fresh_worker = worker_root / "worker-fresh"
+    unrelated_worker = worker_root / "other"
+    for path in (stale_worker, fresh_worker, unrelated_worker):
+        path.mkdir(parents=True)
+    for path in (stale_worker, fresh_worker):
+        (path / "XMLtoUSDAWorker.exe").write_text("exe", encoding="utf-8")
+    (unrelated_worker / "XMLtoUSDAWorker.exe").write_text("exe", encoding="utf-8")
+    old_timestamp = time.time() - (25 * 60 * 60)
+    os.utime(stale_worker, (old_timestamp, old_timestamp))
+    os.utime(unrelated_worker, (old_timestamp, old_timestamp))
+
+    summary = sweep_stale_job_workspaces(runtime_paths, stale_after_seconds=24 * 60 * 60)
+
+    assert summary.removed_legacy_worker_dirs == 1
+    assert not stale_worker.exists()
+    assert fresh_worker.exists()
+    assert unrelated_worker.exists()
 
 
 def test_startup_sweep_reports_inaccessible_jobs_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -134,13 +224,15 @@ def test_startup_sweep_reports_inaccessible_jobs_root(tmp_path: Path, monkeypatc
         raise PermissionError("denied")
 
     monkeypatch.setattr(type(runtime_paths.jobs_root), "exists", raise_permission_error)
+    isolated_temp = tmp_path / "temp"
+    isolated_temp.mkdir()
+    monkeypatch.setattr("xml_to_usda.runtime_paths.tempfile.gettempdir", lambda: str(isolated_temp))
 
     summary = sweep_stale_job_workspaces(runtime_paths, stale_after_seconds=24 * 60 * 60)
 
     assert summary.removed_jobs == 0
     assert summary.removed_partial_outputs == 0
-    assert summary.failed_jobs == 1
-    assert summary.failed_paths == (str(runtime_paths.jobs_root),)
+    assert str(runtime_paths.jobs_root) in summary.failed_paths
 
 
 def test_success_cleanup_removes_runtime_job_workspace(tmp_path: Path) -> None:

@@ -63,7 +63,7 @@ def test_qt_entry_routes_smoke_mode_before_gui_import(monkeypatch) -> None:
     assert observed == [["--scenario", "startup"]]
 
 
-def test_frozen_fbx_helper_falls_back_to_gui_executable_without_sidecar(
+def test_frozen_fbx_helper_uses_self_executable_worker_mode(
     tmp_path,
     monkeypatch,
 ) -> None:

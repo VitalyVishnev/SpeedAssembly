@@ -291,7 +291,7 @@ def test_cli_benchmark_fbx_reports_payload_counts(
     assert "material_slots: 0" in captured.out
 
 
-def test_fbx_import_supervisor_prefers_sidecar_worker_directory_in_frozen_mode(
+def test_fbx_import_supervisor_uses_self_executable_in_frozen_mode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -300,10 +300,7 @@ def test_fbx_import_supervisor_prefers_sidecar_worker_directory_in_frozen_mode(
 
     request_path = tmp_path / "worker_request.json"
     gui_executable = tmp_path / "XMLtoUSDAConverter.exe"
-    worker_executable = tmp_path / "XMLtoUSDAWorker" / "XMLtoUSDAWorker.exe"
-    worker_executable.parent.mkdir(parents=True, exist_ok=True)
     gui_executable.write_bytes(b"")
-    worker_executable.write_bytes(b"")
 
     monkeypatch.setattr(worker_file_protocol.sys, "frozen", True, raising=False)
     monkeypatch.setattr(worker_file_protocol.sys, "executable", str(gui_executable))
@@ -311,7 +308,7 @@ def test_fbx_import_supervisor_prefers_sidecar_worker_directory_in_frozen_mode(
     command = supervisor_module._resolve_helper_command(request_path)
 
     assert command == [
-        str(worker_executable),
+        str(gui_executable),
         supervisor_module.FBX_WORKER_COMMAND,
         "--request",
         str(request_path),

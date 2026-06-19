@@ -66,11 +66,17 @@ Checks:
 - normal conversion runs should clean runtime job dirs automatically
 - `.partial` output files should not remain after success, cancel, or failure
 - stale job dirs older than 24 hours are removed during startup sweep
+- stale project worker temp files in `%TEMP%`, stale project-owned `_MEI*`
+  package extraction folders, and legacy embedded-worker runtime folders are
+  also removed by startup sweep
 
 Expected behavior:
 
 - only UI settings persist by default
 - runtime temp dirs are removed unless `Preserve temp files for debugging` or `--preserve-temp-files` is enabled
+- source model, fracture preview, and FBX payload caches are persistent caches;
+  clear them only when you intentionally want to trade disk space for slower
+  repeat runs
 - build folders such as `build/` and `dist/` are unrelated to runtime cache cleanup
 - explicit FBX payload cache lives separately under `%LOCALAPPDATA%/XMLtoUSDAConverter/cache/fbx-payloads` and defaults to `20 GB` / `14 days`
 - use the title-bar gear in the Qt UI to refresh, clear, or change the FBX cache policy
@@ -164,7 +170,7 @@ Practical rule:
 - if parallel FBX import cannot start in the current environment, the converter should now fall back to sequential import instead of terminating the job immediately
 - packaged frozen runs now isolate each FBX import in its own worker process for stability while still allowing parallel multi-FBX import
 - extremely large packaged FBX replacements now start with the requested helper concurrency and only downgrade after an actual native helper crash proves the current level is unsafe
-- the primary `dist-next` release includes `XMLtoUSDAConverter.exe` and `XMLtoUSDAWorker.exe`; packaged worker commands should resolve to the sidecar worker, not back into the GUI exe
+- the primary `dist-next` release includes only `XMLtoUSDAConverter.exe`; packaged worker commands should relaunch that executable in worker mode before Qt imports
 - if packaged telemetry stalls at `fbx_import`, compare the worker count message with the selected CPU profile before assuming the exporter is hung
 
 ## Huge FBX export appears busy for a long time

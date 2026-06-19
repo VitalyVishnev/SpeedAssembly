@@ -144,7 +144,7 @@ Rationale:
 
 ## 2026-06-14: Packaged workers use a dedicated sidecar executable
 
-Status: Accepted
+Status: Superseded by 2026-06-19 self-worker packaged executable
 
 Decision:
 
@@ -161,6 +161,54 @@ Rationale:
   an error payload while worker commands were launched through the GUI exe.
 - A sidecar worker keeps Qt/OpenGL bootstrapping out of heavy geometry workers
   and makes packaged worker behavior easier to reproduce from smoke tests.
+
+## 2026-06-19: Packaged GUI embeds the worker executable
+
+Status: Superseded by 2026-06-19 self-worker packaged executable
+
+Decision:
+
+- The distributed release contains one executable: `XMLtoUSDAConverter.exe`.
+- The GUI executable embeds `XMLtoUSDAWorker.exe` as a PyInstaller binary
+  payload and extracts it on demand to
+  `%LOCALAPPDATA%\XMLtoUSDAConverter\runtime\worker\<worker-build-id>\`.
+- The worker remains a separate runtime process. Packaged worker commands must
+  resolve to the extracted embedded worker, not to the GUI executable and not
+  to a sidecar beside `dist-next`.
+- The worker cache key is derived from the embedded worker SHA-256 so copying
+  the GUI executable does not create a false cache miss.
+
+Rationale:
+
+- The operator should be able to share one executable without auxiliary files.
+- Process isolation remains required because native geometry failures must not
+  take down the Qt shell.
+- Keeping extraction behind the Runtime Adapter preserves launcher/dev and
+  packaged conversion semantics while localizing packaging failure modes.
+
+## 2026-06-19: Packaged workers use the self executable
+
+Status: Accepted
+
+Decision:
+
+- The distributed release contains one executable: `XMLtoUSDAConverter.exe`.
+- Packaged worker commands launch the same executable with the worker command
+  prefix, such as `XMLtoUSDAConverter.exe fracture-worker --request <path>`.
+- `xml_to_usda.qt_ui.entry` must keep worker command dispatch before Qt imports
+  and before GUI bootstrap so worker processes do not construct the UI shell.
+- The release build must not create, embed, extract, or distribute
+  `XMLtoUSDAWorker.exe`.
+
+Rationale:
+
+- Embedding a nested worker executable created a fragile extraction point in
+  PyInstaller onefile temp directories and failed before worker startup on real
+  packaged runs.
+- Reusing the packaged executable preserves one-file distribution and process
+  isolation without relying on an auxiliary executable on disk.
+- This reopens the original GUI-executable worker risk, so packaged smoke and
+  strict stability gates are the acceptance signal for this Runtime Adapter.
 
 ## 2026-06-15: Fracture Preview uses latest-state coalescing and cached reuse
 

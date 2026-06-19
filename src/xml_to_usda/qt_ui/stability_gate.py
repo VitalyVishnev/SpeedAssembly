@@ -188,11 +188,8 @@ def run_stability_gate_cli(argv: list[str] | None = None) -> int:
 def run_stability_gate(options: StabilityGateOptions) -> dict[str, object]:
     dist_path = Path(options.dist_path)
     gui_exe = dist_path / "XMLtoUSDAConverter.exe"
-    worker_exe = dist_path / "XMLtoUSDAWorker.exe"
     if not gui_exe.exists():
         raise StabilityGateError(f"Missing packaged GUI executable: {gui_exe}")
-    if not worker_exe.exists():
-        raise StabilityGateError(f"Missing packaged worker executable: {worker_exe}")
 
     samples = required_sample_paths(names=options.sample_profiles)
     report_root = options.report_path.parent if options.report_path else dist_path / "stability"
@@ -202,7 +199,7 @@ def run_stability_gate(options: StabilityGateOptions) -> dict[str, object]:
     started = time.time()
     for profile_name, input_path in samples.items():
         if options.run_worker:
-            runs.extend(_run_worker_stress(worker_exe, input_path, report_root, options, profile_name))
+            runs.extend(_run_worker_stress(gui_exe, input_path, report_root, options, profile_name))
         if options.run_ui:
             runs.extend(_run_ui_stress(gui_exe, input_path, report_root, options, profile_name))
     passed = all(bool(run.get("passed")) for run in runs)
@@ -229,7 +226,7 @@ def prepare_crash_dump_collection(report_root: Path, *, enabled: bool = True) ->
         import winreg
 
         base_path = r"Software\Microsoft\Windows\Windows Error Reporting\LocalDumps"
-        for executable_name in ("XMLtoUSDAWorker.exe", "XMLtoUSDAConverter.exe"):
+        for executable_name in ("XMLtoUSDAConverter.exe",):
             key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, base_path + "\\" + executable_name)
             try:
                 winreg.SetValueEx(key, "DumpFolder", 0, winreg.REG_EXPAND_SZ, str(dump_dir))
@@ -246,7 +243,7 @@ def prepare_crash_dump_collection(report_root: Path, *, enabled: bool = True) ->
     return {
         "enabled": True,
         "dump_dir": str(dump_dir),
-        "executables": ("XMLtoUSDAWorker.exe", "XMLtoUSDAConverter.exe"),
+        "executables": ("XMLtoUSDAConverter.exe",),
     }
 
 

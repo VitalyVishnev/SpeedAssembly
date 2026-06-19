@@ -15,6 +15,21 @@ from .models import CleanupPolicy, ConversionPhase
 
 APP_NAME = "XMLtoUSDAConverter"
 DEFAULT_STALE_JOB_SECONDS = 24 * 60 * 60
+RUNTIME_TEMP_FILE_PREFIXES = (
+    "xml_to_usda_conversion_",
+    "xml_to_usda_proxy_",
+    "xml_to_usda_fracture_",
+    "xml_to_usda_fbx_helper_",
+)
+RUNTIME_TEMP_FILE_SUFFIXES = (
+    ".request.pkl",
+    ".result.pkl",
+    ".error.json",
+    ".stderr.log",
+)
+RUNTIME_TEMP_DIR_PREFIXES = (
+    "xml_to_usda_conversion_events_",
+)
 
 
 @dataclass(frozen=True)
@@ -32,12 +47,22 @@ class RuntimePaths:
 class RuntimeCleanupSummary:
     removed_jobs: int = 0
     removed_partial_outputs: int = 0
+    removed_temp_files: int = 0
+    removed_temp_dirs: int = 0
+    removed_legacy_worker_dirs: int = 0
     failed_jobs: int = 0
     failed_paths: tuple[str, ...] = ()
 
     @property
     def has_activity(self) -> bool:
-        return self.removed_jobs > 0 or self.removed_partial_outputs > 0 or self.failed_jobs > 0
+        return (
+            self.removed_jobs > 0
+            or self.removed_partial_outputs > 0
+            or self.removed_temp_files > 0
+            or self.removed_temp_dirs > 0
+            or self.removed_legacy_worker_dirs > 0
+            or self.failed_jobs > 0
+        )
 
     def to_message(self) -> str:
         parts: list[str] = []
@@ -45,8 +70,14 @@ class RuntimeCleanupSummary:
             parts.append(f"removed {self.removed_jobs} stale job workspace(s)")
         if self.removed_partial_outputs:
             parts.append(f"removed {self.removed_partial_outputs} stale partial USDA file(s)")
+        if self.removed_temp_files:
+            parts.append(f"removed {self.removed_temp_files} stale worker temp file(s)")
+        if self.removed_temp_dirs:
+            parts.append(f"removed {self.removed_temp_dirs} stale runtime temp folder(s)")
+        if self.removed_legacy_worker_dirs:
+            parts.append(f"removed {self.removed_legacy_worker_dirs} legacy worker runtime folder(s)")
         if self.failed_jobs:
-            parts.append(f"failed to remove {self.failed_jobs} stale job workspace(s)")
+            parts.append(f"failed to remove {self.failed_jobs} stale runtime path(s)")
         return ", ".join(parts)
 
 
@@ -167,48 +198,59 @@ def sweep_stale_job_workspaces(
     stale_after_seconds: int = DEFAULT_STALE_JOB_SECONDS,
     now: float | None = None,
 ) -> RuntimeCleanupSummary:
-    try:
-        if not runtime_paths.jobs_root.exists():
-            return RuntimeCleanupSummary()
-    except OSError:
-        return RuntimeCleanupSummary(
-            failed_jobs=1,
-            failed_paths=(str(runtime_paths.jobs_root),),
-        )
-
-    try:
-        job_dirs = list(runtime_paths.jobs_root.iterdir())
-    except OSError:
-        return RuntimeCleanupSummary(
-            failed_jobs=1,
-            failed_paths=(str(runtime_paths.jobs_root),),
-        )
-
     current_time = now if now is not None else time.time()
+    failed_paths: list[str] = []
     removed_jobs = 0
     removed_partial_outputs = 0
-    failed_paths: list[str] = []
-    for job_dir in job_dirs:
-        if not job_dir.is_dir():
-            continue
-        manifest_path = job_dir / "job_manifest.json"
-        timestamp_source = manifest_path if manifest_path.exists() else job_dir
+
+    try:
+        jobs_root_exists = runtime_paths.jobs_root.exists()
+    except OSError:
+        jobs_root_exists = False
+        failed_paths.append(str(runtime_paths.jobs_root))
+
+    if jobs_root_exists:
         try:
-            age_seconds = current_time - timestamp_source.stat().st_mtime
+            job_dirs = list(runtime_paths.jobs_root.iterdir())
         except OSError:
-            failed_paths.append(str(job_dir))
-            continue
-        if age_seconds < stale_after_seconds:
-            continue
-        removed_partial_outputs += _remove_stale_partial_output(manifest_path, runtime_paths, failed_paths)
-        try:
-            shutil.rmtree(job_dir)
-            removed_jobs += 1
-        except OSError:
-            failed_paths.append(str(job_dir))
+            job_dirs = ()
+            failed_paths.append(str(runtime_paths.jobs_root))
+        for job_dir in job_dirs:
+            if not job_dir.is_dir():
+                continue
+            manifest_path = job_dir / "job_manifest.json"
+            timestamp_source = manifest_path if manifest_path.exists() else job_dir
+            try:
+                age_seconds = current_time - timestamp_source.stat().st_mtime
+            except OSError:
+                failed_paths.append(str(job_dir))
+                continue
+            if age_seconds < stale_after_seconds:
+                continue
+            removed_partial_outputs += _remove_stale_partial_output(manifest_path, runtime_paths, failed_paths)
+            try:
+                shutil.rmtree(job_dir)
+                removed_jobs += 1
+            except OSError:
+                failed_paths.append(str(job_dir))
+
+    removed_temp_files, removed_temp_dirs = _sweep_stale_temp_artifacts(
+        current_time=current_time,
+        stale_after_seconds=stale_after_seconds,
+        failed_paths=failed_paths,
+    )
+    removed_legacy_worker_dirs = _sweep_legacy_worker_runtime_dirs(
+        runtime_paths,
+        current_time=current_time,
+        stale_after_seconds=stale_after_seconds,
+        failed_paths=failed_paths,
+    )
     return RuntimeCleanupSummary(
         removed_jobs=removed_jobs,
         removed_partial_outputs=removed_partial_outputs,
+        removed_temp_files=removed_temp_files,
+        removed_temp_dirs=removed_temp_dirs,
+        removed_legacy_worker_dirs=removed_legacy_worker_dirs,
         failed_jobs=len(failed_paths),
         failed_paths=tuple(failed_paths),
     )
@@ -267,6 +309,119 @@ def _remove_stale_partial_output(
     except OSError:
         failed_paths.append(str(partial_output))
         return 0
+
+
+def _sweep_stale_temp_artifacts(
+    *,
+    current_time: float,
+    stale_after_seconds: int,
+    failed_paths: list[str],
+) -> tuple[int, int]:
+    temp_root = Path(tempfile.gettempdir())
+    try:
+        children = list(temp_root.iterdir())
+    except OSError:
+        failed_paths.append(str(temp_root))
+        return 0, 0
+
+    removed_files = 0
+    removed_dirs = 0
+    current_meipass = _current_meipass_path()
+    for path in children:
+        try:
+            if current_time - path.stat().st_mtime < stale_after_seconds:
+                continue
+        except OSError:
+            failed_paths.append(str(path))
+            continue
+        if path.is_file() and _is_project_worker_temp_file(path):
+            try:
+                path.unlink()
+                removed_files += 1
+            except OSError:
+                failed_paths.append(str(path))
+            continue
+        project_temp_dir = _is_project_temp_dir(path, current_meipass=current_meipass)
+        if project_temp_dir is None:
+            failed_paths.append(str(path))
+            continue
+        if path.is_dir() and project_temp_dir:
+            try:
+                shutil.rmtree(path)
+                removed_dirs += 1
+            except OSError:
+                failed_paths.append(str(path))
+    return removed_files, removed_dirs
+
+
+def _is_project_worker_temp_file(path: Path) -> bool:
+    name = path.name
+    return name.startswith(RUNTIME_TEMP_FILE_PREFIXES) and name.endswith(RUNTIME_TEMP_FILE_SUFFIXES)
+
+
+def _is_project_temp_dir(path: Path, *, current_meipass: Path | None) -> bool | None:
+    name = path.name
+    if name.startswith(RUNTIME_TEMP_DIR_PREFIXES):
+        return True
+    if not name.startswith("_MEI"):
+        return False
+    try:
+        resolved_path = path.resolve(strict=False)
+    except OSError:
+        resolved_path = path
+    if current_meipass is not None and resolved_path == current_meipass:
+        return False
+    try:
+        return (path / "xml_to_usda").exists()
+    except OSError:
+        return None
+
+
+def _current_meipass_path() -> Path | None:
+    meipass = getattr(sys, "_MEIPASS", None)
+    if not meipass:
+        return None
+    try:
+        return Path(str(meipass)).resolve(strict=False)
+    except OSError:
+        return Path(str(meipass))
+
+
+def _sweep_legacy_worker_runtime_dirs(
+    runtime_paths: RuntimePaths,
+    *,
+    current_time: float,
+    stale_after_seconds: int,
+    failed_paths: list[str],
+) -> int:
+    worker_root = runtime_paths.cache_root.parent / "runtime" / "worker"
+    try:
+        if not worker_root.exists():
+            return 0
+        worker_dirs = list(worker_root.iterdir())
+    except OSError:
+        failed_paths.append(str(worker_root))
+        return 0
+
+    removed = 0
+    for worker_dir in worker_dirs:
+        if not worker_dir.is_dir() or not worker_dir.name.startswith("worker-"):
+            continue
+        if not (worker_dir / "XMLtoUSDAWorker.exe").exists():
+            continue
+        try:
+            age_seconds = current_time - worker_dir.stat().st_mtime
+        except OSError:
+            failed_paths.append(str(worker_dir))
+            continue
+        if age_seconds < stale_after_seconds:
+            continue
+        try:
+            shutil.rmtree(worker_dir)
+            removed += 1
+        except OSError:
+            failed_paths.append(str(worker_dir))
+    return removed
 
 
 def _ensure_existing_directory(path: Path) -> None:

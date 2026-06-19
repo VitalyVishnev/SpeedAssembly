@@ -90,11 +90,5 @@ def cleanup_file(path: str | Path) -> None:
 def resolve_worker_command(command: str, request_path: str | Path) -> list[str]:
     request = str(request_path)
     if bool(getattr(sys, "frozen", False)):
-        worker_dir_executable = Path(sys.executable).parent / "XMLtoUSDAWorker" / "XMLtoUSDAWorker.exe"
-        if worker_dir_executable.exists():
-            return [str(worker_dir_executable), command, "--request", request]
-        worker_executable = Path(sys.executable).with_name("XMLtoUSDAWorker.exe")
-        if worker_executable.exists():
-            return [str(worker_executable), command, "--request", request]
         return [sys.executable, command, "--request", request]
     return [sys.executable, "-m", "xml_to_usda", command, "--request", request]

@@ -72,16 +72,16 @@ For release-candidate stability, run the strict packaged gate after packaging:
 .\scripts\run_packaged_stability_gate.ps1
 ```
 
-This gate uses the packaged `XMLtoUSDAConverter.exe` and `XMLtoUSDAWorker.exe`,
-requires the real Spruce and 28-million-triangle skeletal samples, and fails on
-any worker crash, retry, missing result, or missing report even if a later
-preview succeeds.
+This gate uses the packaged `XMLtoUSDAConverter.exe` for both UI smoke and
+direct worker stress, requires the real Spruce and 28-million-triangle skeletal
+samples, and fails on any worker crash, retry, missing result, or missing
+report even if a later preview succeeds.
 
 Large-job execution note:
 
 - the GUI now launches big conversion jobs through a spawned worker subprocess
 - on Windows, that worker may itself launch additional `spawn` worker processes for parallel FBX prototype import
-- the release package includes `XMLtoUSDAConverter.exe` plus the dedicated `XMLtoUSDAWorker.exe` sidecar; packaged workers must not run through the GUI executable
+- the release package includes only `XMLtoUSDAConverter.exe`; packaged worker commands launch that same executable with a worker command prefix before Qt imports
 - this is why `.venv310`, `multiprocessing.freeze_support()`, and a real file-backed Python entry point matter for stress tests and packaged builds
 
 ## Runtime temp files and cache hygiene
@@ -91,6 +91,10 @@ Large-job execution note:
 - default runtime behavior is `ephemeral`: per-job temp dirs are removed on success, cancel, and failure
 - the GUI `Preserve temp files for debugging` switch and CLI `--preserve-temp-files` flag keep the job dir and manifest on disk for investigation
 - stale job dirs older than 24 hours are cleaned during startup sweep
+- the same startup sweep also removes stale project-owned worker protocol files
+  in `%TEMP%`, stale project-owned PyInstaller `_MEI*` extraction folders, and
+  legacy `%LOCALAPPDATA%/XMLtoUSDAConverter/runtime/worker/worker-*` folders
+  from the superseded embedded-worker package layout
 - GUI-side runtime errors are appended to `~/.xml_to_usda/gui_runtime.log` so failures can be reviewed later without relying on modal popups
 - GUI-side structured trace events are appended to `~/.xml_to_usda/gui_trace.jsonl`
   with rotation. Compact trace is always on; the Global Settings `Debug Trace`

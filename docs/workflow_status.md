@@ -159,9 +159,10 @@ The primary standalone package build path has also been stabilized:
   result settles; that is the main regression signal for the preview lifecycle
 - strict packaged stability is a separate release-candidate gate:
   `.\scripts\run_packaged_stability_gate.ps1`. It uses real
-  Spruce and 28-million-triangle skeletal samples, preserves per-iteration
-  artifacts under `dist-next\stability\`, and fails on any worker crash, retry,
-  missing result, or missing smoke report.
+  Spruce and 28-million-triangle skeletal samples, runs direct worker stress
+  through the packaged `XMLtoUSDAConverter.exe` worker command mode, preserves
+  per-iteration artifacts under `dist-next\stability\`, and fails on any worker
+  crash, retry, missing result, or missing smoke report.
 
 The earlier importer-facing concerns are treated as closed by the current validation set.
 

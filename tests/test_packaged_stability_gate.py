@@ -120,21 +120,37 @@ def test_crash_dump_collection_can_be_disabled_explicitly(tmp_path: Path) -> Non
     assert "disabled" in status["warning"]
 
 
-def test_stability_gate_fails_when_packaged_worker_exe_is_missing(tmp_path: Path) -> None:
+def test_stability_gate_uses_packaged_gui_exe_for_direct_worker_stress(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import xml_to_usda.qt_ui.stability_gate as stability_gate
+
     dist_path = tmp_path / "dist-next"
     dist_path.mkdir()
-    (dist_path / "XMLtoUSDAConverter.exe").write_bytes(b"gui")
+    gui_exe = dist_path / "XMLtoUSDAConverter.exe"
+    gui_exe.write_bytes(b"gui")
+    calls: list[Path] = []
 
-    with pytest.raises(StabilityGateError, match="Missing packaged worker executable"):
-        run_stability_gate(
-            StabilityGateOptions(
-                dist_path=dist_path,
-                sample_profiles=(),
-                iterations=1,
-                run_ui=False,
-                run_worker=False,
-            )
+    def run_worker_stress(worker_exe, input_path, report_root, options, profile_name):  # noqa: ARG001
+        calls.append(worker_exe)
+        return ()
+
+    monkeypatch.setattr(stability_gate, "_run_worker_stress", run_worker_stress)
+    monkeypatch.setattr(stability_gate, "required_sample_paths", lambda names: {"sample": tmp_path / "sample.xml"})
+
+    report = run_stability_gate(
+        StabilityGateOptions(
+            dist_path=dist_path,
+            sample_profiles=("sample",),
+            iterations=1,
+            run_ui=False,
+            run_worker=True,
         )
+    )
+
+    assert report["passed"] is True
+    assert calls == [gui_exe]
 
 
 def test_stability_artifact_analysis_can_allow_retry_only_when_requested(tmp_path: Path) -> None:
