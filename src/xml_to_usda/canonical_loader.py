@@ -8,7 +8,13 @@ ResolvedAssemblyModel that applies operator intent for authoring.
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
+import os
+import pickle
 import time
+import tempfile
+from pathlib import Path
 
 from .assembly_resolution import (
     AssemblyResolutionOptions,
@@ -37,6 +43,9 @@ from .source_validation import validate_source_model
 from .xml_reader import analyze_xml, read_source_xml
 
 
+SOURCE_MODEL_CACHE_SCHEMA_VERSION = 1
+
+
 def load_source_tree_model(
     input_path: str,
     *,
@@ -52,11 +61,24 @@ def load_source_tree_model(
         started_at=started_at,
     )
     throw_if_cancelled(cancel_event)
+    cache_path = _source_model_cache_path(input_path)
+    cached = _read_source_model_cache(cache_path)
+    if cached is not None:
+        report, model, diagnostics = cached
+        emit_telemetry(
+            telemetry_callback,
+            ConversionPhase.XML_NORMALIZATION,
+            message="Reusing cached XML source model.",
+            started_at=started_at,
+        )
+        return report, model, diagnostics
+
     document = read_source_xml(input_path)
     analysis = analyze_xml(document)
     report = analysis.report
     model = normalize_to_canonical(document, report, source_nodes=analysis.source_nodes)
     diagnostics = validate_source_model(model)
+    _write_source_model_cache(cache_path, (report, model, diagnostics))
     return report, model, diagnostics
 
 
@@ -212,3 +234,80 @@ def _apply_material_policy(
         single_material_path=single_material_path,
         normalize_asset_path=normalize_unreal_asset_path,
     )
+
+
+def _source_model_cache_root() -> Path:
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    candidate = Path(local_app_data) / "XMLtoUSDAConverter" / "cache" / "source_models" if local_app_data else None
+    fallback = Path(tempfile.gettempdir()) / "XMLtoUSDAConverter" / "cache" / "source_models"
+    for root in (candidate, fallback):
+        if root is None:
+            continue
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            return root
+        except OSError:
+            continue
+    return fallback
+
+
+def _source_model_cache_path(input_path: str) -> Path:
+    xml_path = Path(input_path)
+    try:
+        stat_result = xml_path.stat()
+    except OSError:
+        return _source_model_cache_root() / "unavailable.pkl"
+    signature = "|".join(
+        (
+            str(SOURCE_MODEL_CACHE_SCHEMA_VERSION),
+            os.path.normcase(str(xml_path.resolve(strict=False))),
+            str(stat_result.st_size),
+            str(stat_result.st_mtime_ns),
+        )
+    )
+    cache_key = hashlib.sha256(signature.encode("utf-8")).hexdigest()
+    return _source_model_cache_root() / f"{cache_key}.pkl"
+
+
+def _read_source_model_cache(cache_path: Path):
+    try:
+        with cache_path.open("rb") as handle:
+            payload = pickle.load(handle)
+    except FileNotFoundError:
+        return None
+    except Exception:
+        with contextlib.suppress(Exception):
+            cache_path.unlink(missing_ok=True)
+        return None
+    if not isinstance(payload, tuple) or len(payload) != 3:
+        with contextlib.suppress(Exception):
+            cache_path.unlink(missing_ok=True)
+        return None
+    report, model, diagnostics = payload
+    if not isinstance(report, ObservedXmlSchemaReport):
+        with contextlib.suppress(Exception):
+            cache_path.unlink(missing_ok=True)
+        return None
+    if not isinstance(model, CanonicalTreeModel):
+        with contextlib.suppress(Exception):
+            cache_path.unlink(missing_ok=True)
+        return None
+    if not isinstance(diagnostics, tuple):
+        with contextlib.suppress(Exception):
+            cache_path.unlink(missing_ok=True)
+        return None
+    return report, model, diagnostics
+
+
+def _write_source_model_cache(cache_path: Path, payload: tuple[ObservedXmlSchemaReport, CanonicalTreeModel, tuple[ValidationIssue, ...]]) -> None:
+    temp_path = cache_path.with_name(f"{cache_path.name}.tmp")
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with temp_path.open("wb") as handle:
+            pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        temp_path.replace(cache_path)
+    except Exception:
+        with contextlib.suppress(Exception):
+            temp_path.unlink(missing_ok=True)
+        with contextlib.suppress(Exception):
+            cache_path.unlink(missing_ok=True)

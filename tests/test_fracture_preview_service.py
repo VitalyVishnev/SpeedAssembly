@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -11,7 +12,6 @@ from xml_to_usda.fracture_preview_service import (
     generate_fracture_preview_from_source_request,
 )
 from xml_to_usda.fracture_service import FractureError, FractureSettings
-from xml_to_usda.fracture_service import FRACTURE_METHOD_MANUAL_PINNED_BONES
 from xml_to_usda.models import (
     ConversionRequest,
     ExportMetadata,
@@ -28,6 +28,15 @@ from xml_to_usda.models import (
     RepeatedPartInstance,
     TreeAsset,
     Vector3,
+)
+
+
+BIG_SPRUCE = (
+    Path(__file__).resolve().parents[1]
+    / "samples"
+    / "speedtree"
+    / "BigSpruce"
+    / "SkeletalAssemblyTest_Spruce_Big_low.xml"
 )
 
 
@@ -180,6 +189,86 @@ def test_fracture_preview_uses_plan_membership_stable_colors_and_simplified_geom
     assert tuple(first.prototypes) == ("Mesh_1",)
     assert first.prototypes["Mesh_1"].mesh.face_count == 1
     assert first.plan.actual_piece_count == 3
+    assert first.viewport_scene is not None
+    assert first.viewport_scene.scene_id == "Oak_fracture_preview"
+    assert first.viewport_scene.stats.logical_triangles == 5
+    assert first.viewport_scene.stats.instance_count == 2
+
+
+def test_fracture_preview_can_skip_viewport_scene_for_worker_transport() -> None:
+    preview = generate_fracture_preview(
+        _tree(),
+        FracturePreviewSettings(
+            fracture=FractureSettings(target_piece_count=3, output_stem="Oak"),
+            max_base_faces_per_piece=1,
+            max_prototype_faces=1,
+        ),
+        include_viewport_scene=False,
+    )
+
+    assert preview.viewport_scene is None
+    assert preview.plan.actual_piece_count == 3
+    assert preview.pieces
+
+
+def test_fracture_preview_reuses_base_cap_source_context_for_all_pieces(monkeypatch) -> None:
+    import xml_to_usda.fracture_geometry as fracture_geometry
+
+    calls = 0
+    original = fracture_geometry._source_edge_faces
+
+    def count_source_edge_faces(mesh, face_ranges=None):
+        nonlocal calls
+        calls += 1
+        return original(mesh, face_ranges)
+
+    monkeypatch.setattr(fracture_geometry, "_source_edge_faces", count_source_edge_faces)
+
+    result = generate_fracture_preview(
+        _tree(),
+        FracturePreviewSettings(
+            fracture=FractureSettings(target_piece_count=3, output_stem="Oak", generate_caps=True),
+            max_base_faces_per_piece=2,
+            max_prototype_faces=1,
+        ),
+    )
+
+    assert result.plan.actual_piece_count == 3
+    assert calls == 1
+
+
+def test_fracture_preview_source_request_reuses_on_disk_preview_cache(monkeypatch, tmp_path) -> None:
+    from xml_to_usda import fracture_preview_service
+
+    cache_root = tmp_path / "cache" / "fracture_preview_source_models"
+    monkeypatch.setattr(fracture_preview_service, "_preview_source_model_cache_root", lambda: cache_root)
+
+    request = FracturePreviewSourceRequest(input_path=str(BIG_SPRUCE))
+    settings = FracturePreviewSettings(
+        fracture=FractureSettings(target_piece_count=5, output_stem="Spruce"),
+        max_base_faces_per_piece=200,
+        max_prototype_faces=100,
+    )
+
+    first = generate_fracture_preview_from_source_request(
+        request,
+        settings,
+        include_viewport_scene=False,
+    )
+    assert list(cache_root.glob("*.pkl"))
+
+    def fail_load_source_tree_model(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("source XML should not be reloaded when the fracture preview cache is warm")
+
+    monkeypatch.setattr(fracture_preview_service, "load_source_tree_model", fail_load_source_tree_model)
+
+    second = generate_fracture_preview_from_source_request(
+        request,
+        settings,
+        include_viewport_scene=False,
+    )
+
+    assert second.plan == first.plan
 
 
 def test_fracture_preview_includes_bone_overlay_segments_and_selected_manual_cuts() -> None:
@@ -194,7 +283,6 @@ def test_fracture_preview_includes_bone_overlay_segments_and_selected_manual_cut
         replace(source_tree, skeleton=tuple(skeleton)),
         FracturePreviewSettings(
             fracture=FractureSettings(
-                method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
                 target_piece_count=3,
                 output_stem="Oak",
                 pinned_cut_joint_tokens=("bone_003",),
@@ -211,7 +299,7 @@ def test_fracture_preview_includes_bone_overlay_segments_and_selected_manual_cut
         ("bone_003", "bone_004"),
     )
     assert tuple(segment.child_joint_token for segment in result.bone_segments if segment.is_selected_cut) == ("bone_003",)
-    assert tuple(cut.joint_token for cut in result.plan.selected_cut_sites) == ("bone_001", "bone_003")
+    assert tuple(cut.joint_token for cut in result.plan.selected_cut_sites) == ("bone_002", "bone_003")
     bone_002_segment = next(segment for segment in result.bone_segments if segment.child_joint_token == "bone_002")
     assert (bone_002_segment.parent_position.x, bone_002_segment.parent_position.y, bone_002_segment.parent_position.z) == pytest.approx(
         (0.0, 1.0, 0.0)
@@ -225,7 +313,7 @@ def test_fracture_preview_includes_bone_overlay_segments_and_selected_manual_cut
         for joint_token in piece.piece.joint_tokens
     }
     bone_003_segment = next(segment for segment in result.bone_segments if segment.child_joint_token == "bone_003")
-    assert bone_003_segment.color == piece_color_by_joint["bone_003"]
+    assert bone_003_segment.color == piece_color_by_joint["bone_001"]
 
 
 def test_fracture_preview_distributes_target_polycount_between_base_and_repeated_parts() -> None:
@@ -301,8 +389,13 @@ def test_fracture_preview_fails_loudly_when_repeated_part_references_missing_pro
 
 def test_fracture_preview_from_conversion_request_uses_source_xml_geometry_not_operator_replacements(
     monkeypatch,
+    tmp_path,
 ) -> None:
+    from xml_to_usda import fracture_preview_service
+
     observed: dict[str, object] = {}
+    cache_root = tmp_path / "cache" / "fracture_preview_source_models"
+    monkeypatch.setattr(fracture_preview_service, "_preview_source_model_cache_root", lambda: cache_root)
 
     def fake_load_source_tree_model(input_path, *, telemetry_callback=None, cancel_event=None):
         observed["input_path"] = input_path

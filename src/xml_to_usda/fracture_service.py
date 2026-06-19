@@ -11,25 +11,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import sqrt
 
-from .models import CanonicalTreeModel, Joint, RepeatedPartInstance, ValidationIssue
+from .models import CanonicalTreeModel, Joint, RepeatedPartInstance, ValidationIssue, Vector3
 
 
-FRACTURE_METHOD_WIND_GUIDED_HIERARCHY = "wind_guided_hierarchy"
-FRACTURE_METHOD_PURE_HIERARCHY = "pure_hierarchy"
-FRACTURE_METHOD_BRANCH_BASE_GREEDY = "branch_base_greedy"
-FRACTURE_METHOD_MANUAL_PINNED_BONES = "manual_pinned_bones"
-
-_SUPPORTED_METHODS = {
-    FRACTURE_METHOD_WIND_GUIDED_HIERARCHY,
-    FRACTURE_METHOD_PURE_HIERARCHY,
-    FRACTURE_METHOD_BRANCH_BASE_GREEDY,
-    FRACTURE_METHOD_MANUAL_PINNED_BONES,
-}
-
-_AUTO_FILL_METHODS = {
-    FRACTURE_METHOD_WIND_GUIDED_HIERARCHY,
-    FRACTURE_METHOD_PURE_HIERARCHY,
-    FRACTURE_METHOD_BRANCH_BASE_GREEDY,
+FRACTURE_METHOD_MANUAL_FRACTURING = "manual_fracturing"
+_LEGACY_METHODS = {
+    "wind_guided_hierarchy",
+    "pure_hierarchy",
+    "branch_base_greedy",
+    "manual_pinned_bones",
 }
 
 
@@ -39,11 +29,12 @@ class FractureError(ValueError):
 
 @dataclass(frozen=True)
 class FractureSettings:
-    method: str = FRACTURE_METHOD_WIND_GUIDED_HIERARCHY
     target_piece_count: int = 5
     output_stem: str = "Tree"
     pinned_cut_joint_tokens: tuple[str, ...] = ()
-    manual_auto_fill_method: str = FRACTURE_METHOD_WIND_GUIDED_HIERARCHY
+    generate_caps: bool = False
+    preserve_trunk_bias: float = 0.5
+    force_stump_piece: bool = False
 
 
 @dataclass(frozen=True)
@@ -51,6 +42,9 @@ class FractureCutSite:
     joint_token: str
     kind: str
     reason: str
+    parent_joint_token: str | None = None
+    child_joint_token: str | None = None
+    segment_t: float | None = None
 
 
 @dataclass(frozen=True)
@@ -88,36 +82,76 @@ class _SkeletonGraph:
     depth_by_name: dict[str, int]
 
 
-def plan_fracture(model: CanonicalTreeModel, settings: FractureSettings | None = None) -> FracturePlan:
+@dataclass(frozen=True)
+class _FracturePlanCache:
+    graph: _SkeletonGraph
+    base_face_owner_by_index: tuple[str | None, ...]
+    subtree_base_face_counts: dict[str, int]
+    main_axis: tuple[str, ...]
+
+
+def format_manual_segment_cut_token(parent_joint_token: str, child_joint_token: str, segment_t: float) -> str:
+    parent = parent_joint_token.strip()
+    child = child_joint_token.strip()
+    if not parent or not child:
+        raise FractureError("Manual segment cut requires non-empty parent and child joint tokens.")
+    t = float(segment_t)
+    if t <= 0.0 or t >= 1.0:
+        raise FractureError(f"Manual segment cut position must be between 0 and 1, got {segment_t}.")
+    return f"{parent}->{child}@{t:.3f}"
+
+
+def plan_fracture(
+    model: CanonicalTreeModel,
+    settings: FractureSettings | None = None,
+    *,
+    analysis_cache: _FracturePlanCache | None = None,
+) -> FracturePlan:
     resolved_settings = settings or FractureSettings()
     _validate_settings(resolved_settings)
     _validate_fracture_source(model)
 
-    graph = _build_skeleton_graph(model.skeleton)
-    base_face_owner_by_index = _base_face_owner_by_index(model, graph)
-    subtree_base_face_counts = _subtree_base_face_counts(graph, base_face_owner_by_index)
-    planning_method = _planning_method(resolved_settings)
-    main_axis = _select_main_axis(graph, planning_method)
+    if analysis_cache is not None and analysis_cache.graph.joints != model.skeleton:
+        analysis_cache = None
+    if analysis_cache is None:
+        analysis_cache = _build_fracture_plan_cache(model)
+
+    graph = analysis_cache.graph
+    base_face_owner_by_index = analysis_cache.base_face_owner_by_index
+    subtree_base_face_counts = analysis_cache.subtree_base_face_counts
+    main_axis = analysis_cache.main_axis
     candidate_cut_sites, candidate_diagnostics = _candidate_cut_sites(
         graph,
         subtree_base_face_counts,
-        method=planning_method,
         main_axis=main_axis,
+        preserve_trunk_bias=resolved_settings.preserve_trunk_bias,
     )
 
     selected: list[FractureCutSite] = _manual_cut_sites(resolved_settings, graph, subtree_base_face_counts)
+    if resolved_settings.force_stump_piece:
+        stump_cut = _stump_cut_site(
+            graph,
+            subtree_base_face_counts,
+            main_axis=main_axis,
+        )
+        if stump_cut is not None and all(cut.joint_token != stump_cut.joint_token for cut in selected):
+            selected.append(stump_cut)
+            selected = _ordered_cut_sites_for_settings(selected, graph)
     rejected: list[FractureCutSite] = []
     pieces = _build_pieces(
         model,
         graph,
         base_face_owner_by_index,
-        _ordered_cut_sites_for_settings(selected, resolved_settings, graph),
+        _ordered_cut_sites_for_settings(selected, graph),
         output_stem=resolved_settings.output_stem,
     )
+    _raise_for_empty_manual_cut_pieces(selected, pieces)
     for cut_site in candidate_cut_sites:
+        if any(existing.joint_token == cut_site.joint_token for existing in selected):
+            continue
         if len(pieces) >= resolved_settings.target_piece_count:
             break
-        trial_selected = _ordered_cut_sites_for_settings(selected + [cut_site], resolved_settings, graph)
+        trial_selected = _ordered_cut_sites_for_settings(selected + [cut_site], graph)
         trial_pieces = _build_pieces(
             model,
             graph,
@@ -154,7 +188,7 @@ def plan_fracture(model: CanonicalTreeModel, settings: FractureSettings | None =
         )
 
     return FracturePlan(
-        method=resolved_settings.method,
+        method=FRACTURE_METHOD_MANUAL_FRACTURING,
         requested_piece_count=resolved_settings.target_piece_count,
         actual_piece_count=len(pieces),
         output_stem=resolved_settings.output_stem,
@@ -166,12 +200,21 @@ def plan_fracture(model: CanonicalTreeModel, settings: FractureSettings | None =
     )
 
 
+def _build_fracture_plan_cache(model: CanonicalTreeModel) -> _FracturePlanCache:
+    graph = _build_skeleton_graph(model.skeleton)
+    base_face_owner_by_index = _base_face_owner_by_index(model, graph)
+    return _FracturePlanCache(
+        graph=graph,
+        base_face_owner_by_index=base_face_owner_by_index,
+        subtree_base_face_counts=_subtree_base_face_counts(graph, base_face_owner_by_index),
+        main_axis=_select_main_axis(graph),
+    )
+
+
 def _manual_piece_count_diagnostics(
     settings: FractureSettings,
     pieces: tuple[FracturePiece, ...],
 ) -> tuple[ValidationIssue, ...]:
-    if settings.method != FRACTURE_METHOD_MANUAL_PINNED_BONES:
-        return ()
     if len(pieces) <= settings.target_piece_count:
         return ()
     return (
@@ -187,17 +230,14 @@ def _manual_piece_count_diagnostics(
 
 
 def _validate_settings(settings: FractureSettings) -> None:
-    if not isinstance(settings.method, str):
-        raise FractureError(f"Fracture method must be a string, got {type(settings.method).__name__}.")
-    if settings.method not in _SUPPORTED_METHODS:
-        raise FractureError(f"Unsupported fracture method: {settings.method}")
-    if not isinstance(settings.manual_auto_fill_method, str):
-        raise FractureError(
-            "Manual fracture auto-fill method must be a string, "
-            f"got {type(settings.manual_auto_fill_method).__name__}."
-        )
-    if settings.manual_auto_fill_method not in _AUTO_FILL_METHODS:
-        raise FractureError(f"Unsupported manual fracture auto-fill method: {settings.manual_auto_fill_method}")
+    legacy_method = getattr(settings, "method", None)
+    if legacy_method is not None:
+        if legacy_method in _LEGACY_METHODS:
+            raise FractureError(f"Legacy fracture method is no longer supported: {legacy_method}")
+        raise FractureError(f"Unsupported fracture method: {legacy_method}")
+    legacy_auto_fill = getattr(settings, "manual_auto_fill_method", None)
+    if legacy_auto_fill is not None:
+        raise FractureError("Legacy manual fracture auto-fill methods are no longer supported.")
     if not isinstance(settings.target_piece_count, int):
         raise FractureError(
             "Fracture target piece count must be an integer, "
@@ -220,12 +260,14 @@ def _validate_settings(settings: FractureSettings) -> None:
                 "Manual fracture pinned cut joint tokens must be strings, "
                 f"got {type(token).__name__}."
             )
-
-
-def _planning_method(settings: FractureSettings) -> str:
-    if settings.method == FRACTURE_METHOD_MANUAL_PINNED_BONES:
-        return settings.manual_auto_fill_method
-    return settings.method
+    if not isinstance(settings.generate_caps, bool):
+        raise FractureError(f"Fracture generate_caps must be a bool, got {type(settings.generate_caps).__name__}.")
+    if not 0.0 <= float(settings.preserve_trunk_bias) <= 1.0:
+        raise FractureError("Fracture preserve_trunk_bias must be between 0 and 1.")
+    if not isinstance(settings.force_stump_piece, bool):
+        raise FractureError(
+            f"Fracture force_stump_piece must be a bool, got {type(settings.force_stump_piece).__name__}."
+        )
 
 
 def _manual_cut_sites(
@@ -233,46 +275,83 @@ def _manual_cut_sites(
     graph: _SkeletonGraph,
     subtree_base_face_counts: dict[str, int],
 ) -> list[FractureCutSite]:
-    if settings.method != FRACTURE_METHOD_MANUAL_PINNED_BONES:
-        return []
-    ordered_tokens = _ordered_manual_cut_tokens(settings.pinned_cut_joint_tokens, graph)
     cut_sites: list[FractureCutSite] = []
-    for token in ordered_tokens:
-        if token in graph.roots:
-            raise FractureError(f"Manual fracture cut site {token} cannot be a skeleton root.")
-        if subtree_base_face_counts.get(token, 0) <= 0:
-            raise FractureError(f"Manual fracture cut site {token} cannot produce a Fracture Piece with base mesh faces.")
-        cut_sites.append(FractureCutSite(joint_token=token, kind="joint", reason="manual_pinned"))
-    return cut_sites
+    seen: set[str] = set()
+    for token in settings.pinned_cut_joint_tokens:
+        cut_site = _manual_cut_site_from_token(token, graph)
+        if cut_site.joint_token in seen:
+            continue
+        seen.add(cut_site.joint_token)
+        if cut_site.kind == "joint":
+            if cut_site.joint_token in graph.roots:
+                raise FractureError(f"Manual fracture cut site {cut_site.joint_token} cannot be a skeleton root.")
+            if subtree_base_face_counts.get(cut_site.joint_token, 0) <= 0:
+                raise FractureError(
+                    f"Manual fracture cut site {cut_site.joint_token} cannot produce a Fracture Piece with base mesh faces."
+                )
+        cut_sites.append(cut_site)
+    return sorted(cut_sites, key=lambda cut_site: _cut_site_sort_key(cut_site, graph))
 
 
-def _ordered_manual_cut_tokens(tokens: tuple[str, ...], graph: _SkeletonGraph) -> tuple[str, ...]:
-    unique: set[str] = set()
-    for token in tokens:
+def _manual_cut_site_from_token(token: str, graph: _SkeletonGraph) -> FractureCutSite:
+    if "->" not in token and "@" not in token:
         if token not in graph.joint_by_name:
             raise FractureError(f"Manual fracture cut site references missing skeleton joint {token}.")
-        unique.add(token)
-    return tuple(joint.name for joint in graph.joints if joint.name in unique)
+        return FractureCutSite(joint_token=token, kind="joint", reason="manual_pinned")
+    try:
+        edge, raw_t = token.rsplit("@", 1)
+        parent, child = edge.split("->", 1)
+        normalized = format_manual_segment_cut_token(parent, child, float(raw_t))
+    except ValueError as exc:
+        raise FractureError(f"Manual fracture segment cut token is invalid: {token}") from exc
+    parent = parent.strip()
+    child = child.strip()
+    if parent not in graph.joint_by_name:
+        raise FractureError(f"Manual fracture segment cut references missing parent joint {parent}.")
+    if child not in graph.joint_by_name:
+        raise FractureError(f"Manual fracture segment cut references missing child joint {child}.")
+    if graph.joint_by_name[child].parent != parent:
+        raise FractureError(f"Manual fracture segment cut {normalized} is not a parent-child skeleton edge.")
+    return FractureCutSite(
+        joint_token=normalized,
+        kind="manual_segment",
+        reason="manual_pinned_segment",
+        parent_joint_token=parent,
+        child_joint_token=child,
+        segment_t=float(raw_t),
+    )
 
 
 def _ordered_cut_sites_for_settings(
     cut_sites: list[FractureCutSite],
-    settings: FractureSettings,
     graph: _SkeletonGraph,
 ) -> list[FractureCutSite]:
-    if settings.method != FRACTURE_METHOD_MANUAL_PINNED_BONES:
-        return cut_sites
-    order = graph.index_by_name
-    return sorted(cut_sites, key=lambda cut_site: order.get(cut_site.joint_token, len(order)))
+    return sorted(cut_sites, key=lambda cut_site: _cut_site_sort_key(cut_site, graph))
+
+
+def _cut_site_sort_key(cut_site: FractureCutSite, graph: _SkeletonGraph) -> tuple[int, float, str]:
+    anchor = cut_site.child_joint_token or cut_site.joint_token
+    return (graph.index_by_name.get(anchor, len(graph.joints)), cut_site.segment_t or -1.0, cut_site.joint_token)
 
 
 def _validate_fracture_source(model: CanonicalTreeModel) -> None:
     if model.base_mesh is None:
         raise FractureError("Fracture planning requires a base mesh.")
+    _validate_materialized_base_mesh_topology(model.base_mesh)
     if not model.skeleton:
         raise FractureError("Fracture planning requires a skeleton hierarchy.")
     if model.base_mesh.skel_element_size <= 0 or not model.base_mesh.skel_joint_indices:
         raise FractureError("Fracture planning requires base mesh skinning indices.")
+
+
+def _validate_materialized_base_mesh_topology(mesh) -> None:
+    for field_name in ("points", "face_vertex_counts", "face_vertex_indices"):
+        value = getattr(mesh, field_name, None)
+        if not isinstance(value, tuple):
+            raise FractureError(
+                f"Base mesh {field_name} must be a materialized tuple for fracture planning, "
+                f"got {type(value).__name__}."
+            )
 
 
 def _build_skeleton_graph(skeleton: tuple[Joint, ...]) -> _SkeletonGraph:
@@ -323,20 +402,10 @@ def _build_skeleton_graph(skeleton: tuple[Joint, ...]) -> _SkeletonGraph:
     )
 
 
-def _select_main_axis(graph: _SkeletonGraph, method: str) -> tuple[str, ...]:
+def _select_main_axis(graph: _SkeletonGraph) -> tuple[str, ...]:
     paths = _root_to_leaf_paths(graph)
     if not paths:
         return graph.roots[:1]
-    if method == FRACTURE_METHOD_WIND_GUIDED_HIERARCHY:
-        return max(
-            paths,
-            key=lambda path: (
-                sum(1 for token in path if graph.joint_by_name[token].generator_level == 0),
-                _path_length(graph, path),
-                len(path),
-                tuple(reversed(path)),
-            ),
-        )
     return max(paths, key=lambda path: (_path_length(graph, path), len(path), tuple(reversed(path))))
 
 
@@ -344,32 +413,45 @@ def _candidate_cut_sites(
     graph: _SkeletonGraph,
     subtree_base_face_counts: dict[str, int],
     *,
-    method: str,
     main_axis: tuple[str, ...],
+    preserve_trunk_bias: float,
 ) -> tuple[tuple[FractureCutSite, ...], tuple[ValidationIssue, ...]]:
-    if method == FRACTURE_METHOD_BRANCH_BASE_GREEDY:
-        return _branch_base_candidates(graph, subtree_base_face_counts, main_axis), ()
-
-    diagnostics: tuple[ValidationIssue, ...] = ()
-    if method == FRACTURE_METHOD_WIND_GUIDED_HIERARCHY and not any(
-        graph.joint_by_name[token].generator_level == 0 for token in main_axis
-    ):
-        diagnostics = (
-            ValidationIssue(
-                severity="warning",
-                code="fracture_wind_guidance_missing",
-                message="Wind-guided fracture could not find Group_0 joints and used hierarchy ordering.",
-            ),
-        )
-
     candidates: list[FractureCutSite] = []
     midpoint = _main_axis_midpoint(graph, main_axis, subtree_base_face_counts)
-    if midpoint is not None:
+    branch_candidates = list(_branch_base_candidates(graph, subtree_base_face_counts, main_axis))
+    if midpoint is not None and preserve_trunk_bias < 0.5:
         candidates.append(FractureCutSite(joint_token=midpoint, kind="joint", reason="main_axis_midpoint"))
-
-    candidates.extend(_branch_base_candidates(graph, subtree_base_face_counts, main_axis))
+    candidates.extend(branch_candidates)
+    if midpoint is not None and preserve_trunk_bias >= 0.5:
+        candidates.append(FractureCutSite(joint_token=midpoint, kind="joint", reason="main_axis_midpoint"))
     candidates.extend(_remaining_hierarchy_candidates(graph, subtree_base_face_counts, candidates))
-    return tuple(_dedupe_cut_sites(candidates)), diagnostics
+    return tuple(_dedupe_cut_sites(candidates)), ()
+
+
+def _stump_cut_site(
+    graph: _SkeletonGraph,
+    subtree_base_face_counts: dict[str, int],
+    *,
+    main_axis: tuple[str, ...],
+) -> FractureCutSite | None:
+    if len(main_axis) < 2:
+        return None
+    root_token = main_axis[0]
+    child_token = main_axis[1]
+    child = graph.joint_by_name[child_token]
+    if child.parent != root_token:
+        return None
+    total_faces = subtree_base_face_counts.get(root_token, 0)
+    child_faces = subtree_base_face_counts.get(child_token, 0)
+    if child_faces <= 0 or total_faces - child_faces <= 0:
+        return None
+    return FractureCutSite(
+        joint_token=child_token,
+        kind="joint",
+        reason="stump_piece",
+        parent_joint_token=root_token,
+        child_joint_token=child_token,
+    )
 
 
 def _branch_base_candidates(
@@ -449,14 +531,14 @@ def _dedupe_cut_sites(cut_sites: list[FractureCutSite]) -> tuple[FractureCutSite
 def _build_pieces(
     model: CanonicalTreeModel,
     graph: _SkeletonGraph,
-    base_face_owner_by_index: tuple[str, ...],
+    base_face_owner_by_index: tuple[str | None, ...],
     selected_cut_sites: list[FractureCutSite],
     *,
     output_stem: str,
 ) -> tuple[FracturePiece, ...]:
     selected_tokens = tuple(cut_site.joint_token for cut_site in selected_cut_sites)
     owner_by_joint = {
-        joint.name: _deepest_selected_ancestor(graph, joint.name, selected_tokens)
+        joint.name: _deepest_selected_cut_owner(graph, joint.name, selected_cut_sites)
         for joint in graph.joints
     }
     joint_tokens_by_owner: dict[str | None, list[str]] = {None: []}
@@ -473,8 +555,25 @@ def _build_pieces(
     for joint in graph.joints:
         joint_tokens_by_owner[owner_by_joint[joint.name]].append(joint.name)
 
+    segment_cut_sites = [cut_site for cut_site in selected_cut_sites if cut_site.kind == "manual_segment"]
+    face_centroids = _base_face_centroids(model) if segment_cut_sites else ()
     for face_index, joint_token in enumerate(base_face_owner_by_index):
-        face_indices_by_owner[owner_by_joint[joint_token]].append(face_index)
+        if joint_token is None:
+            continue
+        owner = owner_by_joint[joint_token]
+        segment_owner = None
+        if segment_cut_sites:
+            face_centroid = face_centroids[face_index]
+            if face_centroid is None:
+                continue
+            segment_owner = _spatial_segment_cut_owner(
+                graph,
+                face_centroid,
+                joint_token,
+                owner,
+                segment_cut_sites,
+            )
+        face_indices_by_owner[segment_owner or owner].append(face_index)
 
     for part_index, part in enumerate(model.repeated_parts):
         joint_token = _repeated_part_joint_token(part, graph)
@@ -508,6 +607,132 @@ def _build_pieces(
             )
         )
     return tuple(pieces)
+
+
+def _deepest_selected_cut_owner(
+    graph: _SkeletonGraph,
+    joint_token: str,
+    selected_cut_sites: list[FractureCutSite],
+) -> str | None:
+    best_owner: str | None = None
+    best_depth = -1
+    for cut_site in selected_cut_sites:
+        anchor = cut_site.child_joint_token or cut_site.joint_token
+        if not _is_ancestor_or_self(graph, anchor, joint_token):
+            continue
+        depth = graph.depth_by_name[anchor]
+        if depth > best_depth:
+            best_owner = cut_site.joint_token
+            best_depth = depth
+    return best_owner
+
+
+def _spatial_segment_cut_owner(
+    graph: _SkeletonGraph,
+    face_centroid,
+    face_owner_joint_token: str,
+    current_owner: str | None,
+    selected_cut_sites: list[FractureCutSite],
+) -> str | None:
+    current_depth = _owner_anchor_depth(graph, current_owner, selected_cut_sites)
+    best: tuple[int, str] | None = None
+    for cut_site in selected_cut_sites:
+        if cut_site.kind != "manual_segment":
+            continue
+        parent = cut_site.parent_joint_token
+        child = cut_site.child_joint_token
+        segment_t = cut_site.segment_t
+        if parent is None or child is None or segment_t is None:
+            continue
+        if not (
+            _is_ancestor_or_self(graph, parent, face_owner_joint_token)
+            or _is_ancestor_or_self(graph, face_owner_joint_token, parent)
+        ):
+            continue
+        projected_t = _project_point_to_segment_t(
+            face_centroid,
+            graph.joint_by_name[parent].bind_translate,
+            graph.joint_by_name[child].bind_translate,
+        )
+        if projected_t < segment_t:
+            continue
+        depth = graph.depth_by_name[child]
+        if depth < current_depth:
+            continue
+        candidate = (depth, cut_site.joint_token)
+        if best is None or candidate > best:
+            best = candidate
+    if best is None:
+        return None
+    return best[1]
+
+
+def _owner_anchor_depth(
+    graph: _SkeletonGraph,
+    owner: str | None,
+    selected_cut_sites: list[FractureCutSite],
+) -> int:
+    if owner is None:
+        return -1
+    for cut_site in selected_cut_sites:
+        if cut_site.joint_token == owner:
+            anchor = cut_site.child_joint_token or cut_site.joint_token
+            return graph.depth_by_name.get(anchor, -1)
+    return graph.depth_by_name.get(owner, -1)
+
+
+def _is_ancestor_or_self(graph: _SkeletonGraph, ancestor: str, joint_token: str) -> bool:
+    current: str | None = joint_token
+    while current is not None:
+        if current == ancestor:
+            return True
+        current = graph.joint_by_name[current].parent
+    return False
+
+
+def _base_face_centroids(model: CanonicalTreeModel) -> tuple[Vector3 | None, ...]:
+    mesh = model.base_mesh
+    if mesh is None:
+        raise FractureError("Fracture planning requires a base mesh.")
+    centroids = []
+    cursor = 0
+    for face_index, vertex_count in enumerate(mesh.face_vertex_counts):
+        face_indices = mesh.face_vertex_indices[cursor : cursor + vertex_count]
+        cursor += vertex_count
+        if not face_indices:
+            centroids.append(None)
+            continue
+        x = sum(mesh.points[index].x for index in face_indices) / len(face_indices)
+        y = sum(mesh.points[index].y for index in face_indices) / len(face_indices)
+        z = sum(mesh.points[index].z for index in face_indices) / len(face_indices)
+        centroids.append(Vector3(x, y, z))
+    return tuple(centroids)
+
+
+def _project_point_to_segment_t(point: Vector3, parent: Vector3, child: Vector3) -> float:
+    dx = child.x - parent.x
+    dy = child.y - parent.y
+    dz = child.z - parent.z
+    length_squared = dx * dx + dy * dy + dz * dz
+    if length_squared <= 0.0:
+        raise FractureError("Manual fracture segment cut references a zero-length skeleton edge.")
+    return ((point.x - parent.x) * dx + (point.y - parent.y) * dy + (point.z - parent.z) * dz) / length_squared
+
+
+def _raise_for_empty_manual_cut_pieces(
+    selected_cut_sites: list[FractureCutSite],
+    pieces: tuple[FracturePiece, ...],
+) -> None:
+    manual_tokens = {
+        cut_site.joint_token
+        for cut_site in selected_cut_sites
+        if cut_site.reason.startswith("manual_pinned")
+    }
+    for piece in pieces:
+        if piece.cut_joint_token in manual_tokens and not piece.base_face_indices:
+            raise FractureError(
+                f"Manual fracture cut site {piece.cut_joint_token} cannot produce a Fracture Piece with base mesh faces."
+            )
 
 
 def _refine_with_synthetic_face_splits(
@@ -591,7 +816,7 @@ def _renumber_pieces(pieces: tuple[FracturePiece, ...], *, output_stem: str) -> 
     )
 
 
-def _base_face_owner_by_index(model: CanonicalTreeModel, graph: _SkeletonGraph) -> tuple[str, ...]:
+def _base_face_owner_by_index(model: CanonicalTreeModel, graph: _SkeletonGraph) -> tuple[str | None, ...]:
     mesh = model.base_mesh
     if mesh is None:
         raise FractureError("Fracture planning requires a base mesh.")
@@ -605,15 +830,21 @@ def _base_face_owner_by_index(model: CanonicalTreeModel, graph: _SkeletonGraph) 
         raise FractureError("Base mesh skinning weight count is smaller than point count.")
 
     point_owner_tokens = tuple(_point_owner_token(model, graph, point_index) for point_index in range(len(mesh.points)))
-    face_owner_tokens: list[str] = []
+    face_owner_tokens: list[str | None] = []
     cursor = 0
     for face_index, vertex_count in enumerate(mesh.face_vertex_counts):
-        if vertex_count <= 0:
+        if vertex_count < 0:
             raise FractureError(f"Base mesh face {face_index} has invalid vertex count {vertex_count}.")
+        if vertex_count == 0:
+            face_owner_tokens.append(None)
+            continue
         face_indices = mesh.face_vertex_indices[cursor : cursor + vertex_count]
         if len(face_indices) != vertex_count:
             raise FractureError(f"Base mesh face {face_index} is missing face vertex indices.")
         cursor += vertex_count
+        for point_index in face_indices:
+            if point_index < 0 or point_index >= len(point_owner_tokens):
+                raise FractureError(f"Base mesh face {face_index} references point {point_index} outside the mesh.")
         face_owner_tokens.append(_majority_token(tuple(point_owner_tokens[index] for index in face_indices), face_index))
     if cursor != len(mesh.face_vertex_indices):
         raise FractureError("Base mesh has trailing face vertex indices that are not referenced by face counts.")
@@ -670,20 +901,6 @@ def _repeated_part_joint_token(part: RepeatedPartInstance, graph: _SkeletonGraph
     raise FractureError(f"Repeated part {part.name} has no skeleton binding for fracture assignment.")
 
 
-def _deepest_selected_ancestor(
-    graph: _SkeletonGraph,
-    joint_token: str,
-    selected_tokens: tuple[str, ...],
-) -> str | None:
-    selected = set(selected_tokens)
-    current: str | None = joint_token
-    while current is not None:
-        if current in selected:
-            return current
-        current = graph.joint_by_name[current].parent
-    return None
-
-
 def _root_to_leaf_paths(graph: _SkeletonGraph) -> tuple[tuple[str, ...], ...]:
     paths: list[tuple[str, ...]] = []
 
@@ -719,10 +936,12 @@ def _generator_level_sort_key(joint: Joint) -> int:
 
 def _subtree_base_face_counts(
     graph: _SkeletonGraph,
-    base_face_owner_by_index: tuple[str, ...],
+    base_face_owner_by_index: tuple[str | None, ...],
 ) -> dict[str, int]:
     counts = {joint.name: 0 for joint in graph.joints}
     for owner_token in base_face_owner_by_index:
+        if owner_token is None:
+            continue
         current: str | None = owner_token
         while current is not None:
             counts[current] += 1

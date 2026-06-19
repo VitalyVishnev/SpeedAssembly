@@ -8,13 +8,28 @@ geometry and stable colors for inspection instead of authoring USD.
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
+import os
+import pickle
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+import tempfile
+from typing import TYPE_CHECKING
 
 from .canonical_loader import load_source_tree_model
-from .fracture_geometry import sample_face_indices, slice_mesh_faces
-from .fracture_service import FractureError, FracturePiece, FracturePlan, FractureSettings, plan_fracture
+from .fracture_geometry import build_cap_source_context, sample_face_indices, slice_mesh_faces
+from .fracture_service import (
+    FractureError,
+    FracturePiece,
+    FracturePlan,
+    FractureSettings,
+    _FracturePlanCache,
+    _build_fracture_plan_cache,
+    plan_fracture,
+)
 from .geometry_buffers import geometry_buffer_from_mesh, geometry_buffer_to_mesh
+from .job_control import throw_if_cancelled
 from .models import (
     CanonicalTreeModel,
     Color4,
@@ -30,11 +45,15 @@ from .models import (
 )
 from .output_resolution import render_output_file_name
 
+if TYPE_CHECKING:
+    from .viewport_scene import ViewportScene
+
 
 DEFAULT_FRACTURE_PREVIEW_POLYCOUNT = 1_000_000
 DEFAULT_FRACTURE_PREVIEW_BASE_PRIORITY = 0.33
 DEFAULT_FRACTURE_PREVIEW_BASE_FACE_BUDGET = 50_000
 DEFAULT_FRACTURE_PREVIEW_PROTOTYPE_FACE_BUDGET = 2_000
+FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -108,6 +127,7 @@ class FracturePreviewResult:
     instances: tuple[FracturePreviewInstance, ...]
     diagnostics: tuple[ValidationIssue, ...]
     bone_segments: tuple[FracturePreviewBoneSegment, ...] = ()
+    viewport_scene: "ViewportScene | None" = None
 
 
 def prepare_fracture_preview_source_request(
@@ -135,6 +155,7 @@ def generate_fracture_preview_from_conversion_request(
     *,
     telemetry_callback=None,
     cancel_event=None,
+    include_viewport_scene: bool = True,
 ) -> FracturePreviewResult:
     """Load source XML geometry and build a diagnostic fracture preview."""
     return generate_fracture_preview_from_source_request(
@@ -142,6 +163,7 @@ def generate_fracture_preview_from_conversion_request(
         settings,
         telemetry_callback=telemetry_callback,
         cancel_event=cancel_event,
+        include_viewport_scene=include_viewport_scene,
     )
 
 
@@ -151,36 +173,67 @@ def generate_fracture_preview_from_source_request(
     *,
     telemetry_callback=None,
     cancel_event=None,
+    include_viewport_scene: bool = True,
 ) -> FracturePreviewResult:
     """Load source XML geometry and build a diagnostic fracture preview."""
     input_path = request.input_path.strip()
     if not input_path:
         raise FractureError("Fracture preview requires a source XML path.")
     preview_settings = _preview_settings(settings, _preview_output_stem(request, input_path))
-    _report, source_model, source_diagnostics = load_source_tree_model(
-        input_path,
-        telemetry_callback=telemetry_callback,
-        cancel_event=cancel_event,
+    throw_if_cancelled(cancel_event)
+    cached_preview_model = _read_preview_source_model_cache(input_path)
+    if cached_preview_model is None:
+        report, source_model, source_diagnostics = load_source_tree_model(
+            input_path,
+            telemetry_callback=telemetry_callback,
+            cancel_event=cancel_event,
+        )
+        analysis_cache = _build_fracture_plan_cache(source_model)
+        cached_preview_model = (
+            report,
+            _slim_preview_source_model(source_model),
+            source_diagnostics,
+            analysis_cache,
+        )
+        _write_preview_source_model_cache(input_path, cached_preview_model)
+    _report, source_model, source_diagnostics, analysis_cache = cached_preview_model
+    result = generate_fracture_preview(
+        source_model,
+        preview_settings,
+        include_viewport_scene=include_viewport_scene,
+        analysis_cache=analysis_cache,
     )
-    result = generate_fracture_preview(source_model, preview_settings)
     return replace(result, diagnostics=source_diagnostics + result.diagnostics)
 
 
 def generate_fracture_preview(
     model: CanonicalTreeModel,
     settings: FracturePreviewSettings | None = None,
+    *,
+    include_viewport_scene: bool = True,
+    analysis_cache: _FracturePlanCache | None = None,
 ) -> FracturePreviewResult:
     """Build lightweight diagnostic preview payloads from one tree model."""
     resolved_settings = settings or FracturePreviewSettings()
     _validate_preview_settings(resolved_settings)
-    plan = plan_fracture(model, resolved_settings.fracture)
+    plan = plan_fracture(model, resolved_settings.fracture, analysis_cache=analysis_cache)
     base_face_budgets = _base_face_budgets(model, plan, resolved_settings)
     prototype_budgets = _prototype_face_budgets(model, plan, resolved_settings, base_face_budgets)
-    pieces = tuple(_preview_piece(model, piece, base_face_budgets[piece.index]) for piece in plan.pieces)
+    cap_context = build_cap_source_context(model.base_mesh) if resolved_settings.fracture.generate_caps and model.base_mesh is not None else None
+    pieces = tuple(
+        _preview_piece(
+            model,
+            piece,
+            base_face_budgets[piece.index],
+            generate_caps=resolved_settings.fracture.generate_caps,
+            cap_context=cap_context,
+        )
+        for piece in plan.pieces
+    )
     prototypes = _preview_prototypes(model, plan, prototype_budgets)
     instances = _preview_instances(model, pieces)
     bone_segments = _preview_bone_segments(model, resolved_settings.fracture, pieces)
-    return FracturePreviewResult(
+    result = FracturePreviewResult(
         plan=plan,
         pieces=pieces,
         prototypes=prototypes,
@@ -188,6 +241,12 @@ def generate_fracture_preview(
         diagnostics=plan.diagnostics,
         bone_segments=bone_segments,
     )
+    if not include_viewport_scene:
+        return result
+
+    from .fracture_viewport_scene import build_fracture_viewport_scene
+
+    return replace(result, viewport_scene=build_fracture_viewport_scene(result))
 
 
 def _single_conversion_input_path(request: ConversionRequest) -> str:
@@ -250,11 +309,20 @@ def _preview_piece(
     model: CanonicalTreeModel,
     piece: FracturePiece,
     face_budget: int,
+    *,
+    generate_caps: bool,
+    cap_context=None,
 ) -> FracturePreviewPiece:
     if model.base_mesh is None:
         raise FractureError("Fracture preview requires a base mesh.")
     sampled_faces = sample_face_indices(piece.base_face_indices, face_budget)
-    mesh = slice_mesh_faces(model.base_mesh, sampled_faces, name=f"{piece.name}_PreviewBase")
+    mesh = slice_mesh_faces(
+        model.base_mesh,
+        sampled_faces,
+        name=f"{piece.name}_PreviewBase",
+        generate_caps=generate_caps,
+        cap_context=cap_context,
+    )
     return FracturePreviewPiece(
         piece=piece,
         color=_piece_color(piece.index),
@@ -436,7 +504,7 @@ def _preview_bone_segments(
                 parent_position=parent.bind_translate,
                 child_position=joint.bind_translate,
                 is_selected_cut=joint.name in selected_tokens,
-                color=color_by_joint_token.get(joint.name, Color4(0.64, 0.82, 0.95, 1.0)),
+                color=color_by_joint_token.get(parent.name, Color4(0.64, 0.82, 0.95, 1.0)),
             )
         )
     return tuple(segments)
@@ -468,3 +536,101 @@ def _piece_color(index: int) -> Color4:
     green = 0.25 + ((value >> 8) & 0xFF) / 510.0
     blue = 0.25 + (value & 0xFF) / 510.0
     return Color4(red, green, blue, 1.0)
+
+
+def _slim_preview_source_model(model: CanonicalTreeModel) -> CanonicalTreeModel:
+    return replace(
+        model,
+        materials=(),
+        source_objects=(),
+        base_tree_parts=(),
+        branch_segments=(),
+        mesh_library=(),
+        skeletal_support_primvars=None,
+        spines=(),
+        dynamic_wind=None,
+    )
+
+
+def _read_preview_source_model_cache(
+    input_path: str,
+) -> tuple[object, CanonicalTreeModel, tuple[ValidationIssue, ...], _FracturePlanCache] | None:
+    cache_path = _preview_source_model_cache_path(input_path)
+    try:
+        with cache_path.open("rb") as handle:
+            payload = pickle.load(handle)
+    except FileNotFoundError:
+        return None
+    except Exception:
+        with contextlib.suppress(Exception):
+            cache_path.unlink(missing_ok=True)
+        return None
+    if not isinstance(payload, tuple) or len(payload) != 4:
+        with contextlib.suppress(Exception):
+            cache_path.unlink(missing_ok=True)
+        return None
+    report, model, diagnostics, analysis_cache = payload
+    if not isinstance(model, CanonicalTreeModel) or not isinstance(diagnostics, tuple):
+        with contextlib.suppress(Exception):
+            cache_path.unlink(missing_ok=True)
+        return None
+    if not isinstance(analysis_cache, _FracturePlanCache):
+        with contextlib.suppress(Exception):
+            cache_path.unlink(missing_ok=True)
+        return None
+    return report, model, diagnostics, analysis_cache
+
+
+def _write_preview_source_model_cache(
+    input_path: str,
+    payload: tuple[object, CanonicalTreeModel, tuple[ValidationIssue, ...], _FracturePlanCache],
+) -> None:
+    cache_path = _preview_source_model_cache_path(input_path)
+    temp_path = cache_path.with_name(f"{cache_path.name}.tmp")
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with temp_path.open("wb") as handle:
+            pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        temp_path.replace(cache_path)
+    except Exception:
+        with contextlib.suppress(Exception):
+            temp_path.unlink(missing_ok=True)
+        with contextlib.suppress(Exception):
+            cache_path.unlink(missing_ok=True)
+
+
+def _preview_source_model_cache_path(input_path: str) -> Path:
+    xml_path = Path(input_path)
+    try:
+        stat_result = xml_path.stat()
+    except OSError:
+        return _preview_source_model_cache_root() / "unavailable.pkl"
+    signature = "|".join(
+        (
+            str(FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION),
+            os.path.normcase(str(xml_path.resolve(strict=False))),
+            str(stat_result.st_size),
+            str(stat_result.st_mtime_ns),
+        )
+    )
+    cache_key = hashlib.sha256(signature.encode("utf-8")).hexdigest()
+    return _preview_source_model_cache_root() / f"{cache_key}.pkl"
+
+
+def _preview_source_model_cache_root() -> Path:
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    candidate = (
+        Path(local_app_data) / "XMLtoUSDAConverter" / "cache" / "fracture_preview_source_models"
+        if local_app_data
+        else None
+    )
+    fallback = Path(tempfile.gettempdir()) / "XMLtoUSDAConverter" / "cache" / "fracture_preview_source_models"
+    for root in (candidate, fallback):
+        if root is None:
+            continue
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            return root
+        except OSError:
+            continue
+    return fallback
