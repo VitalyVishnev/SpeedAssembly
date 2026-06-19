@@ -32,6 +32,30 @@ Rationale:
 - Packaged worker races can make the process state visible before the result
   event is processed; the file protocol is the more reliable completion signal.
 
+## 2026-06-14: Preview shell is shared infrastructure, not a mode switcher
+
+Status: Accepted
+
+Decision:
+
+- Proxy Mesh Preview and Fracture Preview use the same Preview Shell module for
+  window ownership, modality, focus, and the two-column viewport/settings
+  layout.
+- The current UX keeps separate Geometry-tab entry points and separate
+  mode-specific dialogs for mode settings and result presentation.
+- Do not introduce one hot-swappable runtime shell object unless a real
+  in-preview mode switcher becomes product behavior.
+
+Rationale:
+
+- The shared shell module removes duplicated window/layout behavior while
+  preserving the current modal preview workflow.
+- A runtime mode switcher would couple proxy and fracture panel lifetimes,
+  settings ownership, and worker cancellation rules without current user-facing
+  leverage.
+- Future architecture reviews should treat one runtime shell object as a new UX
+  requirement, not an unfinished stability fix.
+
 ## 2026-06-06: Manual fracture cuts are current-XML session state
 
 Status: Accepted
@@ -56,9 +80,31 @@ Rationale:
 - The UI can choose bones, but it must not own the destructibility partition
   contract.
 
-## 2026-06-06: Fracture Preview uses a local UI background thread
+## 2026-06-12: Fracturing uses one Manual Fracturing planner
 
 Status: Accepted
+
+Decision:
+
+- Operator-facing Fracturing has one planner: Manual Fracturing.
+- Manual pinned cuts, optional Stump Piece, Preserve Trunk Bias, and automatic
+  hierarchy fill are settings on that planner, not separate fracture methods.
+- Legacy method ids such as `pure_hierarchy`, `wind_guided_hierarchy`,
+  `branch_base_greedy`, and `manual_pinned_bones` are rejected loudly.
+- Optional Fracture Caps are generated in `fracture_geometry.py` so preview and
+  export use the same sliced piece mesh contract.
+- Exploded Fracture Preview is visual-only Qt state and does not change export.
+
+Rationale:
+
+- The useful product model is always pinned cuts plus deterministic fill.
+- Separate modes made UI state look more powerful than the underlying planner
+  and encouraged mismatched preview/export expectations.
+- Caps are geometry behavior, not viewport decoration.
+
+## 2026-06-06: Fracture Preview uses a local UI background thread
+
+Status: Superseded by 2026-06-12 process isolation
 
 Decision:
 
@@ -77,6 +123,90 @@ Rationale:
   executables while the operator changes controls is a worse runtime contract
   than a local background thread.
 - Export isolation still protects the high-stakes authoring path.
+
+## 2026-06-12: Fracture Preview uses process isolation
+
+Status: Accepted
+
+Decision:
+
+- `Fracture Preview` generation runs in an isolated worker process.
+- Settings changes cancel stale preview workers and start a fresh isolated job.
+- Worker result/error files are drained before reporting a stopped worker as
+  crashed.
+
+Rationale:
+
+- Runtime traces showed native crashes inside threaded fracture preview work
+  could close the Qt shell before Python produced a useful error.
+- Process isolation keeps native failures outside the operator UI and matches
+  the Proxy Mesh crash-containment contract.
+
+## 2026-06-14: Packaged workers use a dedicated sidecar executable
+
+Status: Accepted
+
+Decision:
+
+- Packaged release builds include `XMLtoUSDAConverter.exe` for the Qt shell and
+  `XMLtoUSDAWorker.exe` for file-protocol worker commands.
+- Conversion, Proxy Mesh, Fracture Preview/Export, and FBX helper worker
+  commands should resolve to the sidecar worker when it exists.
+- The GUI executable may remain a compatibility fallback for older layouts, but
+  it is not the primary packaged worker runtime.
+
+Rationale:
+
+- Runtime traces showed repeated native worker crashes before Python could write
+  an error payload while worker commands were launched through the GUI exe.
+- A sidecar worker keeps Qt/OpenGL bootstrapping out of heavy geometry workers
+  and makes packaged worker behavior easier to reproduce from smoke tests.
+
+## 2026-06-15: Fracture Preview uses latest-state coalescing and cached reuse
+
+Status: Accepted
+
+Decision:
+
+- Fracture Preview stays process-isolated, but the UI preview lifecycle now
+  coalesces rapid settings changes into the latest pending request instead of
+  starting a fresh worker for every transient toggle.
+- Fracture Preview reuses a cached completed result when the operator returns
+  to a previously computed XML/settings combination during the same session.
+- Visual-only viewport controls such as `Piece Color` and `Exploded View`
+  remain local viewport state and do not restart the worker.
+
+Rationale:
+
+- The observed crash pattern came from repeated fast worker churn over the same
+  large XML, not from the fracture planner contract itself.
+- Keeping the current worker alive until the last pending settings are ready
+  avoids a cancellation/start storm and reduces redundant XML normalization.
+- Cached reuse makes "toggle back" interactions feel immediate without changing
+  the preview/export contract.
+
+## 2026-06-16: UDIM resolution is piece-local
+
+Status: Accepted
+
+Decision:
+
+- UDIM settings are applied independently per authored piece: the `Base Skeletal
+  Tree` resolves its own base-material rows, and each prototype resolves its own
+  repeated-part UDIM rows after local material remap.
+- The same numeric `material_id` may appear in different pieces without
+  cross-piece overwrite. `material_id` is not a global semantic role.
+- Duplicate active UDIM settings for one `material_id` inside one piece, or a
+  UDIM target that matches no real section in that piece, are fail-loud
+  conversion errors.
+
+Rationale:
+
+- The previous global post-pass made prototype settings depend on unrelated
+  pieces and allowed the wrong scope to win when ids overlapped.
+- Source material ids are observed section keys, not stable semantic identities.
+- Piece-local resolution matches the operator expectation that what is visible
+  per row is what gets authored per piece.
 
 ## 2026-05-19: Operator settings are global, not per-XML
 

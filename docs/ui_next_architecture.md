@@ -49,8 +49,8 @@ available logical geometry.
 - primary release GUI entrypoint is `xml_to_usda.qt_ui.entry`
 - `python -m xml_to_usda gui` and `xml-to-usda-gui` route to the PySide6 shell
 - primary packaged build is `dist-next\XMLtoUSDAConverter.exe`
-- the PySide6 packaged exe is a one-file release artifact and also handles
-  `fbx-worker` helper mode when launched with the worker command prefix
+- packaged worker commands route to the dedicated `dist-next\XMLtoUSDAWorker.exe`
+  sidecar so heavy geometry work does not re-enter the GUI executable
 
 The release target is now the PySide6 shell. Any missing operator parity should
 be treated as release-blocking work for `dist-next`, not as a reason to revive

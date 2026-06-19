@@ -32,8 +32,8 @@ def test_validate_conversion_request_rejects_explicit_output_for_batch() -> None
     ("setting", "message"),
     (
         (
-            UdimMaterialSetting(material_id=0, mode=UdimMode.SHIFT_PRIMARY_UV, udim_id=1001),
-            "UDIM material id must be a positive integer.",
+            UdimMaterialSetting(material_id=-1, mode=UdimMode.SHIFT_PRIMARY_UV, udim_id=1001),
+            "UDIM material id must be a non-negative integer.",
         ),
         (
             UdimMaterialSetting(material_id=1, mode=UdimMode.WRITE_SECONDARY_UV_OFFSET, udim_id=1000),
@@ -49,6 +49,17 @@ def test_validate_conversion_request_rejects_invalid_udim_settings(
 
     with pytest.raises(ValueError, match=message):
         validate_conversion_request(request)
+
+
+def test_validate_conversion_request_accepts_source_material_id_zero_for_udim() -> None:
+    request = ConversionRequest(
+        input_paths=("a.xml",),
+        udim_material_settings=(
+            UdimMaterialSetting(material_id=0, mode=UdimMode.SHIFT_PRIMARY_UV, udim_id=1001),
+        ),
+    )
+
+    validate_conversion_request(request)
 
 
 @pytest.mark.parametrize(

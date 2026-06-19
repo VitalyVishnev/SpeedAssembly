@@ -21,8 +21,8 @@ from .models import (
     UdimMaterialSetting,
     UdimMode,
 )
-from .udim_resolver import apply_udim_material_settings
 from .payload_partition import partition_fbx_material_faces
+from .udim_resolver import apply_udim_settings_to_prototype
 
 
 BASELINE_BARK_MATERIAL_ID = 1
@@ -106,8 +106,6 @@ def _apply_explicit_material_contract(
     next_material_id = max((material.source_id for material in materials), default=0) + 1
     prototypes = []
     warnings: list[str] = []
-    udim_settings: list[UdimMaterialSetting] = []
-
     for prototype in model.prototypes:
         if prototype.resolution_mode == PrototypeResolutionMode.EXTERNAL_ASSET:
             prototypes.append(prototype)
@@ -120,13 +118,14 @@ def _apply_explicit_material_contract(
         if material_mode == FbxMaterialMode.SINGLE_MATERIAL:
             material_id = next_material_id
             next_material_id += 1
+            prototype_settings: tuple[UdimMaterialSetting, ...] = ()
             if prototype.single_material_udim_mode != UdimMode.OFF:
-                udim_settings.append(
+                prototype_settings = (
                     UdimMaterialSetting(
                         material_id=material_id,
                         mode=prototype.single_material_udim_mode,
                         udim_id=prototype.single_material_udim_id,
-                    )
+                    ),
                 )
             materials.append(
                 MaterialSpec(
@@ -138,7 +137,10 @@ def _apply_explicit_material_contract(
                     source_material_ids=(material_id,),
                 )
             )
-            prototypes.append(_replace_prototype_sections_with_single_material(prototype, material_id))
+            prototype = _replace_prototype_sections_with_single_material(prototype, material_id)
+            if prototype_settings:
+                prototype = apply_udim_settings_to_prototype(prototype, prototype_settings)
+            prototypes.append(prototype)
             continue
 
         if material_mode == FbxMaterialMode.MATERIAL_SLOTS:
@@ -149,9 +151,11 @@ def _apply_explicit_material_contract(
             )
             next_material_id += len(slot_material_specs)
             materials.extend(slot_material_specs)
-            udim_settings.extend(slot_udim_settings)
             warnings.extend(slot_warnings)
-            prototypes.append(_replace_prototype_sections(prototype, sections))
+            prototype = _replace_prototype_sections(prototype, sections)
+            if slot_udim_settings:
+                prototype = apply_udim_settings_to_prototype(prototype, slot_udim_settings)
+            prototypes.append(prototype)
             continue
 
         sections, failure_reason = _explicit_vertex_color_sections_for_prototype(
@@ -168,8 +172,9 @@ def _apply_explicit_material_contract(
         black_material_id = next_material_id
         white_material_id = next_material_id + 1
         next_material_id += 2
+        prototype_settings: list[UdimMaterialSetting] = []
         if prototype.black_material_udim_mode != UdimMode.OFF:
-            udim_settings.append(
+            prototype_settings.append(
                 UdimMaterialSetting(
                     material_id=black_material_id,
                     mode=prototype.black_material_udim_mode,
@@ -177,7 +182,7 @@ def _apply_explicit_material_contract(
                 )
             )
         if prototype.white_material_udim_mode != UdimMode.OFF:
-            udim_settings.append(
+            prototype_settings.append(
                 UdimMaterialSetting(
                     material_id=white_material_id,
                     mode=prototype.white_material_udim_mode,
@@ -205,19 +210,19 @@ def _apply_explicit_material_contract(
             )
         )
         prototypes.append(
-            _replace_prototype_sections(
-                prototype,
-                _remap_bucket_sections(sections, black_material_id, white_material_id),
+            apply_udim_settings_to_prototype(
+                _replace_prototype_sections(
+                    prototype,
+                    _remap_bucket_sections(sections, black_material_id, white_material_id),
+                ),
+                tuple(prototype_settings),
             )
         )
 
     metadata = model.metadata
     if warnings:
         metadata = replace(metadata, warnings=metadata.warnings + tuple(warnings))
-    resolved_model = replace(model, materials=tuple(materials), prototypes=tuple(prototypes), metadata=metadata)
-    if udim_settings:
-        resolved_model = apply_udim_material_settings(resolved_model, tuple(udim_settings))
-    return resolved_model
+    return replace(model, materials=tuple(materials), prototypes=tuple(prototypes), metadata=metadata)
 
 
 def _prototype_uses_explicit_part_material_contract(prototype) -> bool:
@@ -226,6 +231,8 @@ def _prototype_uses_explicit_part_material_contract(prototype) -> bool:
     if prototype.source_mode == PrototypeSourceMode.FBX_FILE:
         return True
     if prototype.fbx_material_mode != FbxMaterialMode.AUTO:
+        return True
+    if prototype.has_active_udim_settings():
         return True
     return bool(
         prototype.single_material_path

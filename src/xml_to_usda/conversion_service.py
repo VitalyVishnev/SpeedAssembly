@@ -134,6 +134,8 @@ def _should_use_explicit_material_contract(
             return True
         if config.single_material_path or config.black_material_path or config.white_material_path:
             return True
+        if config.has_active_udim_settings():
+            return True
         if config.mode == PrototypeSourceMode.FBX_FILE:
             return True
     return False

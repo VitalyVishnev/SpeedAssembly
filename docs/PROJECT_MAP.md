@@ -63,6 +63,8 @@ free of UI, process, launcher, and package-build behavior.
 - `src/xml_to_usda/payload_partition.py`
 - `src/xml_to_usda/geometry_buffers.py`
 - `src/xml_to_usda/udim_resolver.py`
+  Owns piece-local UDIM UV mutation and fail-loud target validation for base
+  meshes and resolved prototypes.
 
 ### Application modules
 
@@ -76,6 +78,10 @@ contracts.
 - `src/xml_to_usda/diagnostics_bundle.py`
   Owns local diagnostics bundle request construction and zip export, including
   runtime trace and packaged smoke artifacts when present.
+- `src/xml_to_usda/viewport_scene.py`
+  Owns the Qt-free `Viewport Scene` payload contract shared by preview modes.
+- `src/xml_to_usda/proxy_viewport_scene.py`
+  Owns the Proxy Mesh Preview mode adapter into `Viewport Scene`.
 - `src/xml_to_usda/proxy_mesh_service.py`
   Owns `ProxyMeshSourceRequest` and proxy companion generation/export.
 - `src/xml_to_usda/fracture_service.py`
@@ -83,11 +89,17 @@ contracts.
   Owns `FractureExportRequest` and resolved-intent fracture USDA export.
 - `src/xml_to_usda/fracture_preview_service.py`
   Owns `FracturePreviewSourceRequest` and source-geometry fracture previews.
+- `src/xml_to_usda/fracture_viewport_scene.py`
+  Owns the Fracture Preview mode adapter into `Viewport Scene`.
 - `src/xml_to_usda/conversion_orchestrator.py`
 - `src/xml_to_usda/canonical_loader.py`
 - `src/xml_to_usda/assembly_resolution.py`
+  Applies base-mesh UDIM intent before prototype source resolution and builds
+  the authoring model with the per-piece UDIM contract intact.
 - `src/xml_to_usda/prototype_resolution.py`
 - `src/xml_to_usda/material_assignment_resolution.py`
+  Resolves prototype material assignment and applies repeated-part UDIM intent
+  inside each piece after local material ids exist.
 - `src/xml_to_usda/source_analysis.py`
 - `src/xml_to_usda/udim_settings.py`
 
@@ -118,11 +130,25 @@ environment-facing implementation details.
 Operator-facing adapters over application contracts.
 
 - `src/xml_to_usda/qt_ui/`
+- `src/xml_to_usda/qt_ui/preview_jobs.py`
+  Owns the shared process-backed preview job lifecycle for latest-request-wins
+  preview workers. Mode-specific UI code still owns payload interpretation.
+- `src/xml_to_usda/qt_ui/preview_shell.py`
+  Owns the shared preview dialog shell: two-column viewport/settings layout,
+  stable sizing, modality, owner, and focus behavior. Preview modes provide
+  their mode-specific viewport widget and settings panel content.
+- `src/xml_to_usda/qt_ui/viewport.py`
+  Owns the shared Qt/OpenGL matcap/grid viewport implementation, camera/orbit
+  behavior, and `ViewportScene` mesh rendering for preview modes.
 - `src/xml_to_usda/qt_ui/proxy_preview.py`
-  Contains the shared Qt matcap/grid viewport plus Proxy Mesh preview dialog.
+  Contains the Proxy Mesh preview dialog. The dialog is UI-only for preview
+  generation: it reports settings changes, accepts ready proxy results, and
+  renders them through `qt_ui/viewport.py`, but does not own worker processes.
 - `src/xml_to_usda/qt_ui/fracture_preview.py`
   Contains the Fracture Preview dialog and payload adapter into the shared
-  matcap/grid viewport.
+  matcap/grid viewport base. Preview generation process lifecycle is owned by
+  `qt_ui/preview_jobs.py` through `qt_ui/background_jobs.py`; shared fracture
+  overlays and picking live in `qt_ui/viewport.py`.
 - `src/xml_to_usda/qt_ui/trace.py`
   Qt-facing facade over runtime trace logging.
 - `src/xml_to_usda/qt_ui/smoke.py`

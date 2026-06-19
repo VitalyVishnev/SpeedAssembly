@@ -5,6 +5,7 @@ import importlib
 import sys
 from pathlib import Path
 
+import xml_to_usda
 from xml_to_usda.fracture_preview_service import FracturePreviewSettings, FracturePreviewSourceRequest
 from xml_to_usda.fracture_service import FractureSettings
 from xml_to_usda import worker_file_protocol
@@ -68,12 +69,54 @@ def test_fracture_preview_worker_does_not_depend_on_export_service(monkeypatch, 
     finally:
         if original_worker_module is not None:
             sys.modules["xml_to_usda.fracture_worker_subprocess"] = original_worker_module
+            setattr(xml_to_usda, "fracture_worker_subprocess", original_worker_module)
+        elif hasattr(xml_to_usda, "fracture_worker_subprocess"):
+            delattr(xml_to_usda, "fracture_worker_subprocess")
         if original_export_module is not None:
             sys.modules["xml_to_usda.fracture_export_service"] = original_export_module
+            setattr(xml_to_usda, "fracture_export_service", original_export_module)
+        elif hasattr(xml_to_usda, "fracture_export_service"):
+            delattr(xml_to_usda, "fracture_export_service")
 
     result = read_fracture_worker_result(result_path)
     assert result is not None
     assert result.plan.actual_piece_count == 2
+    assert error_path.exists() is False
+
+
+def test_fracture_preview_worker_reports_caps_stage_breadcrumbs(capsys, tmp_path: Path) -> None:
+    request_path = tmp_path / "preview_caps.request.pkl"
+    result_path = tmp_path / "preview_caps.result.pkl"
+    error_path = tmp_path / "preview_caps.error.json"
+    write_fracture_worker_request(
+        request_path,
+        FractureWorkerRequest(
+            request=FracturePreviewSourceRequest(
+                input_path=str(SIMPLE_TREE_01),
+                output_path=str(tmp_path / "SimpleTree_01.usda"),
+            ),
+            settings=FracturePreviewSettings(
+                fracture=FractureSettings(target_piece_count=2, generate_caps=True),
+                max_base_faces_per_piece=10,
+                max_prototype_faces=5,
+            ),
+            action=FRACTURE_WORKER_ACTION_PREVIEW,
+            result_path=str(result_path),
+            error_path=str(error_path),
+        ),
+    )
+
+    assert run_fracture_worker_request_file(request_path) == 0
+
+    stderr = capsys.readouterr().err
+    assert "fracture-worker stage=request.read.start" in stderr
+    assert "fracture-worker stage=preview.generate.start" in stderr
+    assert "generate_caps=True" in stderr
+    assert "fracture-worker stage=preview.generate.end" in stderr
+    assert "fracture-worker stage=result.write.end" in stderr
+    result = read_fracture_worker_result(result_path)
+    assert result is not None
+    assert result.viewport_scene is None
     assert error_path.exists() is False
 
 

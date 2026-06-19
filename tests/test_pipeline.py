@@ -36,7 +36,8 @@ from xml_to_usda.models import (
     Vector2,
     Vector3,
 )
-from xml_to_usda.job_control import cpu_worker_count, reserved_cpu_count
+from xml_to_usda import job_control
+from xml_to_usda.job_control import apply_process_profile, cpu_worker_count, reserved_cpu_count
 from xml_to_usda.normalizer import _vertex_color_material_sections
 from xml_to_usda.pipeline import (
     _apply_material_policy,
@@ -180,6 +181,41 @@ def test_cpu_profile_worker_count_math() -> None:
     assert cpu_worker_count(CpuProfile.QUIET, cpu_count=8) == 4
 
 
+def test_apply_process_profile_declares_winapi_signatures(monkeypatch) -> None:
+    class FakeFunction:
+        def __init__(self, return_value=True):
+            self.return_value = return_value
+            self.argtypes = None
+            self.restype = None
+            self.calls = []
+
+        def __call__(self, *args):
+            self.calls.append(args)
+            return self.return_value
+
+    class FakeKernel32:
+        def __init__(self):
+            self.GetCurrentProcess = FakeFunction(return_value=1234567890123)
+            self.SetPriorityClass = FakeFunction()
+
+        def __getattr__(self, name):
+            if name == "SetProcessAffinityMask":
+                raise AssertionError("Process profile must not set packaged worker CPU affinity.")
+            raise AttributeError(name)
+
+    fake_kernel32 = FakeKernel32()
+    monkeypatch.setattr(job_control.os, "name", "nt")
+    monkeypatch.setattr(job_control.ctypes, "WinDLL", lambda *_args, **_kwargs: fake_kernel32, raising=False)
+    monkeypatch.setattr(job_control, "logical_cpu_count", lambda: 40)
+
+    apply_process_profile(CpuProfile.BALANCED)
+
+    assert fake_kernel32.GetCurrentProcess.argtypes == ()
+    assert fake_kernel32.GetCurrentProcess.restype == job_control.wintypes.HANDLE
+    assert fake_kernel32.SetPriorityClass.argtypes == (job_control.wintypes.HANDLE, job_control.wintypes.DWORD)
+    assert fake_kernel32.SetPriorityClass.calls == [(1234567890123, 0x00004000)]
+
+
 def test_inspect_report_tracks_structure_without_sample_specific_contracts() -> None:
     report = inspect_source(SIMPLE_TREE_01)
     payload = json.loads(render_inspect_report(report))
@@ -193,9 +229,9 @@ def test_inspect_report_tracks_structure_without_sample_specific_contracts() -> 
     assert payload["leaf_binding_distribution"]
     assert payload["leaf_mesh_distribution"]
     assert payload["leaf_source_object_distribution"]
-    assert payload["material_count"] == 2
-    assert payload["base_material_distribution"] == {"1": payload["base_mesh_face_count"]}
-    assert payload["prototype_material_distribution"]["1"] > 0
+    assert payload["material_count"] == 3
+    assert payload["base_material_distribution"] == {"0": 46, "1": payload["base_mesh_face_count"] - 46}
+    assert payload["prototype_material_distribution"]["0"] > 0
     assert payload["base_geometry_mode"] == "merged"
     assert payload["base_mesh_part_count"] >= 2
     assert payload["base_mesh_point_count"] > 0
@@ -263,7 +299,7 @@ def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
     model = normalize_to_canonical(document, report)
 
     assert model.base_mesh is not None
-    assert len(model.materials) == 2
+    assert len(model.materials) == 3
     assert model.source_objects
     assert model.skeleton
     assert model.base_tree_parts
@@ -285,10 +321,10 @@ def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
     assert len(model.base_mesh.skel_joint_indices) == len(model.base_mesh.points)
     assert len(model.base_mesh.skel_joint_weights) == len(model.base_mesh.points)
     assert len(model.base_mesh.uv_coords) == len(model.base_mesh.face_vertex_indices)
-    assert {material.source_id for material in model.materials} == {1, 2}
-    assert {section.material_id for section in model.base_mesh.sections} == {1}
+    assert {material.source_id for material in model.materials} == {0, 1, 2}
+    assert {section.material_id for section in model.base_mesh.sections} == {0, 1}
     assert all(
-        prototype.mesh is not None and {section.material_id for section in prototype.mesh.sections} == {1}
+        prototype.mesh is not None and {section.material_id for section in prototype.mesh.sections} == {0}
         for prototype in model.prototypes
     )
     assert all(part.binding.joint_tokens for part in model.assembly_parts)

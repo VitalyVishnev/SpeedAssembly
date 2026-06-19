@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 
@@ -11,6 +13,7 @@ pytestmark = pytest.mark.qt
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QAbstractSpinBox, QMessageBox, QWidget
 
+from xml_to_usda.discovery_service import PrototypeDiscovery, PrototypeRowSpec
 from xml_to_usda.qt_ui.dependencies import build_default_dependencies
 from xml_to_usda.qt_ui.entry import main
 from xml_to_usda.qt_ui.entry import _build_signature_from_executable_path
@@ -37,6 +40,59 @@ def test_qt_shell_window_creation(qtbot, tmp_path) -> None:
 
     assert window.windowTitle() == "XML to USDA Converter"
     assert window.minimumWidth() >= 1100
+
+
+def test_qt_shell_survives_startup_discovery_failure(qtbot, tmp_path) -> None:
+    theme = load_theme()
+    xml_path = tmp_path / "tree.xml"
+    xml_path.write_text("<Tree/>", encoding="utf-8")
+    settings_path = tmp_path / "gui_settings.json"
+    from xml_to_usda.settings_service import save_gui_settings
+
+    save_gui_settings(
+        settings_path,
+        GuiSettingsSnapshot(last_input_path=str(xml_path)),
+    )
+
+    deps = build_default_dependencies()
+
+    def _discover_part_prototype_rows(input_path, persisted_records=()):
+        assert input_path == str(xml_path)
+        return PrototypeDiscovery(
+            summary="Found 1 repeated branch instance across 1 prototype(s).",
+            rows=(
+                PrototypeRowSpec(
+                    source_key="Mesh_1",
+                    source_name="Twig_01",
+                    source_mesh_id=1,
+                    instance_count=1,
+                ),
+            ),
+        )
+
+    def _discover_base_material_rows(_input_path, persisted_records=()):
+        raise AttributeError("'str' object has no attribute 'target'")
+
+    deps = replace(
+        deps,
+        discover_part_prototype_rows=_discover_part_prototype_rows,
+        discover_base_material_rows=_discover_base_material_rows,
+    )
+
+    window = MainWindow(
+        theme,
+        UiShellState(),
+        dependencies=deps,
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=settings_path,
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    assert window.materials_panel.summary_label.text() == "Selected XML file could not be loaded."
+    assert window.geometry_panel.summary_label.text() == "Selected XML file could not be loaded."
+    assert window.wind_panel.summary_label.text() == "Selected XML file could not be loaded."
+    assert not window.geometry_panel.has_rows()
 
 
 def test_qt_shell_title_buttons_do_not_clip_text_when_theme_height_is_too_small(qtbot, tmp_path) -> None:

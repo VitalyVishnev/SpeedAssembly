@@ -74,13 +74,44 @@ architecture terms above are more precise.
   the Repeated Part Instances assigned to that skeleton-owned region. It is not
   a Source Prototype, Authored Prototype, or generic Assembly Part.
 - **Fracture Cut Site**
-  Skeleton joint selected as the root of a Fracture Piece subtree. Automatic
-  methods derive cut sites from hierarchy and wind hints; manual preview picks
-  derive them from operator-selected bone segments.
+  Skeleton joint or parent-child segment selected as the root-side split for a
+  Fracture Piece. The unified Manual Fracturing planner applies pinned cut
+  sites first and fills missing pieces from deterministic hierarchy candidates.
+- **Manual Segment Fracture Cut Site**
+  Source-specific manual cut on a parent-child skeleton edge, stored as
+  `parent->child@t`. In v1 it assigns the child-side joint subtree to the new
+  Fracture Piece and splits Base Mesh faces by centroid projection against the
+  selected edge position.
 - **Pinned Fracture Cut Site**
   A source-specific manual Fracture Cut Site stored only for the current XML
   session. Pinned cut sites are applied before automatic fill, but final
   Fracture Piece membership is still planned by the Fracturing module.
+- **Stump Piece**
+  Optional Fracture Piece created by the planner at the lowest valid
+  parent-child skeleton segment that leaves Base Mesh faces on both sides of
+  the cut. It is planner state, not a separate export mode.
+- **Preserve Trunk Bias**
+  Manual Fracturing setting from `0.0` to `1.0`. Lower values allow the planner
+  to split the main axis earlier; higher values prefer branch-base candidates so
+  the trunk stays intact longer.
+- **Fracture Cap**
+  Optional generated Base Mesh faces that close cut boundary loops on fracture
+  pieces. Current caps are deterministic triangle fans over sliced piece
+  boundaries; they do not perform cut-plane boolean triangle clipping.
+- **Exploded Fracture Preview**
+  Visual-only Qt viewport transform that offsets preview pieces away from the
+  tree center for inspection. It never changes Fracture Piece membership or
+  exported USDA.
+- **Viewport Scene**
+  Qt-free preview payload that describes mesh batches, draw calls, overlays,
+  selectable ids, bounds, and diagnostic stats for a preview viewport. It is
+  not an OpenGL resource and does not own Proxy Mesh generation or Fracture
+  Piece membership.
+- **Viewport Mode Adapter**
+  Adapter that converts an application preview result, such as Proxy Mesh
+  Preview or Fracture Preview, into a `Viewport Scene` without importing Qt.
+  Mode adapters own display projection only; domain planning and generation
+  remain in their application modules.
 - **Assembly Root**
   Root prim of the USDA scene. It marks the scene as a Nanite Assembly and, in
   skeletal assembly mode, points UE at the descendant Main Skeleton.
@@ -241,8 +272,10 @@ architecture terms above are more precise.
 - **UDIM Material Setting**
   Per-material Operator Intent that either shifts primary face-varying UVs or
   writes a full-size secondary UV channel for resolved inline geometry. It is
-  keyed by resolved material id and does not edit external Unreal asset
-  prototypes.
+  evaluated piece-locally against the current authored mesh or prototype,
+  keyed by that piece's resolved material ids, and does not edit external
+  Unreal asset prototypes. There is no shared model-level UDIM post-pass. The
+  same numeric material id may appear in another piece without conflict.
 - **Source Name**
   Name observed in source data, such as XML object names, `Meshes/Mesh/@Name`,
   material names, or source filenames. Source Names are metadata unless a

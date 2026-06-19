@@ -17,6 +17,8 @@ from xml_to_usda.models import (
     ConversionMode,
     FbxMaterialMode,
     GeometryBuffer,
+    UdimMaterialSetting,
+    UdimMode,
     PrototypeSourceConfig,
     PrototypeSourceMode,
     PrototypeStrategy,
@@ -213,6 +215,57 @@ def test_material_assignment_resolution_changes_projection_only() -> None:
     )
     assert source_material.ue_asset_path is None
     assert resolved_material.ue_asset_path == "/Game/Materials/M_Base.M_Base"
+
+
+def test_udim_settings_apply_independently_per_piece() -> None:
+    _report, source_model, source_diagnostics = load_source_tree_model(str(SIMPLE_TREE_01))
+
+    baseline = resolve_assembly_model_from_options(
+        source_model,
+        AssemblyResolutionOptions(conversion_mode=ConversionMode.STATIC_ASSEMBLY),
+        source_diagnostics=source_diagnostics,
+    )
+    resolved = resolve_assembly_model_from_options(
+        source_model,
+        AssemblyResolutionOptions(
+            conversion_mode=ConversionMode.STATIC_ASSEMBLY,
+            use_explicit_material_contract=True,
+            udim_material_settings=(
+                UdimMaterialSetting(
+                    material_id=1,
+                    mode=UdimMode.SHIFT_PRIMARY_UV,
+                    udim_id=1003,
+                ),
+            ),
+            prototype_source_configs=(
+                PrototypeSourceConfig(
+                    source_key="Mesh_1",
+                    source_name="Twig_01",
+                    mode=PrototypeSourceMode.XML_MESH,
+                    fbx_material_mode=FbxMaterialMode.SINGLE_MATERIAL,
+                    single_material_path="/Game/TreeParts/M_Twig.M_Twig",
+                    single_material_udim_mode=UdimMode.WRITE_SECONDARY_UV_OFFSET,
+                    single_material_udim_id=1004,
+                ),
+            ),
+        ),
+        source_diagnostics=source_diagnostics,
+    )
+
+    baseline_base_mesh = baseline.authoring_model.base_mesh
+    resolved_base_mesh = resolved.authoring_model.base_mesh
+    assert baseline_base_mesh is not None
+    assert resolved_base_mesh is not None
+    assert resolved_base_mesh.uv_coords[0].x == pytest.approx(baseline_base_mesh.uv_coords[0].x + 2.0)
+    assert resolved_base_mesh.uv_coords[0].y == pytest.approx(baseline_base_mesh.uv_coords[0].y)
+
+    baseline_prototype = next(prototype for prototype in baseline.authoring_model.prototypes if prototype.source_key == "Mesh_1")
+    resolved_prototype = next(prototype for prototype in resolved.authoring_model.prototypes if prototype.source_key == "Mesh_1")
+    assert baseline_prototype.mesh is not None
+    assert resolved_prototype.mesh is not None
+    assert resolved_prototype.mesh.uv_coords == baseline_prototype.mesh.uv_coords
+    assert resolved_prototype.mesh.secondary_uv_coords[0].x == pytest.approx(3.5)
+    assert resolved_prototype.mesh.secondary_uv_coords[0].y == pytest.approx(0.5)
 
 
 def test_static_assembly_projection_does_not_change_source_strategy() -> None:

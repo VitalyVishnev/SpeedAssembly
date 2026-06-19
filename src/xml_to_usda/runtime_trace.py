@@ -18,6 +18,7 @@ from typing import Any
 DEFAULT_TRACE_MAX_BYTES = 10 * 1024 * 1024
 DEFAULT_TRACE_BACKUP_COUNT = 5
 TRACE_FILE_NAME = "gui_trace.jsonl"
+FORCE_DEBUG_TRACE = True
 
 
 @dataclass(frozen=True)
@@ -57,7 +58,7 @@ class RuntimeTraceLogger:
             event["worker"] = str(worker)
         if data:
             event["data"] = _json_safe(data)
-        if self.debug_enabled and debug_data:
+        if (self.debug_enabled or FORCE_DEBUG_TRACE) and debug_data:
             event["debug"] = _json_safe(debug_data)
 
         self.path.parent.mkdir(parents=True, exist_ok=True)

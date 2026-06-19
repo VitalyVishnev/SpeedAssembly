@@ -21,6 +21,13 @@
 - Reason for deferral: Current preset handling is tightly coupled to dialogs/widgets, and preview cache state does not yet have enough shared lifecycle behavior to justify a separate controller without creating a shallow abstraction.
 - Likely next step: Revisit when a concrete preset workflow change or a second preview-cache consumer appears; then extract only the behavior that hides real complexity behind a smaller interface.
 
+## Startup XML Discovery Guarded But Root Cause Unisolated
+
+- Issue: First-load XML discovery in the Qt shell can still throw unexpected parser exceptions before the user interacts with the UI, even though the shell now catches the failure and stays open.
+- Location: `src/xml_to_usda/qt_ui/window.py`, `src/xml_to_usda/qt_ui/panels.py`
+- Reason for deferral: The crash path is now contained, but the exact parser/state trigger was not isolated in this pass.
+- Likely next step: Capture the failing input and reproduce the parser exception in a focused non-UI load script, then decide whether the trigger is malformed XML, transient file access, or a parser edge case.
+
 ## Fracturing UE Runtime Validation Pending
 
 - Issue: Fracture Preview and export are stable enough on the dense Spruce sample for iteration, but the final runtime replacement workflow has not yet been validated in UE 5.7.x with vehicle impact/destruction behavior.
@@ -28,12 +35,19 @@
 - Reason for deferral: UE runtime replacement requires an engine scene and destruction test harness, not just USDA import or Qt preview.
 - Likely next step: Import the intact tree and exported fracture pieces into UE 5.7.x, replace the skeletal tree with the root-pivoted Static Mesh Assembly pieces at runtime, and compare neutral-pose visual alignment.
 
-## Fracturing Face-Ownership Cut Accuracy Pending
+## Fracturing Cut-Plane Geometry Refinement Pending
 
-- Issue: Fracture export currently partitions Base Mesh by whole-face skeleton ownership. It does not split triangles crossing a fracture boundary and does not author cut caps/interior surfaces.
-- Location: `src/xml_to_usda/fracture_export_service.py`
-- Reason for deferral: The first export slice needed stable root-pivoted sibling files and per-piece assembly ownership before implementing geometric cut refinement.
-- Likely next step: Add geometric boundary splitting for faces crossing selected cut sites, keeping v1 caps intentionally open unless a later UE/runtime validation changes that requirement.
+- Issue: Fracture export and preview can generate deterministic boundary-loop triangle-fan caps, but Base Mesh partitioning still uses whole-face ownership/centroid side tests. It does not split triangles that cross an intended cut plane or create boolean-accurate interior surfaces.
+- Location: `src/xml_to_usda/fracture_geometry.py`, `src/xml_to_usda/fracture_service.py`, `src/xml_to_usda/fracture_export_service.py`
+- Reason for deferral: Boundary caps are enough for first inspection/export parity, while true cut-plane clipping needs a separate mesh refinement pass and UE validation.
+- Likely next step: Add cut-plane triangle splitting for manual segment and automatic cut sites, then feed those new boundary loops into the existing cap generation path.
+
+## Fracturing Closely Spaced Manual Cuts Need Rejection
+
+- Issue: If two manual fracture cuts are placed too close together, the planner can still fail to build a non-empty mesh for one of the pieces and report that the mesh was not generated.
+- Location: `src/xml_to_usda/fracture_service.py`, `src/xml_to_usda/fracture_geometry.py`
+- Reason for deferral: The current planner is now stable and the remaining issue is a geometry validity rule for cut spacing and empty-piece rejection, not a crash fix.
+- Likely next step: Reject or merge cuts that collapse a piece below the minimum face budget before cap generation and preview authoring start.
 
 ## Fracturing Synthetic Cut Instance Assignment Pending
 
@@ -41,6 +55,13 @@
 - Location: `src/xml_to_usda/fracture_service.py`
 - Reason for deferral: Repeated-part side assignment inside one skeleton segment is a separate geometric classification problem; guessing it would break the root-pivoted static assembly contract.
 - Likely next step: Add split-plane side tests for repeated-part instance origins/bounds and reject ambiguous instances loudly instead of assigning by fallback.
+
+## Manual Segment Fracture Cut Repeated-Part Classification Pending
+
+- Issue: Manual `parent->child@t` cuts split Base Mesh by whole-face centroid projection and assign repeated parts by existing skeleton binding. They do not spatially classify repeated-part bounds across the selected segment.
+- Location: `src/xml_to_usda/fracture_service.py`, `src/xml_to_usda/fracture_export_service.py`, `src/xml_to_usda/qt_ui/fracture_preview.py`
+- Reason for deferral: Repeated-part side assignment inside one skeleton segment is separate from Base Mesh cap generation and must not guess when bounds cross the cut.
+- Likely next step: Add repeated-part origin/bounds side tests and reject ambiguous instances loudly.
 
 ## UDIM Real-Sample Coverage Pending
 
@@ -73,7 +94,7 @@
 ## Proxy Mesh Worker Crash Isolation
 
 - Issue: Large SpeedTree XML fixtures can trigger intermittent native Windows access violations while source geometry is normalized for proxy generation. Proxy preview/export now run in an isolated worker process and suppress native modal crash dialogs, but the underlying parser/normalizer instability still needs root-cause analysis.
-- Location: `src/xml_to_usda/conversion_process.py`, `src/xml_to_usda/qt_ui/proxy_preview.py`, `src/xml_to_usda/qt_ui/background_jobs.py`
+- Location: `src/xml_to_usda/conversion_process.py`, `src/xml_to_usda/qt_ui/preview_jobs.py`, `src/xml_to_usda/qt_ui/background_jobs.py`
 - Reason for deferral: The immediate operator blocker is preventing the GUI from crashing or freezing during proxy preview/export. Fixing the native access violation requires a separate focused pass through XML reading/normalization memory behavior.
 - Likely next step: Add a reproducible stress test around repeated `load_canonical_model` calls for `SkeletyalAssemblyTest_Spruce_Big_low.xml`, then audit `xml_reader.py`/`normalizer.py` for unsafe C-extension or array lifetime interactions.
 
@@ -83,3 +104,10 @@
 - Location: `src/xml_to_usda/conversion_process.py`, `src/xml_to_usda/fracture_worker_subprocess.py`, `src/xml_to_usda/proxy_mesh_worker_subprocess.py`
 - Reason for deferral: The operator-facing workflow is stable, and speculative removal of native simplification broke Proxy Mesh quality.
 - Likely next step: Reproduce native failures with a focused packaged-worker stress loop before changing geometry backends or normalizer internals again.
+
+## UDIM Piece-Local Real-Sample Coverage Pending
+
+- Issue: Piece-local UDIM isolation is covered by automated tests and the current baseline sample, but it has not yet been validated across a wider set of real SpeedTree structures with different base/prototype material layouts.
+- Location: `src/xml_to_usda/udim_resolver.py`, `src/xml_to_usda/material_resolver.py`, `src/xml_to_usda/assembly_resolution.py`
+- Reason for deferral: the current change closed the cross-piece overwrite bug; the remaining work is broader sample coverage, not a known logic failure.
+- Likely next step: run the piece-local UDIM cases on base geometry, repeated parts, and FBX slot prototypes across the real tree/shrub/grass sample matrix already used for breadth validation.

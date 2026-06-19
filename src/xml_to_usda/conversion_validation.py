@@ -42,7 +42,7 @@ def _validate_udim_target(mode_value, udim_id: int, *, material_id: int | None =
     mode = UdimMode.parse(mode_value)
     if mode == UdimMode.OFF:
         return
-    if material_id is not None and material_id <= 0:
-        raise ValueError("UDIM material id must be a positive integer.")
+    if material_id is not None and material_id < 0:
+        raise ValueError("UDIM material id must be a non-negative integer.")
     if udim_id < 1001:
         raise ValueError("UDIM id must be greater than or equal to 1001.")

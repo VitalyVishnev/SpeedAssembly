@@ -306,6 +306,17 @@ rows. Repeated-part UDIM settings are resolved only for inline geometry created
 by `single_material`, `vertex_color_split`, or FBX `material_slots`; external
 Unreal asset prototypes keep their own UV data.
 
+UDIM evaluation is piece-local:
+
+- base XML material rows are applied only to the `Base Skeletal Tree`
+- repeated-part UDIM rows are applied only after the repeated-part material mode
+  has created concrete per-piece material ids
+- the same numeric `material_id` may appear in different pieces without
+  cross-piece overwrite, because ids are not global semantic roles
+- if one piece contains duplicate active UDIM settings for the same
+  `material_id`, or if a setting targets no actual section in that piece, the
+  converter fails loudly instead of guessing
+
 Raw SpeedTree XML material ids must be treated as opaque Source Material
 metadata. The default `source_materials` policy preserves those ids only as
 internal keys. Legacy `source_material_roles` may infer bark/leaves buckets from

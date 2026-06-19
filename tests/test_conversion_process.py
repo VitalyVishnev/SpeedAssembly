@@ -277,9 +277,38 @@ def test_start_fracture_preview_process_uses_file_based_worker(monkeypatch) -> N
     assert isinstance(payload.request, FracturePreviewSourceRequest)
     assert payload.action == "preview"
     assert payload.settings.fracture.target_piece_count == 3
+    stderr_path = queue.stderr_path
+    assert stderr_path.name.endswith(".stderr.log")
+    assert popen_calls[0].kwargs["stderr"] is not None
     cancel_event.set()
     assert process.is_alive() is False
     close_process_queue(queue)
+    assert stderr_path.exists() is False
+
+
+def test_fracture_worker_crash_context_can_include_stderr_tail(tmp_path: Path) -> None:
+    from xml_to_usda.qt_ui.background_jobs import QtBackgroundJobsController
+
+    stderr_path = tmp_path / "worker.stderr.log"
+    stderr_path.write_text("first line\nnative crash detail\n", encoding="utf-8")
+    queue = type(
+        "_Queue",
+        (),
+        {
+            "request_path": tmp_path / "request.pkl",
+            "result_path": tmp_path / "result.pkl",
+            "error_path": tmp_path / "error.json",
+            "stderr_path": stderr_path,
+        },
+    )()
+    controller = QtBackgroundJobsController.__new__(QtBackgroundJobsController)
+
+    context = controller._format_worker_file_context(queue)
+    payload = controller._worker_queue_payload(queue)
+
+    assert "stderr_path=" in context
+    assert "native crash detail" in context
+    assert str(payload["stderr_tail"]).splitlines() == ["first line", "native crash detail"]
 
 
 def test_drain_process_queue_returns_all_pending_events() -> None:

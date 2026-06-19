@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
+import xml_to_usda.fracture_service as fracture_service
 from xml_to_usda.fracture_service import (
-    FRACTURE_METHOD_BRANCH_BASE_GREEDY,
-    FRACTURE_METHOD_MANUAL_PINNED_BONES,
-    FRACTURE_METHOD_PURE_HIERARCHY,
-    FRACTURE_METHOD_WIND_GUIDED_HIERARCHY,
+    FRACTURE_METHOD_MANUAL_FRACTURING,
     FractureError,
     FractureSettings,
+    format_manual_segment_cut_token,
     plan_fracture,
 )
 from xml_to_usda.models import (
@@ -51,6 +51,34 @@ def _base_mesh_for_joint_faces(joint_indices: tuple[int, ...]) -> MeshData:
                 Vector3(x, 0.0, 0.0),
                 Vector3(x + 0.4, 0.0, 0.0),
                 Vector3(x, 0.4, 0.0),
+            )
+        )
+        face_vertex_counts.append(3)
+        face_vertex_indices.extend((first_point, first_point + 1, first_point + 2))
+        skel_joint_indices.extend((joint_index, joint_index, joint_index))
+    return MeshData(
+        name="Base",
+        points=tuple(points),
+        face_vertex_counts=tuple(face_vertex_counts),
+        face_vertex_indices=tuple(face_vertex_indices),
+        skel_joint_indices=tuple(skel_joint_indices),
+        skel_joint_weights=(1.0,) * len(skel_joint_indices),
+        skel_element_size=1,
+    )
+
+
+def _vertical_strip_mesh(face_ys: tuple[float, ...], joint_index: int) -> MeshData:
+    points: list[Vector3] = []
+    face_vertex_counts: list[int] = []
+    face_vertex_indices: list[int] = []
+    skel_joint_indices: list[int] = []
+    for y in face_ys:
+        first_point = len(points)
+        points.extend(
+            (
+                Vector3(-0.2, y, 0.0),
+                Vector3(0.2, y, 0.0),
+                Vector3(-0.2, y + 0.2, 0.0),
             )
         )
         face_vertex_counts.append(3)
@@ -113,16 +141,31 @@ def _single_root_trunk(face_count: int) -> TreeAsset:
     )
 
 
-def test_wind_guided_fracture_keeps_root_first_and_assigns_repeated_parts_by_skeleton_owner() -> None:
+def _simple_segment_trunk() -> TreeAsset:
+    skeleton = (
+        _joint("root", 0, None, 0.0, 0),
+        _joint("top", 1, "root", 10.0, 0),
+    )
+    return TreeAsset(
+        metadata=ExportMetadata(source_path="trunk.xml", source_version=None),
+        materials=(),
+        source_objects=(),
+        base_mesh=_vertical_strip_mesh((1.0, 3.0, 6.0, 8.0), joint_index=0),
+        skeleton=skeleton,
+        assembly_parts=(),
+    )
+
+
+def test_manual_fracturing_auto_fill_keeps_root_first_and_assigns_repeated_parts_by_skeleton_owner() -> None:
     plan = plan_fracture(
         _tree(),
         FractureSettings(
-            method=FRACTURE_METHOD_WIND_GUIDED_HIERARCHY,
             target_piece_count=3,
             output_stem="Oak",
         ),
     )
 
+    assert plan.method == FRACTURE_METHOD_MANUAL_FRACTURING
     assert tuple(piece.name for piece in plan.pieces) == ("Oak_fracture_00", "Oak_fracture_01", "Oak_fracture_02")
     assert plan.pieces[0].is_root_piece is True
     assert plan.pieces[0].base_face_indices
@@ -154,26 +197,25 @@ def test_fracture_refines_existing_cut_order_when_target_count_grows() -> None:
     two_piece_plan = plan_fracture(_tree(), FractureSettings(target_piece_count=2, output_stem="Oak"))
     three_piece_plan = plan_fracture(_tree(), FractureSettings(target_piece_count=3, output_stem="Oak"))
 
-    assert tuple(cut.joint_token for cut in two_piece_plan.selected_cut_sites) == ("bone_001",)
-    assert tuple(cut.joint_token for cut in three_piece_plan.selected_cut_sites[:1]) == ("bone_001",)
-    assert three_piece_plan.pieces[1].cut_joint_token == two_piece_plan.pieces[1].cut_joint_token
+    assert tuple(cut.joint_token for cut in two_piece_plan.selected_cut_sites) == ("bone_003",)
+    assert "bone_003" in tuple(cut.joint_token for cut in three_piece_plan.selected_cut_sites)
+    assert "bone_003" in tuple(piece.cut_joint_token for piece in three_piece_plan.pieces)
 
 
-def test_wind_guided_fracture_falls_back_to_hierarchy_when_group_zero_is_missing() -> None:
+def test_legacy_fracture_method_ids_fail_loudly() -> None:
     tree = _tree()
-    tree_without_wind_groups = replace(
-        tree,
-        skeleton=tuple(
-            replace(joint, generator_label=None, generator_level=None)
-            for joint in tree.skeleton
-        ),
+    legacy_settings = SimpleNamespace(
+        method="pure_hierarchy",
+        target_piece_count=3,
+        output_stem="Oak",
+        pinned_cut_joint_tokens=(),
+        generate_caps=False,
+        preserve_trunk_bias=0.5,
+        force_stump_piece=False,
     )
 
-    plan = plan_fracture(tree_without_wind_groups, FractureSettings(target_piece_count=3, output_stem="Oak"))
-
-    assert plan.actual_piece_count == 3
-    assert plan.main_axis_joint_tokens == ("root", "bone_001", "bone_002")
-    assert any(issue.code == "fracture_wind_guidance_missing" for issue in plan.diagnostics)
+    with pytest.raises(FractureError, match="Legacy fracture method is no longer supported"):
+        plan_fracture(tree, legacy_settings)  # type: ignore[arg-type]
 
 
 def test_fracture_clamps_down_instead_of_emitting_pieces_without_base_faces() -> None:
@@ -182,6 +224,25 @@ def test_fracture_clamps_down_instead_of_emitting_pieces_without_base_faces() ->
     assert plan.actual_piece_count == 5
     assert all(piece.base_face_indices for piece in plan.pieces)
     assert any(issue.code == "fracture_piece_count_clamped" for issue in plan.diagnostics)
+
+
+def test_fracture_skips_empty_source_faces_before_piece_planning() -> None:
+    tree = _tree()
+    base_mesh = tree.base_mesh
+    mesh_with_empty_face = replace(
+        base_mesh,
+        face_vertex_counts=base_mesh.face_vertex_counts[:2] + (0,) + base_mesh.face_vertex_counts[2:],
+    )
+
+    plan = plan_fracture(
+        replace(tree, base_mesh=mesh_with_empty_face),
+        FractureSettings(target_piece_count=3, output_stem="Oak"),
+    )
+
+    assert plan.actual_piece_count == 3
+    assert all(piece.base_face_indices for piece in plan.pieces)
+    assert all(2 not in piece.base_face_indices for piece in plan.pieces)
+    assert any(3 in piece.base_face_indices for piece in plan.pieces)
 
 
 def test_fracture_fails_loudly_without_base_mesh_skinning() -> None:
@@ -197,30 +258,19 @@ def test_fracture_fails_loudly_without_base_mesh_skinning() -> None:
         plan_fracture(replace(tree, base_mesh=broken_base_mesh), FractureSettings(target_piece_count=2))
 
 
-def test_pure_hierarchy_fracture_does_not_require_wind_groups() -> None:
+def test_fracture_fails_loudly_when_base_mesh_topology_is_not_materialized() -> None:
     tree = _tree()
-    tree_without_wind_groups = replace(
-        tree,
-        skeleton=tuple(
-            replace(joint, generator_label=None, generator_level=None)
-            for joint in tree.skeleton
-        ),
-    )
+    broken_base_mesh = replace(tree.base_mesh)
+    object.__setattr__(broken_base_mesh, "face_vertex_counts", (count for count in tree.base_mesh.face_vertex_counts))
 
-    plan = plan_fracture(
-        tree_without_wind_groups,
-        FractureSettings(method=FRACTURE_METHOD_PURE_HIERARCHY, target_piece_count=3, output_stem="Oak"),
-    )
-
-    assert plan.main_axis_joint_tokens == ("root", "bone_001", "bone_002")
-    assert tuple(cut.joint_token for cut in plan.selected_cut_sites) == ("bone_001", "bone_003")
-    assert not any(issue.code == "fracture_wind_guidance_missing" for issue in plan.diagnostics)
+    with pytest.raises(FractureError, match="Base mesh face_vertex_counts must be a materialized tuple"):
+        plan_fracture(replace(tree, base_mesh=broken_base_mesh), FractureSettings(target_piece_count=2))
 
 
-def test_branch_base_greedy_fracture_starts_at_large_branch_roots() -> None:
+def test_preserve_trunk_bias_prefers_branch_bases_before_main_axis_midpoint() -> None:
     plan = plan_fracture(
         _tree(),
-        FractureSettings(method=FRACTURE_METHOD_BRANCH_BASE_GREEDY, target_piece_count=2, output_stem="Oak"),
+        FractureSettings(target_piece_count=2, output_stem="Oak", preserve_trunk_bias=1.0),
     )
 
     assert plan.actual_piece_count == 2
@@ -228,11 +278,21 @@ def test_branch_base_greedy_fracture_starts_at_large_branch_roots() -> None:
     assert tuple(piece.cut_joint_token for piece in plan.pieces[1:]) == ("bone_003",)
 
 
-def test_manual_pinned_bones_apply_first_and_allow_nested_fracture_pieces() -> None:
+def test_balanced_fracturing_can_still_start_at_main_axis_midpoint() -> None:
+    plan = plan_fracture(
+        _tree(),
+        FractureSettings(target_piece_count=2, output_stem="Oak", preserve_trunk_bias=0.0),
+    )
+
+    assert plan.actual_piece_count == 2
+    assert tuple(cut.reason for cut in plan.selected_cut_sites) == ("main_axis_midpoint",)
+    assert tuple(piece.cut_joint_token for piece in plan.pieces[1:]) == ("bone_001",)
+
+
+def test_manual_pinned_cuts_apply_first_and_allow_nested_fracture_pieces() -> None:
     plan = plan_fracture(
         _tree(),
         FractureSettings(
-            method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
             target_piece_count=3,
             output_stem="Oak",
             pinned_cut_joint_tokens=("bone_001", "bone_003"),
@@ -247,35 +307,96 @@ def test_manual_pinned_bones_apply_first_and_allow_nested_fracture_pieces() -> N
     assert plan.pieces[2].joint_tokens == ("bone_003", "bone_004")
 
 
-def test_manual_pinned_bones_use_skeleton_order_and_auto_fill_after_pins() -> None:
+def test_manual_segment_cut_splits_base_faces_between_joints_by_cut_position() -> None:
+    plan = plan_fracture(
+        _simple_segment_trunk(),
+        FractureSettings(
+            target_piece_count=2,
+            output_stem="Trunk",
+            pinned_cut_joint_tokens=(format_manual_segment_cut_token("root", "top", 0.5),),
+        ),
+    )
+
+    assert plan.actual_piece_count == 2
+    assert tuple(cut.kind for cut in plan.selected_cut_sites) == ("manual_segment",)
+    assert tuple(piece.base_face_indices for piece in plan.pieces) == ((0, 1), (2, 3))
+    assert plan.pieces[1].cut_joint_token == "root->top@0.500"
+    assert plan.pieces[1].joint_tokens == ("top",)
+
+
+def test_stump_piece_uses_first_main_axis_child_joint_not_lowest_face_centroid() -> None:
+    skeleton = (
+        _joint("root", 0, None, 0.0, 0),
+        _joint("top", 1, "root", 10.0, 0),
+    )
+    tree = TreeAsset(
+        metadata=ExportMetadata(source_path="trunk.xml", source_version=None),
+        materials=(),
+        source_objects=(),
+        base_mesh=_vertical_strip_mesh((1.0, 3.0, 6.0, 8.0), joint_index=0),
+        skeleton=skeleton,
+        assembly_parts=(),
+    )
+    base_mesh = replace(tree.base_mesh)
+    object.__setattr__(base_mesh, "skel_joint_indices", (0,) * 6 + (1,) * 6)
+    plan = plan_fracture(
+        replace(tree, base_mesh=base_mesh),
+        FractureSettings(
+            target_piece_count=2,
+            output_stem="Trunk",
+            force_stump_piece=True,
+        ),
+    )
+
+    assert plan.actual_piece_count == 2
+    assert plan.selected_cut_sites[0].reason == "stump_piece"
+    assert plan.selected_cut_sites[0].kind == "joint"
+    assert plan.selected_cut_sites[0].joint_token == "top"
+    assert tuple(piece.base_face_indices for piece in plan.pieces) == ((0, 1), (2, 3))
+
+
+def test_joint_only_fracturing_does_not_compute_face_centroids(monkeypatch) -> None:
+    def fail_centroids(_model):
+        raise AssertionError("Joint-only fracture planning must not scan base face centroids.")
+
+    monkeypatch.setattr(fracture_service, "_base_face_centroids", fail_centroids)
+
+    plan = plan_fracture(
+        _tree(),
+        FractureSettings(
+            target_piece_count=3,
+            output_stem="Oak",
+            force_stump_piece=True,
+        ),
+    )
+
+    assert plan.actual_piece_count == 3
+    assert plan.selected_cut_sites[0].joint_token == "bone_001"
+
+
+def test_manual_pinned_cuts_use_skeleton_order_and_auto_fill_after_pins() -> None:
     first = plan_fracture(
         _tree(),
         FractureSettings(
-            method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
             target_piece_count=3,
             output_stem="Oak",
             pinned_cut_joint_tokens=("bone_003",),
-            manual_auto_fill_method=FRACTURE_METHOD_PURE_HIERARCHY,
         ),
     )
     second = plan_fracture(
         _tree(),
         FractureSettings(
-            method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
             target_piece_count=3,
             output_stem="Oak",
             pinned_cut_joint_tokens=("bone_003", "bone_001"),
-            manual_auto_fill_method=FRACTURE_METHOD_PURE_HIERARCHY,
         ),
     )
     third = plan_fracture(
         _tree(),
         FractureSettings(
-            method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
             target_piece_count=3,
             output_stem="Oak",
             pinned_cut_joint_tokens=("bone_001", "bone_003"),
-            manual_auto_fill_method=FRACTURE_METHOD_PURE_HIERARCHY,
         ),
     )
 
@@ -283,11 +404,10 @@ def test_manual_pinned_bones_use_skeleton_order_and_auto_fill_after_pins() -> No
     assert tuple(piece.cut_joint_token for piece in second.pieces) == tuple(piece.cut_joint_token for piece in third.pieces)
 
 
-def test_manual_pinned_bones_preserve_manual_pieces_when_target_is_lower() -> None:
+def test_manual_pinned_cuts_preserve_manual_pieces_when_target_is_lower() -> None:
     plan = plan_fracture(
         _tree(),
         FractureSettings(
-            method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
             target_piece_count=2,
             output_stem="Oak",
             pinned_cut_joint_tokens=("bone_001", "bone_003"),
@@ -300,7 +420,7 @@ def test_manual_pinned_bones_preserve_manual_pieces_when_target_is_lower() -> No
     assert any(issue.code == "fracture_manual_piece_count_exceeds_target" for issue in plan.diagnostics)
 
 
-def test_manual_pinned_bones_fail_loudly_for_missing_or_empty_cut_sites() -> None:
+def test_manual_pinned_cuts_fail_loudly_for_missing_or_empty_cut_sites() -> None:
     tree = _tree()
     tree_with_empty_joint = replace(
         tree,
@@ -311,7 +431,6 @@ def test_manual_pinned_bones_fail_loudly_for_missing_or_empty_cut_sites() -> Non
         plan_fracture(
             tree,
             FractureSettings(
-                method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
                 target_piece_count=2,
                 pinned_cut_joint_tokens=("bone_missing",),
             ),
@@ -321,7 +440,6 @@ def test_manual_pinned_bones_fail_loudly_for_missing_or_empty_cut_sites() -> Non
         plan_fracture(
             tree_with_empty_joint,
             FractureSettings(
-                method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
                 target_piece_count=2,
                 pinned_cut_joint_tokens=("bone_empty",),
             ),
@@ -333,7 +451,6 @@ def test_fracture_settings_fail_loudly_for_invalid_manual_token_payload() -> Non
         plan_fracture(
             _tree(),
             FractureSettings(
-                method=FRACTURE_METHOD_WIND_GUIDED_HIERARCHY,
                 pinned_cut_joint_tokens=[].append,  # type: ignore[arg-type]
             ),
         )

@@ -751,14 +751,15 @@ class MaterialsTabPanel(QWidget):
         geometry_snapshot: dict[str, GeometryRowState],
         cpu_profile: CpuProfile,
     ) -> None:
+        base_discovery = self._deps.discover_base_material_rows(input_path, persisted_records=base_persisted_records)
+        part_discovery = self._deps.discover_part_prototype_rows(input_path, persisted_records=part_persisted_records)
+
         self._base_rows.clear()
         self._part_rows.clear()
         self._geometry_snapshot = dict(geometry_snapshot)
         self._cpu_profile = cpu_profile
         _rebuild_scroll_layout(self.scroll_layout)
 
-        base_discovery = self._deps.discover_base_material_rows(input_path, persisted_records=base_persisted_records)
-        part_discovery = self._deps.discover_part_prototype_rows(input_path, persisted_records=part_persisted_records)
         self.summary_label.setText(f"{base_discovery.summary} {part_discovery.summary}".strip())
 
         self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, self._build_base_materials_card(base_discovery))
@@ -852,15 +853,14 @@ class MaterialsTabPanel(QWidget):
                     udim_id=slot_row.udim_id_spin.value(),
                 )
                 for slot_row in row.slot_rows
-                if slot_row.slot_name.strip()
-            )
+                    if slot_row.slot_name.strip()
+                )
 
+            has_explicit_material_content = self._part_material_values_have_explicit_content(values, slot_overrides)
             if source_mode == PrototypeSourceMode.XML_MESH:
                 if (
                     values.fbx_material_mode != FbxMaterialMode.VERTEX_COLOR_SPLIT
-                    or values.single_material_path
-                    or values.black_material_path
-                    or values.white_material_path
+                    or has_explicit_material_content
                 ):
                     configs.append(
                         PrototypeSourceConfig(
@@ -956,14 +956,13 @@ class MaterialsTabPanel(QWidget):
                 for slot_row in row.slot_rows
                 if slot_row.slot_name.strip()
             )
+            has_explicit_material_content = self._part_material_values_have_explicit_content(values, slot_records)
             if (
                 source_mode == PrototypeSourceMode.XML_MESH
                 and not geometry.unreal_asset_path.strip()
                 and not geometry.fbx_path.strip()
                 and values.fbx_material_mode == FbxMaterialMode.VERTEX_COLOR_SPLIT
-                and not values.single_material_path
-                and not values.black_material_path
-                and not values.white_material_path
+                and not has_explicit_material_content
                 and not slot_records
             ):
                 continue
@@ -1002,6 +1001,32 @@ class MaterialsTabPanel(QWidget):
             white_material_path=row.white_edit.text().strip(),
             white_material_udim_mode=UdimMode.parse(row.white_udim_mode_combo.currentData()),
             white_material_udim_id=row.white_udim_id_spin.value(),
+        )
+
+    @staticmethod
+    def _part_material_values_have_active_udim(
+        values: _PartMaterialValues,
+        slot_overrides: tuple[object, ...],
+    ) -> bool:
+        if values.single_material_udim_mode != UdimMode.OFF:
+            return True
+        if values.black_material_udim_mode != UdimMode.OFF:
+            return True
+        if values.white_material_udim_mode != UdimMode.OFF:
+            return True
+        return any(UdimMode.parse(getattr(override, "udim_mode", UdimMode.OFF)) != UdimMode.OFF for override in slot_overrides)
+
+    @classmethod
+    def _part_material_values_have_explicit_content(
+        cls,
+        values: _PartMaterialValues,
+        slot_overrides: tuple[object, ...],
+    ) -> bool:
+        return bool(
+            values.single_material_path
+            or values.black_material_path
+            or values.white_material_path
+            or cls._part_material_values_have_active_udim(values, slot_overrides)
         )
 
     def _build_base_materials_card(self, discovery) -> QWidget:

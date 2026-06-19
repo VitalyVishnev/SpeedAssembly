@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import ctypes
 import os
 import time
-from ctypes import WinDLL, c_void_p, get_last_error
+from ctypes import wintypes
 
 from .models import ConversionPhase, ConversionTelemetry, CpuProfile
 
@@ -41,33 +42,27 @@ def cpu_worker_count(profile: CpuProfile, cpu_count: int | None = None) -> int:
 def apply_process_profile(profile: CpuProfile) -> None:
     if os.name != "nt":
         return
+    if not hasattr(ctypes, "WinDLL"):
+        return
     priority_class = _PRIORITY_CLASSES.get(profile)
     if priority_class is None:
         return
 
     try:
-        kernel32 = WinDLL("kernel32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        _configure_kernel32_process_api(kernel32)
         process_handle = kernel32.GetCurrentProcess()
         if process_handle:
-            kernel32.SetPriorityClass(c_void_p(process_handle), priority_class)
-        _apply_affinity_mask(kernel32, process_handle, profile)
+            kernel32.SetPriorityClass(process_handle, priority_class)
     except Exception:
         return
 
 
-def _apply_affinity_mask(kernel32, process_handle, profile: CpuProfile) -> None:
-    cpu_count = logical_cpu_count()
-    if cpu_count <= 1:
-        return
-    reserve = reserved_cpu_count(profile, cpu_count)
-    usable = max(1, cpu_count - reserve)
-    mask = (1 << usable) - 1
-    if mask <= 0:
-        return
-    try:
-        kernel32.SetProcessAffinityMask(c_void_p(process_handle), mask)
-    except Exception:
-        return
+def _configure_kernel32_process_api(kernel32) -> None:
+    kernel32.GetCurrentProcess.argtypes = ()
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.SetPriorityClass.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    kernel32.SetPriorityClass.restype = wintypes.BOOL
 
 
 def emit_telemetry(
@@ -97,4 +92,3 @@ def emit_telemetry(
 def throw_if_cancelled(cancel_event) -> None:
     if cancel_event is not None and bool(cancel_event.is_set()):
         raise ConversionCancelledError("Conversion cancelled by user.")
-

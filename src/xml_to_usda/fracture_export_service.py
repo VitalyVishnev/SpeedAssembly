@@ -191,7 +191,7 @@ def export_fracture_usda(
         throw_if_cancelled(cancel_event)
         piece_output_path = _piece_output_path(base_output_path, piece)
         ensure_output_path_allowed(piece_output_path)
-        piece_resolved = _piece_resolved_model(resolved, piece)
+        piece_resolved = _piece_resolved_model(resolved, piece, generate_caps=export_settings.generate_caps)
         diagnostics += piece_resolved.authoring_diagnostics
         document = write_resolved_usda_document(
             piece_resolved,
@@ -252,8 +252,13 @@ def _piece_output_path(output_path: Path, piece: FracturePiece) -> Path:
     return output_path.with_name(f"{piece.name}.usda")
 
 
-def _piece_resolved_model(resolved: ResolvedAssemblyModel, piece: FracturePiece) -> ResolvedAssemblyModel:
-    piece_model = _piece_authoring_model(resolved.authoring_model, piece)
+def _piece_resolved_model(
+    resolved: ResolvedAssemblyModel,
+    piece: FracturePiece,
+    *,
+    generate_caps: bool = False,
+) -> ResolvedAssemblyModel:
+    piece_model = _piece_authoring_model(resolved.authoring_model, piece, generate_caps=generate_caps)
     authoring_diagnostics = validate_authoring_model(piece_model, conversion_mode=ConversionMode.STATIC_ASSEMBLY)
     return ResolvedAssemblyModel(
         source_model=resolved.source_model,
@@ -267,7 +272,7 @@ def _piece_resolved_model(resolved: ResolvedAssemblyModel, piece: FracturePiece)
     )
 
 
-def _piece_authoring_model(model: CanonicalTreeModel, piece: FracturePiece) -> CanonicalTreeModel:
+def _piece_authoring_model(model: CanonicalTreeModel, piece: FracturePiece, *, generate_caps: bool = False) -> CanonicalTreeModel:
     if model.base_mesh is None:
         raise FractureError("Fracture export requires a base mesh.")
 
@@ -278,7 +283,12 @@ def _piece_authoring_model(model: CanonicalTreeModel, piece: FracturePiece) -> C
     return replace(
         model,
         metadata=metadata,
-        base_mesh=slice_mesh_faces(model.base_mesh, piece.base_face_indices, name=f"{piece.name}_BaseMesh"),
+        base_mesh=slice_mesh_faces(
+            model.base_mesh,
+            piece.base_face_indices,
+            name=f"{piece.name}_BaseMesh",
+            generate_caps=generate_caps,
+        ),
         skeleton=(),
         assembly_parts=repeated_parts,
         prototypes=prototypes,

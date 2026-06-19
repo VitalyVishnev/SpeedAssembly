@@ -66,11 +66,22 @@ written to `dist-next\smoke\smoke_report.json`; stdout/stderr are written next
 to it. Use `-SkipSmoke` only for an explicit emergency bypass and record why it
 was skipped.
 
+For release-candidate stability, run the strict packaged gate after packaging:
+
+```powershell
+.\scripts\run_packaged_stability_gate.ps1
+```
+
+This gate uses the packaged `XMLtoUSDAConverter.exe` and `XMLtoUSDAWorker.exe`,
+requires the real Spruce and 28-million-triangle skeletal samples, and fails on
+any worker crash, retry, missing result, or missing report even if a later
+preview succeeds.
+
 Large-job execution note:
 
 - the GUI now launches big conversion jobs through a spawned worker subprocess
 - on Windows, that worker may itself launch additional `spawn` worker processes for parallel FBX prototype import
-- the primary `dist-next` one-file package reuses `XMLtoUSDAConverter.exe` for packaged `fbx-worker` helper mode instead of requiring a sidecar worker executable
+- the release package includes `XMLtoUSDAConverter.exe` plus the dedicated `XMLtoUSDAWorker.exe` sidecar; packaged workers must not run through the GUI executable
 - this is why `.venv310`, `multiprocessing.freeze_support()`, and a real file-backed Python entry point matter for stress tests and packaged builds
 
 ## Runtime temp files and cache hygiene

@@ -14,7 +14,7 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 
 from xml_to_usda.fracture_preview_service import FracturePreviewSettings, generate_fracture_preview
-from xml_to_usda.fracture_service import FRACTURE_METHOD_MANUAL_PINNED_BONES, FractureSettings
+from xml_to_usda.fracture_service import FractureSettings
 from xml_to_usda.fracture_preview_service import FracturePreviewBoneSegment
 from xml_to_usda.models import (
     ExportMetadata,
@@ -31,13 +31,15 @@ from xml_to_usda.models import (
 )
 from xml_to_usda.qt_ui.fracture_preview import (
     FRACTURE_MATCAP_TINT_STRENGTH,
+    FRACTURE_SOURCE_VERTEX_STRIDE,
     FRACTURE_VERTEX_STRIDE,
     FracturePreviewDialog,
-    FractureViewport,
     FractureViewportMesh,
+    apply_fracture_viewport_mesh,
     build_fracture_viewport_mesh,
 )
-from xml_to_usda.qt_ui.proxy_preview import _prepare_opaque_mesh_draw, _set_matcap_program_uniforms
+from xml_to_usda.qt_ui.viewport import MatcapViewport, _prepare_opaque_mesh_draw, _set_matcap_program_uniforms
+from xml_to_usda.viewport_scene import ViewportBoneSegment, ViewportBounds, ViewportScene, ViewportStats
 
 
 def _joint(name: str, source_id: int, parent: str | None, y: float, group: int) -> Joint:
@@ -123,6 +125,38 @@ def _tree() -> TreeAsset:
     )
 
 
+def _bone_only_scene(segments: tuple[FracturePreviewBoneSegment, ...]) -> ViewportScene:
+    min_x = min(min(segment.parent_position.x, segment.child_position.x) for segment in segments)
+    min_y = min(min(segment.parent_position.y, segment.child_position.y) for segment in segments)
+    min_z = min(min(segment.parent_position.z, segment.child_position.z) for segment in segments)
+    max_x = max(max(segment.parent_position.x, segment.child_position.x) for segment in segments)
+    max_y = max(max(segment.parent_position.y, segment.child_position.y) for segment in segments)
+    max_z = max(max(segment.parent_position.z, segment.child_position.z) for segment in segments)
+    return ViewportScene(
+        scene_id="bone_only",
+        mesh_batches=(),
+        draw_calls=(),
+        bounds=ViewportBounds(
+            min_point=Vector3(min_x, min_y, min_z),
+            max_point=Vector3(max_x, max_y, max_z),
+        ),
+        stats=ViewportStats(uploaded_triangles=0, logical_triangles=0),
+        bone_segments=tuple(
+            ViewportBoneSegment(
+                segment_id=f"bone:{segment.parent_joint_token}->{segment.child_joint_token}",
+                parent_token=segment.parent_joint_token,
+                child_token=segment.child_joint_token,
+                start=segment.parent_position,
+                end=segment.child_position,
+                color=segment.color,
+                selected=segment.is_selected_cut,
+                selectable_id=f"bone:{segment.parent_joint_token}->{segment.child_joint_token}",
+            )
+            for segment in segments
+        ),
+    )
+
+
 def test_fracture_viewport_payload_triangulates_base_and_instanced_preview_geometry_with_piece_colors() -> None:
     preview = generate_fracture_preview(
         _tree(),
@@ -140,10 +174,10 @@ def test_fracture_viewport_payload_triangulates_base_and_instanced_preview_geome
     assert mesh.uploaded_triangle_count == 5
     assert mesh.piece_count == 3
     assert mesh.instance_count == 2
-    assert len(mesh.vertex_components) == mesh.uploaded_triangle_count * 3 * FRACTURE_VERTEX_STRIDE
+    assert len(mesh.vertex_components) == mesh.uploaded_triangle_count * 3 * FRACTURE_SOURCE_VERTEX_STRIDE
     assert len(mesh.draw_calls) == 5
 
-    first_vertex = tuple(mesh.vertex_components[:FRACTURE_VERTEX_STRIDE])
+    first_vertex = tuple(mesh.vertex_components[:FRACTURE_SOURCE_VERTEX_STRIDE])
     assert first_vertex[6:10] == pytest.approx(
         (
             preview.pieces[0].color.r,
@@ -153,8 +187,10 @@ def test_fracture_viewport_payload_triangulates_base_and_instanced_preview_geome
         )
     )
 
-    instance_vertex_offset = 3 * 3 * FRACTURE_VERTEX_STRIDE
-    first_instance_vertex = tuple(mesh.vertex_components[instance_vertex_offset:instance_vertex_offset + FRACTURE_VERTEX_STRIDE])
+    instance_vertex_offset = 3 * 3 * FRACTURE_SOURCE_VERTEX_STRIDE
+    first_instance_vertex = tuple(
+        mesh.vertex_components[instance_vertex_offset:instance_vertex_offset + FRACTURE_SOURCE_VERTEX_STRIDE]
+    )
     assert first_instance_vertex[0] < 10.0
     assert first_instance_vertex[6:10] == pytest.approx(
         (
@@ -167,9 +203,9 @@ def test_fracture_viewport_payload_triangulates_base_and_instanced_preview_geome
     assert mesh.draw_calls[3].translate.x == pytest.approx(10.0)
 
     second_instance_source = mesh.draw_sources[mesh.draw_calls[4].source_index]
-    second_instance_vertex_offset = second_instance_source.first_vertex * FRACTURE_VERTEX_STRIDE
+    second_instance_vertex_offset = second_instance_source.first_vertex * FRACTURE_SOURCE_VERTEX_STRIDE
     second_instance_vertex = tuple(
-        mesh.vertex_components[second_instance_vertex_offset:second_instance_vertex_offset + FRACTURE_VERTEX_STRIDE]
+        mesh.vertex_components[second_instance_vertex_offset:second_instance_vertex_offset + FRACTURE_SOURCE_VERTEX_STRIDE]
     )
     assert second_instance_vertex[6:10] == pytest.approx(
         (
@@ -232,6 +268,51 @@ def test_fracture_viewport_payload_can_hide_repeated_parts_without_changing_plan
     assert preview.instances
 
 
+def test_fracture_preview_dialog_uses_prebuilt_viewport_scene(qtbot, monkeypatch) -> None:
+    preview = generate_fracture_preview(
+        _tree(),
+        FracturePreviewSettings(
+            fracture=FractureSettings(target_piece_count=3, output_stem="Oak"),
+            max_base_faces_per_piece=1,
+            max_prototype_faces=1,
+        ),
+    )
+    assert preview.viewport_scene is not None
+
+    import xml_to_usda.qt_ui.fracture_preview as fracture_preview_ui
+
+    monkeypatch.setattr(
+        fracture_preview_ui,
+        "build_fracture_viewport_scene",
+        lambda _preview: (_ for _ in ()).throw(AssertionError("dialog rebuilt ViewportScene")),
+    )
+    dialog = FracturePreviewDialog(settings=FracturePreviewSettings(), preview=preview)
+    qtbot.addWidget(dialog)
+
+    assert dialog.viewport_mesh is not None
+    assert dialog.viewport_mesh.piece_count == 3
+
+
+def test_fracture_preview_dialog_builds_viewport_scene_for_worker_result(qtbot) -> None:
+    preview = generate_fracture_preview(
+        _tree(),
+        FracturePreviewSettings(
+            fracture=FractureSettings(target_piece_count=3, output_stem="Oak"),
+            max_base_faces_per_piece=1,
+            max_prototype_faces=1,
+        ),
+    )
+    worker_preview = replace(preview, viewport_scene=None)
+
+    dialog = FracturePreviewDialog(settings=FracturePreviewSettings(), preview=worker_preview)
+    qtbot.addWidget(dialog)
+
+    assert dialog.current_preview is not None
+    assert dialog.current_preview.viewport_scene is not None
+    assert dialog.viewport_mesh is not None
+    assert dialog.viewport_mesh.piece_count == 3
+
+
 def test_fracture_viewport_payload_keeps_bone_overlay_segments() -> None:
     preview = generate_fracture_preview(
         _tree(),
@@ -264,29 +345,30 @@ def test_fracture_viewport_accepts_colored_triangle_payload_and_frames_camera(qt
     )
     mesh = build_fracture_viewport_mesh(preview)
 
-    viewport = FractureViewport()
+    viewport = MatcapViewport()
+    viewport.set_matcap_tint_strength(FRACTURE_MATCAP_TINT_STRENGTH)
     qtbot.addWidget(viewport)
-    viewport.set_mesh(mesh)
+    payload = apply_fracture_viewport_mesh(viewport, mesh, scene=preview.viewport_scene)
 
     assert viewport.has_mesh()
     assert viewport.vertex_count == mesh.triangle_count * 3
-    assert tuple(viewport._fracture_render_payload.vertex_components[6:10]) == pytest.approx(
+    assert tuple(payload.vertex_components[6:10]) == pytest.approx(
         (
             preview.pieces[0].color.r,
             preview.pieces[0].color.g,
             preview.pieces[0].color.b,
-            FRACTURE_MATCAP_TINT_STRENGTH,
+            preview.pieces[0].color.a,
         )
     )
     first_instance_offset = 3 * 3 * FRACTURE_VERTEX_STRIDE
     assert tuple(
-        viewport._fracture_render_payload.vertex_components[first_instance_offset + 6:first_instance_offset + 10]
+        payload.vertex_components[first_instance_offset + 6:first_instance_offset + 10]
     ) == pytest.approx(
         (
             preview.pieces[1].color.r,
             preview.pieces[1].color.g,
             preview.pieces[1].color.b,
-            FRACTURE_MATCAP_TINT_STRENGTH,
+            preview.pieces[1].color.a,
         )
     )
     assert viewport.grid_vertex_count > 0
@@ -295,12 +377,46 @@ def test_fracture_viewport_accepts_colored_triangle_payload_and_frames_camera(qt
     assert viewport.camera_distance == pytest.approx(viewport.camera_radius * 3.0)
 
 
+def test_fracture_viewport_exploded_view_updates_uniform_state_without_reuploading_mesh(qtbot) -> None:
+    preview = generate_fracture_preview(
+        _tree(),
+        FracturePreviewSettings(
+            fracture=FractureSettings(target_piece_count=3, output_stem="Oak"),
+            max_base_faces_per_piece=1,
+            max_prototype_faces=1,
+        ),
+    )
+    mesh = build_fracture_viewport_mesh(preview)
+    viewport = MatcapViewport()
+    qtbot.addWidget(viewport)
+    payload = apply_fracture_viewport_mesh(viewport, mesh, scene=preview.viewport_scene)
+    original_components = tuple(mesh.vertex_components)
+    render_components = tuple(payload.vertex_components)
+    explode_components: list[float] = []
+    for offset in range(10, len(payload.vertex_components), FRACTURE_VERTEX_STRIDE):
+        explode_components.extend(float(value) for value in payload.vertex_components[offset:offset + 3])
+    assert any(abs(value) > 0.0 for value in explode_components)
+    upload_calls = 0
+
+    def count_upload() -> None:
+        nonlocal upload_calls
+        upload_calls += 1
+
+    viewport._upload_mesh = count_upload  # type: ignore[method-assign]
+
+    viewport.set_exploded_view_strength(1.0)
+
+    assert tuple(payload.vertex_components) == render_components
+    assert tuple(mesh.vertex_components) == original_components
+    assert upload_calls == 0
+    assert viewport.exploded_view_strength == pytest.approx(1.0)
+
+
 def test_fracture_preview_dialog_enables_manual_bones_visibility_and_hides_repeated_parts(qtbot) -> None:
     preview = generate_fracture_preview(
         _tree(),
         FracturePreviewSettings(
             fracture=FractureSettings(
-                method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
                 target_piece_count=3,
                 output_stem="Oak",
                 pinned_cut_joint_tokens=("bone_003",),
@@ -312,7 +428,6 @@ def test_fracture_preview_dialog_enables_manual_bones_visibility_and_hides_repea
     dialog = FracturePreviewDialog(
         settings=FracturePreviewSettings(
             fracture=FractureSettings(
-                method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
                 target_piece_count=3,
                 pinned_cut_joint_tokens=("bone_003",),
             )
@@ -321,10 +436,13 @@ def test_fracture_preview_dialog_enables_manual_bones_visibility_and_hides_repea
     )
     qtbot.addWidget(dialog)
 
-    assert dialog.show_bones_check.isChecked()
     assert dialog.show_bones_check.isEnabled()
-    assert dialog.viewport.show_bones
+    assert not dialog.viewport.show_bones
     assert dialog.viewport_mesh.instance_count == 2
+
+    dialog.show_bones_check.setChecked(True)
+
+    assert dialog.viewport.show_bones
 
     dialog.show_bones_check.setChecked(False)
 
@@ -341,7 +459,6 @@ def test_fracture_preview_dialog_reset_cuts_clears_manual_session_tokens(qtbot) 
     emitted: list[FracturePreviewSettings] = []
     settings = FracturePreviewSettings(
         fracture=FractureSettings(
-            method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
             target_piece_count=3,
             pinned_cut_joint_tokens=("bone_003",),
         )
@@ -359,7 +476,6 @@ def test_fracture_preview_dialog_lists_deletes_and_undoes_manual_cuts(qtbot) -> 
     emitted: list[FracturePreviewSettings] = []
     settings = FracturePreviewSettings(
         fracture=FractureSettings(
-            method=FRACTURE_METHOD_MANUAL_PINNED_BONES,
             target_piece_count=3,
             pinned_cut_joint_tokens=("bone_002",),
         )
@@ -367,8 +483,8 @@ def test_fracture_preview_dialog_lists_deletes_and_undoes_manual_cuts(qtbot) -> 
     dialog = FracturePreviewDialog(settings=settings, on_settings_changed=emitted.append)
     qtbot.addWidget(dialog)
 
-    assert dialog.method_combo.itemText(dialog.method_combo.findData(FRACTURE_METHOD_MANUAL_PINNED_BONES)) == "Manual Fracturing"
     assert tuple(dialog._cut_delete_buttons) == ("bone_002",)
+    assert dialog._cut_delete_buttons["bone_002"].maximumWidth() == 22
 
     dialog._toggle_manual_cut_token("bone_003")
 
@@ -384,6 +500,21 @@ def test_fracture_preview_dialog_lists_deletes_and_undoes_manual_cuts(qtbot) -> 
 
     assert emitted[-1].fracture.pinned_cut_joint_tokens == ()
     assert dialog._cut_delete_buttons == {}
+
+
+def test_fracture_preview_dialog_visual_sliders_do_not_emit_preview_settings(qtbot) -> None:
+    emitted: list[FracturePreviewSettings] = []
+    dialog = FracturePreviewDialog(settings=FracturePreviewSettings(), on_settings_changed=emitted.append)
+    qtbot.addWidget(dialog)
+
+    dialog.color_strength_slider.setValue(24)
+    dialog.exploded_view_slider.setValue(67)
+
+    assert emitted == []
+    assert dialog.color_strength_spin.value() == pytest.approx(0.24)
+    assert dialog.viewport.matcap_tint_strength == pytest.approx(0.24)
+    assert dialog.exploded_view_spin.value() == pytest.approx(0.67)
+    assert dialog.viewport.exploded_view_strength == pytest.approx(0.67)
 
 
 def test_fracture_viewport_ctrl_click_picks_nearest_bone_segment_deterministically(qtbot) -> None:
@@ -411,15 +542,19 @@ def test_fracture_viewport_ctrl_click_picks_nearest_bone_segment_deterministical
             ),
         ),
     )
-    viewport = FractureViewport()
+    viewport = MatcapViewport()
     qtbot.addWidget(viewport)
     viewport.resize(500, 400)
-    viewport.set_mesh(mesh)
+    scene = _bone_only_scene(mesh.bone_segments)
+    apply_fracture_viewport_mesh(viewport, mesh, scene=scene)
     viewport.set_show_bones(True)
     left_screen = viewport._project_point_to_screen(Vector3(-0.75, 0.5, 0.0))
 
     assert left_screen is not None
-    assert viewport.pick_bone_segment_child_token(left_screen[0], left_screen[1]) == "left"
+    cut_token = viewport.pick_bone_segment_child_token(left_screen[0], left_screen[1])
+    assert cut_token is not None
+    assert cut_token.startswith("root->left@")
+    assert 0.40 < float(cut_token.rsplit("@", 1)[1]) < 0.60
 
 
 def test_fracture_viewport_ctrl_hover_previews_cut_target_and_click_uses_it(qtbot) -> None:
@@ -448,10 +583,11 @@ def test_fracture_viewport_ctrl_hover_previews_cut_target_and_click_uses_it(qtbo
             ),
         ),
     )
-    viewport = FractureViewport()
+    viewport = MatcapViewport()
     qtbot.addWidget(viewport)
     viewport.resize(500, 400)
-    viewport.set_mesh(mesh)
+    scene = _bone_only_scene(mesh.bone_segments)
+    apply_fracture_viewport_mesh(viewport, mesh, scene=scene)
     viewport.set_show_bones(True)
     viewport.on_bone_cut_toggled = picked.append
     right_screen = viewport._project_point_to_screen(Vector3(0.75, 0.5, 0.0))
@@ -474,7 +610,9 @@ def test_fracture_viewport_ctrl_hover_previews_cut_target_and_click_uses_it(qtbo
         )
     )
 
-    assert viewport.hover_cut_token == "right"
+    assert viewport.hover_cut_token is not None
+    assert viewport.hover_cut_token.startswith("root->right@")
+    assert 0.40 < float(viewport.hover_cut_token.rsplit("@", 1)[1]) < 0.60
 
     viewport.mousePressEvent(
         QMouseEvent(
@@ -486,7 +624,7 @@ def test_fracture_viewport_ctrl_hover_previews_cut_target_and_click_uses_it(qtbo
         )
     )
 
-    assert picked == ["right"]
+    assert picked == [viewport.hover_cut_token]
 
     viewport.set_show_bones(False)
 
@@ -494,7 +632,7 @@ def test_fracture_viewport_ctrl_hover_previews_cut_target_and_click_uses_it(qtbo
 
 
 def test_fracture_viewport_show_bones_does_not_upload_overlay_over_grid(qtbot, monkeypatch) -> None:
-    viewport = FractureViewport()
+    viewport = MatcapViewport()
     qtbot.addWidget(viewport)
     calls: list[str] = []
     monkeypatch.setattr(viewport, "isValid", lambda: True)
@@ -517,28 +655,33 @@ def test_fracture_viewport_piece_color_slider_updates_render_payload_without_reg
             max_prototype_faces=1,
         ),
     )
-    viewport = FractureViewport()
+    viewport = MatcapViewport()
     qtbot.addWidget(viewport)
     calls: list[str] = []
     monkeypatch.setattr(viewport, "isValid", lambda: False)
-    viewport.set_mesh(build_fracture_viewport_mesh(preview))
+    mesh = build_fracture_viewport_mesh(preview)
+    original_payload = apply_fracture_viewport_mesh(viewport, mesh, scene=preview.viewport_scene)
+    original_components = tuple(original_payload.vertex_components)
+    viewport._mesh_dirty = False
+    monkeypatch.setattr(viewport, "_upload_mesh", lambda: calls.append("upload"))
 
     viewport.set_matcap_tint_strength(0.24)
 
     assert viewport.matcap_tint_strength == pytest.approx(0.24)
-    assert tuple(viewport._fracture_render_payload.vertex_components[6:10]) == pytest.approx(
+    assert tuple(original_payload.vertex_components) == original_components
+    assert tuple(original_payload.vertex_components[6:10]) == pytest.approx(
         (
             preview.pieces[0].color.r,
             preview.pieces[0].color.g,
             preview.pieces[0].color.b,
-            0.24,
+            preview.pieces[0].color.a,
         )
     )
-    assert viewport._mesh_dirty
+    assert not viewport._mesh_dirty
     assert calls == []
 
 
-def test_matcap_uniforms_do_not_runtime_bind_piece_color_strength() -> None:
+def test_matcap_uniforms_bind_visual_controls_as_gl_float_uniforms_without_reuploading_vertices() -> None:
     class _Program:
         def __init__(self) -> None:
             self.calls = []
@@ -566,12 +709,15 @@ def test_matcap_uniforms_do_not_runtime_bind_piece_color_strength() -> None:
         mvp="mvp",
         normal_matrix="normal",
         piece_tint_strength=0.78,
+        exploded_view_strength=0.42,
     )
 
-    assert ("uniformLocation", "pieceTintStrength") not in program.calls
+    assert ("uniformLocation", "pieceTintStrength") in program.calls
+    assert ("uniformLocation", "explodeStrength") in program.calls
+    assert (7, 0.78) in functions.calls
+    assert (7, 0.42) in functions.calls
     assert ("mvp", "mvp") in program.calls
     assert ("normalMatrix", "normal") in program.calls
-    assert functions.calls == []
 
 
 def test_fracture_viewport_prepares_opaque_mesh_draw_after_blended_grid() -> None:
@@ -618,7 +764,7 @@ def test_fracture_viewport_releases_gl_resources_with_current_context(qtbot, mon
             calls.append(f"{self.name}.removeAllShaders")
 
     calls: list[str] = []
-    viewport = FractureViewport()
+    viewport = MatcapViewport()
     qtbot.addWidget(viewport)
     monkeypatch.setattr(viewport, "isValid", lambda: True)
     monkeypatch.setattr(viewport, "makeCurrent", lambda: calls.append("makeCurrent"))

@@ -209,6 +209,34 @@ class MeshData:
     skel_joint_weights: tuple[float, ...] = ()
     skel_element_size: int = 0
 
+    def __post_init__(self) -> None:
+        for field_name in (
+            "points",
+            "face_vertex_counts",
+            "face_vertex_indices",
+            "uv_coords",
+            "secondary_uv_coords",
+            "vertex_colors",
+            "sections",
+            "skel_joint_indices",
+            "skel_joint_weights",
+        ):
+            object.__setattr__(self, field_name, _materialized_tuple_field(self, field_name))
+
+
+def _materialized_tuple_field(owner: object, field_name: str) -> tuple:
+    value = getattr(owner, field_name)
+    if isinstance(value, tuple):
+        return value
+    if isinstance(value, (str, bytes)):
+        raise TypeError(f"{type(owner).__name__}.{field_name} must be tuple-compatible, got {type(value).__name__}.")
+    try:
+        return tuple(value)
+    except TypeError as exc:
+        raise TypeError(
+            f"{type(owner).__name__}.{field_name} must be tuple-compatible, got {type(value).__name__}."
+        ) from exc
+
 
 @dataclass(frozen=True, slots=True)
 class MaterialSpec:
@@ -352,6 +380,14 @@ class Prototype:
     fbx_material_slot_overrides: tuple["FbxMaterialSlotOverride", ...] = ()
     geometry_payload: "GeometryBuffer | None" = None
 
+    def has_active_udim_settings(self) -> bool:
+        return (
+            self.single_material_udim_mode != UdimMode.OFF
+            or self.black_material_udim_mode != UdimMode.OFF
+            or self.white_material_udim_mode != UdimMode.OFF
+            or any(override.udim_mode != UdimMode.OFF for override in self.fbx_material_slot_overrides)
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class GeometryBuffer:
@@ -412,6 +448,14 @@ class PrototypeSourceConfig:
     white_material_udim_mode: UdimMode = UdimMode.OFF
     white_material_udim_id: int = 1001
     fbx_material_slot_overrides: tuple["FbxMaterialSlotOverride", ...] = ()
+
+    def has_active_udim_settings(self) -> bool:
+        return (
+            self.single_material_udim_mode != UdimMode.OFF
+            or self.black_material_udim_mode != UdimMode.OFF
+            or self.white_material_udim_mode != UdimMode.OFF
+            or any(override.udim_mode != UdimMode.OFF for override in self.fbx_material_slot_overrides)
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -36,7 +36,7 @@ from .prototype_resolution import (
 from .authoring_validation import validate_authoring_model
 from .resolution_validation import validate_resolution
 from .source_validation import validate_source_model
-from .udim_resolver import apply_udim_material_settings
+from .udim_resolver import apply_udim_settings_to_mesh_data
 
 
 @dataclass(frozen=True)
@@ -87,9 +87,17 @@ def resolve_assembly_model(
     started_at = runtime.started_at if runtime.started_at is not None else time.perf_counter()
     runtime = replace(runtime, started_at=started_at)
     resolved_conversion_mode = ConversionMode.parse(options.conversion_mode)
+    working_source_model = replace(
+        source_model,
+        base_mesh=apply_udim_settings_to_mesh_data(
+            source_model.base_mesh,
+            options.udim_material_settings,
+            label="Base Skeletal Tree",
+        ),
+    )
 
     authoring_model = resolve_prototype_sources(
-        source_model,
+        working_source_model,
         options.prototype_source_configs,
         cpu_profile=options.cpu_profile,
         telemetry_callback=runtime.telemetry_callback,
@@ -109,7 +117,6 @@ def resolve_assembly_model(
             started_at=runtime.started_at,
         ),
     )
-    authoring_model = apply_udim_material_settings(authoring_model, options.udim_material_settings)
     if resolved_conversion_mode == ConversionMode.STATIC_ASSEMBLY:
         authoring_model = replace(authoring_model, prototype_strategy=PrototypeStrategy.INLINE_STATIC_PART)
     authoring_model = replace(

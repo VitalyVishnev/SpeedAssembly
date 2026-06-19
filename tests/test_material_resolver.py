@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from xml_to_usda.canonical_loader import load_canonical_model, load_resolved_assembly_model, load_source_tree_model
+from xml_to_usda.asset_paths import normalize_unreal_asset_path
 from xml_to_usda.fbx_adapter import FbxVertexColorReadError, _read_vertex_color
 from xml_to_usda.models import (
     BaseMaterialOverride,
@@ -28,9 +29,10 @@ from xml_to_usda.models import (
     Vector3,
 )
 from xml_to_usda.normalizer import _resolve_prototype_material_sections, _vertex_color_material_sections, normalize_to_canonical
+from xml_to_usda.material_resolver import apply_material_policy
 from xml_to_usda.pipeline import _apply_material_policy, convert_file, discover_source_materials
 from xml_to_usda.validator import validate_model
-from xml_to_usda.udim_resolver import apply_udim_material_settings
+from xml_to_usda.udim_resolver import apply_udim_settings_to_mesh_data
 from xml_to_usda.xml_reader import inspect_xml, read_source_xml
 from xml_to_usda.udim_settings import load_udim_material_settings_from_json
 
@@ -169,6 +171,11 @@ def test_discover_source_materials_ignores_prototype_only_material_slots() -> No
             source_name="Bark_Mat",
             ue_asset_path=None,
         ),
+        BaseMaterialOverride(
+            source_id=0,
+            source_name="Default_Mat",
+            ue_asset_path=None,
+        ),
     )
 
 
@@ -256,12 +263,12 @@ def test_source_material_policy_preserves_shifted_source_material_ids(tmp_path: 
     _, model, diagnostics = load_canonical_model(str(shifted_sample))
 
     assert result.usda_document is not None
-    assert {material.source_id for material in model.materials} == {5, 6}
-    assert {material.source_material_ids for material in model.materials} == {(5,), (6,)}
+    assert {material.source_id for material in model.materials} == {0, 5, 6}
+    assert {material.source_material_ids for material in model.materials} == {(0,), (5,), (6,)}
     assert model.base_mesh is not None
-    assert {section.material_id for section in model.base_mesh.sections} == {5}
+    assert {section.material_id for section in model.base_mesh.sections} == {0, 5}
     assert all(
-        prototype.mesh is None or {section.material_id for section in prototype.mesh.sections} <= {5, 6}
+        prototype.mesh is None or {section.material_id for section in prototype.mesh.sections} <= {0, 5, 6}
         for prototype in model.prototypes
     )
     assert not any(
@@ -287,7 +294,7 @@ def test_source_role_policy_remaps_shifted_source_material_ids_to_role_materials
 
     assert result.usda_document is not None
     assert {material.source_id for material in model.materials} == {1, 2}
-    assert {material.source_material_ids for material in model.materials} == {(5,), (6,)}
+    assert {material.source_material_ids for material in model.materials} == {(0, 5), (6,)}
     assert model.base_mesh is not None
     assert {section.material_id for section in model.base_mesh.sections} == {1}
     assert all(
@@ -321,7 +328,7 @@ def test_source_role_policy_succeeds_with_fbx_single_material_on_shifted_source_
     prototype = next(prototype for prototype in model.prototypes if prototype.source_key == "Mesh_1")
 
     assert {material.source_id for material in model.materials} == {1, 2}
-    assert {material.source_material_ids for material in model.materials} == {(5,), (6,)}
+    assert {material.source_material_ids for material in model.materials} == {(0, 5), (6,)}
     assert prototype.geometry_payload is not None
     assert {section.material_id for section in prototype.geometry_payload.sections} == {1}
     assert not any(
@@ -356,7 +363,7 @@ def test_explicit_xml_part_single_material_adds_prototype_local_material_overrid
     assert prototype_one.mesh is not None
     assert {section.material_id for section in prototype_one.mesh.sections} == {prototype_material.source_id}
     assert prototype_two.mesh is not None
-    assert {section.material_id for section in prototype_two.mesh.sections} == {1}
+    assert {section.material_id for section in prototype_two.mesh.sections} == {0}
 
 
 def test_vertex_color_split_policy_maps_white_and_nonwhite_for_base_and_prototypes() -> None:
@@ -377,9 +384,9 @@ def test_vertex_color_split_policy_maps_white_and_nonwhite_for_base_and_prototyp
             Color4(1.0, 1.0, 1.0),
             Color4(1.0, 1.0, 1.0),
             Color4(1.0, 1.0, 1.0),
-            Color4(0.5, 0.5, 0.5),
-            Color4(0.5, 0.5, 0.5),
-            Color4(0.5, 0.5, 0.5),
+            Color4(0.0, 0.0, 0.0),
+            Color4(0.0, 0.0, 0.0),
+            Color4(0.0, 0.0, 0.0),
         ),
         sections=(MeshSection(material_id=9, face_indices=(0, 1)),),
         skel_joint_indices=(0, 0, 0, 0, 0, 0),
@@ -782,6 +789,71 @@ def test_fbx_part_source_material_slots_requires_at_least_one_filled_path(tmp_pa
         )
 
 
+def test_explicit_part_material_contract_activates_for_udim_only_xml_mesh_rows() -> None:
+    _, source_model, _ = load_canonical_model(str(SIMPLE_TREE_01))
+    source_prototype = next(prototype for prototype in source_model.prototypes if prototype.source_key == "Mesh_1")
+    synthetic_mesh = MeshData(
+        name="SyntheticMaterialSplit",
+        points=(
+            Vector3(0.0, 0.0, 0.0),
+            Vector3(1.0, 0.0, 0.0),
+            Vector3(0.0, 1.0, 0.0),
+            Vector3(1.0, 1.0, 0.0),
+            Vector3(2.0, 1.0, 0.0),
+            Vector3(1.0, 2.0, 0.0),
+        ),
+        face_vertex_counts=(3, 3),
+        face_vertex_indices=(0, 1, 2, 3, 4, 5),
+        vertex_colors=(
+            Color4(1.0, 1.0, 1.0),
+            Color4(1.0, 1.0, 1.0),
+            Color4(1.0, 1.0, 1.0),
+            Color4(0.0, 0.0, 0.0),
+            Color4(0.0, 0.0, 0.0),
+            Color4(0.0, 0.0, 0.0),
+        ),
+        sections=(MeshSection(material_id=9, face_indices=(0, 1)),),
+        skel_joint_indices=(0, 0, 0, 0, 0, 0),
+        skel_joint_weights=(1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
+        skel_element_size=1,
+    )
+    udim_prototype = replace(
+        source_prototype,
+        mesh=synthetic_mesh,
+        source_mode=PrototypeSourceMode.XML_MESH,
+        fbx_material_mode=FbxMaterialMode.VERTEX_COLOR_SPLIT,
+        single_material_path=None,
+        single_material_udim_mode=UdimMode.OFF,
+        black_material_path=None,
+        black_material_udim_mode=UdimMode.WRITE_SECONDARY_UV_OFFSET,
+        black_material_udim_id=1028,
+        white_material_path=None,
+        white_material_udim_mode=UdimMode.SHIFT_PRIMARY_UV,
+        white_material_udim_id=1003,
+        fbx_material_slot_overrides=(),
+    )
+    model = replace(source_model, prototypes=(udim_prototype, *source_model.prototypes[1:]))
+
+    resolved_model = apply_material_policy(
+        model,
+        material_policy=MaterialPolicy.SOURCE_MATERIALS,
+        bark_material_path=None,
+        leaves_material_path=None,
+        single_material_path=None,
+        normalize_asset_path=normalize_unreal_asset_path,
+        explicit_part_material_contract=True,
+    )
+
+    black_material = next(material for material in resolved_model.materials if material.name == f"{source_prototype.identity.prim_name}_Black")
+    white_material = next(material for material in resolved_model.materials if material.name == f"{source_prototype.identity.prim_name}_White")
+    resolved_prototype = next(prototype for prototype in resolved_model.prototypes if prototype.source_key == "Mesh_1")
+
+    assert len(resolved_model.materials) == len(source_model.materials) + 2
+    assert {black_material.source_id, white_material.source_id} == {
+        section.material_id for section in resolved_prototype.mesh.sections
+    }
+
+
 def test_read_vertex_color_wraps_autodesk_binding_internal_error() -> None:
     class _BrokenColorElement:
         def GetDirectArray(self):
@@ -881,32 +953,23 @@ def test_conflicting_fbx_material_modes_for_same_prototype_are_rejected(tmp_path
 
 
 def test_udim_settings_keep_input_order_for_the_same_material() -> None:
-    model = TreeAsset(
-        metadata=ExportMetadata(source_path="synthetic.xml", source_version=None),
-        materials=(),
-        source_objects=(),
-        base_mesh=MeshData(
-            name="OrderSensitiveMesh",
-            points=(Vector3(0.0, 0.0, 0.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0)),
-            face_vertex_counts=(3,),
-            face_vertex_indices=(0, 1, 2),
-            uv_coords=(Vector2(0.0, 0.0), Vector2(1.0, 0.0), Vector2(0.0, 1.0)),
-            sections=(MeshSection(material_id=1, face_indices=(0,)),),
-        ),
-        skeleton=(),
-        assembly_parts=(),
+    mesh = MeshData(
+        name="OrderSensitiveMesh",
+        points=(Vector3(0.0, 0.0, 0.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0)),
+        face_vertex_counts=(3,),
+        face_vertex_indices=(0, 1, 2),
+        uv_coords=(Vector2(0.0, 0.0), Vector2(1.0, 0.0), Vector2(0.0, 1.0)),
+        sections=(MeshSection(material_id=1, face_indices=(0,)),),
     )
 
-    resolved = apply_udim_material_settings(
-        model,
-        (
-            UdimMaterialSetting(material_id=1, mode=UdimMode.SHIFT_PRIMARY_UV, udim_id=1003),
-            UdimMaterialSetting(material_id=1, mode=UdimMode.SHIFT_PRIMARY_UV, udim_id=1004),
-        ),
-    )
-
-    assert resolved.base_mesh is not None
-    assert resolved.base_mesh.uv_coords[0] == Vector2(5.0, 0.0)
+    with pytest.raises(ValueError, match="multiple active UDIM settings for material id 1"):
+        apply_udim_settings_to_mesh_data(
+            mesh,
+            (
+                UdimMaterialSetting(material_id=1, mode=UdimMode.SHIFT_PRIMARY_UV, udim_id=1003),
+                UdimMaterialSetting(material_id=1, mode=UdimMode.SHIFT_PRIMARY_UV, udim_id=1004),
+            ),
+        )
 
 
 def test_udim_primary_shift_moves_only_selected_resolved_material_uvs() -> None:
@@ -930,8 +993,26 @@ def test_udim_primary_shift_moves_only_selected_resolved_material_uvs() -> None:
     assert baseline_mesh.sections == resolved_mesh.sections
     assert len(baseline_mesh.uv_coords) == len(resolved_mesh.uv_coords)
 
-    for before, after in zip(baseline_mesh.uv_coords, resolved_mesh.uv_coords, strict=True):
-        assert after.x == pytest.approx(before.x + 2.0)
+    face_ranges = []
+    cursor = 0
+    for face_count in baseline_mesh.face_vertex_counts:
+        face_ranges.append((cursor, cursor + face_count))
+        cursor += face_count
+    shifted_faces = {
+        face_index
+        for section in baseline_mesh.sections
+        if section.material_id == 1
+        for face_index in section.face_indices
+    }
+    shifted_slots = {
+        slot_index
+        for face_index in shifted_faces
+        for slot_index in range(*face_ranges[face_index])
+    }
+
+    for slot_index, (before, after) in enumerate(zip(baseline_mesh.uv_coords, resolved_mesh.uv_coords, strict=True)):
+        expected_x = before.x + 2.0 if slot_index in shifted_slots else before.x
+        assert after.x == pytest.approx(expected_x)
         assert after.y == pytest.approx(before.y)
 
 
@@ -990,17 +1071,8 @@ def test_udim_secondary_mode_defaults_untouched_material_faces_to_first_udim() -
             MeshSection(material_id=2, face_indices=(1,)),
         ),
     )
-    model = TreeAsset(
-        metadata=ExportMetadata(source_path="synthetic.xml", source_version=None),
-        materials=(),
-        source_objects=(),
-        base_mesh=mesh,
-        skeleton=(),
-        assembly_parts=(),
-    )
-
-    resolved = apply_udim_material_settings(
-        model,
+    resolved = apply_udim_settings_to_mesh_data(
+        mesh,
         (
             UdimMaterialSetting(
                 material_id=1,
@@ -1008,14 +1080,15 @@ def test_udim_secondary_mode_defaults_untouched_material_faces_to_first_udim() -
                 udim_id=1003,
             ),
         ),
+        label="Base Skeletal Tree",
     )
 
-    assert resolved.base_mesh is not None
-    assert len(resolved.base_mesh.secondary_uv_coords) == len(mesh.uv_coords)
-    assert [(uv.x, uv.y) for uv in resolved.base_mesh.secondary_uv_coords[:3]] == pytest.approx(
+    assert resolved is not None
+    assert len(resolved.secondary_uv_coords) == len(mesh.uv_coords)
+    assert [(uv.x, uv.y) for uv in resolved.secondary_uv_coords[:3]] == pytest.approx(
         [(2.5, 0.5), (2.5, 0.5), (2.5, 0.5)]
     )
-    assert [(uv.x, uv.y) for uv in resolved.base_mesh.secondary_uv_coords[3:]] == pytest.approx(
+    assert [(uv.x, uv.y) for uv in resolved.secondary_uv_coords[3:]] == pytest.approx(
         [(0.5, 0.5), (0.5, 0.5), (0.5, 0.5)]
     )
 
@@ -1047,17 +1120,8 @@ def test_udim_secondary_mode_overwrites_existing_secondary_uvs_with_default_fill
             MeshSection(material_id=2, face_indices=(1,)),
         ),
     )
-    model = TreeAsset(
-        metadata=ExportMetadata(source_path="synthetic.xml", source_version=None),
-        materials=(),
-        source_objects=(),
-        base_mesh=mesh,
-        skeleton=(),
-        assembly_parts=(),
-    )
-
-    resolved = apply_udim_material_settings(
-        model,
+    resolved = apply_udim_settings_to_mesh_data(
+        mesh,
         (
             UdimMaterialSetting(
                 material_id=1,
@@ -1065,30 +1129,30 @@ def test_udim_secondary_mode_overwrites_existing_secondary_uvs_with_default_fill
                 udim_id=1003,
             ),
         ),
+        label="Base Skeletal Tree",
     )
 
-    assert resolved.base_mesh is not None
-    assert [(uv.x, uv.y) for uv in resolved.base_mesh.secondary_uv_coords[:3]] == pytest.approx(
+    assert resolved is not None
+    assert [(uv.x, uv.y) for uv in resolved.secondary_uv_coords[:3]] == pytest.approx(
         [(2.5, 0.5), (2.5, 0.5), (2.5, 0.5)]
     )
-    assert [(uv.x, uv.y) for uv in resolved.base_mesh.secondary_uv_coords[3:]] == pytest.approx(
+    assert [(uv.x, uv.y) for uv in resolved.secondary_uv_coords[3:]] == pytest.approx(
         [(0.5, 0.5), (0.5, 0.5), (0.5, 0.5)]
     )
 
 
 def test_udim_setting_that_matches_no_inline_material_is_resolution_error() -> None:
-    _, resolved = load_resolved_assembly_model(
-        str(SIMPLE_TREE_01),
-        udim_material_settings=(
-            UdimMaterialSetting(
-                material_id=999,
-                mode=UdimMode.SHIFT_PRIMARY_UV,
-                udim_id=1003,
+    with pytest.raises(ValueError, match="Base Skeletal Tree has no material sections for UDIM material id\\(s\\): 999"):
+        load_resolved_assembly_model(
+            str(SIMPLE_TREE_01),
+            udim_material_settings=(
+                UdimMaterialSetting(
+                    material_id=999,
+                    mode=UdimMode.SHIFT_PRIMARY_UV,
+                    udim_id=1003,
+                ),
             ),
-        ),
-    )
-
-    assert any(issue.code == "unmatched_udim_material" for issue in resolved.resolution_diagnostics)
+        )
 
 
 def test_udim_settings_json_loads_material_targets(tmp_path: Path) -> None:

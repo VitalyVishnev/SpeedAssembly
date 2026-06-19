@@ -26,3 +26,15 @@ repeat the same obvious steps.
   - Likely next step: replace any fixture with a real export if one becomes
     available; otherwise keep the smallest fixture that expresses the contract
     cleanly.
+
+- `src/xml_to_usda/udim_resolver.py`, `src/xml_to_usda/material_resolver.py`,
+  `src/xml_to_usda/assembly_resolution.py`
+  - Problem: piece-local UDIM isolation is covered by automated tests and the
+    current baseline sample, but it has not yet been validated across a wider
+    set of real SpeedTree structures with different base/prototype material
+    layouts.
+  - Why deferred: the current change closed the cross-piece overwrite bug; the
+    remaining work is broader sample coverage, not a known logic failure.
+  - Likely next step: run the piece-local UDIM cases on base geometry, repeated
+    parts, and FBX slot prototypes across the real tree/shrub/grass sample
+    matrix already used for breadth validation.

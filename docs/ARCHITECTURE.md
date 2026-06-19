@@ -190,12 +190,14 @@ domain concept.
   policy and operator overrides. USDA writing emits `Authored Material Binding`.
   Avoid treating source material ids as authored semantic roles.
 - UDIM material seam:
-  UDIM settings are Operator Intent over resolved inline material ids. Base XML
-  material rows feed `ConversionRequest.udim_material_settings`; repeated-part
-  `single_material`, `vertex_color_split`, and FBX `material_slots` rows carry
-  UDIM settings through prototype source config and material assignment
-  resolution. `udim_resolver.py` owns UV mutation after material ids are
-  resolved; external Unreal asset prototypes are not editable inline.
+  UDIM settings are Operator Intent over resolved piece-local material ids.
+  Base XML material rows feed `ConversionRequest.udim_material_settings` and
+  apply only to the `Base Skeletal Tree` before prototype material remap.
+  Repeated-part `single_material`, `vertex_color_split`, and FBX
+  `material_slots` rows carry UDIM settings through prototype source config and
+  material assignment resolution, where each piece resolves its own material
+  ids independently. `udim_resolver.py` owns piece-local UV mutation and
+  target validation; external Unreal asset prototypes are not editable inline.
 - Naming seam:
   Keep `Source Name`, `Output Stem`, `Prim Name`, `Authored Asset Name`, and
   `Unreal Asset Path` distinct. Do not infer skeleton or base asset naming from
@@ -225,20 +227,62 @@ domain concept.
   Proxy simplification is part of the proxy service contract and must preserve
   connected topology through the QEM backend. Do not replace it with
   diagnostic face sampling.
+- Viewport Scene seam:
+  `viewport_scene.py` owns the Qt-free `Viewport Scene` payload contract:
+  mesh batches, draw calls, overlays, selectable ids, bounds, and diagnostic
+  stats. `proxy_viewport_scene.py` and `fracture_viewport_scene.py` are the
+  first `Viewport Mode Adapter` modules. They project application preview
+  results into draw intent without importing Qt, owning OpenGL resources, or
+  changing Proxy Mesh generation, Fracture Piece membership, cut validity, or
+  export semantics. `qt_ui/viewport.py` owns the shared Qt/OpenGL camera,
+  orbit, grid, resource lifecycle, mesh rendering, bone overlay drawing,
+  selected/hover cut markers, and screen-space bone picking for `ViewportScene`
+  payloads. The shared vertex format includes `ViewportDrawCall`
+  `explode_direction`, so exploded preview is viewport visual state rather than
+  Fracture Piece membership. `qt_ui/viewport.py` also owns viewport-stage trace
+  emission through a callback seam and the shared matcap vertex upload/attribute
+  layout, so mode dialogs do not fake OpenGL upload events or duplicate shader
+  binding contracts. Proxy Mesh Preview renders through
+  `MatcapViewport.set_scene()`. Fracture Preview passes the prebuilt
+  `ViewportScene` and precomputed matcap vertex payload into the same viewport
+  mesh upload, overlay, and picking path; fracture-only state such as
+  `FractureViewportMesh` stays in `FracturePreviewDialog` and adapter
+  functions, not in a viewport subclass.
+- Preview job lifecycle seam:
+  `qt_ui/preview_jobs.py` owns process-backed preview job lifecycle:
+  latest-request-wins, cancellation, pending-request coalescing, queue draining
+  state, crash context, and worker trace breadcrumbs. It does not interpret
+  mode payloads. `qt_ui/window.py` and `qt_ui/background_jobs.py` remain the UI
+  adapters that translate a ready result or loud error into dialog state.
+  Proxy Mesh Preview and Fracture Preview now use this seam, so preview dialogs
+  are not worker/process owners.
+- Preview shell seam:
+  `qt_ui/preview_shell.py` owns the shared preview dialog shell: viewport slot,
+  settings-panel slot, stable sizing, owner, modality, and focus rules.
+  Mode-specific dialogs own their settings controls and result presentation,
+  but they must not recreate shell layout or hand-written
+  `show`/`raise`/`activateWindow` sequences.
 - Fracturing seam:
   Fracturing is a companion destructibility workflow over `ResolvedAssemblyModel`.
   `fracture_service.py` owns deterministic skeleton-owned Fracture Piece
-  planning, including manual pinned Fracture Cut Site validation and automatic
-  fill. `fracture_export_service.py` projects those pieces into per-piece
+  planning, including manual pinned Fracture Cut Site validation, manual
+  segment cut membership, optional Stump Piece selection, Preserve Trunk Bias,
+  and automatic fill. `fracture_geometry.py` owns sliced piece mesh construction
+  and optional Fracture Cap generation so preview and export share the same
+  geometry contract. `fracture_export_service.py` projects those pieces into per-piece
   `Static Mesh Assembly` authoring models and delegates USDA writing to
   `usda_writer.py`. `fracture_preview_service.py` projects the same plan into
-  diagnostic preview payloads with stable colors and lightweight geometry.
+  diagnostic preview payloads with stable colors, lightweight geometry, and a
+  prebuilt `Viewport Scene` for rendering.
+  `fracture_viewport_scene.py` owns the Fracture Preview mode adapter from
+  domain preview result to `Viewport Scene`.
   `qt_ui/fracture_preview.py` owns the Qt preview dialog/viewport adapter and
-  adapts those payloads into the shared matcap/grid viewport with slight
-  per-piece tinting. It owns viewport bone picking, x-ray skeleton overlay, and
-  visual-only visibility toggles such as `Hide Repeated Parts`; it must not own
-  Fracture Piece membership, manual cut validity, or source interpretation
-  rules.
+  adapts the prebuilt `Viewport Scene` into the current legacy matcap/grid
+  render payload. It owns visual-only fracture controls such as
+  `Hide Repeated Parts` and Exploded Fracture Preview, but shared bone overlay,
+  cut marker, hover, and picking behavior lives in `qt_ui/viewport.py`. It must
+  not own `Viewport Scene` construction, Fracture Piece membership, manual cut
+  validity, cap generation, or source interpretation rules.
   Fracture export must reuse resolved Operator Intent for materials and
   prototype sources, but its authored piece files are static assemblies
   regardless of the main export mode. Fracture preview uses source XML geometry
@@ -246,9 +290,10 @@ domain concept.
   exposes both operations: preview passes a source-geometry request, export
   passes a resolved-intent `FractureExportRequest`. Fracture export uses the
   file-based fracture worker subprocess because it writes authoritative USDA
-  outputs. Fracture Preview runs in a Qt-owned background thread instead of a
-  packaged frozen worker process; preview is interactive, read-only, and must
-  not churn short-lived frozen executables while the operator changes controls.
+  outputs. Fracture Preview runs in an isolated worker process because runtime
+  traces showed native failures in threaded preview work can close the Qt shell
+  before Python reports an error. Preview settings changes cancel stale preview
+  workers and start a fresh isolated job.
   Fracture Preview may use deterministic sampling for viewport payload budgets,
   but that is a preview adapter policy, not a reusable mesh simplification
   policy. Worker result files remain authoritative for subprocess-backed jobs:

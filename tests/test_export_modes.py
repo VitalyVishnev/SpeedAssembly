@@ -183,7 +183,7 @@ def test_skeletal_parts_mode_authors_library_without_base_tree_or_instancer() ->
         "/Tree/AssemblyPartsInstancer",
         'append rel skel:animationSource = </Tree/AssemblyPartsInstancer/Prototypes/Twig_01/PartSkelRoot/PartAnimation>',
     )
-    assert inventory.contains("/Tree/AssemblyPartsInstancer", 'rel material:binding = </Tree/Materials/Material_1_1>')
+    assert inventory.contains("/Tree/AssemblyPartsInstancer", 'rel material:binding = </Tree/Materials/Material_0_0>')
 
 
 def test_skeletal_parts_mode_preserves_external_part_reuse() -> None:

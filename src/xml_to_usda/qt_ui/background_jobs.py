@@ -24,6 +24,7 @@ from ..gui_formatters import (
 )
 from ..models import ConversionJobResult, ConversionRequest, ConversionTelemetry
 from ..proxy_mesh_service import ProxyMeshJobResult
+from .preview_jobs import PreviewProcessJob
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,20 @@ class QtBackgroundJobsController:
         self._proxy_mesh_error_traceback: str | None = None
         self._proxy_mesh_result_received = False
         self._proxy_mesh_thread: threading.Thread | None = None
+        self._proxy_preview_retry_count = 0
+        self._proxy_preview_job = PreviewProcessJob(
+            name="proxy_preview",
+            start_process=lambda request, settings: self._deps.start_proxy_mesh_process(
+                request,
+                settings,
+                action="preview",
+            ),
+            drain_queue=self._deps.drain_process_queue,
+            close_queue=self._deps.close_process_queue,
+            trace_payload=self._proxy_preview_trace_payload,
+            trace=self._trace_worker,
+            pending_start_delay_seconds=0.25,
+        )
         self._fracture_export_process = None
         self._fracture_export_queue = None
         self._fracture_export_cancel_event = None
@@ -71,16 +86,16 @@ class QtBackgroundJobsController:
         self._fracture_export_settings = None
         self._fracture_export_error_traceback: str | None = None
         self._fracture_export_result_received = False
-        self._fracture_preview_process = None
-        self._fracture_preview_queue = None
-        self._fracture_preview_cancel_event = None
-        self._fracture_preview_request = None
-        self._fracture_preview_settings = None
-        self._fracture_preview_error_traceback: str | None = None
-        self._fracture_preview_result_received = False
+        self._fracture_preview_job = PreviewProcessJob(
+            name="fracture_preview",
+            start_process=self._deps.start_fracture_preview_process,
+            drain_queue=self._deps.drain_process_queue,
+            close_queue=self._deps.close_process_queue,
+            trace_payload=self._fracture_preview_trace_payload,
+            trace=self._trace_worker,
+            pending_start_delay_seconds=0.25,
+        )
         self._fracture_preview_retry_count = 0
-        self._fracture_preview_thread: threading.Thread | None = None
-        self._fracture_preview_generation_id = 0
 
     @property
     def conversion_running(self) -> bool:
@@ -105,19 +120,16 @@ class QtBackgroundJobsController:
         )
 
     @property
+    def proxy_preview_running(self) -> bool:
+        return self._proxy_preview_job.running
+
+    @property
     def fracture_export_running(self) -> bool:
         return bool(self._fracture_export_process is not None and self._fracture_export_process.is_alive())
 
     @property
     def fracture_preview_running(self) -> bool:
-        return bool(
-            (self._fracture_preview_process is not None and self._fracture_preview_process.is_alive())
-            or (
-                self._fracture_preview_thread is not None
-                and self._fracture_preview_thread.is_alive()
-                and self._fracture_preview_request is not None
-            )
-        )
+        return self._fracture_preview_job.running
 
     def start_conversion(self, *, request: ConversionRequest, run_async: bool) -> None:
         if self.conversion_running:
@@ -296,6 +308,30 @@ class QtBackgroundJobsController:
         self._window._update_action_state()
         self._ensure_polling()
 
+    def start_proxy_mesh_preview(self, request, settings) -> None:
+        if self.proxy_mesh_running:
+            self._window._set_status("Proxy Mesh export is already running...")
+            return
+        if not self.proxy_preview_running:
+            self._proxy_preview_retry_count = 0
+        self._window._set_status("Generating Proxy Preview...")
+        if hasattr(self._window, "_handle_proxy_preview_loading"):
+            self._window._handle_proxy_preview_loading("Generating...")
+        try:
+            start_result = self._proxy_preview_job.start_latest(request, settings)
+        except Exception as exc:
+            self._proxy_preview_job.close()
+            self._handle_proxy_preview_error(str(exc))
+            return
+        if start_result.queued:
+            self._window._set_status("Proxy Preview update queued...")
+        self._window._update_action_state()
+        self._ensure_polling()
+
+    def cancel_proxy_mesh_preview(self) -> None:
+        self._proxy_preview_job.cancel_running(clear_pending=True)
+        self._window._update_action_state()
+
     def start_fracture_export(self, request, settings) -> None:
         if self.fracture_export_running:
             self._window._set_status("Fracture export already running...")
@@ -319,47 +355,22 @@ class QtBackgroundJobsController:
         self._ensure_polling()
 
     def start_fracture_preview(self, request, settings) -> None:
-        if self.fracture_preview_running:
-            self._window._set_status("Fracture preview already running...")
-            return
-        self._fracture_preview_error_traceback = None
-        self._fracture_preview_result_received = False
-        self._fracture_preview_request = request
-        self._fracture_preview_settings = settings
-        self._fracture_preview_generation_id += 1
-        generation_id = self._fracture_preview_generation_id
+        if not self.fracture_preview_running:
+            self._fracture_preview_retry_count = 0
         self._window._set_status("Generating Fracture Preview...")
-        self._fracture_preview_thread = threading.Thread(
-            target=self._run_fracture_preview_worker,
-            kwargs={"request": request, "settings": settings, "generation_id": generation_id},
-            daemon=True,
-        )
-        self._fracture_preview_thread.start()
-        self._trace_worker("worker.spawn", "fracture_preview", {"mode": "thread", "generation_id": generation_id})
+        try:
+            start_result = self._fracture_preview_job.start_latest(request, settings)
+        except Exception as exc:
+            self.close_fracture_preview_process()
+            self._window._report_error("Fracture Preview failed", str(exc), status="Fracture Preview failed.")
+            return
+        if start_result.queued:
+            self._window._set_status("Fracture Preview update queued...")
         self._window._update_action_state()
         self._ensure_polling()
 
-    def _run_fracture_preview_worker(self, *, request, settings, generation_id: int) -> None:
-        try:
-            result = self._deps.generate_fracture_preview_from_source_request(request, settings)
-            self._event_queue.put(("fracture_preview_result", (generation_id, result)))
-        except Exception as exc:
-            self._event_queue.put(("fracture_preview_error_traceback", (generation_id, traceback.format_exc())))
-            self._event_queue.put(("fracture_preview_error", (generation_id, str(exc))))
-
     def cancel_fracture_preview(self) -> None:
-        self._fracture_preview_generation_id += 1
-        if self._fracture_preview_cancel_event is not None:
-            with suppress(Exception):
-                self._fracture_preview_cancel_event.set()
-        if self._fracture_preview_process is not None and self._fracture_preview_process.is_alive():
-            with suppress(Exception):
-                self._fracture_preview_process.join(timeout=0.1)
-            if self._fracture_preview_process.is_alive():
-                with suppress(Exception):
-                    self._fracture_preview_process.terminate()
-                    self._fracture_preview_process.join(timeout=0.1)
-        self.close_fracture_preview_process()
+        self._fracture_preview_job.cancel_running(clear_pending=True)
         self._window._update_action_state()
 
     def _start_proxy_mesh_process(self, request, settings) -> bool:
@@ -426,18 +437,11 @@ class QtBackgroundJobsController:
                 with suppress(Exception):
                     self._fracture_export_process.terminate()
                     self._fracture_export_process.join(timeout=0.2)
-        if self._fracture_preview_process is not None and self._fracture_preview_process.is_alive():
-            if self._fracture_preview_cancel_event is not None:
-                with suppress(Exception):
-                    self._fracture_preview_cancel_event.set()
-            with suppress(Exception):
-                self._fracture_preview_process.join(timeout=0.2)
-            if self._fracture_preview_process.is_alive():
-                with suppress(Exception):
-                    self._fracture_preview_process.terminate()
-                    self._fracture_preview_process.join(timeout=0.2)
+        if self._fracture_preview_job.has_process:
+            self._fracture_preview_job.cancel_running(clear_pending=True)
         self.close_conversion_process()
         self.close_proxy_mesh_process()
+        self.close_proxy_preview_process()
         self.close_fracture_export_process()
         self.close_fracture_preview_process()
 
@@ -487,28 +491,6 @@ class QtBackgroundJobsController:
             elif event_name == "proxy_mesh_result":
                 self._proxy_mesh_result_received = True
                 self._handle_proxy_mesh_job_result(payload)
-            elif event_name == "fracture_preview_error_traceback":
-                generation_id, formatted_traceback = payload
-                if generation_id == self._fracture_preview_generation_id:
-                    self._fracture_preview_error_traceback = str(formatted_traceback)
-            elif event_name == "fracture_preview_error":
-                generation_id, message = payload
-                if generation_id == self._fracture_preview_generation_id:
-                    self._fracture_preview_result_received = True
-                    error_message = str(message)
-                    if "Fracture job context:" not in error_message:
-                        error_message = (
-                            f"{error_message}\n"
-                            f"{self._format_fracture_job_context(self._fracture_preview_request, self._fracture_preview_settings)}\n"
-                            f"{self._format_runtime_crash_context()}"
-                        )
-                    self._handle_fracture_preview_error(error_message)
-            elif event_name == "fracture_preview_result":
-                generation_id, result = payload
-                if generation_id == self._fracture_preview_generation_id:
-                    self._fracture_preview_result_received = True
-                    self._handle_fracture_preview_result(result)
-
         if self._conversion_queue is not None:
             for event_name, payload in self._deps.drain_process_queue(self._conversion_queue):
                 keep_polling = True
@@ -543,6 +525,23 @@ class QtBackgroundJobsController:
         elif self._proxy_mesh_thread is not None and self._proxy_mesh_thread.is_alive():
             keep_polling = True
 
+        if self._drain_proxy_preview_queue():
+            keep_polling = True
+
+        if self._proxy_preview_job.running:
+            keep_polling = True
+        elif self._proxy_preview_job.has_process and not self._proxy_preview_job.result_received:
+            if self._drain_proxy_preview_queue():
+                keep_polling = True
+            if self._proxy_preview_job.has_process and not self._proxy_preview_job.result_received:
+                self._handle_proxy_preview_process_crash()
+                if self._proxy_preview_job.has_process:
+                    keep_polling = True
+        elif self._proxy_preview_job.has_pending:
+            if self._proxy_preview_job.has_ready_pending:
+                self._proxy_preview_job.start_pending_if_any()
+            keep_polling = True
+
         if self._fracture_export_queue is not None:
             for event_name, payload in self._deps.drain_process_queue(self._fracture_export_queue):
                 keep_polling = True
@@ -563,20 +562,25 @@ class QtBackgroundJobsController:
         if self._drain_fracture_preview_queue():
             keep_polling = True
 
-        if self._fracture_preview_process is not None and self._fracture_preview_process.is_alive():
+        if self._fracture_preview_job.running:
             keep_polling = True
-        elif self._fracture_preview_process is not None and not self._fracture_preview_result_received:
+        elif self._fracture_preview_job.has_process and not self._fracture_preview_job.result_received:
             if self._drain_fracture_preview_queue():
                 keep_polling = True
-            if self._fracture_preview_process is not None and not self._fracture_preview_result_received:
+            if self._fracture_preview_job.has_process and not self._fracture_preview_job.result_received:
                 self._handle_fracture_preview_process_crash()
-                if self._fracture_preview_process is not None:
+                if self._fracture_preview_job.has_process:
                     keep_polling = True
+        elif self._fracture_preview_job.has_pending:
+            if self._fracture_preview_job.has_ready_pending:
+                self._fracture_preview_job.start_pending_if_any()
+            keep_polling = True
 
         if (
             self.wind_refresh_running
             or self.wind_json_running
             or self.proxy_mesh_running
+            or self.proxy_preview_running
             or self.fracture_export_running
             or self.fracture_preview_running
         ):
@@ -587,19 +591,36 @@ class QtBackgroundJobsController:
         self._poll_timer.stop()
 
     def _drain_fracture_preview_queue(self) -> bool:
-        if self._fracture_preview_queue is None:
-            return False
         received_event = False
-        for event_name, payload in self._deps.drain_process_queue(self._fracture_preview_queue):
+        for event_name, payload in self._fracture_preview_job.drain():
             received_event = True
             if event_name == "error_traceback":
-                self._fracture_preview_error_traceback = str(payload)
+                continue
             elif event_name == "error":
-                self._fracture_preview_result_received = True
-                self._handle_fracture_preview_error(str(payload))
+                error_message = str(payload)
+                if "Fracture job context:" not in error_message:
+                    error_message = (
+                        f"{error_message}\n"
+                        f"{self._format_fracture_job_context(self._fracture_preview_job.request, self._fracture_preview_job.settings)}\n"
+                        f"{self._format_runtime_crash_context()}"
+                    )
+                if self._fracture_preview_job.error_traceback and self._fracture_preview_job.error_traceback not in error_message:
+                    error_message = f"{error_message}\n\n{self._fracture_preview_job.error_traceback}"
+                self._handle_fracture_preview_error(error_message)
             elif event_name == "result":
-                self._fracture_preview_result_received = True
                 self._handle_fracture_preview_result(payload)
+        return received_event
+
+    def _drain_proxy_preview_queue(self) -> bool:
+        received_event = False
+        for event_name, payload in self._proxy_preview_job.drain():
+            received_event = True
+            if event_name == "error_traceback":
+                continue
+            if event_name == "error":
+                self._handle_proxy_preview_error(str(payload))
+            elif event_name == "result":
+                self._handle_proxy_preview_job_result(payload)
         return received_event
 
     def _handle_wind_refresh_error(self, payload: _WindErrorPayload) -> None:
@@ -743,6 +764,74 @@ class QtBackgroundJobsController:
             return
         self._window._handle_proxy_mesh_export_result(job_result.export)
 
+    def _handle_proxy_preview_process_crash(self) -> None:
+        crash = self._proxy_preview_job.crash()
+        if self._proxy_preview_retry_count < 1 and crash.request is not None and crash.settings is not None:
+            self._proxy_preview_retry_count += 1
+            self._proxy_preview_job.close_handles()
+            self._window._set_status(f"Proxy Preview worker crashed once (exit code {crash.exit_code}). Retrying...")
+            if hasattr(self._window, "_handle_proxy_preview_loading"):
+                self._window._handle_proxy_preview_loading("Retrying after worker crash...")
+            try:
+                self._proxy_preview_job.start_latest(crash.request, crash.settings)
+            except Exception as exc:
+                self._proxy_preview_job.close()
+                self._handle_proxy_preview_error(str(exc))
+            return
+        message = f"Proxy Preview worker process crashed unexpectedly (exit code {crash.exit_code})"
+        message = f"{message}\n{self._format_worker_file_context(crash.queue)}"
+        message = f"{message}\n{self._format_runtime_crash_context()}"
+        if crash.error_traceback:
+            message = f"{message}\n\n{crash.error_traceback}"
+        self._handle_proxy_preview_error(message)
+
+    def _handle_proxy_preview_job_result(self, job_result) -> None:
+        error_traceback = self._proxy_preview_job.error_traceback
+        request = self._proxy_preview_job.request
+        settings = self._proxy_preview_job.settings
+        self._trace_worker("worker.result", "proxy_preview", {"error": bool(job_result.error_message)})
+        if job_result.error_message:
+            message = str(job_result.error_message)
+            if (
+                self._proxy_preview_retry_count < 1
+                and request is not None
+                and settings is not None
+                and _is_retryable_proxy_preview_error(message)
+            ):
+                self._proxy_preview_retry_count += 1
+                self._proxy_preview_job.close_handles()
+                self._window._set_status("Proxy Preview worker returned a transient error. Retrying...")
+                if hasattr(self._window, "_handle_proxy_preview_loading"):
+                    self._window._handle_proxy_preview_loading("Retrying...")
+                try:
+                    self._proxy_preview_job.start_latest(request, settings)
+                except Exception as exc:
+                    self._proxy_preview_job.close()
+                    self._handle_proxy_preview_error(str(exc))
+                return
+            if error_traceback:
+                message = f"{message}\n\n{error_traceback}"
+            self._handle_proxy_preview_error(message)
+            return
+        proxy = getattr(job_result, "proxy", None)
+        if proxy is None:
+            self._handle_proxy_preview_error("Proxy Preview worker finished without a preview result.")
+            return
+        if self._proxy_preview_job.finish_current():
+            return
+        self._proxy_preview_retry_count = 0
+        self._window._update_action_state()
+        self._window._handle_proxy_preview_result(proxy)
+
+    def _handle_proxy_preview_error(self, message: str) -> None:
+        self._trace_worker("worker.error", "proxy_preview", {"message": message})
+        if self._proxy_preview_job.finish_current():
+            return
+        self._proxy_preview_retry_count = 0
+        self._window._update_action_state()
+        if hasattr(self._window, "_handle_proxy_preview_error_message"):
+            self._window._handle_proxy_preview_error_message(message)
+
     def _handle_fracture_export_process_crash(self) -> None:
         exit_code = self._fracture_export_process.exitcode if self._fracture_export_process is not None else None
         self._trace_worker("worker.crash", "fracture_export", {"exit_code": exit_code})
@@ -768,22 +857,25 @@ class QtBackgroundJobsController:
         self._window._handle_fracture_export_result(result)
 
     def _handle_fracture_preview_process_crash(self) -> None:
-        exit_code = self._fracture_preview_process.exitcode if self._fracture_preview_process is not None else None
-        self._trace_worker("worker.crash", "fracture_preview", {"exit_code": exit_code})
-        if self._fracture_preview_retry_count < 1 and self._fracture_preview_request is not None and self._fracture_preview_settings is not None:
-            request = self._fracture_preview_request
-            settings = self._fracture_preview_settings
+        crash = self._fracture_preview_job.crash()
+        if self._fracture_preview_retry_count < 1 and crash.request is not None and crash.settings is not None:
             self._fracture_preview_retry_count += 1
-            self._close_fracture_preview_process_handles()
-            self._window._set_status(f"Fracture Preview worker crashed once (exit code {exit_code}). Retrying...")
-            self.start_fracture_preview(request, settings)
+            self._fracture_preview_job.close_handles()
+            self._window._set_status(f"Fracture Preview worker crashed once (exit code {crash.exit_code}). Retrying...")
+            if hasattr(self._window, "_fracture_preview_dialog") and self._window._fracture_preview_dialog is not None:
+                self._window._fracture_preview_dialog.set_loading("Retrying after worker crash...")
+            try:
+                self._fracture_preview_job.start_latest(crash.request, crash.settings)
+            except Exception as exc:
+                self._fracture_preview_job.close()
+                self._handle_fracture_preview_error(str(exc))
             return
-        crash_message = f"Fracture preview worker process crashed unexpectedly (exit code {exit_code})"
-        crash_message = f"{crash_message}\n{self._format_fracture_job_context(self._fracture_preview_request, self._fracture_preview_settings)}"
-        crash_message = f"{crash_message}\n{self._format_worker_file_context(self._fracture_preview_queue)}"
+        crash_message = f"Fracture preview worker process crashed unexpectedly (exit code {crash.exit_code})"
+        crash_message = f"{crash_message}\n{self._format_fracture_job_context(crash.request, crash.settings)}"
+        crash_message = f"{crash_message}\n{self._format_worker_file_context(crash.queue)}"
         crash_message = f"{crash_message}\n{self._format_runtime_crash_context()}"
-        if self._fracture_preview_error_traceback:
-            crash_message = f"{crash_message}\n\n{self._fracture_preview_error_traceback}"
+        if crash.error_traceback:
+            crash_message = f"{crash_message}\n\n{crash.error_traceback}"
         self._handle_fracture_preview_error(crash_message)
 
     def _format_fracture_job_context(self, request, settings) -> str:
@@ -810,8 +902,10 @@ class QtBackgroundJobsController:
             fracture = settings.fracture
             lines.extend(
                 (
-                    f"  method={fracture.method}",
                     f"  target_piece_count={fracture.target_piece_count}",
+                    f"  preserve_trunk_bias={fracture.preserve_trunk_bias}",
+                    f"  force_stump_piece={fracture.force_stump_piece}",
+                    f"  generate_caps={fracture.generate_caps}",
                     f"  preview_polycount={settings.final_polycount}",
                     f"  preview_base_priority={settings.base_mesh_priority}",
                     f"  preview_prototype_faces={settings.max_prototype_faces}",
@@ -820,8 +914,10 @@ class QtBackgroundJobsController:
         else:
             lines.extend(
                 (
-                    f"  method={settings.method}",
                     f"  target_piece_count={settings.target_piece_count}",
+                    f"  preserve_trunk_bias={settings.preserve_trunk_bias}",
+                    f"  force_stump_piece={settings.force_stump_piece}",
+                    f"  generate_caps={settings.generate_caps}",
                 )
             )
         return "\n".join(lines)
@@ -831,7 +927,7 @@ class QtBackgroundJobsController:
         if queue is None:
             lines.append("  queue=<none>")
             return "\n".join(lines)
-        for label in ("request_path", "result_path", "error_path"):
+        for label in ("request_path", "result_path", "error_path", "stderr_path"):
             path = getattr(queue, label, None)
             if path is None:
                 lines.append(f"  {label}=<none>")
@@ -843,11 +939,25 @@ class QtBackgroundJobsController:
                 exists = False
                 size = None
             lines.append(f"  {label}={path} exists={exists} size={size}")
+        stderr_tail = self._worker_stderr_tail(queue)
+        if stderr_tail:
+            lines.append("Worker stderr tail:")
+            lines.append(stderr_tail)
         return "\n".join(lines)
 
     def _handle_fracture_preview_result(self, result) -> None:
-        self._trace_worker("worker.result", "fracture_preview", {"result": result is not None})
-        self.close_fracture_preview_process()
+        self._trace_worker(
+            "worker.result",
+            "fracture_preview",
+            {
+                "preview_job_id": self._fracture_preview_job.active_job_id,
+                "result": result is not None,
+                "piece_count": getattr(getattr(result, "plan", None), "actual_piece_count", None),
+            },
+        )
+        if self._fracture_preview_job.finish_current():
+            return
+        self._fracture_preview_retry_count = 0
         self._window._update_action_state()
         if result is None:
             self._window._report_error(
@@ -859,7 +969,7 @@ class QtBackgroundJobsController:
         self._window._handle_fracture_preview_result(result)
 
     def _handle_fracture_preview_error(self, message: str) -> None:
-        error_traceback = self._fracture_preview_error_traceback
+        error_traceback = self._fracture_preview_job.error_traceback
         if hasattr(self._window, "_trace"):
             self._window._trace(
                 "worker.error",
@@ -869,7 +979,9 @@ class QtBackgroundJobsController:
             )
         else:
             self._trace_worker("worker.error", "fracture_preview", {"message": message})
-        self.close_fracture_preview_process()
+        if self._fracture_preview_job.finish_current():
+            return
+        self._fracture_preview_retry_count = 0
         self._window._update_action_state()
         if hasattr(self._window, "_handle_fracture_preview_error_message"):
             self._window._handle_fracture_preview_error_message(message)
@@ -924,6 +1036,10 @@ class QtBackgroundJobsController:
         self._proxy_mesh_result_received = False
         self._proxy_mesh_thread = None
 
+    def close_proxy_preview_process(self) -> None:
+        self._proxy_preview_job.close()
+        self._proxy_preview_retry_count = 0
+
     def close_fracture_export_process(self) -> None:
         self._deps.close_process_queue(self._fracture_export_queue)
         self._fracture_export_process = None
@@ -935,19 +1051,8 @@ class QtBackgroundJobsController:
         self._fracture_export_result_received = False
 
     def close_fracture_preview_process(self) -> None:
-        self._close_fracture_preview_process_handles()
-        self._fracture_preview_request = None
-        self._fracture_preview_settings = None
+        self._fracture_preview_job.close()
         self._fracture_preview_retry_count = 0
-        self._fracture_preview_thread = None
-
-    def _close_fracture_preview_process_handles(self) -> None:
-        self._deps.close_process_queue(self._fracture_preview_queue)
-        self._fracture_preview_process = None
-        self._fracture_preview_queue = None
-        self._fracture_preview_cancel_event = None
-        self._fracture_preview_error_traceback = None
-        self._fracture_preview_result_received = False
 
     def _trace_worker(self, kind: str, worker: str, data: dict[str, object] | None = None) -> None:
         if hasattr(self._window, "_trace"):
@@ -955,7 +1060,7 @@ class QtBackgroundJobsController:
 
     def _worker_queue_payload(self, queue) -> dict[str, object]:
         payload: dict[str, object] = {}
-        for label in ("request_path", "result_path", "error_path"):
+        for label in ("request_path", "result_path", "error_path", "stderr_path"):
             path = getattr(queue, label, None)
             if path is None:
                 continue
@@ -968,4 +1073,88 @@ class QtBackgroundJobsController:
             payload[label] = str(path)
             payload[f"{label}_exists"] = exists
             payload[f"{label}_size"] = size
+        stderr_tail = self._worker_stderr_tail(queue)
+        if stderr_tail:
+            payload["stderr_tail"] = stderr_tail
         return payload
+
+    def _worker_stderr_tail(self, queue) -> str:
+        path = getattr(queue, "stderr_path", None)
+        if path is None:
+            return ""
+        try:
+            if not path.exists() or path.stat().st_size <= 0:
+                return ""
+            data = path.read_bytes()[-4000:]
+        except OSError:
+            return ""
+        return data.decode("utf-8", errors="replace").strip()
+
+    def _fracture_preview_trace_payload(self, request, settings, job_id: int) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "preview_job_id": job_id,
+        }
+        if request is not None:
+            payload.update(
+                {
+                    "input_path": getattr(request, "input_path", ""),
+                    "output_path": getattr(request, "output_path", ""),
+                    "output_directory": getattr(request, "output_directory", ""),
+                    "cpu_profile": getattr(getattr(request, "cpu_profile", None), "value", ""),
+                }
+            )
+        if settings is not None and hasattr(settings, "fracture"):
+            fracture = settings.fracture
+            payload.update(
+                {
+                    "target_piece_count": fracture.target_piece_count,
+                    "preserve_trunk_bias": fracture.preserve_trunk_bias,
+                    "force_stump_piece": fracture.force_stump_piece,
+                    "generate_caps": fracture.generate_caps,
+                    "pinned_cut_joint_tokens": fracture.pinned_cut_joint_tokens,
+                    "preview_polycount": settings.final_polycount,
+                    "preview_base_priority": settings.base_mesh_priority,
+                    "preview_prototype_faces": settings.max_prototype_faces,
+                }
+            )
+        return payload
+
+    def _proxy_preview_trace_payload(self, request, settings, job_id: int) -> dict[str, object]:
+        payload: dict[str, object] = {"preview_job_id": job_id}
+        if request is not None:
+            payload.update(
+                {
+                    "input_path": getattr(request, "input_path", ""),
+                    "output_path": getattr(request, "output_path", ""),
+                    "cpu_profile": getattr(getattr(request, "cpu_profile", None), "value", ""),
+                }
+            )
+        if settings is not None:
+            payload.update(
+                {
+                    "final_polycount": getattr(settings, "final_polycount", None),
+                    "bounds_inflation": getattr(settings, "bounds_inflation", None),
+                    "density_resolution": getattr(settings, "density_resolution", None),
+                    "base_mesh_priority": getattr(settings, "base_mesh_priority", None),
+                }
+            )
+        return payload
+
+
+def _is_retryable_proxy_preview_error(message: str) -> bool:
+    deterministic_fragments = (
+        "Unsupported proxy mesh method",
+        "Proxy final polycount must be greater than zero",
+        "Proxy bounds inflation must be greater than zero",
+        "Proxy density resolution must be greater than zero",
+        "Missing resolved prototype",
+        "has no resolved polygon payload",
+        "requires base geometry or at least one repeated part instance",
+        "malformed orientation quaternion",
+        "zero-length orientation quaternion",
+        "zero scale component",
+        "Proxy mesh generation supports exactly one input XML",
+        "Proxy mesh generation requires a source XML path",
+        "Proxy source resolution failed",
+    )
+    return not any(fragment in message for fragment in deterministic_fragments)

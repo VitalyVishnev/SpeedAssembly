@@ -21,6 +21,9 @@ def build_release_bundle(*, repo_root: str | Path, dist_path: str | Path, zip_pa
     exe_path = resolved_dist_path / "XMLtoUSDAConverter.exe"
     if not exe_path.exists():
         raise FileNotFoundError(f"Release executable is missing: {exe_path}")
+    worker_exe_path = resolved_dist_path / "XMLtoUSDAWorker.exe"
+    if not worker_exe_path.exists():
+        raise FileNotFoundError(f"Release worker executable is missing: {worker_exe_path}")
 
     resolved_zip_path.parent.mkdir(parents=True, exist_ok=True)
     if resolved_zip_path.exists():
@@ -28,6 +31,7 @@ def build_release_bundle(*, repo_root: str | Path, dist_path: str | Path, zip_pa
 
     with zipfile.ZipFile(resolved_zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.write(exe_path, "XMLtoUSDAConverter.exe")
+        archive.write(worker_exe_path, "XMLtoUSDAWorker.exe")
         build_info_path = resolved_dist_path / "build_info.json"
         if build_info_path.exists():
             archive.write(build_info_path, "build_info.json")

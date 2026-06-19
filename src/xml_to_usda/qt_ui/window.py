@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import os
 import time
+import contextlib
+import traceback
+from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -63,6 +66,7 @@ from ..fracture_preview_service import (
     FracturePreviewSourceRequest,
     prepare_fracture_preview_source_request,
 )
+from ..fracture_viewport_scene import build_fracture_viewport_scene
 from ..runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
 from ..settings_service import (
     FACTORY_DEFAULT_PRESET_NAME,
@@ -95,6 +99,7 @@ from .persistence import (
     save_ui_theme_overrides,
 )
 from .fracture_preview import FracturePreviewDialog
+from .preview_shell import configure_preview_dialog, focus_preview_dialog
 from .proxy_preview import ProxyPreviewDialog
 from .theme import (
     ResolvedTheme,
@@ -138,6 +143,21 @@ def _format_bytes(value: int) -> str:
             return f"{amount:.1f} {unit}" if unit != "B" else f"{int(amount)} B"
         amount /= 1024.0
     return f"{int(value)} B"
+
+
+def _fracture_preview_trace_payload(settings: FracturePreviewSettings) -> dict[str, object]:
+    fracture = settings.fracture
+    return {
+        "target_piece_count": fracture.target_piece_count,
+        "preserve_trunk_bias": fracture.preserve_trunk_bias,
+        "force_stump_piece": fracture.force_stump_piece,
+        "generate_caps": fracture.generate_caps,
+        "pinned_cut_joint_tokens": fracture.pinned_cut_joint_tokens,
+        "final_polycount": settings.final_polycount,
+        "base_mesh_priority": settings.base_mesh_priority,
+        "max_base_faces_per_piece": settings.max_base_faces_per_piece,
+        "max_prototype_faces": settings.max_prototype_faces,
+    }
 
 
 def _widget_trace_name(widget: QWidget) -> str:
@@ -639,11 +659,16 @@ class MainWindow(QWidget):
         self._fracture_preview_settings = FracturePreviewSettings()
         self._proxy_mesh_preview_result: ProxyMeshResult | None = None
         self._proxy_mesh_preview_input_path = ""
+        self._fracture_preview_cache: OrderedDict[tuple[object, object], object] = OrderedDict()
 
         self._operator_state, self._operator_snapshot = load_operator_state(
             self._deps,
             settings_path=self._operator_settings_path,
         )
+        if not self._operator_snapshot.debug_trace_enabled:
+            self._operator_snapshot = replace(self._operator_snapshot, debug_trace_enabled=True)
+            with contextlib.suppress(Exception):
+                self._deps.save_gui_settings(self._operator_settings_path, self._operator_snapshot)
         self._proxy_mesh_settings = self._operator_snapshot.proxy_mesh_settings
         self._conversion_mode = self._operator_state.conversion_mode.value
         self._runtime_paths = resolve_runtime_paths(
@@ -659,6 +684,7 @@ class MainWindow(QWidget):
             message="Qt shell startup",
             data={
                 "debug_trace_enabled": self._operator_snapshot.debug_trace_enabled,
+                "debug_trace_forced": True,
                 "settings_path": str(self._operator_settings_path),
             },
             debug_data={
@@ -1468,11 +1494,7 @@ class MainWindow(QWidget):
             self._operator_snapshot,
             fbx_cache_max_size_gb=max(1, int(max_size_gb)),
             fbx_cache_max_age_days=max(1, int(max_age_days)),
-            debug_trace_enabled=(
-                self._operator_snapshot.debug_trace_enabled
-                if debug_trace_enabled is None
-                else bool(debug_trace_enabled)
-            ),
+            debug_trace_enabled=True,
         )
         self._trace_logger = replace(self._trace_logger, debug_enabled=self._operator_snapshot.debug_trace_enabled)
         self._deps.save_gui_settings(self._operator_settings_path, self._operator_snapshot)
@@ -1542,9 +1564,9 @@ class MainWindow(QWidget):
         self.generate_button.setEnabled(
             has_input and not self._conversion_running and not self._wind_refresh_running and not self._wind_json_running
         )
-        proxy_running = self._background_jobs.proxy_mesh_running
+        proxy_running = self._background_jobs.proxy_mesh_running or self._background_jobs.proxy_preview_running
         self.generate_proxy_button.setEnabled(has_input and not self._conversion_running and not proxy_running)
-        self.geometry_panel.preview_proxy_button.setEnabled(has_input and not self._conversion_running and not proxy_running)
+        self.geometry_panel.preview_proxy_button.setEnabled(has_input and not self._conversion_running)
         fracture_preview_running = self._background_jobs.fracture_preview_running
         self.geometry_panel.preview_fracture_button.setEnabled(
             has_input and not self._conversion_running and not fracture_preview_running
@@ -1595,6 +1617,10 @@ class MainWindow(QWidget):
             self._trace_logger.log(kind, **kwargs)
         except OSError:
             pass
+
+    def _attach_preview_viewport_trace(self, viewport, *, job: str) -> None:
+        if hasattr(viewport, "set_trace_callback"):
+            viewport.set_trace_callback(lambda kind, data, current_job=job: self._trace(kind, job=current_job, data=data))
 
     def _startup_log_text(self) -> str:
         return (
@@ -1920,17 +1946,29 @@ class MainWindow(QWidget):
                 part_records = active_preset.part_mesh_settings
             if not wind_records:
                 wind_records = dict(active_preset.wind_group_settings)
-        self.wind_panel.set_persisted_settings(wind_records)
 
-        prototype_discovery = self._deps.discover_part_prototype_rows(input_path, persisted_records=part_records)
-        self.geometry_panel.load(prototype_discovery)
-        self.materials_panel.load(
-            input_path=input_path,
-            base_persisted_records=base_records,
-            part_persisted_records=part_records,
-            geometry_snapshot=self.geometry_panel.current_snapshot(),
-            cpu_profile=self._operator_state.cpu_profile,
-        )
+        try:
+            prototype_discovery = self._deps.discover_part_prototype_rows(input_path, persisted_records=part_records)
+            self.geometry_panel.load(prototype_discovery)
+            self.materials_panel.load(
+                input_path=input_path,
+                base_persisted_records=base_records,
+                part_persisted_records=part_records,
+                geometry_snapshot=self.geometry_panel.current_snapshot(),
+                cpu_profile=self._operator_state.cpu_profile,
+            )
+        except Exception as exc:
+            self._clear_input_dependent_tabs("Selected XML file could not be loaded.")
+            self._set_status("Input discovery failed.")
+            self._append_log(
+                "Input discovery failed\n"
+                f"input_path={input_path}\n"
+                f"{type(exc).__name__}: {exc}\n"
+                f"{traceback.format_exc().rstrip()}"
+            )
+            return
+
+        self.wind_panel.set_persisted_settings(wind_records)
         self.wind_panel.clear("Click Refresh Wind Groups to inspect wind settings.")
 
     def _clear_input_dependent_tabs(self, message: str | None = None) -> None:
@@ -2070,6 +2108,9 @@ class MainWindow(QWidget):
 
     def open_proxy_preview_dialog(self) -> None:
         self._source_refresh_timer.stop()
+        if self._proxy_preview_dialog is not None and self._proxy_preview_dialog.isVisible():
+            focus_preview_dialog(self._proxy_preview_dialog)
+            return
         if self._background_jobs.fracture_preview_running:
             self._background_jobs.cancel_fracture_preview()
             if self._fracture_preview_dialog is not None and self._fracture_preview_dialog.current_preview is None:
@@ -2081,49 +2122,42 @@ class MainWindow(QWidget):
             self._report_error("Missing input", str(exc))
             return
 
-        def _start_preview(settings):
-            return self._deps.start_proxy_mesh_process(
-                request,
-                settings,
-                action="preview",
-            )
-
         input_path = request.input_path
         dialog = ProxyPreviewDialog(
             settings=self._proxy_mesh_settings,
-            start_preview=_start_preview,
-            run_preview_locally=lambda settings: self._deps.generate_proxy_mesh_from_source_request(request, settings),
-            drain_queue=self._deps.drain_process_queue,
-            close_queue=self._deps.close_process_queue,
             initial_proxy=self._proxy_preview_result_for_input(input_path),
-            report_preview_error=self._record_proxy_preview_error,
+            on_settings_changed=lambda settings, current_input=input_path, current_request=request: self._handle_proxy_preview_settings_changed(
+                current_input,
+                current_request,
+                settings,
+            ),
             on_preview_ready=lambda proxy, current_input=input_path: self._cache_proxy_preview_result(
                 current_input,
                 proxy,
             ),
-            on_preview_closed=lambda settings, proxy, current_input=input_path: self._apply_proxy_preview_state(
+            on_preview_closed=lambda settings, proxy, current_input=input_path: self._handle_proxy_preview_closed(
                 current_input,
                 settings,
                 proxy,
             ),
-            parent=None,
+            parent=self,
         )
-        dialog.setStyleSheet(self.styleSheet())
+        configure_preview_dialog(dialog, owner=self, stylesheet=self.styleSheet())
+        self._attach_preview_viewport_trace(dialog.viewport, job="proxy_preview")
         self._proxy_preview_dialog = dialog
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        focus_preview_dialog(dialog)
 
     def open_fracture_preview_dialog(self) -> None:
         self._source_refresh_timer.stop()
+        if self._fracture_preview_dialog is not None and self._fracture_preview_dialog.isVisible():
+            focus_preview_dialog(self._fracture_preview_dialog)
+            return
         if self._proxy_preview_dialog is not None:
             self._proxy_preview_dialog.close()
             self._proxy_preview_dialog = None
         if self._background_jobs.fracture_preview_running:
             if self._fracture_preview_dialog is not None:
-                self._fracture_preview_dialog.show()
-                self._fracture_preview_dialog.raise_()
-                self._fracture_preview_dialog.activateWindow()
+                focus_preview_dialog(self._fracture_preview_dialog)
             return
         settings = self._fracture_preview_settings
         try:
@@ -2137,8 +2171,10 @@ class MainWindow(QWidget):
                 (
                     f"input_path={request.input_path}",
                     f"output_path={request.output_path}",
-                    f"method={settings.fracture.method}",
                     f"target_piece_count={settings.fracture.target_piece_count}",
+                    f"preserve_trunk_bias={settings.fracture.preserve_trunk_bias}",
+                    f"force_stump_piece={settings.fracture.force_stump_piece}",
+                    f"generate_caps={settings.fracture.generate_caps}",
                     f"preview_polycount={settings.final_polycount}",
                     f"preview_base_priority={settings.base_mesh_priority}",
                     f"preview_prototype_faces={settings.max_prototype_faces}",
@@ -2152,8 +2188,10 @@ class MainWindow(QWidget):
             data={
                 "input_path": request.input_path,
                 "output_path": request.output_path,
-                "method": settings.fracture.method,
                 "target_piece_count": settings.fracture.target_piece_count,
+                "preserve_trunk_bias": settings.fracture.preserve_trunk_bias,
+                "force_stump_piece": settings.fracture.force_stump_piece,
+                "generate_caps": settings.fracture.generate_caps,
                 "preview_polycount": settings.final_polycount,
             },
             debug_data={
@@ -2165,25 +2203,42 @@ class MainWindow(QWidget):
             settings=settings,
             on_settings_changed=self._handle_fracture_preview_settings_changed,
             on_export_requested=self.run_export_fracture_usda,
-            parent=None,
+            parent=self,
         )
-        dialog.setStyleSheet(self.styleSheet())
+        configure_preview_dialog(dialog, owner=self, stylesheet=self.styleSheet())
+        self._attach_preview_viewport_trace(dialog.viewport, job="fracture_preview")
         self._fracture_preview_dialog = dialog
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        focus_preview_dialog(dialog)
+        self._trace(
+            "scene.request",
+            job="fracture_preview",
+            message="Fracture Preview scene requested",
+            data=_fracture_preview_trace_payload(settings),
+        )
+        cached_preview = self._fracture_preview_cache_get(request, settings)
+        if cached_preview is not None:
+            self._trace("cache.hit", job="fracture_preview", message="Fracture Preview cache hit")
+            self._handle_fracture_preview_result(cached_preview)
+            return
         self._background_jobs.start_fracture_preview(request, settings)
 
     def _handle_fracture_preview_result(self, preview) -> None:
+        if preview.viewport_scene is None:
+            preview = replace(preview, viewport_scene=build_fracture_viewport_scene(preview))
+        try:
+            self._fracture_preview_cache_put(self._build_fracture_preview_request(), self._fracture_preview_settings, preview)
+        except ValueError:
+            pass
         dialog = self._fracture_preview_dialog
         if dialog is None:
             dialog = FracturePreviewDialog(
                 settings=self._fracture_preview_settings,
                 on_settings_changed=self._handle_fracture_preview_settings_changed,
                 on_export_requested=self.run_export_fracture_usda,
-                parent=None,
+                parent=self,
             )
-            dialog.setStyleSheet(self.styleSheet())
+            configure_preview_dialog(dialog, owner=self, stylesheet=self.styleSheet())
+            self._attach_preview_viewport_trace(dialog.viewport, job="fracture_preview")
             self._fracture_preview_dialog = dialog
         dialog.set_settings(self._fracture_preview_settings)
         self._append_runtime_log(
@@ -2204,6 +2259,19 @@ class MainWindow(QWidget):
                 "piece_count": preview.plan.actual_piece_count,
                 "prototype_count": len(preview.prototypes),
                 "instance_count": len(preview.instances),
+            },
+        )
+        self._trace(
+            "scene.ready",
+            job="fracture_preview",
+            message="Fracture Preview scene ready",
+            data={
+                "scene_id": preview.viewport_scene.scene_id,
+                "batch_count": len(preview.viewport_scene.mesh_batches),
+                "draw_call_count": len(preview.viewport_scene.draw_calls),
+                "bone_segment_count": len(preview.viewport_scene.bone_segments),
+                "uploaded_triangles": preview.viewport_scene.stats.uploaded_triangles,
+                "logical_triangles": preview.viewport_scene.stats.logical_triangles,
             },
         )
         self._append_runtime_log("INFO Fracture Preview preparing viewport mesh")
@@ -2234,19 +2302,22 @@ class MainWindow(QWidget):
                 },
             )
         self._set_status(f"Fracture Preview ready: {preview.plan.actual_piece_count} piece(s).")
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        focus_preview_dialog(dialog)
 
     def _handle_fracture_preview_error_message(self, message: str) -> None:
+        self._trace("scene.error", job="fracture_preview", message=message)
         if self._fracture_preview_dialog is not None:
             self._fracture_preview_dialog.set_error("Preview generation failed. See log for details.")
 
     def _handle_fracture_preview_settings_changed(self, settings: FracturePreviewSettings) -> None:
         self._fracture_preview_settings = settings
         self.geometry_panel.apply_fracture_preview_settings(settings)
-        if self._background_jobs.fracture_preview_running:
-            self._background_jobs.cancel_fracture_preview()
+        self._trace(
+            "settings.change",
+            job="fracture_preview",
+            message="Fracture Preview settings changed",
+            data=_fracture_preview_trace_payload(settings),
+        )
         try:
             request = self._build_fracture_preview_request()
         except ValueError as exc:
@@ -2256,14 +2327,147 @@ class MainWindow(QWidget):
             "INFO Fracture Preview settings changed",
             "\n".join(
                 (
-                    f"method={settings.fracture.method}",
                     f"target_piece_count={settings.fracture.target_piece_count}",
+                    f"preserve_trunk_bias={settings.fracture.preserve_trunk_bias}",
+                    f"force_stump_piece={settings.fracture.force_stump_piece}",
+                    f"generate_caps={settings.fracture.generate_caps}",
                     f"preview_polycount={settings.final_polycount}",
                     f"preview_base_priority={settings.base_mesh_priority}",
                 )
             ),
         )
+        self._trace(
+            "scene.request",
+            job="fracture_preview",
+            message="Fracture Preview scene requested",
+            data=_fracture_preview_trace_payload(settings),
+        )
+        cached_preview = self._fracture_preview_cache_get(request, settings)
+        if cached_preview is not None:
+            self._background_jobs.cancel_fracture_preview()
+            self._trace("cache.hit", job="fracture_preview", message="Fracture Preview cache hit")
+            self._handle_fracture_preview_result(cached_preview)
+            return
         self._background_jobs.start_fracture_preview(request, settings)
+
+    def _fracture_preview_cache_get(self, request: FracturePreviewSourceRequest, settings: FracturePreviewSettings):
+        key = self._fracture_preview_cache_key(request, settings)
+        cached = self._fracture_preview_cache.get(key)
+        if cached is None:
+            return None
+        self._fracture_preview_cache.move_to_end(key)
+        return cached
+
+    def _fracture_preview_cache_put(self, request: FracturePreviewSourceRequest, settings: FracturePreviewSettings, preview) -> None:
+        key = self._fracture_preview_cache_key(request, settings)
+        self._fracture_preview_cache[key] = preview
+        self._fracture_preview_cache.move_to_end(key)
+        while len(self._fracture_preview_cache) > 6:
+            self._fracture_preview_cache.popitem(last=False)
+
+    def _fracture_preview_cache_key(
+        self,
+        request: FracturePreviewSourceRequest,
+        settings: FracturePreviewSettings,
+    ) -> tuple[object, object]:
+        return (
+            (
+                request.input_path,
+                request.output_path,
+                request.output_directory,
+                request.output_naming_template,
+                request.cpu_profile.value,
+            ),
+            settings,
+        )
+
+    def _handle_proxy_preview_settings_changed(
+        self,
+        input_path: str,
+        request: ProxyMeshSourceRequest,
+        settings: ProxyMeshSettings,
+    ) -> None:
+        self._proxy_mesh_settings = settings
+        self.geometry_panel.apply_proxy_settings(settings)
+        cached_proxy = self._proxy_preview_result_for_input(input_path)
+        if cached_proxy is not None and cached_proxy.settings != settings:
+            self._proxy_mesh_preview_result = None
+            self._proxy_mesh_preview_input_path = ""
+        self._schedule_operator_state_save()
+        self._trace(
+            "scene.request",
+            job="proxy_preview",
+            message="Proxy Preview scene requested",
+            data={
+                "input_path": request.input_path,
+                "output_path": request.output_path,
+                "final_polycount": settings.final_polycount,
+                "base_mesh_priority": settings.base_mesh_priority,
+                "density_resolution": settings.density_resolution,
+            },
+        )
+        self._background_jobs.start_proxy_mesh_preview(request, settings)
+
+    def _handle_proxy_preview_loading(self, message: str) -> None:
+        if self._proxy_preview_dialog is not None:
+            self._proxy_preview_dialog.set_loading(message)
+
+    def _handle_proxy_preview_result(self, proxy: ProxyMeshResult) -> None:
+        input_path = self.source_input.text().strip()
+        self._cache_proxy_preview_result(input_path, proxy)
+        self._set_status("Proxy Preview ready.")
+        self._trace(
+            "job.result",
+            job="proxy_preview",
+            message="Proxy Preview result received",
+            data={
+                "mesh_name": proxy.mesh.name,
+                "point_count": proxy.mesh.point_count,
+                "face_count": proxy.mesh.face_count,
+                "source_instance_count": proxy.source_instance_count,
+            },
+        )
+        self._trace(
+            "scene.ready",
+            job="proxy_preview",
+            message="Proxy Preview scene ready",
+            data={
+                "mesh_name": proxy.mesh.name,
+                "uploaded_triangles": proxy.mesh.face_count,
+                "logical_triangles": proxy.mesh.face_count,
+                "source_instance_count": proxy.source_instance_count,
+            },
+        )
+        dialog = self._proxy_preview_dialog
+        if dialog is not None:
+            dialog.set_proxy(proxy)
+            self._trace(
+                "viewport.upload",
+                job="proxy_preview",
+                message="Proxy Preview viewport mesh ready",
+                data={
+                    "uploaded_triangles": proxy.mesh.face_count,
+                    "logical_triangles": proxy.mesh.face_count,
+                    "vertex_count": dialog.viewport.vertex_count,
+                },
+            )
+
+    def _handle_proxy_preview_error_message(self, message: str) -> None:
+        self._trace("scene.error", job="proxy_preview", message=message)
+        self._record_proxy_preview_error(message)
+        self._set_status("Proxy Preview failed.")
+        if self._proxy_preview_dialog is not None:
+            self._proxy_preview_dialog.set_error(message)
+
+    def _handle_proxy_preview_closed(
+        self,
+        input_path: str,
+        settings: ProxyMeshSettings,
+        proxy: ProxyMeshResult | None,
+    ) -> None:
+        if self._background_jobs.proxy_preview_running:
+            self._background_jobs.cancel_proxy_mesh_preview()
+        self._apply_proxy_preview_state(input_path, settings, proxy)
 
     def run_generate_proxy_mesh(self) -> None:
         self._source_refresh_timer.stop()

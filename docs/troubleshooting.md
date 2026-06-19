@@ -20,6 +20,7 @@ Practical rule:
 
 - if the standalone build ever looks suspicious, rerun `.\scripts\build_qt_gui_exe.cmd -Package -Clean`
 - `.\scripts\build_qt_gui_exe.cmd -Package` now runs packaged high-risk smoke by default; check `dist-next\smoke\smoke_report.json` before treating a package as validated
+- before treating Fracture/Proxy viewport stability as release-ready, run `.\scripts\run_packaged_stability_gate.ps1`; this is the strict Spruce/28mil gate and any worker crash or retry is a failure
 - do not trust an older `dist-next\XMLtoUSDAConverter.exe` timestamp as proof that the current source was packaged
 - check the GUI `Log` after startup: the top `Build info:` block is sourced from `dist-next\build_info.json` and is now the fastest way to confirm which release build you actually launched
 
@@ -34,11 +35,12 @@ What to check first:
 
 1. Rebuild with `.\scripts\build_qt_gui_exe.cmd -Package`; do not use `-SkipSmoke` unless the bypass is intentional.
 2. Open `dist-next\smoke\smoke_report.json` and identify the first failed scenario/check.
-3. Export a diagnostics bundle from the Support dialog, or inspect the local files directly:
+3. Run `.\scripts\run_packaged_stability_gate.ps1`; inspect `dist-next\stability\stability_report.json` and the per-iteration artifacts under `dist-next\stability\`.
+4. Export a diagnostics bundle from the Support dialog, or inspect the local files directly:
    - `~/.xml_to_usda/gui_trace.jsonl`
    - `~/.xml_to_usda/gui_runtime.log`
    - `%LOCALAPPDATA%/XMLtoUSDAConverter/cache/jobs/*/job_manifest.json`
-4. Compare trace milestones with runtime log milestones.
+5. Compare trace milestones with runtime log milestones.
 
 Interpretation:
 
@@ -162,7 +164,7 @@ Practical rule:
 - if parallel FBX import cannot start in the current environment, the converter should now fall back to sequential import instead of terminating the job immediately
 - packaged frozen runs now isolate each FBX import in its own worker process for stability while still allowing parallel multi-FBX import
 - extremely large packaged FBX replacements now start with the requested helper concurrency and only downgrade after an actual native helper crash proves the current level is unsafe
-- the primary `dist-next` release is one file: `XMLtoUSDAConverter.exe` handles `fbx-worker` helper mode itself; legacy sidecar workers are still preferred if a manual/older package layout includes one
+- the primary `dist-next` release includes `XMLtoUSDAConverter.exe` and `XMLtoUSDAWorker.exe`; packaged worker commands should resolve to the sidecar worker, not back into the GUI exe
 - if packaged telemetry stalls at `fbx_import`, compare the worker count message with the selected CPU profile before assuming the exporter is hung
 
 ## Huge FBX export appears busy for a long time

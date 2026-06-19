@@ -32,7 +32,8 @@ The project has passed the baseline importer gate:
 - repeated parts are authored through `PointInstancer`
 - UE-backed material overrides work on the current baseline workflow
 - the authored second UV channel (`primvars:st1`) is accepted by UE 5.7.x on the current baseline sample, and UDIM offsets behave as expected in that path
-- automated tests cover the USDA authoring path and the secondary-UV overwrite rule that fills untouched faces with `(0.5, 0.5)`
+- piece-local UDIM isolation is covered by automated tests: base mesh and repeated parts can reuse the same numeric material ids without cross-piece overwrite, while duplicate active settings or missing targets fail loudly
+- automated tests cover the USDA authoring path and the secondary-UV overwrite rule for matched faces; untouched faces in an authored secondary channel preserve the existing payload unless the piece actually needs a default fill
 
 The project has also passed automated `Phase 1` regression coverage for:
 
@@ -108,6 +109,12 @@ Current Fracturing status:
   mode
 - preview uses source-normalized XML geometry, stable per-piece colors, the
   shared Qt matcap/grid viewport, and an isolated Fracture worker process
+- rapid fracture-preview edits now use latest-state coalescing with a short
+  debounce, so one worker is not spawned for every transient toggle while the
+  previous large-tree preview is still settling
+- completed Fracture Preview results are cached for the current XML session so
+  toggling back to an already-computed setting returns immediately instead of
+  redoing the full preview path
 - export uses resolved Operator Intent and writes per-piece root-pivoted Static
   Mesh Assembly USDA files
 - preview worker result files are the success source of truth; an exit code `0`
@@ -147,6 +154,14 @@ The primary standalone package build path has also been stabilized:
   executable
 - packaged smoke is a GUI/runtime gate only. It does not replace manual UE
   5.7.x import validation for importer-facing changes.
+- packaged high-risk smoke now includes a rapid Fracture Preview settings
+  stress path that opens one viewport and hammers the controls before the first
+  result settles; that is the main regression signal for the preview lifecycle
+- strict packaged stability is a separate release-candidate gate:
+  `.\scripts\run_packaged_stability_gate.ps1`. It uses real
+  Spruce and 28-million-triangle skeletal samples, preserves per-iteration
+  artifacts under `dist-next\stability\`, and fails on any worker crash, retry,
+  missing result, or missing smoke report.
 
 The earlier importer-facing concerns are treated as closed by the current validation set.
 
@@ -222,7 +237,7 @@ Run this checklist for every real `Phase 1` sample:
 
 1. keep the baseline skeletal assembly path stable
 2. validate the current contract on multiple real structural variants
-3. extend UDIM validation across additional real SpeedTree samples while keeping the importer path stable
+3. extend piece-local UDIM validation across additional real SpeedTree samples while keeping the importer path stable
 
 ## Troubleshooting shortcut
 

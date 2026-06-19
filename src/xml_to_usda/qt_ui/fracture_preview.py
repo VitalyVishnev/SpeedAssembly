@@ -10,20 +10,17 @@ from __future__ import annotations
 
 import math
 from array import array
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import sqrt
 
 import numpy as np
 
 from PySide6.QtCore import QSignalBlocker, Qt
-from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QShortcut, QVector3D
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QCheckBox,
-    QComboBox,
-    QDialog,
     QDoubleSpinBox,
-    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -40,18 +37,16 @@ from ..fracture_preview_service import (
     FracturePreviewResult,
     FracturePreviewSettings,
 )
-from ..fracture_service import (
-    FRACTURE_METHOD_BRANCH_BASE_GREEDY,
-    FRACTURE_METHOD_MANUAL_PINNED_BONES,
-    FRACTURE_METHOD_PURE_HIERARCHY,
-    FRACTURE_METHOD_WIND_GUIDED_HIERARCHY,
-    FractureSettings,
-)
+from ..fracture_service import FractureSettings
+from ..fracture_viewport_scene import build_fracture_viewport_scene
 from ..models import Color4, GeometryBuffer, Quaternion, Vector3
-from .proxy_preview import GL_FLOAT, MatcapViewport, _build_grid_vertices
+from ..viewport_scene import ViewportScene
+from .preview_shell import PreviewShellDialog
+from .viewport import MATCAP_VERTEX_STRIDE, MatcapViewport
 
 
-FRACTURE_VERTEX_STRIDE = 10
+FRACTURE_SOURCE_VERTEX_STRIDE = 10
+FRACTURE_VERTEX_STRIDE = MATCAP_VERTEX_STRIDE
 FRACTURE_MATCAP_TINT_STRENGTH = 0.78
 
 
@@ -69,6 +64,7 @@ class FractureDrawCall:
     translate: Vector3
     orientation: Quaternion
     scale: Vector3
+    explode_offset: Vector3 = Vector3(0.0, 0.0, 0.0)
 
 
 @dataclass(frozen=True)
@@ -91,7 +87,7 @@ class FractureRenderPayload:
     max_point: Vector3
 
 
-class FracturePreviewDialog(QDialog):
+class FracturePreviewDialog(PreviewShellDialog):
     def __init__(
         self,
         *,
@@ -101,7 +97,7 @@ class FracturePreviewDialog(QDialog):
         on_export_requested=None,
         parent=None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(title="Fracture Preview", parent=parent)
         self._on_settings_changed = on_settings_changed or (lambda settings: None)
         self._on_export_requested = on_export_requested or (lambda: None)
         self._settings = settings or FracturePreviewSettings()
@@ -110,18 +106,13 @@ class FracturePreviewDialog(QDialog):
         self._cut_delete_buttons: dict[str, QPushButton] = {}
         self.current_preview: FracturePreviewResult | None = None
         self.viewport_mesh: FractureViewportMesh | None = None
-        self.setWindowTitle("Fracture Preview")
-        self.resize(1040, 720)
-
-        layout = QGridLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
 
         viewport_host = QWidget(self)
         viewport_layout = QGridLayout(viewport_host)
         viewport_layout.setContentsMargins(0, 0, 0, 0)
         viewport_layout.setSpacing(0)
-        self.viewport = FractureViewport(viewport_host)
+        self.viewport = MatcapViewport(viewport_host)
+        self.viewport.set_matcap_tint_strength(FRACTURE_MATCAP_TINT_STRENGTH)
         viewport_layout.addWidget(self.viewport, 0, 0)
         self.loading_label = QLabel("Preparing preview geometry...", viewport_host)
         self.loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -134,47 +125,17 @@ class FracturePreviewDialog(QDialog):
             "border-radius: 6px;"
         )
         viewport_layout.addWidget(self.loading_label, 0, 0, alignment=Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(viewport_host, 0, 0)
+        self.set_viewport_widget(viewport_host)
 
-        settings_panel = QFrame(self)
-        settings_panel.setObjectName("PanelCard")
-        settings_panel.setFixedWidth(260)
-        settings_layout = QVBoxLayout(settings_panel)
-        settings_layout.setContentsMargins(14, 14, 14, 14)
-        settings_layout.setSpacing(8)
+        settings_panel, settings_layout = self.create_settings_panel()
 
         title = QLabel("Fracturing", settings_panel)
         title.setStyleSheet("font-weight: 700;")
         settings_layout.addWidget(title)
 
-        self.method_combo = QComboBox(settings_panel)
-        self.method_combo.addItem("Wind Guided Hierarchy", FRACTURE_METHOD_WIND_GUIDED_HIERARCHY)
-        self.method_combo.addItem("Pure Hierarchy", FRACTURE_METHOD_PURE_HIERARCHY)
-        self.method_combo.addItem("Branch Base Greedy", FRACTURE_METHOD_BRANCH_BASE_GREEDY)
-        self.method_combo.addItem("Manual Fracturing", FRACTURE_METHOD_MANUAL_PINNED_BONES)
-        self.method_combo.setProperty("prominent", True)
-        self.method_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.method_combo.setStyleSheet(
-            "QComboBox[prominent=\"true\"] {"
-            "background: rgba(151, 163, 77, 0.22);"
-            "border: 1px solid rgba(151, 163, 77, 0.72);"
-            "border-radius: 6px;"
-            "padding: 6px 10px;"
-            "}"
-            "QComboBox[prominent=\"true\"]:hover {"
-            "background: rgba(151, 163, 77, 0.34);"
-            "}"
-        )
-        settings_layout.addWidget(QLabel("Method", settings_panel))
-        settings_layout.addWidget(self.method_combo)
-
-        self.manual_auto_fill_label = QLabel("Manual Auto Fill", settings_panel)
-        self.manual_auto_fill_combo = QComboBox(settings_panel)
-        self.manual_auto_fill_combo.addItem("Wind Guided Hierarchy", FRACTURE_METHOD_WIND_GUIDED_HIERARCHY)
-        self.manual_auto_fill_combo.addItem("Pure Hierarchy", FRACTURE_METHOD_PURE_HIERARCHY)
-        self.manual_auto_fill_combo.addItem("Branch Base Greedy", FRACTURE_METHOD_BRANCH_BASE_GREEDY)
-        settings_layout.addWidget(self.manual_auto_fill_label)
-        settings_layout.addWidget(self.manual_auto_fill_combo)
+        mode_label = QLabel("Manual Fracturing", settings_panel)
+        mode_label.setStyleSheet("font-weight: 700; color: #2b3032;")
+        settings_layout.addWidget(mode_label)
 
         self.piece_count_slider, self.piece_count_spin = _build_int_slider_row(
             settings_panel,
@@ -207,6 +168,28 @@ class FracturePreviewDialog(QDialog):
         settings_layout.addWidget(QLabel("Base Priority", settings_panel))
         settings_layout.addLayout(_slider_row(self.base_priority_slider, self.base_priority_spin))
 
+        self.preserve_trunk_slider, self.preserve_trunk_spin = _build_float_slider_row(
+            settings_panel,
+            minimum=0.0,
+            maximum=1.0,
+            value=float(self._settings.fracture.preserve_trunk_bias),
+            step=0.01,
+            scale=100,
+        )
+        settings_layout.addWidget(QLabel("Preserve Trunk", settings_panel))
+        settings_layout.addLayout(_slider_row(self.preserve_trunk_slider, self.preserve_trunk_spin))
+
+        self.exploded_view_slider, self.exploded_view_spin = _build_float_slider_row(
+            settings_panel,
+            minimum=0.0,
+            maximum=1.0,
+            value=0.0,
+            step=0.01,
+            scale=100,
+        )
+        settings_layout.addWidget(QLabel("Exploded View", settings_panel))
+        settings_layout.addLayout(_slider_row(self.exploded_view_slider, self.exploded_view_spin))
+
         self.color_strength_slider, self.color_strength_spin = _build_float_slider_row(
             settings_panel,
             minimum=0.0,
@@ -220,10 +203,14 @@ class FracturePreviewDialog(QDialog):
 
         self.show_bones_check = QCheckBox("Show Bones", settings_panel)
         self.hide_repeated_parts_check = QCheckBox("Hide Repeated Parts", settings_panel)
+        self.generate_caps_check = QCheckBox("Generate Caps", settings_panel)
+        self.stump_piece_check = QCheckBox("Stump Piece", settings_panel)
         self.reset_cuts_button = QPushButton("Reset Cuts", settings_panel)
         self.reset_cuts_button.clicked.connect(self._reset_manual_cuts)
         settings_layout.addWidget(self.show_bones_check)
         settings_layout.addWidget(self.hide_repeated_parts_check)
+        settings_layout.addWidget(self.generate_caps_check)
+        settings_layout.addWidget(self.stump_piece_check)
         settings_layout.addWidget(self.reset_cuts_button)
 
         self.cut_list_label = QLabel("Cuts", settings_panel)
@@ -243,35 +230,39 @@ class FracturePreviewDialog(QDialog):
         settings_layout.addWidget(self.summary_label)
         settings_layout.addStretch(1)
 
-        layout.addWidget(settings_panel, 0, 1)
         self.viewport.on_bone_cut_toggled = self._toggle_manual_cut_token
         self.undo_cut_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
         self.undo_cut_shortcut.activated.connect(self._undo_last_manual_cut)
         self._sync_settings_controls(self._settings)
-        self.method_combo.currentIndexChanged.connect(lambda _index: self._handle_method_changed())
-        self.manual_auto_fill_combo.currentIndexChanged.connect(lambda _index: self._emit_settings_changed())
         self.piece_count_slider.sliderReleased.connect(self._emit_settings_changed)
         self.piece_count_spin.editingFinished.connect(self._emit_settings_changed)
         self.polycount_slider.sliderReleased.connect(self._emit_settings_changed)
         self.polycount_spin.editingFinished.connect(self._emit_settings_changed)
         self.base_priority_slider.sliderReleased.connect(self._emit_settings_changed)
         self.base_priority_spin.editingFinished.connect(self._emit_settings_changed)
+        self.preserve_trunk_slider.sliderReleased.connect(self._emit_settings_changed)
+        self.preserve_trunk_spin.editingFinished.connect(self._emit_settings_changed)
+        self.exploded_view_spin.valueChanged.connect(self._handle_exploded_view_changed)
+        self.exploded_view_slider.valueChanged.connect(
+            lambda raw: self._handle_exploded_view_changed(float(raw) / 100.0)
+        )
         self.color_strength_spin.valueChanged.connect(self._handle_color_strength_changed)
-        self.color_strength_slider.valueChanged.connect(lambda _value: self._handle_color_strength_changed(self.color_strength_spin.value()))
+        self.color_strength_slider.valueChanged.connect(lambda raw: self._handle_color_strength_changed(float(raw) / 100.0))
         self.show_bones_check.toggled.connect(self._handle_show_bones_changed)
         self.hide_repeated_parts_check.toggled.connect(self._handle_hide_repeated_parts_changed)
+        self.generate_caps_check.toggled.connect(lambda _checked: self._emit_settings_changed())
+        self.stump_piece_check.toggled.connect(lambda _checked: self._emit_settings_changed())
         if preview is not None:
             self.set_preview(preview)
 
     def settings(self) -> FracturePreviewSettings:
         return FracturePreviewSettings(
             fracture=FractureSettings(
-                method=str(self.method_combo.currentData() or FRACTURE_METHOD_WIND_GUIDED_HIERARCHY),
                 target_piece_count=int(self.piece_count_spin.value()),
                 pinned_cut_joint_tokens=self._manual_cut_tokens,
-                manual_auto_fill_method=str(
-                    self.manual_auto_fill_combo.currentData() or FRACTURE_METHOD_WIND_GUIDED_HIERARCHY
-                ),
+                generate_caps=self.generate_caps_check.isChecked(),
+                preserve_trunk_bias=float(self.preserve_trunk_spin.value()),
+                force_stump_piece=self.stump_piece_check.isChecked(),
             ),
             final_polycount=int(self.polycount_spin.value() or DEFAULT_FRACTURE_PREVIEW_POLYCOUNT),
             base_mesh_priority=float(self.base_priority_spin.value()),
@@ -289,12 +280,18 @@ class FracturePreviewDialog(QDialog):
         self.summary_label.setText(message)
 
     def set_preview(self, preview: FracturePreviewResult) -> None:
+        if preview.viewport_scene is None:
+            preview = replace(preview, viewport_scene=build_fracture_viewport_scene(preview))
         self.current_preview = preview
-        self.viewport_mesh = build_fracture_viewport_mesh(
-            preview,
+        self.viewport_mesh = build_fracture_viewport_mesh_from_scene(
+            preview.viewport_scene,
             include_repeated_parts=not self.hide_repeated_parts_check.isChecked(),
         )
-        self.viewport.set_mesh(self.viewport_mesh)
+        apply_fracture_viewport_mesh(
+            self.viewport,
+            self.viewport_mesh,
+            scene=preview.viewport_scene,
+        )
         self.viewport.set_selected_cut_tokens(self._manual_cut_tokens)
         self.viewport.set_show_bones(self.show_bones_check.isChecked())
         self.loading_label.hide()
@@ -314,28 +311,28 @@ class FracturePreviewDialog(QDialog):
 
     def _sync_settings_controls(self, settings: FracturePreviewSettings) -> None:
         with (
-            QSignalBlocker(self.method_combo),
-            QSignalBlocker(self.manual_auto_fill_combo),
             QSignalBlocker(self.piece_count_slider),
             QSignalBlocker(self.piece_count_spin),
             QSignalBlocker(self.polycount_slider),
             QSignalBlocker(self.polycount_spin),
             QSignalBlocker(self.base_priority_slider),
             QSignalBlocker(self.base_priority_spin),
+            QSignalBlocker(self.preserve_trunk_slider),
+            QSignalBlocker(self.preserve_trunk_spin),
             QSignalBlocker(self.show_bones_check),
+            QSignalBlocker(self.generate_caps_check),
+            QSignalBlocker(self.stump_piece_check),
         ):
-            method_index = self.method_combo.findData(settings.fracture.method)
-            self.method_combo.setCurrentIndex(max(0, method_index))
-            auto_fill_index = self.manual_auto_fill_combo.findData(settings.fracture.manual_auto_fill_method)
-            self.manual_auto_fill_combo.setCurrentIndex(max(0, auto_fill_index))
             self.piece_count_slider.setValue(int(settings.fracture.target_piece_count))
             self.piece_count_spin.setValue(int(settings.fracture.target_piece_count))
             self.polycount_slider.setValue(int(settings.final_polycount))
             self.polycount_spin.setValue(int(settings.final_polycount))
             self.base_priority_slider.setValue(int(round(float(settings.base_mesh_priority) * 100)))
             self.base_priority_spin.setValue(float(settings.base_mesh_priority))
-            if settings.fracture.method == FRACTURE_METHOD_MANUAL_PINNED_BONES and not self.show_bones_check.isChecked():
-                self.show_bones_check.setChecked(True)
+            self.preserve_trunk_slider.setValue(int(round(float(settings.fracture.preserve_trunk_bias) * 100)))
+            self.preserve_trunk_spin.setValue(float(settings.fracture.preserve_trunk_bias))
+            self.generate_caps_check.setChecked(settings.fracture.generate_caps)
+            self.stump_piece_check.setChecked(settings.fracture.force_stump_piece)
         self._sync_manual_controls()
 
     def _emit_settings_changed(self) -> None:
@@ -353,21 +350,17 @@ class FracturePreviewDialog(QDialog):
             self.color_strength_slider.setValue(int(round(resolved * 100)))
         self.viewport.set_matcap_tint_strength(resolved)
 
-    def _handle_method_changed(self) -> None:
-        self._sync_manual_controls()
-        self._emit_settings_changed()
+    def _handle_exploded_view_changed(self, value: float) -> None:
+        resolved = float(value)
+        with QSignalBlocker(self.exploded_view_slider):
+            self.exploded_view_slider.setValue(int(round(resolved * 100)))
+        self.viewport.set_exploded_view_strength(resolved)
 
     def _sync_manual_controls(self) -> None:
-        manual = self.method_combo.currentData() == FRACTURE_METHOD_MANUAL_PINNED_BONES
-        self.manual_auto_fill_label.setVisible(manual)
-        self.manual_auto_fill_combo.setVisible(manual)
-        self.reset_cuts_button.setVisible(manual)
-        self.cut_list_label.setVisible(manual)
-        self.cut_list_host.setVisible(manual)
-        if manual:
-            self.show_bones_check.setEnabled(True)
-        else:
-            self.show_bones_check.setEnabled(True)
+        self.reset_cuts_button.setVisible(True)
+        self.cut_list_label.setVisible(True)
+        self.cut_list_host.setVisible(True)
+        self.show_bones_check.setEnabled(True)
         self.viewport.set_show_bones(self.show_bones_check.isChecked())
         self._sync_cut_list()
 
@@ -379,8 +372,6 @@ class FracturePreviewDialog(QDialog):
             self.set_preview(self.current_preview)
 
     def _toggle_manual_cut_token(self, joint_token: str) -> None:
-        if self.method_combo.currentData() != FRACTURE_METHOD_MANUAL_PINNED_BONES:
-            return
         tokens = list(self._manual_cut_tokens)
         if joint_token in tokens:
             tokens.remove(joint_token)
@@ -434,8 +425,10 @@ class FracturePreviewDialog(QDialog):
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(6)
             label = QLabel(joint_token, row)
+            label.setWordWrap(False)
             button = QPushButton("x", row)
-            button.setFixedSize(24, 22)
+            button.setFixedSize(22, 22)
+            button.setMaximumWidth(22)
             button.setToolTip(f"Remove {joint_token}")
             button.clicked.connect(lambda _checked=False, token=joint_token: self._remove_manual_cut_token(token))
             row_layout.addWidget(label, 1)
@@ -530,258 +523,19 @@ def _sync_float_slider(slider: QSlider, value: float, scale: int) -> None:
         slider.setValue(int(round(value * scale)))
 
 
-class FractureViewport(MatcapViewport):
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self._fracture_mesh: FractureViewportMesh | None = None
-        self._fracture_render_payload: FractureRenderPayload | None = None
-        self._matcap_tint_strength = FRACTURE_MATCAP_TINT_STRENGTH
-        self._show_bones = False
-        self._selected_cut_tokens: tuple[str, ...] = ()
-        self._hover_cut_token: str | None = None
-        self.on_bone_cut_toggled = lambda _joint_token: None
-        self.setMouseTracking(True)
-
-    def has_mesh(self) -> bool:
-        return self._fracture_mesh is not None and self._vertex_count > 0
-
-    def set_mesh(self, mesh: FractureViewportMesh) -> None:
-        self._fracture_mesh = mesh
-        self._fracture_render_payload = _build_fracture_render_payload(
-            mesh,
-            tint_strength=self._matcap_tint_strength,
-        )
-        self._vertex_count = len(self._fracture_render_payload.vertex_components) // FRACTURE_VERTEX_STRIDE
-        self._update_fracture_mesh_metrics(self._fracture_render_payload)
-        self._grid_vertex_count = int(len(self._build_grid_vertices_for_current_camera()) // 4)
-        self._mesh_dirty = True
-        self._grid_dirty = True
-        if self.isValid():
-            self.makeCurrent()
-            try:
-                self._upload_mesh()
-                self._upload_grid()
-            finally:
-                self.doneCurrent()
-        self.update()
-
-    def set_matcap_tint_strength(self, value: float) -> None:
-        self._matcap_tint_strength = max(0.0, min(1.0, float(value)))
-        if self._fracture_mesh is not None:
-            self._fracture_render_payload = _build_fracture_render_payload(
-                self._fracture_mesh,
-                tint_strength=self._matcap_tint_strength,
-            )
-            self._mesh_dirty = True
-            if self.isValid():
-                self.makeCurrent()
-                try:
-                    self._upload_mesh()
-                finally:
-                    self.doneCurrent()
-        self.update()
-
-    @property
-    def mesh(self) -> FractureViewportMesh | None:
-        return self._fracture_mesh
-
-    @property
-    def show_bones(self) -> bool:
-        return self._show_bones
-
-    @property
-    def bone_vertex_count(self) -> int:
-        mesh = self._fracture_mesh
-        if not self._show_bones or mesh is None:
-            return 0
-        return len(mesh.bone_segments) * 2
-
-    def set_show_bones(self, value: bool) -> None:
-        self._show_bones = bool(value)
-        if not self._show_bones:
-            self._hover_cut_token = None
-        self.update()
-
-    @property
-    def hover_cut_token(self) -> str | None:
-        return self._hover_cut_token
-
-    def set_selected_cut_tokens(self, joint_tokens: tuple[str, ...]) -> None:
-        self._selected_cut_tokens = tuple(joint_tokens)
-        if self._hover_cut_token is not None and self._bone_segment_by_child_token(self._hover_cut_token) is None:
-            self._hover_cut_token = None
-        self.update()
-
-    def paintGL(self) -> None:  # type: ignore[override]
-        super().paintGL()
-        if self._show_bones:
-            self._paint_bone_overlay()
-
-    def mousePressEvent(self, event) -> None:  # type: ignore[override]
-        if (
-            event.button() == Qt.MouseButton.LeftButton
-            and event.modifiers() & Qt.KeyboardModifier.ControlModifier
-            and self._show_bones
-        ):
-            token = self._hover_cut_token or self.pick_bone_segment_child_token(event.position().x(), event.position().y())
-            if token:
-                self.on_bone_cut_toggled(token)
-                event.accept()
-                return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
-        if self._show_bones and not event.buttons() and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            token = self.pick_bone_segment_child_token(event.position().x(), event.position().y())
-            if token != self._hover_cut_token:
-                self._hover_cut_token = token
-                self.update()
-            event.accept()
-            return
-        if self._hover_cut_token is not None and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
-            self._hover_cut_token = None
-            self.update()
-        super().mouseMoveEvent(event)
-
-    def keyReleaseEvent(self, event) -> None:  # type: ignore[override]
-        if event.key() == Qt.Key.Key_Control and self._hover_cut_token is not None:
-            self._hover_cut_token = None
-            self.update()
-        super().keyReleaseEvent(event)
-
-    def leaveEvent(self, event) -> None:  # type: ignore[override]
-        if self._hover_cut_token is not None:
-            self._hover_cut_token = None
-            self.update()
-        super().leaveEvent(event)
-
-    def pick_bone_segment_child_token(self, x: float, y: float, *, max_distance: float = 14.0) -> str | None:
-        mesh = self._fracture_mesh
-        if mesh is None or not mesh.bone_segments:
-            return None
-        best: tuple[float, str] | None = None
-        for segment in mesh.bone_segments:
-            parent = self._project_point_to_screen(segment.parent_position)
-            child = self._project_point_to_screen(segment.child_position)
-            if parent is None or child is None:
-                continue
-            distance = _distance_to_screen_segment(float(x), float(y), parent, child)
-            candidate = (distance, segment.child_joint_token)
-            if best is None or candidate < best:
-                best = candidate
-        if best is None or best[0] > max_distance:
-            return None
-        return best[1]
-
-    def _bone_segment_by_child_token(self, joint_token: str) -> FracturePreviewBoneSegment | None:
-        mesh = self._fracture_mesh
-        if mesh is None:
-            return None
-        for segment in mesh.bone_segments:
-            if segment.child_joint_token == joint_token:
-                return segment
-        return None
-
-    def _project_point_to_screen(self, point: Vector3) -> tuple[float, float] | None:
-        width = max(1, self.width())
-        height = max(1, self.height())
-        mapped = (self._projection_matrix() * self._view_matrix()).map(
-            QVector3D(float(point.x), float(point.y), float(point.z))
-        )
-        ndc_x = float(mapped.x())
-        ndc_y = float(mapped.y())
-        if ndc_x < -1.5 or ndc_x > 1.5 or ndc_y < -1.5 or ndc_y > 1.5:
-            return None
-        return ((ndc_x + 1.0) * 0.5 * width, (1.0 - ndc_y) * 0.5 * height)
-
-    def _build_grid_vertices_for_current_camera(self) -> np.ndarray:
-        return _build_grid_vertices(self._target, self._radius, self._ground_y)
-
-    def _upload_mesh(self) -> None:
-        if self._program is None or self._vertex_buffer is None or self._vao is None:
-            return
-        payload = self._fracture_render_payload
-        vertices = payload.vertex_components if payload is not None else np.asarray([], dtype=np.float32)
-        self._vertex_count = int(len(vertices) // FRACTURE_VERTEX_STRIDE)
-        self._vao.bind()
-        self._vertex_buffer.bind()
-        self._vertex_buffer.allocate(vertices.tobytes(), vertices.nbytes)
-        self._program.bind()
-        stride = FRACTURE_VERTEX_STRIDE * 4
-        position_location = self._program.attributeLocation("position")
-        normal_location = self._program.attributeLocation("normal")
-        piece_tint_location = self._program.attributeLocation("pieceTint")
-        if position_location >= 0:
-            self._program.enableAttributeArray(position_location)
-            self._program.setAttributeBuffer(position_location, GL_FLOAT, 0, 3, stride)
-        if normal_location >= 0:
-            self._program.enableAttributeArray(normal_location)
-            self._program.setAttributeBuffer(normal_location, GL_FLOAT, 12, 3, stride)
-        if piece_tint_location >= 0:
-            self._program.enableAttributeArray(piece_tint_location)
-            self._program.setAttributeBuffer(piece_tint_location, GL_FLOAT, 24, 4, stride)
-        self._program.release()
-        self._vertex_buffer.release()
-        self._vao.release()
-        self._mesh_dirty = False
-
-    def _update_fracture_mesh_metrics(self, payload: FractureRenderPayload) -> None:
-        if self._vertex_count <= 0:
-            return
-        min_x = payload.min_point.x
-        min_y = payload.min_point.y
-        min_z = payload.min_point.z
-        max_x = payload.max_point.x
-        max_y = payload.max_point.y
-        max_z = payload.max_point.z
-        self._ground_y = float(min_y)
-        self._radius = max(
-            0.001,
-            math.sqrt((max_x - min_x) ** 2 + (max_y - min_y) ** 2 + (max_z - min_z) ** 2) * 0.5,
-        )
-        self._target = Vector3((min_x + max_x) * 0.5, (min_y + max_y) * 0.5, (min_z + max_z) * 0.5)
-        self._distance = self._radius * 3.0
-
-    def _paint_bone_overlay(self) -> None:
-        mesh = self._fracture_mesh
-        if mesh is None or not mesh.bone_segments:
-            return
-        painter = QPainter(self)
-        try:
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            for segment in mesh.bone_segments:
-                parent = self._project_point_to_screen(segment.parent_position)
-                child = self._project_point_to_screen(segment.child_position)
-                if parent is None or child is None:
-                    continue
-                selected = segment.is_selected_cut or segment.child_joint_token in self._selected_cut_tokens
-                halo = QPen(QColor(6, 10, 12, 210), 7.0 if selected else 6.0)
-                halo.setCapStyle(Qt.PenCapStyle.RoundCap)
-                painter.setPen(halo)
-                painter.drawLine(int(round(parent[0])), int(round(parent[1])), int(round(child[0])), int(round(child[1])))
-                if selected:
-                    pen = QPen(_qcolor_from_color4(segment.color, alpha=255), 4.5)
-                else:
-                    pen = QPen(_qcolor_from_color4(segment.color, alpha=230), 3.6)
-                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-                painter.setPen(pen)
-                painter.drawLine(int(round(parent[0])), int(round(parent[1])), int(round(child[0])), int(round(child[1])))
-                if selected:
-                    _paint_cut_marker(painter, child, QColor(255, 245, 185, 245), radius=6.5, width=2.0)
-                    painter.setPen(QPen(QColor(255, 245, 185, 245), 1.0))
-                    painter.drawText(int(round(child[0])) + 5, int(round(child[1])) - 5, segment.child_joint_token)
-            if self._hover_cut_token is not None:
-                hover_segment = self._bone_segment_by_child_token(self._hover_cut_token)
-                if hover_segment is not None:
-                    hover_point = self._project_point_to_screen(hover_segment.child_position)
-                    if hover_point is not None:
-                        _paint_cut_marker(painter, hover_point, QColor(155, 235, 255, 245), radius=8.5, width=2.2)
-        finally:
-            painter.end()
-
-
 def build_fracture_viewport_mesh(
     preview: FracturePreviewResult,
+    *,
+    include_repeated_parts: bool = True,
+) -> FractureViewportMesh:
+    scene = preview.viewport_scene
+    if scene is None:
+        scene = build_fracture_viewport_scene(preview)
+    return build_fracture_viewport_mesh_from_scene(scene, include_repeated_parts=include_repeated_parts)
+
+
+def build_fracture_viewport_mesh_from_scene(
+    scene: ViewportScene,
     *,
     include_repeated_parts: bool = True,
 ) -> FractureViewportMesh:
@@ -790,76 +544,105 @@ def build_fracture_viewport_mesh(
     draw_calls: list[FractureDrawCall] = []
     logical_triangle_count = 0
     uploaded_triangle_count = 0
-    source_by_instance_key: dict[tuple[str, int], int] = {}
+    source_by_key: dict[tuple[str, tuple[float, float, float, float]], int] = {}
+    batch_by_id = {batch.batch_id: batch for batch in scene.mesh_batches}
+    included_draw_calls = tuple(
+        draw_call
+        for draw_call in scene.draw_calls
+        if include_repeated_parts or draw_call.visibility_group != "repeated_parts"
+    )
 
     def add_source(name: str, source_vertices: array, source_triangle_count: int) -> int:
         source_index = len(draw_sources)
-        first_vertex = len(vertices) // FRACTURE_VERTEX_STRIDE
+        first_vertex = len(vertices) // FRACTURE_SOURCE_VERTEX_STRIDE
         vertices.extend(source_vertices)
         draw_sources.append(
             FractureDrawSource(
                 name=name,
                 first_vertex=first_vertex,
-                vertex_count=len(source_vertices) // FRACTURE_VERTEX_STRIDE,
+                vertex_count=len(source_vertices) // FRACTURE_SOURCE_VERTEX_STRIDE,
                 triangle_count=source_triangle_count,
             )
         )
         return source_index
 
-    for piece in preview.pieces:
-        source_vertices = array("f")
-        source_triangle_count = _append_mesh_triangles(
-            source_vertices,
-            piece.base_mesh,
-            color=piece.color,
-        )
-        if source_triangle_count:
-            source_index = add_source(piece.piece.name, source_vertices, source_triangle_count)
-            draw_calls.append(_identity_draw_call(source_index))
-            logical_triangle_count += source_triangle_count
+    for scene_draw_call in included_draw_calls:
+        batch = batch_by_id.get(scene_draw_call.batch_id)
+        if batch is None:
+            continue
+        color = scene_draw_call.tint or batch.color or Color4(1.0, 1.0, 1.0, 1.0)
+        source_key = (batch.batch_id, (float(color.r), float(color.g), float(color.b), float(color.a)))
+        source_index = source_by_key.get(source_key)
+        if source_index is None:
+            source_vertices = array("f")
+            source_triangle_count = _append_mesh_triangles(source_vertices, batch.mesh, color=color)
+            if source_triangle_count <= 0:
+                continue
+            source_index = add_source(batch.name, source_vertices, source_triangle_count)
+            source_by_key[source_key] = source_index
             uploaded_triangle_count += source_triangle_count
-    visible_instance_count = 0
-    if include_repeated_parts:
-        for instance in preview.instances:
-            instance_key = (instance.prototype_key, instance.piece_index)
-            source_index = source_by_instance_key.get(instance_key)
-            if source_index is None:
-                prototype = preview.prototypes[instance.prototype_key]
-                source_vertices = array("f")
-                source_triangle_count = _append_mesh_triangles(
-                    source_vertices,
-                    prototype.mesh,
-                    color=instance.color,
-                )
-                source_index = add_source(
-                    f"{prototype.source_name}_piece_{instance.piece_index:02d}",
-                    source_vertices,
-                    source_triangle_count,
-                )
-                source_by_instance_key[instance_key] = source_index
-                uploaded_triangle_count += source_triangle_count
-            source = draw_sources[source_index]
-            draw_calls.append(
-                FractureDrawCall(
-                    source_index=source_index,
-                    translate=instance.position,
-                    orientation=instance.orientation,
-                    scale=instance.scale,
-                )
+        source = draw_sources[source_index]
+        draw_calls.append(
+            FractureDrawCall(
+                source_index=source_index,
+                translate=scene_draw_call.translate,
+                orientation=scene_draw_call.orientation,
+                scale=scene_draw_call.scale,
+                explode_offset=scene_draw_call.explode_direction,
             )
-            visible_instance_count += 1
-            logical_triangle_count += source.triangle_count
+        )
+        logical_triangle_count += source.triangle_count
+    bone_segments = tuple(
+        FracturePreviewBoneSegment(
+            parent_joint_token=segment.parent_token,
+            child_joint_token=segment.child_token,
+            parent_position=segment.start,
+            child_position=segment.end,
+            is_selected_cut=segment.selected,
+            color=segment.color,
+        )
+        for segment in scene.bone_segments
+    )
     return FractureViewportMesh(
-        name=f"{preview.plan.output_stem}_fracture_preview",
+        name=scene.scene_id,
         vertex_components=vertices,
         triangle_count=logical_triangle_count,
         uploaded_triangle_count=uploaded_triangle_count,
-        piece_count=len(preview.pieces),
-        instance_count=visible_instance_count,
+        piece_count=_scene_piece_count(scene),
+        instance_count=sum(1 for draw_call in included_draw_calls if draw_call.visibility_group == "repeated_parts"),
         draw_sources=tuple(draw_sources),
         draw_calls=tuple(draw_calls),
-        bone_segments=preview.bone_segments,
+        bone_segments=bone_segments,
     )
+
+
+def apply_fracture_viewport_mesh(
+    viewport: MatcapViewport,
+    mesh: FractureViewportMesh,
+    *,
+    scene: ViewportScene,
+) -> FractureRenderPayload:
+    payload = _build_fracture_render_payload(
+        mesh,
+        tint_strength=viewport.matcap_tint_strength,
+    )
+    min_point, max_point = _fracture_view_bounds(mesh, payload)
+    viewport.set_precomputed_matcap_scene(
+        scene,
+        vertices=payload.vertex_components,
+        min_point=min_point,
+        max_point=max_point,
+    )
+    return payload
+
+
+def _scene_piece_count(scene: ViewportScene) -> int:
+    piece_ids = {
+        draw_call.selectable_id
+        for draw_call in scene.draw_calls
+        if draw_call.visibility_group == "base_mesh" and draw_call.selectable_id
+    }
+    return len(piece_ids) if piece_ids else scene.stats.batch_count
 
 
 def _build_fracture_render_payload(
@@ -867,7 +650,8 @@ def _build_fracture_render_payload(
     *,
     tint_strength: float = FRACTURE_MATCAP_TINT_STRENGTH,
 ) -> FractureRenderPayload:
-    source_vertices = np.asarray(mesh.vertex_components, dtype=np.float32).reshape((-1, FRACTURE_VERTEX_STRIDE))
+    _ = tint_strength
+    source_vertices = np.asarray(mesh.vertex_components, dtype=np.float32).reshape((-1, FRACTURE_SOURCE_VERTEX_STRIDE))
     total_vertex_count = sum(mesh.draw_sources[draw_call.source_index].vertex_count for draw_call in mesh.draw_calls)
     if total_vertex_count <= 0:
         return FractureRenderPayload(
@@ -902,7 +686,11 @@ def _build_fracture_render_payload(
         render_vertices[output_start:output_end, 0:3] = positions
         render_vertices[output_start:output_end, 3:6] = np.repeat(normals, 3, axis=0)
         render_vertices[output_start:output_end, 6:9] = source_slice[:, 6:9]
-        render_vertices[output_start:output_end, 9] = float(max(0.0, min(1.0, tint_strength)))
+        render_vertices[output_start:output_end, 9] = source_slice[:, 9]
+        render_vertices[output_start:output_end, 10:13] = np.array(
+            (draw_call.explode_offset.x, draw_call.explode_offset.y, draw_call.explode_offset.z),
+            dtype=np.float32,
+        )
         min_values = np.minimum(min_values, positions.min(axis=0))
         max_values = np.maximum(max_values, positions.max(axis=0))
         output_start = output_end
@@ -915,64 +703,24 @@ def _build_fracture_render_payload(
     )
 
 
-def _distance_to_screen_segment(
-    x: float,
-    y: float,
-    start: tuple[float, float],
-    end: tuple[float, float],
-) -> float:
-    sx, sy = start
-    ex, ey = end
-    dx = ex - sx
-    dy = ey - sy
-    length_squared = dx * dx + dy * dy
-    if length_squared <= 1e-8:
-        return math.sqrt((x - sx) ** 2 + (y - sy) ** 2)
-    t = max(0.0, min(1.0, ((x - sx) * dx + (y - sy) * dy) / length_squared))
-    px = sx + t * dx
-    py = sy + t * dy
-    return math.sqrt((x - px) ** 2 + (y - py) ** 2)
-
-
-def _qcolor_from_color4(color: Color4, *, alpha: int) -> QColor:
-    return QColor(
-        max(0, min(255, int(round(float(color.r) * 255)))),
-        max(0, min(255, int(round(float(color.g) * 255)))),
-        max(0, min(255, int(round(float(color.b) * 255)))),
-        max(0, min(255, int(alpha))),
-    )
-
-
-def _paint_cut_marker(
-    painter: QPainter,
-    screen_point: tuple[float, float],
-    color: QColor,
-    *,
-    radius: float,
-    width: float,
-) -> None:
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.setPen(QPen(QColor(4, 8, 10, 230), width + 2.0))
-    x = float(screen_point[0])
-    y = float(screen_point[1])
-    painter.drawEllipse(int(round(x - radius)), int(round(y - radius)), int(round(radius * 2)), int(round(radius * 2)))
-    painter.setPen(QPen(color, width))
-    painter.drawEllipse(int(round(x - radius)), int(round(y - radius)), int(round(radius * 2)), int(round(radius * 2)))
+def _fracture_view_bounds(mesh: FractureViewportMesh, payload: FractureRenderPayload) -> tuple[Vector3, Vector3]:
+    if len(payload.vertex_components) > 0:
+        return payload.min_point, payload.max_point
+    if not mesh.bone_segments:
+        return payload.min_point, payload.max_point
+    min_x = min(min(segment.parent_position.x, segment.child_position.x) for segment in mesh.bone_segments)
+    min_y = min(min(segment.parent_position.y, segment.child_position.y) for segment in mesh.bone_segments)
+    min_z = min(min(segment.parent_position.z, segment.child_position.z) for segment in mesh.bone_segments)
+    max_x = max(max(segment.parent_position.x, segment.child_position.x) for segment in mesh.bone_segments)
+    max_y = max(max(segment.parent_position.y, segment.child_position.y) for segment in mesh.bone_segments)
+    max_z = max(max(segment.parent_position.z, segment.child_position.z) for segment in mesh.bone_segments)
+    return Vector3(min_x, min_y, min_z), Vector3(max_x, max_y, max_z)
 
 
 def _rotate_positions(q: Quaternion, positions: np.ndarray) -> np.ndarray:
     q_vector = np.array((q.i, q.j, q.k), dtype=np.float32)
     t = 2.0 * np.cross(q_vector, positions)
     return positions + float(q.real) * t + np.cross(q_vector, t)
-
-
-def _identity_draw_call(source_index: int) -> FractureDrawCall:
-    return FractureDrawCall(
-        source_index=source_index,
-        translate=Vector3(0.0, 0.0, 0.0),
-        orientation=Quaternion(1.0, 0.0, 0.0, 0.0),
-        scale=Vector3(1.0, 1.0, 1.0),
-    )
 
 
 def _append_mesh_triangles(

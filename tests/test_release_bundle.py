@@ -13,6 +13,7 @@ def test_release_bundle_packages_exe_examples_and_help_assets(tmp_path: Path) ->
     sample_xml = repo_root / "samples" / "speedtree" / "simple_tree" / "variants" / "SimpleTree_01.xml"
     sample_readme = repo_root / "samples" / "README.md"
     exe_path = dist_path / "XMLtoUSDAConverter.exe"
+    worker_exe_path = dist_path / "XMLtoUSDAWorker.exe"
     build_info_path = dist_path / "build_info.json"
 
     sample_xml.parent.mkdir(parents=True)
@@ -22,6 +23,7 @@ def test_release_bundle_packages_exe_examples_and_help_assets(tmp_path: Path) ->
     sample_readme.write_text("# Samples\n", encoding="utf-8")
     dist_path.mkdir(parents=True)
     exe_path.write_bytes(b"exe")
+    worker_exe_path.write_bytes(b"worker")
     build_info_path.write_text('{"build_mode":"release"}', encoding="utf-8")
 
     bundle_path = build_release_bundle(repo_root=repo_root, dist_path=dist_path)
@@ -30,6 +32,7 @@ def test_release_bundle_packages_exe_examples_and_help_assets(tmp_path: Path) ->
     with zipfile.ZipFile(bundle_path) as archive:
         names = set(archive.namelist())
         assert "XMLtoUSDAConverter.exe" in names
+        assert "XMLtoUSDAWorker.exe" in names
         assert "build_info.json" in names
         assert "examples/samples/README.md" in names
         assert "examples/samples/speedtree/simple_tree/variants/SimpleTree_01.xml" in names
@@ -45,6 +48,8 @@ def test_qt_package_script_builds_release_zip() -> None:
     assert "[switch]$SkipSmoke" in script_text
     assert "xml_to_usda.release_bundle" in script_text
     assert "XMLtoUSDAConverter_release.zip" in script_text
+    assert "XMLtoUSDAWorker.exe" in script_text
+    assert "scripts\\launch_worker.py" in script_text
     assert "smoke --scenario high-risk" in script_text
     assert "smoke_report.json" in script_text
     assert "Packaged high-risk smoke failed" in script_text

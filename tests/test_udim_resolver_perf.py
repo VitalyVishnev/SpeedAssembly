@@ -11,19 +11,15 @@ pytestmark = pytest.mark.stress
 
 from xml_to_usda.models import (
     CompactMeshSection,
-    ExportMetadata,
     GeometryBuffer,
     MeshData,
     MeshSection,
-    Prototype,
-    PrototypeIdentity,
-    TreeAsset,
     UdimMaterialSetting,
     UdimMode,
     Vector2,
     Vector3,
 )
-from xml_to_usda.udim_resolver import apply_udim_material_settings
+from xml_to_usda.udim_resolver import apply_udim_settings_to_geometry_buffer, apply_udim_settings_to_mesh_data
 
 
 def _build_mesh_data(face_count: int) -> MeshData:
@@ -79,18 +75,11 @@ def _face_ranges(face_count: int, section_count: int) -> tuple[tuple[int, int], 
     return tuple(ranges)
 
 
-def _build_mesh_model(face_count: int) -> TreeAsset:
-    return TreeAsset(
-        metadata=ExportMetadata(source_path="synthetic.xml", source_version=None),
-        materials=(),
-        source_objects=(),
-        base_mesh=_build_mesh_data(face_count),
-        skeleton=(),
-        assembly_parts=(),
-    )
+def _build_mesh_payload(face_count: int) -> MeshData:
+    return _build_mesh_data(face_count)
 
 
-def _build_geometry_model(face_count: int, *, existing_secondary: bool = False) -> TreeAsset:
+def _build_geometry_payload(face_count: int, *, existing_secondary: bool = False) -> GeometryBuffer:
     geometry_payload = _build_geometry_buffer(face_count)
     if existing_secondary:
         geometry_payload = GeometryBuffer(
@@ -102,23 +91,7 @@ def _build_geometry_model(face_count: int, *, existing_secondary: bool = False) 
             secondary_uv_components=array("f", (9.0, 9.0, 8.0, 8.0, 7.0, 7.0)) * face_count,
             sections=geometry_payload.sections,
         )
-    prototype = Prototype(
-        identity=PrototypeIdentity(source_key="proto", prim_name="Proto"),
-        mesh=None,
-        source_key="proto",
-        source_mesh_id=None,
-        source_name="Proto",
-        geometry_payload=geometry_payload,
-    )
-    return TreeAsset(
-        metadata=ExportMetadata(source_path="synthetic.xml", source_version=None),
-        materials=(),
-        source_objects=(),
-        base_mesh=None,
-        skeleton=(),
-        assembly_parts=(),
-        prototypes=(prototype,),
-    )
+    return geometry_payload
 
 
 def _time_average_seconds(work, *, iterations: int = 5) -> float:
@@ -141,8 +114,8 @@ def _time_average_seconds(work, *, iterations: int = 5) -> float:
 @pytest.mark.parametrize(
     ("payload_kind", "model_factory"),
     (
-        ("mesh", _build_mesh_model),
-        ("geometry", _build_geometry_model),
+        ("mesh", _build_mesh_payload),
+        ("geometry", _build_geometry_payload),
     ),
 )
 def test_udim_secondary_uv_authoring_stays_close_to_primary_shift_for_hot_payloads(
@@ -150,24 +123,31 @@ def test_udim_secondary_uv_authoring_stays_close_to_primary_shift_for_hot_payloa
     model_factory,
 ) -> None:
     face_count = 24000
-    model = model_factory(face_count)
+    payload = model_factory(face_count)
     shift_setting = (UdimMaterialSetting(material_id=1, mode=UdimMode.SHIFT_PRIMARY_UV, udim_id=1003),)
     secondary_setting = (
         UdimMaterialSetting(material_id=1, mode=UdimMode.WRITE_SECONDARY_UV_OFFSET, udim_id=1003),
     )
 
-    shift_seconds = _time_average_seconds(lambda: apply_udim_material_settings(model, shift_setting))
-    secondary_seconds = _time_average_seconds(lambda: apply_udim_material_settings(model, secondary_setting))
+    if payload_kind == "mesh":
+        apply = apply_udim_settings_to_mesh_data
+        label = "HotMesh"
+    else:
+        apply = apply_udim_settings_to_geometry_buffer
+        label = "HotGeometry"
+
+    shift_seconds = _time_average_seconds(lambda: apply(payload, shift_setting, label=label))
+    secondary_seconds = _time_average_seconds(lambda: apply(payload, secondary_setting, label=label))
 
     assert secondary_seconds <= shift_seconds * 1.5
     assert secondary_seconds < 0.05
 
-    resolved = apply_udim_material_settings(model, secondary_setting)
+    resolved = apply(payload, secondary_setting, label=label)
     if payload_kind == "mesh":
-        assert resolved.base_mesh is not None
-        assert resolved.base_mesh.secondary_uv_coords
-        assert resolved.base_mesh.secondary_uv_coords[0] == Vector2(2.5, 0.5)
+        assert resolved is not None
+        assert resolved.secondary_uv_coords
+        assert resolved.secondary_uv_coords[0] == Vector2(2.5, 0.5)
     else:
-        assert resolved.prototypes[0].geometry_payload is not None
-        assert resolved.prototypes[0].geometry_payload.secondary_uv_components
-        assert resolved.prototypes[0].geometry_payload.secondary_uv_components[:2] == array("f", (2.5, 0.5))
+        assert resolved is not None
+        assert resolved.secondary_uv_components
+        assert resolved.secondary_uv_components[:2] == array("f", (2.5, 0.5))

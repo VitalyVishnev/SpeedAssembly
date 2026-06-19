@@ -186,6 +186,9 @@ Current GUI material workflow, stage 1:
   - each used FBX material slot row
 - repeated-part UDIM settings become resolved material settings only after the
   chosen repeated-part material mode creates concrete inline material ids
+- base-tree UDIM rows and repeated-part UDIM rows are resolved per authored
+  piece; the same numeric `material_id` may appear in different pieces without
+  cross-piece overwrite because ids are local to that piece's authored payload
 - `vertex_color_split` is an explicit black/white split for repeated-part materials
 - `material_slots` derives its Source Material slot list from the imported FBX payload instead of from SpeedTree XML
 - only FBX slots actually used by imported faces are exposed

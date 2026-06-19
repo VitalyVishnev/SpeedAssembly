@@ -19,6 +19,20 @@ function Get-VenvExecutable([string]$RepoRoot) {
     return $pythonExe
 }
 
+function Quote-ProcessArgument([string]$Argument) {
+    if ($null -eq $Argument) {
+        return '""'
+    }
+    if ($Argument -notmatch '[\s"]') {
+        return $Argument
+    }
+    return '"' + $Argument.Replace('"', '\"') + '"'
+}
+
+function Join-ProcessArguments([string[]]$Arguments) {
+    return (($Arguments | ForEach-Object { Quote-ProcessArgument $_ }) -join ' ')
+}
+
 function Get-GitBuildMetadata([string]$RepoRoot) {
     $metadata = @{
         git_branch = $null
@@ -90,11 +104,13 @@ function Write-BuildInfo(
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $launcherScript = Join-Path $repoRoot 'scripts\launch_qt_gui.py'
+$workerLauncherScript = Join-Path $repoRoot 'scripts\launch_worker.py'
 $distPath = Join-Path $repoRoot 'dist-next'
 $buildPath = Join-Path $repoRoot 'build-next'
 $qtUiSourceRoot = Join-Path $repoRoot 'src\xml_to_usda\qt_ui'
 $qtUiStagingRoot = Join-Path $buildPath 'qt_ui_data'
 $exePath = Join-Path $distPath 'XMLtoUSDAConverter.exe'
+$workerExePath = Join-Path $distPath 'XMLtoUSDAWorker.exe'
 $iconPath = Join-Path $repoRoot 'src\xml_to_usda\qt_ui\assets\Icon.ico'
 $hooksPath = Join-Path $repoRoot 'hooks'
 
@@ -209,6 +225,34 @@ try {
             throw "Expected release exe was not created: $exePath"
         }
 
+        $workerPyInstallerArgs = @(
+            '-m', 'PyInstaller',
+            '--noconfirm',
+            '--clean',
+            '--onefile',
+            '--console',
+            '--name', 'XMLtoUSDAWorker',
+            '--additional-hooks-dir', $hooksPath,
+            '--paths', (Join-Path $repoRoot 'src'),
+            '--distpath', $distPath,
+            '--workpath', (Join-Path $buildPath 'worker'),
+            '--specpath', $buildPath,
+            $workerLauncherScript
+        )
+        foreach ($exclude in @('PySide6', 'shiboken6')) {
+            $workerPyInstallerArgs += @('--exclude-module', $exclude)
+        }
+
+        Write-Host "Building dedicated worker executable with $pythonExe ..."
+        & $pythonExe -s @workerPyInstallerArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw 'PyInstaller worker build failed.'
+        }
+
+        if (-not (Test-Path $workerExePath)) {
+            throw "Expected worker exe was not created: $workerExePath"
+        }
+
         Write-BuildInfo -DistPath $distPath -ExePath $exePath -PythonExe $pythonExe -RepoRoot $repoRoot -BuildMode 'release'
         $bundlePath = Join-Path $distPath 'XMLtoUSDAConverter_release.zip'
         & $pythonExe -s -m xml_to_usda.release_bundle --repo-root $repoRoot --dist-path $distPath --zip-path $bundlePath
@@ -227,9 +271,38 @@ try {
             New-Item -ItemType Directory -Force -Path $smokeDir | Out-Null
             Write-Host "Running packaged high-risk smoke..."
             # smoke --scenario high-risk
-            & $exePath smoke --scenario high-risk --input $smokeInputPath --output $smokeOutputPath --report $smokeReportPath --timeout-ms 180000 > $smokeStdoutPath 2> $smokeStderrPath
-            if ($LASTEXITCODE -ne 0) {
+            Remove-Item -LiteralPath $smokeReportPath -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $smokeStdoutPath -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $smokeStderrPath -ErrorAction SilentlyContinue
+            $smokeArguments = Join-ProcessArguments @(
+                'smoke',
+                '--scenario',
+                'high-risk',
+                '--input',
+                $smokeInputPath,
+                '--output',
+                $smokeOutputPath,
+                '--report',
+                $smokeReportPath,
+                '--timeout-ms',
+                '180000'
+            )
+            $smokeProcess = Start-Process `
+                -FilePath $exePath `
+                -ArgumentList $smokeArguments `
+                -RedirectStandardOutput $smokeStdoutPath `
+                -RedirectStandardError $smokeStderrPath `
+                -Wait `
+                -PassThru
+            if ($smokeProcess.ExitCode -ne 0) {
                 throw "Packaged high-risk smoke failed. Report: $smokeReportPath"
+            }
+            if (-not (Test-Path $smokeReportPath)) {
+                throw "Packaged high-risk smoke did not write report: $smokeReportPath"
+            }
+            $smokeReport = Get-Content -LiteralPath $smokeReportPath -Raw | ConvertFrom-Json
+            if (-not $smokeReport.passed) {
+                throw "Packaged high-risk smoke report failed: $smokeReportPath"
             }
             Write-Host "Packaged high-risk smoke passed: $smokeReportPath"
         }

@@ -6,7 +6,6 @@ from array import array
 from dataclasses import dataclass, replace
 
 from .models import (
-    CanonicalTreeModel,
     CompactMeshSection,
     GeometryBuffer,
     MeshData,
@@ -28,17 +27,53 @@ class _ResolvedUdimSetting:
     offset: Vector2
 
 
-def apply_udim_material_settings(
-    model: CanonicalTreeModel,
+def apply_udim_settings_to_mesh_data(
+    mesh: MeshData | None,
     settings: tuple[UdimMaterialSetting, ...],
-) -> CanonicalTreeModel:
+    *,
+    label: str = "Mesh",
+) -> MeshData | None:
+    active_settings = _resolve_active_udim_settings(settings)
+    if mesh is None:
+        if active_settings:
+            raise ValueError(f"{label} has no geometry to receive UDIM settings.")
+        return None
+    if not active_settings:
+        return mesh
+    return _apply_settings_to_mesh(mesh, active_settings, label=label)
+
+
+def apply_udim_settings_to_geometry_buffer(
+    geometry_buffer: GeometryBuffer | None,
+    settings: tuple[UdimMaterialSetting, ...],
+    *,
+    label: str = "Mesh",
+) -> GeometryBuffer | None:
+    active_settings = _resolve_active_udim_settings(settings)
+    if geometry_buffer is None:
+        if active_settings:
+            raise ValueError(f"{label} has no geometry to receive UDIM settings.")
+        return None
+    if not active_settings:
+        return geometry_buffer
+    return _apply_settings_to_geometry_buffer(geometry_buffer, active_settings, label=label)
+
+
+def apply_udim_settings_to_prototype(
+    prototype: Prototype,
+    settings: tuple[UdimMaterialSetting, ...],
+) -> Prototype:
     active_settings = _resolve_active_udim_settings(settings)
     if not active_settings:
-        return model
-
-    base_mesh = _apply_settings_to_mesh(model.base_mesh, active_settings) if model.base_mesh is not None else None
-    prototypes = tuple(_apply_settings_to_prototype(prototype, active_settings) for prototype in model.prototypes)
-    return replace(model, base_mesh=base_mesh, prototypes=prototypes)
+        return prototype
+    label = f"Prototype {prototype.identity.prim_name}"
+    if prototype.geometry_payload is not None:
+        geometry_payload = _apply_settings_to_geometry_buffer(prototype.geometry_payload, active_settings, label=label)
+        return replace(prototype, geometry_payload=geometry_payload)
+    if prototype.mesh is not None:
+        mesh = _apply_settings_to_mesh(prototype.mesh, active_settings, label=label)
+        return replace(prototype, mesh=mesh)
+    raise ValueError(f"{label} has no authored geometry to receive UDIM settings.")
 
 
 def _resolve_active_udim_settings(settings: tuple[UdimMaterialSetting, ...]) -> tuple[_ResolvedUdimSetting, ...]:
@@ -57,79 +92,72 @@ def _resolve_active_udim_settings(settings: tuple[UdimMaterialSetting, ...]) -> 
     return tuple(active_settings)
 
 
-def _apply_settings_to_prototype(
-    prototype: Prototype,
-    settings: tuple[_ResolvedUdimSetting, ...],
-) -> Prototype:
-    mesh = _apply_settings_to_mesh(prototype.mesh, settings) if prototype.mesh is not None else None
-    geometry_payload = (
-        _apply_settings_to_geometry_buffer(prototype.geometry_payload, settings)
-        if prototype.geometry_payload is not None
-        else None
-    )
-    return replace(prototype, mesh=mesh, geometry_payload=geometry_payload)
-
-
 def _apply_settings_to_mesh(
     mesh: MeshData | None,
     settings: tuple[_ResolvedUdimSetting, ...],
+    *,
+    label: str = "Mesh",
 ) -> MeshData | None:
     if mesh is None or not mesh.uv_coords:
         return mesh
 
-    primary_uvs = list(mesh.uv_coords)
-    write_secondary = any(setting.mode == UdimMode.WRITE_SECONDARY_UV_OFFSET for setting in settings)
-    secondary_uvs = [DEFAULT_SECONDARY_OFFSET] * len(mesh.uv_coords) if write_secondary else list(mesh.secondary_uv_coords)
-    if secondary_uvs and len(secondary_uvs) != len(mesh.uv_coords):
-        secondary_uvs = [DEFAULT_SECONDARY_OFFSET] * len(mesh.uv_coords) if write_secondary else []
-
-    wrote_secondary = bool(secondary_uvs)
     face_ranges = _face_vertex_ranges(mesh.face_vertex_counts)
     sections_by_material = _group_sections_by_material_id(mesh.sections)
+    _validate_piece_udim_targets(sections_by_material, settings, label)
+    shift_primary = any(setting.mode == UdimMode.SHIFT_PRIMARY_UV for setting in settings)
+    write_secondary = any(setting.mode == UdimMode.WRITE_SECONDARY_UV_OFFSET for setting in settings)
+    if not shift_primary and not write_secondary:
+        return mesh
+
+    primary_uvs = list(mesh.uv_coords) if shift_primary else None
+    secondary_uvs = [DEFAULT_SECONDARY_OFFSET] * len(mesh.uv_coords) if write_secondary else None
     for setting in settings:
         for section in sections_by_material.get(setting.material_id, ()):
-            if setting.mode == UdimMode.SHIFT_PRIMARY_UV:
+            if setting.mode == UdimMode.SHIFT_PRIMARY_UV and primary_uvs is not None:
                 _shift_primary_uvs(primary_uvs, face_ranges, section.face_indices, setting.offset)
-            elif setting.mode == UdimMode.WRITE_SECONDARY_UV_OFFSET:
+            elif setting.mode == UdimMode.WRITE_SECONDARY_UV_OFFSET and secondary_uvs is not None:
                 _write_secondary_uvs(secondary_uvs, face_ranges, section.face_indices, setting.offset)
-                wrote_secondary = True
 
-    return replace(
-        mesh,
-        uv_coords=tuple(primary_uvs),
-        secondary_uv_coords=tuple(secondary_uvs) if wrote_secondary else mesh.secondary_uv_coords,
-    )
+    if primary_uvs is None:
+        resolved_secondary_uvs = tuple(secondary_uvs) if secondary_uvs is not None else mesh.secondary_uv_coords
+        return replace(mesh, secondary_uv_coords=resolved_secondary_uvs)
+    if secondary_uvs is None:
+        return replace(mesh, uv_coords=tuple(primary_uvs))
+    return replace(mesh, uv_coords=tuple(primary_uvs), secondary_uv_coords=tuple(secondary_uvs))
 
 
 def _apply_settings_to_geometry_buffer(
     mesh: GeometryBuffer | None,
     settings: tuple[_ResolvedUdimSetting, ...],
+    *,
+    label: str = "Mesh",
 ) -> GeometryBuffer | None:
     if mesh is None or not mesh.uv_components:
         return mesh
 
-    primary_uvs = array("f", mesh.uv_components)
-    write_secondary = any(setting.mode == UdimMode.WRITE_SECONDARY_UV_OFFSET for setting in settings)
-    secondary_uvs = _default_secondary_uv_components(len(primary_uvs)) if write_secondary else array("f", mesh.secondary_uv_components)
-    if secondary_uvs and len(secondary_uvs) != len(primary_uvs):
-        secondary_uvs = _default_secondary_uv_components(len(primary_uvs)) if write_secondary else array("f")
-
-    wrote_secondary = bool(secondary_uvs)
     face_ranges = _face_vertex_ranges(mesh.face_vertex_counts)
     sections_by_material = _group_sections_by_material_id(mesh.sections)
+    _validate_piece_udim_targets(sections_by_material, settings, label)
+    shift_primary = any(setting.mode == UdimMode.SHIFT_PRIMARY_UV for setting in settings)
+    write_secondary = any(setting.mode == UdimMode.WRITE_SECONDARY_UV_OFFSET for setting in settings)
+    if not shift_primary and not write_secondary:
+        return mesh
+
+    primary_uvs = array("f", mesh.uv_components) if shift_primary else None
+    secondary_uvs = _default_secondary_uv_components(len(mesh.uv_components)) if write_secondary else None
     for setting in settings:
         for section in sections_by_material.get(setting.material_id, ()):
-            if setting.mode == UdimMode.SHIFT_PRIMARY_UV:
+            if setting.mode == UdimMode.SHIFT_PRIMARY_UV and primary_uvs is not None:
                 _shift_primary_uv_components(primary_uvs, face_ranges, section.face_indices, setting.offset)
-            elif setting.mode == UdimMode.WRITE_SECONDARY_UV_OFFSET:
+            elif setting.mode == UdimMode.WRITE_SECONDARY_UV_OFFSET and secondary_uvs is not None:
                 _write_secondary_uv_components(secondary_uvs, face_ranges, section.face_indices, setting.offset)
-                wrote_secondary = True
 
-    return replace(
-        mesh,
-        uv_components=primary_uvs,
-        secondary_uv_components=secondary_uvs if wrote_secondary else mesh.secondary_uv_components,
-    )
+    if primary_uvs is None:
+        resolved_secondary_uvs = secondary_uvs if secondary_uvs is not None else mesh.secondary_uv_components
+        return replace(mesh, secondary_uv_components=resolved_secondary_uvs)
+    if secondary_uvs is None:
+        return replace(mesh, uv_components=primary_uvs)
+    return replace(mesh, uv_components=primary_uvs, secondary_uv_components=secondary_uvs)
 
 
 def _udim_offset(udim_id: int) -> Vector2:
@@ -154,6 +182,26 @@ def _group_sections_by_material_id(
     for section in sections:
         grouped_sections.setdefault(section.material_id, []).append(section)
     return {material_id: tuple(section_group) for material_id, section_group in grouped_sections.items()}
+
+
+def _validate_piece_udim_targets(
+    sections_by_material: dict[int, tuple[MeshSection | CompactMeshSection, ...]],
+    settings: tuple[_ResolvedUdimSetting, ...],
+    label: str,
+) -> None:
+    seen_material_ids: set[int] = set()
+    missing_material_ids: list[int] = []
+    for setting in settings:
+        if setting.material_id in seen_material_ids:
+            raise ValueError(
+                f"{label} has multiple active UDIM settings for material id {setting.material_id}."
+            )
+        seen_material_ids.add(setting.material_id)
+        if setting.material_id not in sections_by_material:
+            missing_material_ids.append(setting.material_id)
+    if missing_material_ids:
+        missing_payload = ", ".join(str(material_id) for material_id in missing_material_ids)
+        raise ValueError(f"{label} has no material sections for UDIM material id(s): {missing_payload}.")
 
 
 def _shift_primary_uvs(

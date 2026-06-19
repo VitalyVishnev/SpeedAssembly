@@ -278,6 +278,35 @@ def test_prepare_conversion_plan_forces_async_for_fbx_override(tmp_path: Path) -
     assert plan.request.cleanup_policy == CleanupPolicy.PRESERVE_FOR_DEBUGGING
 
 
+def test_prepare_conversion_plan_marks_explicit_contract_for_udim_only_part_row() -> None:
+    config = PrototypeSourceConfig(
+        source_key="Mesh_1",
+        source_name="Twig_01",
+        mode=PrototypeSourceMode.XML_MESH,
+        fbx_material_mode=FbxMaterialMode.VERTEX_COLOR_SPLIT,
+        black_material_udim_mode=UdimMode.WRITE_SECONDARY_UV_OFFSET,
+        black_material_udim_id=1028,
+        white_material_udim_mode=UdimMode.SHIFT_PRIMARY_UV,
+        white_material_udim_id=1003,
+    )
+    plan = prepare_conversion_plan(
+        input_path=str(SIMPLE_TREE_01),
+        output_path="out.usda",
+        cpu_profile=CpuProfile.BALANCED,
+        cleanup_policy=CleanupPolicy.EPHEMERAL,
+        material_policy=MaterialPolicy.SOURCE_MATERIAL_ROLES,
+        bark_material_path=None,
+        leaves_material_path=None,
+        single_material_path=None,
+        base_material_overrides=(),
+        prototype_source_configs=(config,),
+        async_threshold_bytes=1_000_000_000,
+    )
+
+    assert plan.request.use_explicit_material_contract is True
+    assert plan.request.prototype_source_configs == (config,)
+
+
 def test_prepare_conversion_plan_forces_async_when_threshold_is_reached() -> None:
     plan = prepare_conversion_plan(
         input_path=str(SIMPLE_TREE_01),

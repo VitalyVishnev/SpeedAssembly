@@ -23,7 +23,7 @@ from xml_to_usda.models import (
 )
 from xml_to_usda.normalizer import normalize_to_canonical
 from xml_to_usda.pipeline import convert_file
-from xml_to_usda.udim_resolver import apply_udim_material_settings
+from xml_to_usda.source_analysis import discover_source_materials
 from xml_to_usda.udim_settings import load_udim_material_settings_from_json
 from xml_to_usda.usda_authoring import author_usda_text
 from xml_to_usda.usda_writer import render_usda
@@ -288,6 +288,64 @@ def test_realistic_multi_material_part_mesh_authors_geom_subsets() -> None:
     )
 
 
+def test_speedtree_cap_like_object_is_authored_as_base_mesh_material_sections(tmp_path: Path) -> None:
+    source_path = tmp_path / "cap_like_object.xml"
+    source_path.write_text(
+        """
+        <SpeedTreeRaw>
+            <Materials>
+                <Material ID="1" Name="Bark" />
+                <Material ID="0" Name="CapCut" />
+                <Material ID="2" Name="TwigOnly" />
+            </Materials>
+            <Bones>
+                <Bone ID="20" ParentID="-1" StartX="0" StartY="0" StartZ="0" Generator="Group_0" />
+            </Bones>
+            <Objects>
+                <Object ID="1" Name="CapLike" AbsX="0" AbsY="0" AbsZ="0" RelX="0" RelY="0" RelZ="0">
+                    <Points Count="4">
+                        <X>0 1 0 0</X>
+                        <Y>0 0 1 0</Y>
+                        <Z>0 0 0 1</Z>
+                    </Points>
+                    <Vertices Count="4">
+                        <TexcoordU>0 1 0 0</TexcoordU>
+                        <TexcoordV>0 0 1 1</TexcoordV>
+                        <BoneID>20 20 20 20</BoneID>
+                    </Vertices>
+                    <Triangles Material="1" Count="1">
+                        <PointIndices>0 1 2</PointIndices>
+                        <VertexIndices>0 1 2</VertexIndices>
+                    </Triangles>
+                    <Triangles Material="0" Count="1">
+                        <PointIndices>0 2 3</PointIndices>
+                        <VertexIndices>0 2 3</VertexIndices>
+                    </Triangles>
+                </Object>
+            </Objects>
+        </SpeedTreeRaw>
+        """,
+        encoding="utf-8",
+    )
+    document = read_source_xml(source_path)
+    model = normalize_to_canonical(document, inspect_xml(document))
+    diagnostics = validate_model(model)
+    usda = render_usda(model, diagnostics)
+    inventory = UsdaInventory.from_text(usda.text)
+
+    assert model.base_mesh is not None
+    assert model.base_mesh.sections == (
+        MeshSection(material_id=0, face_indices=(1,)),
+        MeshSection(material_id=1, face_indices=(0,)),
+    )
+    assert [material.source_id for material in discover_source_materials(str(source_path))] == [1, 0]
+    assert not any(issue.severity == "error" for issue in diagnostics)
+    assert inventory.has_attribute("/Tree/BaseTreeSkelRoot/BaseTreeMesh", "subsetFamily:materialBind:familyType")
+    assert inventory.has_prim("/Tree/BaseTreeSkelRoot/BaseTreeMesh/Material_0_0", "GeomSubset")
+    assert inventory.has_prim("/Tree/BaseTreeSkelRoot/BaseTreeMesh/Material_1_1", "GeomSubset")
+    assert not inventory.has_prim("/Tree/BaseTreeSkelRoot/BaseTreeMesh/Material_2_2", "GeomSubset")
+
+
 def test_multi_root_skeleton_keeps_unique_root_joint_names_in_usda() -> None:
     document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)
@@ -302,6 +360,7 @@ def test_multi_root_skeleton_keeps_unique_root_joint_names_in_usda() -> None:
     multi_root_model = replace(
         model,
         materials=(
+            MaterialSpec(source_id=0, name="Cap_Mat", source_material_ids=(0,)),
             MaterialSpec(source_id=1, name="Default_Mat", source_material_ids=(1,)),
             MaterialSpec(source_id=2, name="Secondary_Mat", source_material_ids=(2,)),
         ),
@@ -416,6 +475,7 @@ def test_multi_material_prototype_authors_geom_subsets() -> None:
     synthetic_model = replace(
         model,
         materials=(
+            MaterialSpec(source_id=0, name="Cap_Mat"),
             MaterialSpec(source_id=1, name="Default_Mat"),
             MaterialSpec(source_id=2, name="Twigs_Mat"),
         ),

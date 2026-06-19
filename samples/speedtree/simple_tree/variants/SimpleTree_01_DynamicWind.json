@@ -1,0 +1,452 @@
+{
+    "Joints": [
+        {
+            "JointName": "root",
+            "SimulationGroupIndex": 0
+        },
+        {
+            "JointName": "bone_001",
+            "SimulationGroupIndex": 0
+        },
+        {
+            "JointName": "bone_002",
+            "SimulationGroupIndex": 0
+        },
+        {
+            "JointName": "bone_003",
+            "SimulationGroupIndex": 0
+        },
+        {
+            "JointName": "bone_004",
+            "SimulationGroupIndex": 0
+        },
+        {
+            "JointName": "bone_005",
+            "SimulationGroupIndex": 0
+        },
+        {
+            "JointName": "bone_006",
+            "SimulationGroupIndex": 0
+        },
+        {
+            "JointName": "bone_007",
+            "SimulationGroupIndex": 0
+        },
+        {
+            "JointName": "bone_008",
+            "SimulationGroupIndex": 0
+        },
+        {
+            "JointName": "bone_009",
+            "SimulationGroupIndex": 0
+        },
+        {
+            "JointName": "bone_010",
+            "SimulationGroupIndex": 0
+        },
+        {
+            "JointName": "bone_011",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_012",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_013",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_014",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_015",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_016",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_017",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_018",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_019",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_020",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_021",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_022",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_023",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_024",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_025",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_026",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_027",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_028",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_029",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_030",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_031",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_032",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_033",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_034",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_035",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_036",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_037",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_038",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_039",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_040",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_041",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_042",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_043",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_044",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_045",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_046",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_047",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_048",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_049",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_050",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_051",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_052",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_053",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_054",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_055",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_056",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_057",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_058",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_059",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_060",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_061",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_062",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_063",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_064",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_065",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_066",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_067",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_068",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_069",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_070",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_071",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_072",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_073",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_074",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_075",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_076",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_077",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_078",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_079",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_080",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_081",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_082",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_083",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_084",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_085",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_086",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_087",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_088",
+            "SimulationGroupIndex": 1
+        },
+        {
+            "JointName": "bone_089",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_090",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_091",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_092",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_093",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_094",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_095",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_096",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_097",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_098",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_099",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_100",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_101",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_102",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_103",
+            "SimulationGroupIndex": 2
+        },
+        {
+            "JointName": "bone_104",
+            "SimulationGroupIndex": 2
+        }
+    ],
+    "SimulationGroups": [
+        {
+            "bUseDualInfluence": true,
+            "Influence": 0.0,
+            "MinInfluence": 0.5,
+            "MaxInfluence": 1.0,
+            "ShiftTop": 0.5,
+            "bIsTrunkGroup": true
+        },
+        {
+            "bUseDualInfluence": true,
+            "Influence": 0.0,
+            "MinInfluence": 0.5,
+            "MaxInfluence": 1.0,
+            "ShiftTop": 0.5,
+            "bIsTrunkGroup": false
+        },
+        {
+            "bUseDualInfluence": true,
+            "Influence": 0.0,
+            "MinInfluence": 0.5,
+            "MaxInfluence": 1.0,
+            "ShiftTop": 0.5,
+            "bIsTrunkGroup": false
+        }
+    ],
+    "bIsGroundCover": false,
+    "GustAttenuation": 0.0
+}

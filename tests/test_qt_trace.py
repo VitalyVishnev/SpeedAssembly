@@ -39,7 +39,7 @@ def test_qt_trace_logger_writes_jsonl_and_rotates_without_breaking_lines(tmp_pat
     assert all(isinstance(event["ts"], str) and event["ts"] for event in all_events)
 
 
-def test_qt_trace_logger_includes_debug_data_only_when_enabled(tmp_path: Path) -> None:
+def test_qt_trace_logger_includes_debug_data_even_when_saved_setting_is_off(tmp_path: Path) -> None:
     compact_path = tmp_path / "compact.jsonl"
     debug_path = tmp_path / "debug.jsonl"
 
@@ -57,5 +57,5 @@ def test_qt_trace_logger_includes_debug_data_only_when_enabled(tmp_path: Path) -
     compact_event = _read_jsonl(compact_path)[0]
     debug_event = _read_jsonl(debug_path)[0]
 
-    assert "debug" not in compact_event
+    assert compact_event["debug"] == {"command": ["XMLtoUSDAConverter.exe", "fracture-worker"]}
     assert debug_event["debug"] == {"command": ["XMLtoUSDAConverter.exe", "fracture-worker"]}

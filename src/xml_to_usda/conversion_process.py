@@ -63,6 +63,7 @@ def start_conversion_process(
     request_path = _create_conversion_temp_path(".request.pkl")
     result_path = _create_conversion_temp_path(".result.pkl")
     error_path = _create_conversion_temp_path(".error.json")
+    stderr_path = _create_conversion_temp_path(".stderr.log")
     event_dir = Path(tempfile.mkdtemp(prefix="xml_to_usda_conversion_events_"))
     write_conversion_worker_request(
         request_path,
@@ -75,18 +76,20 @@ def start_conversion_process(
         ),
     )
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    process = subprocess.Popen(
-        _resolve_conversion_worker_command(request_path),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=creation_flags,
-    )
+    with stderr_path.open("wb") as stderr_handle:
+        process = subprocess.Popen(
+            _resolve_conversion_worker_command(request_path),
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_handle,
+            creationflags=creation_flags,
+        )
     return (
         _SubprocessWorkerProcess(process),
         _ConversionWorkerQueue(
             request_path=request_path,
             result_path=result_path,
             error_path=error_path,
+            stderr_path=stderr_path,
             event_dir=event_dir,
         ),
         _SubprocessCancelEvent(process),
@@ -103,6 +106,7 @@ def start_proxy_mesh_process(
     request_path = _create_proxy_temp_path(".request.pkl")
     result_path = _create_proxy_temp_path(".result.pkl")
     error_path = _create_proxy_temp_path(".error.json")
+    stderr_path = _create_proxy_temp_path(".stderr.log")
     write_proxy_mesh_worker_request(
         request_path,
         ProxyMeshWorkerRequest(
@@ -114,15 +118,21 @@ def start_proxy_mesh_process(
         ),
     )
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    process = subprocess.Popen(
-        _resolve_proxy_mesh_worker_command(request_path),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=creation_flags,
-    )
+    with stderr_path.open("wb") as stderr_handle:
+        process = subprocess.Popen(
+            _resolve_proxy_mesh_worker_command(request_path),
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_handle,
+            creationflags=creation_flags,
+        )
     return (
         _SubprocessWorkerProcess(process),
-        _ProxyMeshWorkerQueue(request_path=request_path, result_path=result_path, error_path=error_path),
+        _ProxyMeshWorkerQueue(
+            request_path=request_path,
+            result_path=result_path,
+            error_path=error_path,
+            stderr_path=stderr_path,
+        ),
         _SubprocessCancelEvent(process),
     )
 
@@ -151,6 +161,7 @@ def _start_fracture_worker_process(
     request_path = _create_fracture_temp_path(".request.pkl")
     result_path = _create_fracture_temp_path(".result.pkl")
     error_path = _create_fracture_temp_path(".error.json")
+    stderr_path = _create_fracture_temp_path(".stderr.log")
     write_fracture_worker_request(
         request_path,
         FractureWorkerRequest(
@@ -162,15 +173,21 @@ def _start_fracture_worker_process(
         ),
     )
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    process = subprocess.Popen(
-        _resolve_fracture_worker_command(request_path),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=creation_flags,
-    )
+    with stderr_path.open("wb") as stderr_handle:
+        process = subprocess.Popen(
+            _resolve_fracture_worker_command(request_path),
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_handle,
+            creationflags=creation_flags,
+        )
     return (
         _SubprocessWorkerProcess(process),
-        _FractureWorkerQueue(request_path=request_path, result_path=result_path, error_path=error_path),
+        _FractureWorkerQueue(
+            request_path=request_path,
+            result_path=result_path,
+            error_path=error_path,
+            stderr_path=stderr_path,
+        ),
         _SubprocessCancelEvent(process),
     )
 
@@ -308,6 +325,7 @@ class _ConversionWorkerQueue:
     request_path: Path
     result_path: Path
     error_path: Path
+    stderr_path: Path
     event_dir: Path
     delivered_events: set[str] = field(default_factory=set)
     delivered_result: bool = False
@@ -337,7 +355,7 @@ class _ConversionWorkerQueue:
         return events + [("result", _read_conversion_job_result(self.result_path))]
 
     def close(self) -> None:
-        for path in (self.request_path, self.result_path, self.error_path):
+        for path in (self.request_path, self.result_path, self.error_path, self.stderr_path):
             try:
                 cleanup_file(path)
             except Exception:
@@ -355,6 +373,7 @@ class _ProxyMeshWorkerQueue:
     request_path: Path
     result_path: Path
     error_path: Path
+    stderr_path: Path
     delivered: bool = False
 
     def drain(self) -> list[tuple[str, object]]:
@@ -374,7 +393,7 @@ class _ProxyMeshWorkerQueue:
         return [("result", payload)]
 
     def close(self) -> None:
-        for path in (self.request_path, self.result_path, self.error_path):
+        for path in (self.request_path, self.result_path, self.error_path, self.stderr_path):
             try:
                 cleanup_file(path)
             except Exception:
@@ -386,6 +405,7 @@ class _FractureWorkerQueue:
     request_path: Path
     result_path: Path
     error_path: Path
+    stderr_path: Path
     delivered: bool = False
 
     def drain(self) -> list[tuple[str, object]]:
@@ -404,7 +424,7 @@ class _FractureWorkerQueue:
         return [("result", read_fracture_worker_result(self.result_path))]
 
     def close(self) -> None:
-        for path in (self.request_path, self.result_path, self.error_path):
+        for path in (self.request_path, self.result_path, self.error_path, self.stderr_path):
             try:
                 cleanup_file(path)
             except Exception:

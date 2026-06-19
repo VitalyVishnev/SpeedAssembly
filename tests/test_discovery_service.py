@@ -30,9 +30,12 @@ def test_discover_base_material_rows_merges_persisted_paths() -> None:
         ),
     )
 
-    assert discovery.summary == "Found 1 base XML material slot(s)."
+    assert discovery.summary == "Found 2 base XML material slot(s)."
     assert discovery.rows[0].source_name == "Bark_Mat"
     assert discovery.rows[0].ue_asset_path == "/Game/TestMaterials/M_Bark_Test"
+    assert discovery.rows[1].source_id == 0
+    assert discovery.rows[1].source_name == "Default_Mat"
+    assert discovery.rows[1].ue_asset_path == ""
 
 
 def test_discover_part_prototype_rows_restores_persisted_modes() -> None:

@@ -57,6 +57,7 @@ def test_source_analysis_discovers_only_base_mesh_material_slots() -> None:
 
     assert materials == (
         materials[0].__class__(source_id=1, source_name="Bark_Mat"),
+        materials[0].__class__(source_id=0, source_name="Default_Mat"),
     )
 
 
