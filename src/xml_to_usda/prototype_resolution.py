@@ -193,6 +193,7 @@ def resolve_prototype_sources(
                     white_material_udim_mode=config.white_material_udim_mode,
                     white_material_udim_id=config.white_material_udim_id,
                     fbx_material_slot_overrides=config.fbx_material_slot_overrides,
+                    simplification_percent=config.simplification_percent,
                     geometry_payload=None,
                 )
             )
@@ -217,6 +218,7 @@ def resolve_prototype_sources(
                     white_material_udim_mode=config.white_material_udim_mode,
                     white_material_udim_id=config.white_material_udim_id,
                     fbx_material_slot_overrides=(),
+                    simplification_percent=config.simplification_percent,
                 )
             )
         else:
@@ -244,6 +246,7 @@ def resolve_prototype_sources(
                     white_material_udim_mode=config.white_material_udim_mode,
                     white_material_udim_id=config.white_material_udim_id,
                     fbx_material_slot_overrides=config.fbx_material_slot_overrides,
+                    simplification_percent=config.simplification_percent,
                 )
             )
 

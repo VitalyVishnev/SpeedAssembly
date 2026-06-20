@@ -90,6 +90,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
                 source_mode=PrototypeSourceMode.FBX_FILE,
                 fbx_path=str(tmp_path / "spruce_branch.fbx"),
                 fbx_material_mode=FbxMaterialMode.MATERIAL_SLOTS,
+                simplification_percent=45,
                 fbx_material_slot_overrides=(
                     FbxMaterialSlotSettingRecord(
                         slot_name="Bark",
@@ -126,6 +127,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert "part_mesh_settings_by_input_path" not in payload
     assert "wind_group_settings_by_input_path" not in payload
     assert payload["part_mesh_settings"][0]["fbx_material_mode"] == "material_slots"
+    assert payload["part_mesh_settings"][0]["simplification_percent"] == 45
     assert payload["proxy_mesh_settings"]["final_polycount"] == 12000
     assert payload["proxy_mesh_settings"]["bounds_inflation"] == 1.4
     assert payload["proxy_mesh_settings"]["density_resolution"] == 96
@@ -169,6 +171,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert restored_part.source_mode == PrototypeSourceMode.FBX_FILE
     assert restored_part.fbx_path == str(tmp_path / "spruce_branch.fbx")
     assert restored_part.fbx_material_mode == FbxMaterialMode.MATERIAL_SLOTS
+    assert restored_part.simplification_percent == 45
     assert len(restored_part.fbx_material_slot_overrides) == 2
     assert restored_part.fbx_material_slot_overrides[0].slot_name == "Bark"
     assert restored_part.fbx_material_slot_overrides[0].udim_mode == UdimMode.OFF

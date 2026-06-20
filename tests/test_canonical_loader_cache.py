@@ -33,3 +33,11 @@ def test_load_source_tree_model_reuses_on_disk_cache(monkeypatch, tmp_path: Path
     assert second_report == first_report
     assert second_model == first_model
     assert second_diagnostics == first_diagnostics
+
+
+def test_source_model_cache_ignores_legacy_pickle_without_unpickling(tmp_path: Path) -> None:
+    cache_path = tmp_path / "legacy.pkl"
+    cache_path.write_bytes(b"\x80\x05legacy pickle payload")
+
+    assert canonical_loader._read_source_model_cache(cache_path) is None
+    assert not cache_path.exists()

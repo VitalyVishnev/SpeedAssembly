@@ -59,6 +59,7 @@ def load_prototype_source_configs_from_json(path: str) -> tuple[PrototypeSourceC
                 fbx_material_slot_overrides=_load_fbx_material_slot_overrides(
                     raw_value.get("fbx_material_slot_overrides")
                 ),
+                simplification_percent=_coerce_simplification_percent(raw_value.get("simplification_percent")),
             )
         )
     return tuple(configs)
@@ -91,6 +92,14 @@ def _coerce_optional_string(value) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _coerce_simplification_percent(value) -> int:
+    try:
+        percent = int(value)
+    except (TypeError, ValueError):
+        return 100
+    return max(0, min(100, percent))
 
 
 def _load_fbx_material_slot_overrides(raw_value) -> tuple[FbxMaterialSlotOverride, ...]:

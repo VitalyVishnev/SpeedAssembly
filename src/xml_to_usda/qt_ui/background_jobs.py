@@ -96,6 +96,15 @@ class QtBackgroundJobsController:
             pending_start_delay_seconds=0.25,
         )
         self._fracture_preview_retry_count = 0
+        self._part_preview_job = PreviewProcessJob(
+            name="part_preview",
+            start_process=self._deps.start_part_preview_process,
+            drain_queue=self._deps.drain_process_queue,
+            close_queue=self._deps.close_process_queue,
+            trace_payload=self._part_preview_trace_payload,
+            trace=self._trace_worker,
+            pending_start_delay_seconds=0.2,
+        )
 
     @property
     def conversion_running(self) -> bool:
@@ -130,6 +139,10 @@ class QtBackgroundJobsController:
     @property
     def fracture_preview_running(self) -> bool:
         return self._fracture_preview_job.running
+
+    @property
+    def part_preview_running(self) -> bool:
+        return self._part_preview_job.running
 
     def start_conversion(self, *, request: ConversionRequest, run_async: bool) -> None:
         if self.conversion_running:
@@ -369,6 +382,17 @@ class QtBackgroundJobsController:
         self._window._update_action_state()
         self._ensure_polling()
 
+    def start_part_preview(self, request, settings) -> None:
+        if hasattr(self._window, "_handle_part_preview_loading"):
+            self._window._handle_part_preview_loading("Generating preview...")
+        try:
+            self._part_preview_job.start_latest(request, settings)
+        except Exception as exc:
+            self._part_preview_job.close()
+            self._handle_part_preview_error(str(exc))
+            return
+        self._ensure_polling()
+
     def cancel_fracture_preview(self) -> None:
         self._fracture_preview_job.cancel_running(clear_pending=True)
         self._window._update_action_state()
@@ -439,11 +463,14 @@ class QtBackgroundJobsController:
                     self._fracture_export_process.join(timeout=0.2)
         if self._fracture_preview_job.has_process:
             self._fracture_preview_job.cancel_running(clear_pending=True)
+        if self._part_preview_job.has_process:
+            self._part_preview_job.cancel_running(clear_pending=True)
         self.close_conversion_process()
         self.close_proxy_mesh_process()
         self.close_proxy_preview_process()
         self.close_fracture_export_process()
         self.close_fracture_preview_process()
+        self.close_part_preview_process()
 
     def _ensure_polling(self) -> None:
         if not self._poll_timer.isActive():
@@ -576,6 +603,23 @@ class QtBackgroundJobsController:
                 self._fracture_preview_job.start_pending_if_any()
             keep_polling = True
 
+        if self._drain_part_preview_queue():
+            keep_polling = True
+
+        if self._part_preview_job.running:
+            keep_polling = True
+        elif self._part_preview_job.has_process and not self._part_preview_job.result_received:
+            if self._drain_part_preview_queue():
+                keep_polling = True
+            if self._part_preview_job.has_process and not self._part_preview_job.result_received:
+                self._handle_part_preview_process_crash()
+                if self._part_preview_job.has_process:
+                    keep_polling = True
+        elif self._part_preview_job.has_pending:
+            if self._part_preview_job.has_ready_pending:
+                self._part_preview_job.start_pending_if_any()
+            keep_polling = True
+
         if (
             self.wind_refresh_running
             or self.wind_json_running
@@ -583,6 +627,7 @@ class QtBackgroundJobsController:
             or self.proxy_preview_running
             or self.fracture_export_running
             or self.fracture_preview_running
+            or self.part_preview_running
         ):
             keep_polling = True
 
@@ -621,6 +666,21 @@ class QtBackgroundJobsController:
                 self._handle_proxy_preview_error(str(payload))
             elif event_name == "result":
                 self._handle_proxy_preview_job_result(payload)
+        return received_event
+
+    def _drain_part_preview_queue(self) -> bool:
+        received_event = False
+        for event_name, payload in self._part_preview_job.drain():
+            received_event = True
+            if event_name == "error_traceback":
+                continue
+            if event_name == "error":
+                message = str(payload)
+                if self._part_preview_job.error_traceback:
+                    message = f"{message}\n\n{self._part_preview_job.error_traceback}"
+                self._handle_part_preview_error(message)
+            elif event_name == "result":
+                self._handle_part_preview_result(payload)
         return received_event
 
     def _handle_wind_refresh_error(self, payload: _WindErrorPayload) -> None:
@@ -831,6 +891,34 @@ class QtBackgroundJobsController:
         self._window._update_action_state()
         if hasattr(self._window, "_handle_proxy_preview_error_message"):
             self._window._handle_proxy_preview_error_message(message)
+
+    def _handle_part_preview_process_crash(self) -> None:
+        crash = self._part_preview_job.crash()
+        message = f"Part Preview worker process crashed unexpectedly (exit code {crash.exit_code})"
+        message = f"{message}\n{self._format_worker_file_context(crash.queue)}"
+        message = f"{message}\n{self._format_runtime_crash_context()}"
+        if crash.error_traceback:
+            message = f"{message}\n\n{crash.error_traceback}"
+        self._handle_part_preview_error(message)
+
+    def _handle_part_preview_result(self, result) -> None:
+        self._trace_worker("worker.result", "part_preview", {"result": result is not None})
+        if result is None:
+            self._handle_part_preview_error("Part Preview worker finished without a preview result.")
+            return
+        if self._part_preview_job.finish_current():
+            return
+        self._window._update_action_state()
+        if hasattr(self._window, "_handle_part_preview_result"):
+            self._window._handle_part_preview_result(result)
+
+    def _handle_part_preview_error(self, message: str) -> None:
+        self._trace_worker("worker.error", "part_preview", {"message": message})
+        if self._part_preview_job.finish_current():
+            return
+        self._window._update_action_state()
+        if hasattr(self._window, "_handle_part_preview_error_message"):
+            self._window._handle_part_preview_error_message(message)
 
     def _handle_fracture_export_process_crash(self) -> None:
         exit_code = self._fracture_export_process.exitcode if self._fracture_export_process is not None else None
@@ -1054,6 +1142,9 @@ class QtBackgroundJobsController:
         self._fracture_preview_job.close()
         self._fracture_preview_retry_count = 0
 
+    def close_part_preview_process(self) -> None:
+        self._part_preview_job.close()
+
     def _trace_worker(self, kind: str, worker: str, data: dict[str, object] | None = None) -> None:
         if hasattr(self._window, "_trace"):
             self._window._trace(kind, worker=worker, data=data or {})
@@ -1138,6 +1229,30 @@ class QtBackgroundJobsController:
                     "base_mesh_priority": getattr(settings, "base_mesh_priority", None),
                 }
             )
+        return payload
+
+    def _part_preview_trace_payload(self, request, settings, job_id: int) -> dict[str, object]:
+        payload: dict[str, object] = {"preview_job_id": job_id}
+        if request is not None:
+            payload.update(
+                {
+                    "input_path": getattr(request, "input_path", ""),
+                    "source_key": getattr(request, "source_key", ""),
+                    "source_name": getattr(request, "source_name", ""),
+                    "cpu_profile": getattr(getattr(request, "cpu_profile", None), "value", ""),
+                }
+            )
+            config = getattr(request, "prototype_source_config", None)
+            if config is not None:
+                payload.update(
+                    {
+                        "source_mode": getattr(getattr(config, "mode", None), "value", ""),
+                        "material_mode": getattr(getattr(config, "fbx_material_mode", None), "value", ""),
+                        "simplification_percent": getattr(config, "simplification_percent", None),
+                    }
+                )
+        if settings is not None:
+            payload["display_mode"] = getattr(getattr(settings, "display_mode", None), "value", "")
         return payload
 
 

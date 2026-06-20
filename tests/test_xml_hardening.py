@@ -29,6 +29,26 @@ def test_read_source_xml_rejects_dtd_and_entities(tmp_path: Path) -> None:
         read_source_xml(xml_path)
 
 
+def test_read_source_xml_uses_explicit_binary_parser_adapter(monkeypatch, tmp_path: Path) -> None:
+    import xml_to_usda.xml_reader as xml_reader
+
+    xml_path = tmp_path / "simple.xml"
+    xml_path.write_text("<SpeedTreeRaw />", encoding="utf-8")
+    observed: dict[str, object] = {}
+
+    def fake_parse(source, **kwargs):
+        observed["source_has_read"] = hasattr(source, "read")
+        observed["has_parser"] = kwargs.get("parser") is not None
+        return xml_reader.ET.ElementTree(xml_reader.ET.Element("SpeedTreeRaw"))
+
+    monkeypatch.setattr(xml_reader.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(xml_reader.ET, "parse", fake_parse)
+
+    assert read_source_xml(xml_path).root_tag == "SpeedTreeRaw"
+    assert observed["source_has_read"] is True
+    assert observed["has_parser"] is True
+
+
 def test_streamed_source_analysis_rejects_dtd_and_entities(tmp_path: Path) -> None:
     xml_path = _write_entity_xml(tmp_path / "entity.xml")
 

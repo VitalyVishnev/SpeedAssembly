@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from xml_to_usda.qt_ui.trace import QtTraceLogger
+from xml_to_usda.runtime_trace import RuntimeTraceLogger as QtTraceLogger
 
 
 def _read_jsonl(path: Path) -> list[dict[str, object]]:

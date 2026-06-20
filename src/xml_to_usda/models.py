@@ -378,6 +378,7 @@ class Prototype:
     white_material_udim_mode: UdimMode = UdimMode.OFF
     white_material_udim_id: int = 1001
     fbx_material_slot_overrides: tuple["FbxMaterialSlotOverride", ...] = ()
+    simplification_percent: int = 100
     geometry_payload: "GeometryBuffer | None" = None
 
     def has_active_udim_settings(self) -> bool:
@@ -448,6 +449,7 @@ class PrototypeSourceConfig:
     white_material_udim_mode: UdimMode = UdimMode.OFF
     white_material_udim_id: int = 1001
     fbx_material_slot_overrides: tuple["FbxMaterialSlotOverride", ...] = ()
+    simplification_percent: int = 100
 
     def has_active_udim_settings(self) -> bool:
         return (

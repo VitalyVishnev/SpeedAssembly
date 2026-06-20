@@ -39,8 +39,9 @@ from ..fracture_preview_service import (
 )
 from ..fracture_service import FractureSettings
 from ..fracture_viewport_scene import build_fracture_viewport_scene
-from ..models import Color4, GeometryBuffer, Quaternion, Vector3
+from ..models import Color4, GeometryBuffer, Quaternion, UdimMode, Vector3
 from ..viewport_scene import ViewportScene
+from .material_controls import MaterialUdimRow, MaterialUdimValue
 from .preview_shell import PreviewShellDialog
 from .viewport import MATCAP_VERTEX_STRIDE, MatcapViewport
 
@@ -204,12 +205,23 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.show_bones_check = QCheckBox("Show Bones", settings_panel)
         self.hide_repeated_parts_check = QCheckBox("Hide Repeated Parts", settings_panel)
         self.generate_caps_check = QCheckBox("Generate Caps", settings_panel)
+        self.override_caps_material_check = QCheckBox("Override Caps Material", settings_panel)
+        self.caps_material_row = MaterialUdimRow(
+            label="Caps Material",
+            value=MaterialUdimValue(udim_mode=UdimMode.OFF, udim_id=1001),
+            placeholder="/Game/Path/Material.Material",
+            path_max_width=None,
+            stacked_udim=True,
+            parent=settings_panel,
+        )
         self.stump_piece_check = QCheckBox("Stump Piece", settings_panel)
         self.reset_cuts_button = QPushButton("Reset Cuts", settings_panel)
         self.reset_cuts_button.clicked.connect(self._reset_manual_cuts)
         settings_layout.addWidget(self.show_bones_check)
         settings_layout.addWidget(self.hide_repeated_parts_check)
         settings_layout.addWidget(self.generate_caps_check)
+        settings_layout.addWidget(self.override_caps_material_check)
+        settings_layout.addWidget(self.caps_material_row)
         settings_layout.addWidget(self.stump_piece_check)
         settings_layout.addWidget(self.reset_cuts_button)
 
@@ -250,7 +262,8 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.color_strength_slider.valueChanged.connect(lambda raw: self._handle_color_strength_changed(float(raw) / 100.0))
         self.show_bones_check.toggled.connect(self._handle_show_bones_changed)
         self.hide_repeated_parts_check.toggled.connect(self._handle_hide_repeated_parts_changed)
-        self.generate_caps_check.toggled.connect(lambda _checked: self._emit_settings_changed())
+        self.generate_caps_check.toggled.connect(self._handle_generate_caps_changed)
+        self.override_caps_material_check.toggled.connect(lambda _checked: self._sync_caps_material_controls())
         self.stump_piece_check.toggled.connect(lambda _checked: self._emit_settings_changed())
         if preview is not None:
             self.set_preview(preview)
@@ -267,6 +280,12 @@ class FracturePreviewDialog(PreviewShellDialog):
             final_polycount=int(self.polycount_spin.value() or DEFAULT_FRACTURE_PREVIEW_POLYCOUNT),
             base_mesh_priority=float(self.base_priority_spin.value()),
         )
+
+    def caps_material_override_enabled(self) -> bool:
+        return bool(self.generate_caps_check.isChecked() and self.override_caps_material_check.isChecked())
+
+    def caps_material_value(self) -> MaterialUdimValue:
+        return self.caps_material_row.value()
 
     def set_settings(self, settings: FracturePreviewSettings) -> None:
         self._settings = settings
@@ -321,6 +340,7 @@ class FracturePreviewDialog(PreviewShellDialog):
             QSignalBlocker(self.preserve_trunk_spin),
             QSignalBlocker(self.show_bones_check),
             QSignalBlocker(self.generate_caps_check),
+            QSignalBlocker(self.override_caps_material_check),
             QSignalBlocker(self.stump_piece_check),
         ):
             self.piece_count_slider.setValue(int(settings.fracture.target_piece_count))
@@ -333,7 +353,21 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.preserve_trunk_spin.setValue(float(settings.fracture.preserve_trunk_bias))
             self.generate_caps_check.setChecked(settings.fracture.generate_caps)
             self.stump_piece_check.setChecked(settings.fracture.force_stump_piece)
+            if not settings.fracture.generate_caps:
+                self.override_caps_material_check.setChecked(False)
+        self._sync_caps_material_controls()
         self._sync_manual_controls()
+
+    def _sync_caps_material_controls(self) -> None:
+        enabled = bool(self.generate_caps_check.isChecked())
+        self.override_caps_material_check.setVisible(enabled)
+        self.override_caps_material_check.setEnabled(enabled)
+        override_enabled = enabled and bool(self.override_caps_material_check.isChecked())
+        self.caps_material_row.set_controls_visible(override_enabled)
+
+    def _handle_generate_caps_changed(self, _checked: bool) -> None:
+        self._sync_caps_material_controls()
+        self._emit_settings_changed()
 
     def _emit_settings_changed(self) -> None:
         self._sync_manual_controls()

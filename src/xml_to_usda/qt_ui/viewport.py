@@ -83,6 +83,7 @@ class MatcapViewport(QOpenGLWidget):
         self._mesh: GeometryBuffer | None = None
         self._scene: ViewportScene | None = None
         self._precomputed_matcap_vertices: np.ndarray | None = None
+        self._mesh_tint_alpha = DEFAULT_MATCAP_TINT_ALPHA
         self._target = Vector3(0.0, 0.0, 0.0)
         self._radius = 1.0
         self._distance = 3.0
@@ -199,12 +200,19 @@ class MatcapViewport(QOpenGLWidget):
         self._grid_dirty = True
         self._upload_if_valid()
 
-    def set_mesh(self, mesh: GeometryBuffer | None, *, frame_camera: bool = True) -> None:
+    def set_mesh(
+        self,
+        mesh: GeometryBuffer | None,
+        *,
+        frame_camera: bool = True,
+        tint_alpha: float = DEFAULT_MATCAP_TINT_ALPHA,
+    ) -> None:
         self._scene = None
         self._mesh = mesh
         self._precomputed_matcap_vertices = None
+        self._mesh_tint_alpha = max(0.0, min(1.0, float(tint_alpha)))
         self._update_mesh_metrics(frame_camera=frame_camera)
-        self._vertex_count = int(len(_build_viewport_vertices(self._mesh)) // MATCAP_VERTEX_STRIDE)
+        self._vertex_count = int(len(_build_viewport_vertices(self._mesh, tint_alpha=self._mesh_tint_alpha)) // MATCAP_VERTEX_STRIDE)
         self._grid_vertex_count = int(len(_build_grid_vertices(self._target, self._radius, self._ground_y)) // 4)
         self._mesh_dirty = True
         self._grid_dirty = True
@@ -450,7 +458,7 @@ class MatcapViewport(QOpenGLWidget):
             return self._precomputed_matcap_vertices
         if self._scene is not None:
             return _build_scene_vertices(self._scene)
-        return _build_viewport_vertices(self._mesh)
+        return _build_viewport_vertices(self._mesh, tint_alpha=self._mesh_tint_alpha)
 
     def _upload_mesh(self) -> None:
         if self._program is None or self._vertex_buffer is None or self._vao is None:
@@ -758,7 +766,11 @@ def _append_draw_call_vertices(
                 )
 
 
-def _build_viewport_vertices(mesh: GeometryBuffer | None) -> np.ndarray:
+def _build_viewport_vertices(
+    mesh: GeometryBuffer | None,
+    *,
+    tint_alpha: float = DEFAULT_MATCAP_TINT_ALPHA,
+) -> np.ndarray:
     if mesh is None or mesh.point_count == 0:
         return np.asarray([], dtype=np.float32)
     points = list(_points(mesh))
@@ -786,7 +798,7 @@ def _build_viewport_vertices(mesh: GeometryBuffer | None) -> np.ndarray:
                         color[0],
                         color[1],
                         color[2],
-                        DEFAULT_MATCAP_TINT_ALPHA,
+                        max(0.0, min(1.0, float(tint_alpha))),
                         0.0,
                         0.0,
                         0.0,

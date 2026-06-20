@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from collections import Counter, defaultdict
@@ -94,8 +95,15 @@ def read_source_xml(path: str | Path, *, limits: SourceLimits = DEFAULT_SOURCE_L
 
 def parse_source_xml_tree(path: str | Path, *, limits: SourceLimits = DEFAULT_SOURCE_LIMITS) -> ET.ElementTree:
     enforce_source_file_budget(path, limits)
+    _reject_dtd_or_entity_declarations(path)
     try:
-        tree = DefusedET.parse(Path(path))
+        if _use_packaged_xml_parser_adapter():
+            with Path(path).open("rb") as handle:
+                parser = ET.XMLParser(target=ET.TreeBuilder())
+                tree = ET.parse(handle, parser=parser)
+        else:
+            with Path(path).open("rb") as handle:
+                tree = DefusedET.parse(handle, forbid_dtd=True, forbid_entities=True, forbid_external=True)
     except DefusedXmlException as exc:
         raise ValueError("SpeedTree XML must not contain DTD or entity declarations.") from exc
     enforce_source_tree_budgets(tree.getroot(), limits=limits)
@@ -111,21 +119,55 @@ def iterparse_source_xml(
     enforce_source_file_budget(path, limits)
     tracker = SourceBudgetTracker(limits=limits)
     depth = 0
-    try:
-        for event, elem in DefusedET.iterparse(Path(path), events=events):
-            if event == "start":
-                depth += 1
-                tracker.observe_element(elem, depth=depth)
-            elif event == "end":
-                if "start" not in events:
-                    tracker.observe_element(elem)
+    _reject_dtd_or_entity_declarations(path)
+    with Path(path).open("rb") as handle:
+        if _use_packaged_xml_parser_adapter():
+            parser = ET.XMLParser(target=ET.TreeBuilder())
+            iterator = ET.iterparse(handle, events=events, parser=parser)
+        else:
+            iterator = DefusedET.iterparse(
+                handle,
+                events=events,
+                forbid_dtd=True,
+                forbid_entities=True,
+                forbid_external=True,
+            )
+        try:
+            for event, elem in iterator:
+                if event == "start":
+                    depth += 1
+                    tracker.observe_element(elem, depth=depth)
+                elif event == "end":
+                    if "start" not in events:
+                        tracker.observe_element(elem)
+                    yield event, elem
+                    if "start" in events:
+                        depth = max(0, depth - 1)
+                    continue
                 yield event, elem
-                if "start" in events:
-                    depth = max(0, depth - 1)
-                continue
-            yield event, elem
-    except DefusedXmlException as exc:
-        raise ValueError("SpeedTree XML must not contain DTD or entity declarations.") from exc
+        except DefusedXmlException as exc:
+            raise ValueError("SpeedTree XML must not contain DTD or entity declarations.") from exc
+
+
+def _use_packaged_xml_parser_adapter() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+def packaged_xml_parser_adapter_enabled() -> bool:
+    return _use_packaged_xml_parser_adapter()
+
+
+def _reject_dtd_or_entity_declarations(path: str | Path) -> None:
+    with Path(path).open("rb") as handle:
+        previous_tail = b""
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                return
+            lowered = (previous_tail + chunk).lower()
+            if b"<!doctype" in lowered or b"<!entity" in lowered:
+                raise ValueError("SpeedTree XML must not contain DTD or entity declarations.")
+            previous_tail = lowered[-16:]
 
 
 def inspect_xml(document: SourceXmlDocument) -> ObservedXmlSchemaReport:

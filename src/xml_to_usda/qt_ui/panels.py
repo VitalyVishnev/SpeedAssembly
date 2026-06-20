@@ -16,7 +16,6 @@ from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QCheckBox,
-    QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QFrame,
@@ -55,10 +54,16 @@ from ..settings_service import (
     WindGroupSettingRecord,
 )
 from .scrollbars import keep_vertical_scrollbar_visible
-
-UDIM_MODE_COMBO_WIDTH = 180
-UDIM_ID_SPIN_WIDTH = 76
-UDIM_ID_LABEL_SPACING = 4
+from .material_controls import (
+    MaterialUdimRow,
+    MaterialUdimValue,
+    NoWheelComboBox,
+    make_path_edit,
+    make_udim_controls,
+    make_udim_id_cell,
+    set_combo_value,
+)
+from .part_source_controls import PartSourceMaterialValue
 
 
 def _make_scroll_host(parent: QWidget) -> tuple[QWidget, QVBoxLayout]:
@@ -97,16 +102,6 @@ def _rebuild_scroll_layout(layout: QVBoxLayout) -> None:
     layout.addStretch(1)
 
 
-def _set_combo_value(combo: QComboBox, value: str) -> None:
-    index = combo.findData(value)
-    if index >= 0:
-        combo.setCurrentIndex(index)
-        return
-    index = combo.findText(value)
-    if index >= 0:
-        combo.setCurrentIndex(index)
-
-
 def _make_path_edit(
     text: str,
     parent: QWidget,
@@ -114,48 +109,11 @@ def _make_path_edit(
     placeholder: str,
     max_width: int | None = None,
 ) -> QLineEdit:
-    edit = QLineEdit(text, parent)
-    edit.setObjectName("PathInput")
-    edit.setPlaceholderText(placeholder)
-    if max_width is not None:
-        edit.setMaximumWidth(int(max_width))
-    return edit
+    return make_path_edit(text, parent, placeholder=placeholder, max_width=max_width)
 
 
 def _make_udim_controls(parent: QWidget, *, mode: UdimMode, udim_id: int) -> tuple[NoWheelComboBox, QSpinBox]:
-    mode_combo = NoWheelComboBox(parent)
-    mode_combo.setObjectName("InteractiveCombo")
-    for label, value in (
-        ("UDIM Off", UdimMode.OFF.value),
-        ("Shift UV", UdimMode.SHIFT_PRIMARY_UV.value),
-        ("Write UV1 Offset", UdimMode.WRITE_SECONDARY_UV_OFFSET.value),
-    ):
-        mode_combo.addItem(label, value)
-    _set_combo_value(mode_combo, mode.value)
-    mode_combo.setFixedWidth(UDIM_MODE_COMBO_WIDTH)
-    udim_id_spin = QSpinBox(parent)
-    udim_id_spin.setRange(1001, 1999)
-    udim_id_spin.setValue(int(udim_id))
-    udim_id_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-    udim_id_spin.setAlignment(Qt.AlignmentFlag.AlignRight)
-    udim_id_spin.setFixedWidth(UDIM_ID_SPIN_WIDTH)
-    return mode_combo, udim_id_spin
-
-
-def _make_udim_id_cell(parent: QWidget, label: QLabel, spin: QSpinBox) -> QWidget:
-    cell = QWidget(parent)
-    layout = QHBoxLayout(cell)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(UDIM_ID_LABEL_SPACING)
-    label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-    layout.addWidget(label, 0)
-    layout.addWidget(spin, 0)
-    return cell
-
-
-class NoWheelComboBox(QComboBox):
-    def wheelEvent(self, event) -> None:  # type: ignore[override]
-        event.ignore()
+    return make_udim_controls(parent, mode=mode, udim_id=udim_id)
 
 
 class NoWheelDoubleSpinBox(QDoubleSpinBox):
@@ -465,6 +423,7 @@ class GeometryRowWidgets:
     fbx_label: QLabel
     fbx_edit: QLineEdit
     browse_button: QPushButton
+    preview_button: QPushButton
 
 
 class GeometryTabPanel(QWidget):
@@ -475,6 +434,7 @@ class GeometryTabPanel(QWidget):
         on_change,
         on_preview_proxy_requested,
         on_preview_fracture_requested,
+        on_preview_part_requested,
         on_export_fracture_requested,
         on_proxy_settings_changed,
     ) -> None:
@@ -483,6 +443,7 @@ class GeometryTabPanel(QWidget):
         self._on_change = on_change
         self._on_preview_proxy_requested = on_preview_proxy_requested
         self._on_preview_fracture_requested = on_preview_fracture_requested
+        self._on_preview_part_requested = on_preview_part_requested
         self._on_export_fracture_requested = on_export_fracture_requested
         self._on_proxy_settings_changed = on_proxy_settings_changed
         self._rows: list[GeometryRowWidgets] = []
@@ -554,7 +515,7 @@ class GeometryTabPanel(QWidget):
             mode_combo.addItem("Use Unreal Reference", PrototypeSourceMode.UNREAL_ASSET.value)
             mode_combo.addItem("Use FBX File", PrototypeSourceMode.FBX_FILE.value)
             mode_combo.setObjectName("InteractiveCombo")
-            _set_combo_value(mode_combo, spec.source_mode.value)
+            set_combo_value(mode_combo, spec.source_mode.value)
 
             asset_edit = _make_path_edit(spec.unreal_asset_path, card, placeholder="/Game/Path/Asset.Asset")
             asset_label = QLabel("Unreal Path", card)
@@ -564,6 +525,7 @@ class GeometryTabPanel(QWidget):
 
             browse_button = QPushButton("Browse...", card)
             browse_button.clicked.connect(lambda _checked=False, edit=fbx_edit: self._browse_fbx(edit))
+            preview_button = QPushButton("Preview/Edit", card)
 
             card_layout.addWidget(QLabel("Source Mode", card), 2, 0)
             card_layout.addWidget(mode_combo, 2, 1)
@@ -572,6 +534,7 @@ class GeometryTabPanel(QWidget):
             card_layout.addWidget(fbx_label, 4, 0)
             card_layout.addWidget(fbx_edit, 4, 1, 1, 2)
             card_layout.addWidget(browse_button, 4, 3)
+            card_layout.addWidget(preview_button, 5, 1)
 
             row = GeometryRowWidgets(
                 source_key=spec.source_key,
@@ -584,12 +547,14 @@ class GeometryTabPanel(QWidget):
                 fbx_label=fbx_label,
                 fbx_edit=fbx_edit,
                 browse_button=browse_button,
+                preview_button=preview_button,
             )
             self._rows.append(row)
             self._apply_row_mode(row)
             mode_combo.currentIndexChanged.connect(lambda _index, current=row: self._handle_row_mode_changed(current))
             asset_edit.textChanged.connect(lambda _text: self._on_change())
             fbx_edit.textChanged.connect(lambda _text, current=row: self._handle_fbx_changed(current))
+            preview_button.clicked.connect(lambda _checked=False, current=row: self._on_preview_part_requested(current.source_key))
             self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, card)
 
     def current_snapshot(self) -> dict[str, GeometryRowState]:
@@ -605,6 +570,19 @@ class GeometryTabPanel(QWidget):
                 fbx_path=row.fbx_edit.text().strip(),
             )
         return snapshot
+
+    def part_source_geometry(self, source_key: str) -> GeometryRowState | None:
+        return self.current_snapshot().get(source_key)
+
+    def apply_part_source_value(self, value: PartSourceMaterialValue) -> None:
+        row = next((candidate for candidate in self._rows if candidate.source_key == value.source_key), None)
+        if row is None:
+            return
+        set_combo_value(row.source_mode_combo, value.source_mode.value)
+        row.asset_edit.setText(value.unreal_asset_path)
+        row.fbx_edit.setText(value.fbx_path)
+        self._apply_row_mode(row)
+        self._on_change()
 
     def has_rows(self) -> bool:
         return bool(self._rows)
@@ -697,6 +675,7 @@ class PartMaterialRowWidgets:
     slot_rows: list[SlotOverrideWidgets]
     restored_slot_override_records: tuple[FbxMaterialSlotSettingRecord, ...]
     header_label: QLabel
+    simplification_percent: int
 
 
 @dataclass(frozen=True)
@@ -800,7 +779,7 @@ class MaterialsTabPanel(QWidget):
                 row.material_mode_combo.addItem(label, value)
             if current_mode not in {value for value, _label in allowed_modes}:
                 current_mode = FbxMaterialMode.VERTEX_COLOR_SPLIT.value
-            _set_combo_value(row.material_mode_combo, current_mode)
+            set_combo_value(row.material_mode_combo, current_mode)
             row.material_mode_combo.blockSignals(False)
 
             mode = FbxMaterialMode(row.material_mode_combo.currentData())
@@ -811,6 +790,65 @@ class MaterialsTabPanel(QWidget):
                 split_visible=material_controls_visible and mode == FbxMaterialMode.VERTEX_COLOR_SPLIT,
             )
             self._refresh_slot_rows(row)
+
+    def part_source_value(self, source_key: str) -> PartSourceMaterialValue | None:
+        row = next((candidate for candidate in self._part_rows if candidate.source_key == source_key), None)
+        geometry = self._geometry_snapshot.get(source_key)
+        if row is None or geometry is None:
+            return None
+        values = self._part_material_values(row)
+        return PartSourceMaterialValue(
+            source_key=row.source_key,
+            source_name=row.source_name,
+            source_mode=geometry.source_mode,
+            unreal_asset_path=geometry.unreal_asset_path,
+            fbx_path=geometry.fbx_path,
+            fbx_material_mode=values.fbx_material_mode,
+            single_material=MaterialUdimValue(
+                values.single_material_path,
+                values.single_material_udim_mode,
+                values.single_material_udim_id,
+            ),
+            black_material=MaterialUdimValue(
+                values.black_material_path,
+                values.black_material_udim_mode,
+                values.black_material_udim_id,
+            ),
+            white_material=MaterialUdimValue(
+                values.white_material_path,
+                values.white_material_udim_mode,
+                values.white_material_udim_id,
+            ),
+            fbx_material_slot_overrides=self._part_slot_overrides(row),
+            simplification_percent=row.simplification_percent,
+        )
+
+    def apply_part_source_value(self, value: PartSourceMaterialValue) -> None:
+        row = next((candidate for candidate in self._part_rows if candidate.source_key == value.source_key), None)
+        if row is None:
+            return
+        set_combo_value(row.material_mode_combo, value.fbx_material_mode.value)
+        row.single_edit.setText(value.single_material.material_path)
+        set_combo_value(row.single_udim_mode_combo, value.single_material.udim_mode.value)
+        row.single_udim_id_spin.setValue(value.single_material.udim_id)
+        row.black_edit.setText(value.black_material.material_path)
+        set_combo_value(row.black_udim_mode_combo, value.black_material.udim_mode.value)
+        row.black_udim_id_spin.setValue(value.black_material.udim_id)
+        row.white_edit.setText(value.white_material.material_path)
+        set_combo_value(row.white_udim_mode_combo, value.white_material.udim_mode.value)
+        row.white_udim_id_spin.setValue(value.white_material.udim_id)
+        row.simplification_percent = value.simplification_percent
+        row.restored_slot_override_records = tuple(
+            FbxMaterialSlotSettingRecord(
+                slot_name=override.slot_name,
+                ue_asset_path=override.ue_asset_path or "",
+                udim_mode=override.udim_mode,
+                udim_id=override.udim_id,
+            )
+            for override in value.fbx_material_slot_overrides
+        )
+        self.apply_geometry_state(self._geometry_snapshot, cpu_profile=self._cpu_profile)
+        self._on_change()
 
     def collect_base_material_overrides(self) -> tuple[BaseMaterialOverride, ...]:
         return tuple(
@@ -837,6 +875,29 @@ class MaterialsTabPanel(QWidget):
             )
         return tuple(settings)
 
+    @staticmethod
+    def _part_slot_overrides(row: PartMaterialRowWidgets) -> tuple[FbxMaterialSlotOverride, ...]:
+        if row.slot_rows:
+            return tuple(
+                FbxMaterialSlotOverride(
+                    slot_name=slot_row.slot_name,
+                    ue_asset_path=slot_row.path_edit.text().strip() or None,
+                    udim_mode=UdimMode.parse(slot_row.udim_mode_combo.currentData()),
+                    udim_id=slot_row.udim_id_spin.value(),
+                )
+                for slot_row in row.slot_rows
+                if slot_row.slot_name.strip()
+            )
+        return tuple(
+            FbxMaterialSlotOverride(
+                slot_name=record.slot_name,
+                ue_asset_path=record.ue_asset_path or None,
+                udim_mode=record.udim_mode,
+                udim_id=record.udim_id,
+            )
+            for record in row.restored_slot_override_records
+        )
+
     def collect_prototype_source_configs(self) -> tuple[PrototypeSourceConfig, ...]:
         configs: list[PrototypeSourceConfig] = []
         for row in self._part_rows:
@@ -861,6 +922,7 @@ class MaterialsTabPanel(QWidget):
                 if (
                     values.fbx_material_mode != FbxMaterialMode.VERTEX_COLOR_SPLIT
                     or has_explicit_material_content
+                    or row.simplification_percent != 100
                 ):
                     configs.append(
                         PrototypeSourceConfig(
@@ -877,6 +939,7 @@ class MaterialsTabPanel(QWidget):
                             white_material_path=values.white_material_path or None,
                             white_material_udim_mode=values.white_material_udim_mode,
                             white_material_udim_id=values.white_material_udim_id,
+                            simplification_percent=row.simplification_percent,
                         )
                     )
                 continue
@@ -891,6 +954,7 @@ class MaterialsTabPanel(QWidget):
                         source_name=row.source_name,
                         mode=source_mode,
                         asset_path=normalize_unreal_asset_path(asset_path),
+                        simplification_percent=row.simplification_percent,
                     )
                 )
                 continue
@@ -916,6 +980,7 @@ class MaterialsTabPanel(QWidget):
                     white_material_udim_mode=values.white_material_udim_mode,
                     white_material_udim_id=values.white_material_udim_id,
                     fbx_material_slot_overrides=slot_overrides,
+                    simplification_percent=row.simplification_percent,
                 )
             )
         return tuple(configs)
@@ -964,6 +1029,7 @@ class MaterialsTabPanel(QWidget):
                 and values.fbx_material_mode == FbxMaterialMode.VERTEX_COLOR_SPLIT
                 and not has_explicit_material_content
                 and not slot_records
+                and row.simplification_percent == 100
             ):
                 continue
             payload.append(
@@ -984,6 +1050,7 @@ class MaterialsTabPanel(QWidget):
                     white_material_udim_mode=values.white_material_udim_mode,
                     white_material_udim_id=values.white_material_udim_id,
                     fbx_material_slot_overrides=slot_records,
+                    simplification_percent=row.simplification_percent,
                 )
             )
         return tuple(payload)
@@ -1042,35 +1109,25 @@ class MaterialsTabPanel(QWidget):
             layout.addWidget(QLabel("No base XML material slots found in this file.", card))
             return card
         for spec in discovery.rows:
-            row = QFrame(card)
-            row_layout = QGridLayout(row)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setHorizontalSpacing(6)
-            row_layout.addWidget(QLabel(spec.source_name or f"Material_{spec.source_id}", row), 0, 0)
-            path_edit = _make_path_edit(
-                spec.ue_asset_path,
-                row,
+            row = MaterialUdimRow(
+                label=spec.source_name or f"Material_{spec.source_id}",
+                value=MaterialUdimValue(
+                    material_path=spec.ue_asset_path,
+                    udim_mode=spec.udim_mode,
+                    udim_id=spec.udim_id,
+                ),
                 placeholder="/Game/Path/Material.Material",
-                max_width=220,
+                path_max_width=220,
+                parent=card,
             )
-            path_edit.textChanged.connect(lambda _text: self._on_change())
-            row_layout.addWidget(path_edit, 0, 1)
-            udim_mode_combo, udim_id_spin = _make_udim_controls(
-                row,
-                mode=spec.udim_mode,
-                udim_id=spec.udim_id,
-            )
-            udim_mode_combo.currentIndexChanged.connect(lambda _index: self._on_change())
-            row_layout.addWidget(udim_mode_combo, 0, 2)
-            udim_id_spin.valueChanged.connect(lambda _value: self._on_change())
-            row_layout.addWidget(udim_id_spin, 0, 3)
+            row.valueChanged.connect(self._on_change)
             self._base_rows.append(
                 BaseMaterialRowWidgets(
                     source_id=spec.source_id,
                     source_name=spec.source_name,
-                    path_edit=path_edit,
-                    udim_mode_combo=udim_mode_combo,
-                    udim_id_spin=udim_id_spin,
+                    path_edit=row.path_edit,
+                    udim_mode_combo=row.udim_mode_combo,
+                    udim_id_spin=row.udim_id_spin,
                 )
             )
             layout.addWidget(row)
@@ -1105,7 +1162,7 @@ class MaterialsTabPanel(QWidget):
             mode_combo.addItem("Vertex Color Split", FbxMaterialMode.VERTEX_COLOR_SPLIT.value)
             mode_combo.addItem("Single Material", FbxMaterialMode.SINGLE_MATERIAL.value)
             mode_combo.setObjectName("InteractiveCombo")
-            _set_combo_value(mode_combo, spec.fbx_material_mode.value)
+            set_combo_value(mode_combo, spec.fbx_material_mode.value)
 
             single_edit = _make_path_edit(
                 spec.single_material_path,
@@ -1113,7 +1170,7 @@ class MaterialsTabPanel(QWidget):
                 placeholder="/Game/Path/Material.Material",
                 max_width=190,
             )
-            single_udim_mode_combo, single_udim_id_spin = _make_udim_controls(
+            single_udim_mode_combo, single_udim_id_spin = make_udim_controls(
                 row_card,
                 mode=spec.single_material_udim_mode,
                 udim_id=spec.single_material_udim_id,
@@ -1124,7 +1181,7 @@ class MaterialsTabPanel(QWidget):
                 placeholder="/Game/Path/Black.Material",
                 max_width=190,
             )
-            black_udim_mode_combo, black_udim_id_spin = _make_udim_controls(
+            black_udim_mode_combo, black_udim_id_spin = make_udim_controls(
                 row_card,
                 mode=spec.black_material_udim_mode,
                 udim_id=spec.black_material_udim_id,
@@ -1135,7 +1192,7 @@ class MaterialsTabPanel(QWidget):
                 placeholder="/Game/Path/White.Material",
                 max_width=190,
             )
-            white_udim_mode_combo, white_udim_id_spin = _make_udim_controls(
+            white_udim_mode_combo, white_udim_id_spin = make_udim_controls(
                 row_card,
                 mode=spec.white_material_udim_mode,
                 udim_id=spec.white_material_udim_id,
@@ -1144,15 +1201,15 @@ class MaterialsTabPanel(QWidget):
             single_label = QLabel("Single Material", row_card)
             single_udim_label = QLabel("UDIM", row_card)
             single_udim_id_label = QLabel("ID", row_card)
-            single_udim_id_cell = _make_udim_id_cell(row_card, single_udim_id_label, single_udim_id_spin)
+            single_udim_id_cell = make_udim_id_cell(row_card, single_udim_id_label, single_udim_id_spin)
             black_label = QLabel("Black Material", row_card)
             black_udim_label = QLabel("UDIM", row_card)
             black_udim_id_label = QLabel("ID", row_card)
-            black_udim_id_cell = _make_udim_id_cell(row_card, black_udim_id_label, black_udim_id_spin)
+            black_udim_id_cell = make_udim_id_cell(row_card, black_udim_id_label, black_udim_id_spin)
             white_label = QLabel("White Material", row_card)
             white_udim_label = QLabel("UDIM", row_card)
             white_udim_id_label = QLabel("ID", row_card)
-            white_udim_id_cell = _make_udim_id_cell(row_card, white_udim_id_label, white_udim_id_spin)
+            white_udim_id_cell = make_udim_id_cell(row_card, white_udim_id_label, white_udim_id_spin)
 
             form.addWidget(material_mode_label, 0, 0)
             form.addWidget(mode_combo, 0, 1)
@@ -1210,6 +1267,7 @@ class MaterialsTabPanel(QWidget):
                 slot_rows=[],
                 restored_slot_override_records=spec.fbx_material_slot_overrides,
                 header_label=header_label,
+                simplification_percent=spec.simplification_percent,
             )
             self._part_rows.append(row)
             mode_combo.currentIndexChanged.connect(lambda _index, current=row: self._handle_material_mode_changed(current))
@@ -1321,7 +1379,7 @@ class MaterialsTabPanel(QWidget):
             placeholder="/Game/Path/Material.Material",
             max_width=190,
         )
-        udim_mode_combo, udim_id_spin = _make_udim_controls(widget, mode=slot_spec.udim_mode, udim_id=slot_spec.udim_id)
+        udim_mode_combo, udim_id_spin = make_udim_controls(widget, mode=slot_spec.udim_mode, udim_id=slot_spec.udim_id)
         edit.textChanged.connect(lambda _text: self._on_change())
         udim_mode_combo.currentIndexChanged.connect(lambda _index: self._on_change())
         udim_id_spin.valueChanged.connect(lambda _value: self._on_change())

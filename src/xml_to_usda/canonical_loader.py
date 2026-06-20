@@ -43,7 +43,12 @@ from .source_validation import validate_source_model
 from .xml_reader import analyze_xml, read_source_xml
 
 
-SOURCE_MODEL_CACHE_SCHEMA_VERSION = 1
+SOURCE_MODEL_CACHE_SCHEMA_VERSION = 5
+SOURCE_MODEL_CACHE_MAGIC = b"XMLTOUSDA_SOURCE_MODEL_CACHE_V1"
+
+
+class _InvalidSourceModelCache(Exception):
+    pass
 
 
 def load_source_tree_model(
@@ -260,6 +265,7 @@ def _source_model_cache_path(input_path: str) -> Path:
     signature = "|".join(
         (
             str(SOURCE_MODEL_CACHE_SCHEMA_VERSION),
+            _source_model_cache_parser_key(),
             os.path.normcase(str(xml_path.resolve(strict=False))),
             str(stat_result.st_size),
             str(stat_result.st_mtime_ns),
@@ -269,11 +275,27 @@ def _source_model_cache_path(input_path: str) -> Path:
     return _source_model_cache_root() / f"{cache_key}.pkl"
 
 
+def _source_model_cache_parser_key() -> str:
+    from .xml_reader import packaged_xml_parser_adapter_enabled
+
+    return "packaged-et-explicit" if packaged_xml_parser_adapter_enabled() else "defused"
+
+
 def _read_source_model_cache(cache_path: Path):
     try:
         with cache_path.open("rb") as handle:
+            header = handle.readline().rstrip(b"\n")
+            if header != SOURCE_MODEL_CACHE_MAGIC:
+                raise _InvalidSourceModelCache()
+            schema_line = handle.readline().decode("ascii", errors="replace").strip()
+            if schema_line != str(SOURCE_MODEL_CACHE_SCHEMA_VERSION):
+                raise _InvalidSourceModelCache()
             payload = pickle.load(handle)
     except FileNotFoundError:
+        return None
+    except _InvalidSourceModelCache:
+        with contextlib.suppress(Exception):
+            cache_path.unlink(missing_ok=True)
         return None
     except Exception:
         with contextlib.suppress(Exception):
@@ -304,6 +326,8 @@ def _write_source_model_cache(cache_path: Path, payload: tuple[ObservedXmlSchema
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         with temp_path.open("wb") as handle:
+            handle.write(SOURCE_MODEL_CACHE_MAGIC + b"\n")
+            handle.write(f"{SOURCE_MODEL_CACHE_SCHEMA_VERSION}\n".encode("ascii"))
             pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
         temp_path.replace(cache_path)
     except Exception:

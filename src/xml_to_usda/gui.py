@@ -12,7 +12,6 @@ import multiprocessing
 import sys
 
 from .fbx_worker_subprocess import FBX_WORKER_COMMAND
-from .gui_formatters import format_conversion_results, format_wind_group_summary, format_wind_json_result
 
 
 def main() -> int:
@@ -23,11 +22,3 @@ def main() -> int:
         multiprocessing.freeze_support()
         return cli_main(sys.argv[1:])
     raise RuntimeError("The Tk GUI is retired. Use `python -m xml_to_usda gui` for the supported PySide6 shell.")
-
-
-__all__ = [
-    "main",
-    "format_conversion_results",
-    "format_wind_group_summary",
-    "format_wind_json_result",
-]

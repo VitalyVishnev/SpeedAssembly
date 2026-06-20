@@ -11,10 +11,12 @@ from importlib.resources import files
 from pathlib import Path
 
 from ..diagnostics_bundle import default_build_info_path
+from ..runtime_error_mode import suppress_windows_native_error_dialogs
 from ..worker_commands import (
     CONVERSION_WORKER_COMMAND,
     FBX_WORKER_COMMAND,
     FRACTURE_WORKER_COMMAND,
+    PART_PREVIEW_WORKER_COMMAND,
     PROXY_MESH_WORKER_COMMAND,
 )
 from .smoke import SMOKE_COMMAND
@@ -40,7 +42,7 @@ def application_icon_path() -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    _suppress_windows_native_error_dialogs()
+    suppress_windows_native_error_dialogs()
     multiprocessing.freeze_support()
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == FBX_WORKER_COMMAND:
@@ -62,6 +64,11 @@ def main(argv: list[str] | None = None) -> int:
 
         request_path = argv[argv.index("--request") + 1] if "--request" in argv else ""
         return run_fracture_worker_request_file(request_path)
+    if argv and argv[0] == PART_PREVIEW_WORKER_COMMAND:
+        from ..part_preview_worker_subprocess import run_part_preview_worker_request_file
+
+        request_path = argv[argv.index("--request") + 1] if "--request" in argv else ""
+        return run_part_preview_worker_request_file(request_path)
     if argv and argv[0] == SMOKE_COMMAND:
         from .smoke import run_smoke_cli
 
@@ -111,20 +118,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.smoke_exit_ms > 0:
         QTimer.singleShot(args.smoke_exit_ms, app.quit)
     return app.exec()
-
-
-def _suppress_windows_native_error_dialogs() -> None:
-    if sys.platform != "win32":
-        return
-    try:
-        SEM_FAILCRITICALERRORS = 0x0001
-        SEM_NOGPFAULTERRORBOX = 0x0002
-        SEM_NOOPENFILEERRORBOX = 0x8000
-        ctypes.windll.kernel32.SetErrorMode(
-            SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX
-        )
-    except Exception:
-        return
 
 
 def _current_help_prompt_build_signature(build_info_path: Path | None) -> str:

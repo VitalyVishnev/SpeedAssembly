@@ -6,6 +6,7 @@ from pathlib import Path
 from xml_to_usda.worker_commands import (
     CONVERSION_WORKER_COMMAND,
     FRACTURE_WORKER_COMMAND,
+    PART_PREVIEW_WORKER_COMMAND,
     PROXY_MESH_WORKER_COMMAND,
 )
 
@@ -26,15 +27,21 @@ def test_packaged_worker_launcher_routes_worker_commands(monkeypatch) -> None:
         "xml_to_usda.fracture_worker_subprocess.run_fracture_worker_request_file",
         lambda request: calls.append(("fracture", request)) or 0,
     )
+    monkeypatch.setattr(
+        "xml_to_usda.part_preview_worker_subprocess.run_part_preview_worker_request_file",
+        lambda request: calls.append(("part_preview", request)) or 0,
+    )
 
     assert launcher.main([CONVERSION_WORKER_COMMAND, "--request", "conversion.pkl"]) == 0
     assert launcher.main([PROXY_MESH_WORKER_COMMAND, "--request", "proxy.pkl"]) == 0
     assert launcher.main([FRACTURE_WORKER_COMMAND, "--request", "fracture.pkl"]) == 0
+    assert launcher.main([PART_PREVIEW_WORKER_COMMAND, "--request", "part.pkl"]) == 0
 
     assert calls == [
         ("conversion", "conversion.pkl"),
         ("proxy", "proxy.pkl"),
         ("fracture", "fracture.pkl"),
+        ("part_preview", "part.pkl"),
     ]
 
 

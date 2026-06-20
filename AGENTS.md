@@ -49,6 +49,7 @@ If theory and UE behavior disagree, UE behavior wins.
 - не делай костыли, сделай сразу систему так, чтобы работала. Чтобы не пришлось переделывать
 - переиспользуй готовые решения, которые есть в проекте, не изобретай велосипед
 - for subagents use GPT-5.4 mini (medium)
+- use ponytail skill by default
 
 ## Simplicity and Architecture Requirements
 

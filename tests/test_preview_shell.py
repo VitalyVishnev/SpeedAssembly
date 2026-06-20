@@ -25,9 +25,12 @@ def test_preview_shell_owns_viewport_and_settings_slots(qtbot) -> None:
     assert dialog.windowTitle() == "Preview"
     assert dialog.viewport_widget is viewport
     assert dialog.settings_panel is panel
-    assert dialog.shell_layout.itemAtPosition(0, 0).widget() is viewport
-    assert dialog.shell_layout.itemAtPosition(0, 1).widget() is panel
+    assert dialog.shell_layout.itemAtPosition(0, 0).widget() is dialog.splitter
+    assert dialog.splitter.widget(0) is viewport
+    assert dialog.splitter.widget(1) is panel
     assert dialog.shell_layout.columnStretch(0) == 1
+    assert panel.minimumWidth() == 260
+    assert panel.maximumWidth() == 520
 
 
 def test_preview_shell_configures_modal_focus_contract(qtbot) -> None:

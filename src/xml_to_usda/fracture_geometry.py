@@ -34,6 +34,7 @@ def slice_mesh_faces(
     *,
     name: str,
     generate_caps: bool = False,
+    cap_material_id: int | None = None,
     cap_context: CapSourceContext | None = None,
 ) -> MeshData:
     """Return a compact mesh containing only the requested source face indices."""
@@ -99,6 +100,7 @@ def slice_mesh_faces(
             secondary_uv_coords,
             vertex_colors,
             sections,
+            cap_material_id=cap_material_id,
         )
 
     skel_joint_indices, skel_joint_weights = _slice_mesh_skinning(mesh, new_point_source)
@@ -201,6 +203,8 @@ def _append_boundary_fan_caps(
     secondary_uv_coords: list[Vector2],
     vertex_colors: list[Color4],
     sections: tuple[MeshSection, ...],
+    *,
+    cap_material_id: int | None = None,
 ) -> tuple[MeshSection, ...]:
     selected_boundary_edges: list[tuple[int, int, int]] = []
     for original_face_index in sorted(selected):
@@ -246,7 +250,9 @@ def _append_boundary_fan_caps(
                         Color4(1.0, 1.0, 1.0, 1.0),
                     )
                 )
-            material_id = cap_context.material_by_source_face.get(original_face_index, 0)
+            material_id = cap_material_id
+            if material_id is None:
+                material_id = cap_context.material_by_source_face.get(original_face_index, 0)
             cap_face_indices_by_material.setdefault(material_id, []).append(new_face_index)
 
     merged_sections = [MeshSection(material_id=section.material_id, face_indices=section.face_indices) for section in sections]

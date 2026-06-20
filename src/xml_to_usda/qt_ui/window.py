@@ -60,7 +60,7 @@ from ..proxy_mesh_service import (
     ProxyMeshSourceRequest,
     prepare_proxy_mesh_source_request,
 )
-from ..fracture_export_service import FractureExportRequest
+from ..fracture_export_service import FractureCapMaterialSetting, FractureExportRequest
 from ..fracture_preview_service import (
     FracturePreviewSettings,
     FracturePreviewSourceRequest,
@@ -99,6 +99,7 @@ from .persistence import (
     save_ui_theme_overrides,
 )
 from .fracture_preview import FracturePreviewDialog
+from .part_preview import PartPrototypePreviewDialog
 from .preview_shell import configure_preview_dialog, focus_preview_dialog
 from .proxy_preview import ProxyPreviewDialog
 from .theme import (
@@ -114,7 +115,7 @@ from .theme import (
     theme_to_payload,
     write_theme_payload,
 )
-from .trace import QtTraceLogger, trace_path_for_settings_dir
+from ..runtime_trace import RuntimeTraceLogger as QtTraceLogger, trace_path_for_settings_dir
 
 
 @dataclass(frozen=True)
@@ -654,6 +655,7 @@ class MainWindow(QWidget):
         self._adjust_ui_dialog: AdjustUiDialog | None = None
         self._global_settings_dialog: GlobalSettingsDialog | None = None
         self._fracture_preview_dialog: FracturePreviewDialog | None = None
+        self._part_preview_dialog: PartPrototypePreviewDialog | None = None
         self._proxy_preview_dialog: ProxyPreviewDialog | None = None
         self._proxy_mesh_settings = ProxyMeshSettings()
         self._fracture_preview_settings = FracturePreviewSettings()
@@ -1010,6 +1012,7 @@ class MainWindow(QWidget):
             on_change=self._handle_geometry_state_changed,
             on_preview_proxy_requested=self.open_proxy_preview_dialog,
             on_preview_fracture_requested=self.open_fracture_preview_dialog,
+            on_preview_part_requested=self.open_part_preview_dialog,
             on_export_fracture_requested=self.run_export_fracture_usda,
             on_proxy_settings_changed=self._handle_proxy_settings_changed,
         )
@@ -2147,6 +2150,82 @@ class MainWindow(QWidget):
         self._proxy_preview_dialog = dialog
         focus_preview_dialog(dialog)
 
+    def open_part_preview_dialog(self, source_key: str) -> None:
+        self._source_refresh_timer.stop()
+        input_path = self.source_input.text().strip()
+        if not input_path:
+            self._report_error("Missing input", "Select a source XML file before previewing an instanced part.")
+            return
+        self.materials_panel.apply_geometry_state(
+            self.geometry_panel.current_snapshot(),
+            cpu_profile=self._operator_state.cpu_profile,
+        )
+        value = self.materials_panel.part_source_value(source_key)
+        if value is None:
+            self._report_error("Missing part", f"Could not find instanced part {source_key}.")
+            return
+        if self._part_preview_dialog is not None and self._part_preview_dialog.isVisible():
+            self._part_preview_dialog.close()
+        dialog = PartPrototypePreviewDialog(
+            input_path=input_path,
+            value=value,
+            cpu_profile=self._operator_state.cpu_profile,
+            fbx_cache_max_bytes=self._fbx_cache_max_bytes(),
+            fbx_cache_max_age_seconds=self._fbx_cache_max_age_seconds(),
+            browse_fbx=self._browse_part_fbx,
+            inspect_fbx_slots=self._inspect_part_preview_fbx_slots,
+            on_apply=self._apply_part_preview_value,
+            on_preview_requested=self._start_part_preview,
+            parent=self,
+        )
+        configure_preview_dialog(dialog, owner=self, stylesheet=self.styleSheet())
+        self._attach_preview_viewport_trace(dialog.viewport, job="part_preview")
+        self._part_preview_dialog = dialog
+        focus_preview_dialog(dialog)
+
+    def _apply_part_preview_value(self, value) -> None:
+        self.geometry_panel.apply_part_source_value(value)
+        self.materials_panel.apply_geometry_state(
+            self.geometry_panel.current_snapshot(),
+            cpu_profile=self._operator_state.cpu_profile,
+        )
+        self.materials_panel.apply_part_source_value(value)
+        self._handle_tab_state_changed()
+        self._set_status("Instanced part settings applied.")
+
+    def _start_part_preview(self, request, settings) -> None:
+        self._background_jobs.start_part_preview(request, settings)
+
+    def _inspect_part_preview_fbx_slots(self, fbx_path: str, slot_overrides) -> tuple:
+        from ..settings_service import FbxMaterialSlotSettingRecord
+
+        persisted_records = tuple(
+            FbxMaterialSlotSettingRecord(
+                slot_name=override.slot_name,
+                ue_asset_path=override.ue_asset_path or "",
+                udim_mode=override.udim_mode,
+                udim_id=override.udim_id,
+            )
+            for override in slot_overrides
+        )
+        return self._deps.inspect_fbx_material_slot_rows(
+            fbx_path,
+            cpu_profile=self._operator_state.cpu_profile,
+            persisted_records=persisted_records,
+        )
+
+    def _handle_part_preview_loading(self, message: str) -> None:
+        if self._part_preview_dialog is not None:
+            self._part_preview_dialog.set_loading(message)
+
+    def _handle_part_preview_result(self, result) -> None:
+        if self._part_preview_dialog is not None:
+            self._part_preview_dialog.set_preview(result)
+
+    def _handle_part_preview_error_message(self, message: str) -> None:
+        if self._part_preview_dialog is not None:
+            self._part_preview_dialog.set_error(message)
+
     def open_fracture_preview_dialog(self) -> None:
         self._source_refresh_timer.stop()
         if self._fracture_preview_dialog is not None and self._fracture_preview_dialog.isVisible():
@@ -2491,9 +2570,25 @@ class MainWindow(QWidget):
             self._report_conversion_plan_error(exc)
             return
         settings = self._fracture_preview_settings.fracture
+        export_request = FractureExportRequest.from_conversion_request(plan.request)
+        cap_material_setting = self._current_fracture_cap_material_setting()
+        if cap_material_setting.enabled:
+            export_request = replace(export_request, cap_material_setting=cap_material_setting)
         self._background_jobs.start_fracture_export(
-            FractureExportRequest.from_conversion_request(plan.request),
+            export_request,
             settings,
+        )
+
+    def _current_fracture_cap_material_setting(self) -> FractureCapMaterialSetting:
+        dialog = self._fracture_preview_dialog
+        if dialog is None or not dialog.caps_material_override_enabled():
+            return FractureCapMaterialSetting()
+        value = dialog.caps_material_value()
+        return FractureCapMaterialSetting(
+            enabled=True,
+            ue_asset_path=value.material_path or None,
+            udim_mode=value.udim_mode,
+            udim_id=value.udim_id,
         )
 
     def _proxy_preview_result_for_input(self, input_path: str) -> ProxyMeshResult | None:
@@ -2699,6 +2794,8 @@ class MainWindow(QWidget):
         self._settings_save_timer.stop()
         if self._proxy_preview_dialog is not None:
             self._proxy_preview_dialog.close()
+        if self._part_preview_dialog is not None:
+            self._part_preview_dialog.close()
         self._save_operator_state()
         self._background_jobs.shutdown()
         geometry = self.normalGeometry() if self.isMaximized() else self.geometry()

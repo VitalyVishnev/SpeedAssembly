@@ -33,6 +33,26 @@ def test_slice_mesh_faces_can_generate_deterministic_boundary_fan_caps() -> None
     assert tuple(section.face_indices for section in sliced.sections) == ((0,), (1,))
 
 
+def test_slice_mesh_faces_can_assign_caps_to_override_material() -> None:
+    mesh = MeshData(
+        name="Base",
+        points=(
+            Vector3(0.0, 0.0, 0.0),
+            Vector3(1.0, 0.0, 0.0),
+            Vector3(1.0, 1.0, 0.0),
+            Vector3(0.0, 1.0, 0.0),
+        ),
+        face_vertex_counts=(3, 3),
+        face_vertex_indices=(0, 1, 2, 0, 2, 3),
+        sections=(MeshSection(material_id=7, face_indices=(0, 1)),),
+    )
+
+    sliced = slice_mesh_faces(mesh, (0,), name="Piece", generate_caps=True, cap_material_id=42)
+
+    assert tuple(section.material_id for section in sliced.sections) == (7, 42)
+    assert tuple(section.face_indices for section in sliced.sections) == ((0,), (1,))
+
+
 def test_slice_mesh_faces_leaves_piece_open_when_caps_are_disabled() -> None:
     mesh = MeshData(
         name="Base",

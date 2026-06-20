@@ -67,6 +67,7 @@ class PrototypeRowSpec:
     white_material_udim_mode: UdimMode = UdimMode.OFF
     white_material_udim_id: int = 1001
     fbx_material_slot_overrides: tuple[FbxMaterialSlotSettingRecord, ...] = ()
+    simplification_percent: int = 100
 
 
 @dataclass(frozen=True)
@@ -148,6 +149,7 @@ def discover_part_prototype_rows(
         white_material_udim_mode = UdimMode.OFF
         white_material_udim_id = 1001
         slot_overrides: tuple[FbxMaterialSlotSettingRecord, ...] = ()
+        simplification_percent = 100
         if persisted is not None:
             source_mode = _normalize_source_mode(persisted.source_mode)
             fbx_material_mode = _normalize_row_fbx_material_mode(persisted.fbx_material_mode)
@@ -163,6 +165,7 @@ def discover_part_prototype_rows(
             white_material_udim_mode = persisted.white_material_udim_mode
             white_material_udim_id = persisted.white_material_udim_id
             slot_overrides = persisted.fbx_material_slot_overrides
+            simplification_percent = persisted.simplification_percent
         rows.append(
             PrototypeRowSpec(
                 source_key=prototype.source_key,
@@ -183,6 +186,7 @@ def discover_part_prototype_rows(
                 white_material_udim_mode=white_material_udim_mode,
                 white_material_udim_id=white_material_udim_id,
                 fbx_material_slot_overrides=slot_overrides,
+                simplification_percent=simplification_percent,
             )
         )
     return PrototypeDiscovery(

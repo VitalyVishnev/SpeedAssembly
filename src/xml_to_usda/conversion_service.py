@@ -216,6 +216,8 @@ def _should_run_async(
 ) -> bool:
     if any(config.mode == PrototypeSourceMode.FBX_FILE for config in prototype_source_configs):
         return True
+    if any(config.simplification_percent != 100 for config in prototype_source_configs):
+        return True
     try:
         return Path(input_path).stat().st_size >= async_threshold_bytes
     except OSError:

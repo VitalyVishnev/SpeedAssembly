@@ -361,6 +361,35 @@ def _build_fake_deps(calls: dict[str, object]) -> QtUiDependencies:
         }
         return _FinishedProcess(), [("result", export_fracture_usda_from_export_request(request, settings))], object()
 
+    def start_part_preview_process(request, settings):
+        from xml_to_usda.part_preview_service import PartPrototypePreviewResult
+
+        calls.setdefault("start_part_preview_process_events", []).append(
+            {
+                "request": request,
+                "settings": settings,
+            }
+        )
+        calls["start_part_preview_process"] = {
+            "request": request,
+            "settings": settings,
+        }
+        return (
+            _FinishedProcess(),
+            [
+                (
+                    "result",
+                    PartPrototypePreviewResult(
+                        source_key=request.source_key,
+                        source_name=request.source_name,
+                        source_mode=request.prototype_source_config.mode,
+                        mesh=None,
+                    ),
+                )
+            ],
+            object(),
+        )
+
     def drain_process_queue(queue):
         if isinstance(queue, list):
             events = list(queue)
@@ -417,6 +446,7 @@ def _build_fake_deps(calls: dict[str, object]) -> QtUiDependencies:
         start_proxy_mesh_process=start_proxy_mesh_process,
         start_fracture_export_process=start_fracture_export_process,
         start_fracture_preview_process=start_fracture_preview_process,
+        start_part_preview_process=start_part_preview_process,
         close_process_queue=lambda queue: None,
         drain_process_queue=drain_process_queue,
         convert_request=convert_request,
@@ -738,6 +768,56 @@ def test_qt_window_hides_irrelevant_geometry_path_fields(qtbot, tmp_path) -> Non
     assert row.asset_edit.isHidden()
     assert not row.fbx_edit.isHidden()
     assert not row.browse_button.isHidden()
+
+
+def test_qt_window_part_preview_apply_updates_geometry_materials_and_settings(qtbot, tmp_path) -> None:
+    settings_path = tmp_path / "gui_settings.json"
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps({}),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=settings_path,
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    fake_fbx = tmp_path / "twig.fbx"
+    fake_fbx.write_bytes(b"fake")
+    window.source_input.setText(str(tree_xml))
+
+    row = window.geometry_panel._rows[0]
+    row.preview_button.click()
+    qtbot.waitUntil(lambda: window._part_preview_dialog is not None)
+    dialog = window._part_preview_dialog
+
+    dialog.editor.source_mode_combo.setCurrentIndex(
+        dialog.editor.source_mode_combo.findData(PrototypeSourceMode.FBX_FILE.value)
+    )
+    dialog.editor.fbx_path_edit.setText(str(fake_fbx))
+    dialog.editor.material_mode_combo.setCurrentIndex(
+        dialog.editor.material_mode_combo.findData(FbxMaterialMode.SINGLE_MATERIAL.value)
+    )
+    dialog.editor.single_row.path_edit.setText("/Game/Test/M_Twig.M_Twig")
+    dialog.editor.simplification_slider.setValue(45)
+    dialog.apply_button.click()
+
+    snapshot = window.geometry_panel.current_snapshot()["Mesh_7"]
+    assert snapshot.source_mode == PrototypeSourceMode.FBX_FILE
+    assert snapshot.fbx_path == str(fake_fbx)
+
+    records = window.materials_panel.serialize_part_source_records()
+    assert records[0].source_key == "Mesh_7"
+    assert records[0].fbx_material_mode == FbxMaterialMode.SINGLE_MATERIAL
+    assert records[0].single_material_path == "/Game/Test/M_Twig.M_Twig"
+    assert records[0].simplification_percent == 45
+
+    qtbot.waitUntil(lambda: bool(load_gui_settings(settings_path).part_mesh_settings))
+    saved = load_gui_settings(settings_path)
+    assert saved.part_mesh_settings[0].single_material_path == "/Game/Test/M_Twig.M_Twig"
+    assert saved.part_mesh_settings[0].simplification_percent == 45
 
 
 def test_qt_window_hides_irrelevant_part_material_path_fields(qtbot, tmp_path) -> None:
@@ -1488,6 +1568,57 @@ def test_qt_window_opening_fracture_preview_closes_running_proxy_preview(monkeyp
     assert calls["start_fracture_preview_process"]["settings"].fracture.target_piece_count == 5
 
 
+def test_qt_fracture_caps_material_controls_do_not_restart_preview(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    calls: dict[str, object] = {}
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps(calls),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+
+    qtbot.mouseClick(window.geometry_panel.preview_fracture_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(
+        lambda: window._fracture_preview_dialog is not None
+        and window._fracture_preview_dialog.current_preview is not None,
+        timeout=3000,
+    )
+
+    dialog = window._fracture_preview_dialog
+    assert dialog is not None
+    assert dialog.override_caps_material_check.isHidden()
+    assert dialog.caps_material_row.isHidden()
+
+    dialog.generate_caps_check.setChecked(True)
+    qtbot.waitUntil(lambda: len(calls.get("start_fracture_preview_process_events", [])) >= 2, timeout=3000)
+    preview_start_count = len(calls["start_fracture_preview_process_events"])
+
+    dialog.override_caps_material_check.setChecked(True)
+    dialog.caps_material_row.path_edit.setText("/Game/Fracture/M_Cap.M_Cap")
+    dialog.caps_material_row.udim_mode_combo.setCurrentIndex(
+        dialog.caps_material_row.udim_mode_combo.findData(UdimMode.WRITE_SECONDARY_UV_OFFSET.value)
+    )
+    dialog.caps_material_row.udim_id_spin.setValue(1003)
+    qtbot.wait(100)
+
+    assert not dialog.override_caps_material_check.isHidden()
+    assert not dialog.caps_material_row.isHidden()
+    assert dialog.caps_material_row.layout().itemAtPosition(0, 1).widget() is dialog.caps_material_row.path_edit
+    assert dialog.caps_material_row.layout().itemAtPosition(1, 1).widget() is dialog.caps_material_row.udim_mode_combo
+    assert dialog.caps_material_row.layout().itemAtPosition(1, 2).widget() is dialog.caps_material_row.udim_id_spin
+    assert len(calls["start_fracture_preview_process_events"]) == preview_start_count
+
+
 def test_qt_window_exports_fracture_pieces_with_current_operator_intent(monkeypatch, qtbot, tmp_path) -> None:
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
     monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
@@ -1526,8 +1657,16 @@ def test_qt_window_exports_fracture_pieces_with_current_operator_intent(monkeypa
         and window._fracture_preview_dialog.current_preview is not None,
         timeout=3000,
     )
+    dialog = window._fracture_preview_dialog
+    assert dialog is not None
+    dialog.override_caps_material_check.setChecked(True)
+    dialog.caps_material_row.path_edit.setText("/Game/Fracture/M_Cap.M_Cap")
+    dialog.caps_material_row.udim_mode_combo.setCurrentIndex(
+        dialog.caps_material_row.udim_mode_combo.findData(UdimMode.WRITE_SECONDARY_UV_OFFSET.value)
+    )
+    dialog.caps_material_row.udim_id_spin.setValue(1003)
 
-    qtbot.mouseClick(window._fracture_preview_dialog.export_button, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(dialog.export_button, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: "Wrote 4 Fracture USDA piece(s)." in window.status_label.text(), timeout=3000)
 
     assert calls["start_fracture_export_process"]["settings"].target_piece_count == 4
@@ -1537,6 +1676,10 @@ def test_qt_window_exports_fracture_pieces_with_current_operator_intent(monkeypa
     assert isinstance(call["request"], FractureExportRequest)
     assert call["request"].input_path == str(tree_xml)
     assert call["request"].output_path == str(output_path)
+    assert call["request"].cap_material_setting.enabled is True
+    assert call["request"].cap_material_setting.ue_asset_path == "/Game/Fracture/M_Cap.M_Cap"
+    assert call["request"].cap_material_setting.udim_mode == UdimMode.WRITE_SECONDARY_UV_OFFSET
+    assert call["request"].cap_material_setting.udim_id == 1003
     assert call["request"].prototype_source_configs[0].mode == PrototypeSourceMode.FBX_FILE
     assert call["request"].prototype_source_configs[0].fbx_path == str(fake_fbx)
     assert "tree_fracture_03.usda" in window._log_text

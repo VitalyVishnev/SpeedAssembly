@@ -271,6 +271,19 @@ def test_fracture_preview_source_request_reuses_on_disk_preview_cache(monkeypatc
     assert second.plan == first.plan
 
 
+def test_fracture_preview_source_cache_ignores_legacy_pickle_without_unpickling(monkeypatch, tmp_path) -> None:
+    from xml_to_usda import fracture_preview_service
+
+    cache_root = tmp_path / "cache" / "fracture_preview_source_models"
+    cache_root.mkdir(parents=True)
+    monkeypatch.setattr(fracture_preview_service, "_preview_source_model_cache_root", lambda: cache_root)
+    cache_path = fracture_preview_service._preview_source_model_cache_path(str(BIG_SPRUCE))
+    cache_path.write_bytes(b"\x80\x05legacy fracture preview payload")
+
+    assert fracture_preview_service._read_preview_source_model_cache(str(BIG_SPRUCE)) is None
+    assert not cache_path.exists()
+
+
 def test_fracture_preview_includes_bone_overlay_segments_and_selected_manual_cuts() -> None:
     source_tree = _tree()
     skeleton = list(source_tree.skeleton)

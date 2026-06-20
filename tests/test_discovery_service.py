@@ -48,6 +48,7 @@ def test_discover_part_prototype_rows_restores_persisted_modes() -> None:
                 source_mode=PrototypeSourceMode.FBX_FILE,
                 fbx_path=r"D:\XMLtoUSD_miscFiles\spruce_branch.fbx",
                 fbx_material_mode=FbxMaterialMode.MATERIAL_SLOTS,
+                simplification_percent=25,
                 fbx_material_slot_overrides=(
                     FbxMaterialSlotSettingRecord(
                         slot_name="Bark",
@@ -62,6 +63,7 @@ def test_discover_part_prototype_rows_restores_persisted_modes() -> None:
     assert discovery.rows[0].source_name == "Twig_01"
     assert discovery.rows[0].source_mode == PrototypeSourceMode.FBX_FILE
     assert discovery.rows[0].fbx_material_mode == FbxMaterialMode.MATERIAL_SLOTS
+    assert discovery.rows[0].simplification_percent == 25
     assert discovery.rows[0].fbx_material_slot_overrides == (
         FbxMaterialSlotSettingRecord(
             slot_name="Bark",

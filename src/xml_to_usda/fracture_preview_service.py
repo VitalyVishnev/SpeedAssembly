@@ -53,7 +53,12 @@ DEFAULT_FRACTURE_PREVIEW_POLYCOUNT = 1_000_000
 DEFAULT_FRACTURE_PREVIEW_BASE_PRIORITY = 0.33
 DEFAULT_FRACTURE_PREVIEW_BASE_FACE_BUDGET = 50_000
 DEFAULT_FRACTURE_PREVIEW_PROTOTYPE_FACE_BUDGET = 2_000
-FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION = 2
+FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION = 4
+FRACTURE_PREVIEW_SOURCE_CACHE_MAGIC = b"XMLTOUSDA_FRACTURE_PREVIEW_SOURCE_CACHE_V1"
+
+
+class _InvalidFracturePreviewSourceCache(Exception):
+    pass
 
 
 @dataclass(frozen=True)
@@ -558,8 +563,18 @@ def _read_preview_source_model_cache(
     cache_path = _preview_source_model_cache_path(input_path)
     try:
         with cache_path.open("rb") as handle:
+            header = handle.readline().rstrip(b"\n")
+            if header != FRACTURE_PREVIEW_SOURCE_CACHE_MAGIC:
+                raise _InvalidFracturePreviewSourceCache()
+            schema_line = handle.readline().decode("ascii", errors="replace").strip()
+            if schema_line != str(FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION):
+                raise _InvalidFracturePreviewSourceCache()
             payload = pickle.load(handle)
     except FileNotFoundError:
+        return None
+    except _InvalidFracturePreviewSourceCache:
+        with contextlib.suppress(Exception):
+            cache_path.unlink(missing_ok=True)
         return None
     except Exception:
         with contextlib.suppress(Exception):
@@ -590,6 +605,8 @@ def _write_preview_source_model_cache(
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         with temp_path.open("wb") as handle:
+            handle.write(FRACTURE_PREVIEW_SOURCE_CACHE_MAGIC + b"\n")
+            handle.write(f"{FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION}\n".encode("ascii"))
             pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
         temp_path.replace(cache_path)
     except Exception:
@@ -608,6 +625,7 @@ def _preview_source_model_cache_path(input_path: str) -> Path:
     signature = "|".join(
         (
             str(FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION),
+            _preview_source_model_cache_parser_key(),
             os.path.normcase(str(xml_path.resolve(strict=False))),
             str(stat_result.st_size),
             str(stat_result.st_mtime_ns),
@@ -615,6 +633,12 @@ def _preview_source_model_cache_path(input_path: str) -> Path:
     )
     cache_key = hashlib.sha256(signature.encode("utf-8")).hexdigest()
     return _preview_source_model_cache_root() / f"{cache_key}.pkl"
+
+
+def _preview_source_model_cache_parser_key() -> str:
+    from .xml_reader import packaged_xml_parser_adapter_enabled
+
+    return "packaged-et-explicit" if packaged_xml_parser_adapter_enabled() else "defused"
 
 
 def _preview_source_model_cache_root() -> Path:

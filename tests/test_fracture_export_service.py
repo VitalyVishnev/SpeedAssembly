@@ -3,14 +3,18 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from usda_test_inventory import UsdaInventory
 
 from xml_to_usda.fracture_export_service import (
+    FractureCapMaterialSetting,
     FractureExportRequest,
+    _cap_material_id,
+    _piece_resolved_model,
     export_fracture_usda,
     export_fracture_usda_from_export_request,
 )
-from xml_to_usda.fracture_service import FractureSettings
+from xml_to_usda.fracture_service import FractureError, FracturePiece, FractureSettings
 from xml_to_usda.models import (
     BaseMaterialOverride,
     ConversionMode,
@@ -20,7 +24,9 @@ from xml_to_usda.models import (
     InstanceBinding,
     Joint,
     Matrix4d,
+    MaterialSpec,
     MeshData,
+    MeshSection,
     PrototypeSourceConfig,
     PrototypeSourceMode,
     Prototype,
@@ -32,8 +38,10 @@ from xml_to_usda.models import (
     TreeAsset,
     UdimMaterialSetting,
     UdimMode,
+    Vector2,
     Vector3,
 )
+from xml_to_usda.usda_writer import write_resolved_usda_document
 
 
 def _joint(name: str, source_id: int, parent: str | None, y: float, group: int) -> Joint:
@@ -131,6 +139,54 @@ def _resolved_tree() -> ResolvedAssemblyModel:
     )
 
 
+def _cap_test_resolved_tree() -> ResolvedAssemblyModel:
+    resolved = _resolved_tree()
+    base_mesh = MeshData(
+        name="Base",
+        points=(
+            Vector3(0.0, 0.0, 0.0),
+            Vector3(1.0, 0.0, 0.0),
+            Vector3(1.0, 1.0, 0.0),
+            Vector3(0.0, 1.0, 0.0),
+        ),
+        face_vertex_counts=(3, 3),
+        face_vertex_indices=(0, 1, 2, 0, 2, 3),
+        uv_coords=(
+            Vector2(0.0, 0.0),
+            Vector2(1.0, 0.0),
+            Vector2(1.0, 1.0),
+            Vector2(0.0, 0.0),
+            Vector2(1.0, 1.0),
+            Vector2(0.0, 1.0),
+        ),
+        sections=(MeshSection(material_id=7, face_indices=(0, 1)),),
+        skel_joint_indices=(0, 0, 0, 0),
+        skel_joint_weights=(1.0, 1.0, 1.0, 1.0),
+        skel_element_size=1,
+    )
+    tree = replace(
+        resolved.authoring_model,
+        materials=(MaterialSpec(source_id=7, name="Bark", ue_asset_path="/Game/M_Bark.M_Bark"),),
+        base_mesh=base_mesh,
+        assembly_parts=(),
+        prototypes=(),
+    )
+    return replace(resolved, authoring_model=tree)
+
+
+def _single_face_piece() -> FracturePiece:
+    return FracturePiece(
+        index=0,
+        name="Oak_fracture_00",
+        is_root_piece=True,
+        cut_joint_token=None,
+        joint_tokens=("root",),
+        base_face_indices=(0,),
+        repeated_part_indices=(),
+        repeated_part_names=(),
+    )
+
+
 def test_fracture_export_writes_flat_static_assembly_siblings_that_reassemble_at_root_transform(tmp_path: Path) -> None:
     output_path = tmp_path / "Oak.usda"
 
@@ -162,6 +218,93 @@ def test_fracture_export_writes_flat_static_assembly_siblings_that_reassemble_at
     assert "LeafCluster" not in Path(result.outputs[0].output_path).read_text(encoding="utf-8")
     assert "LeafCluster" in Path(result.outputs[1].output_path).read_text(encoding="utf-8")
     assert "LeafCluster" in Path(result.outputs[2].output_path).read_text(encoding="utf-8")
+
+
+def test_fracture_cap_material_override_authors_cap_section_and_material_binding(tmp_path: Path) -> None:
+    resolved = _cap_test_resolved_tree()
+    cap_material_id = _cap_material_id(resolved.authoring_model)
+
+    piece_resolved = _piece_resolved_model(
+        resolved,
+        _single_face_piece(),
+        generate_caps=True,
+        cap_material_setting=FractureCapMaterialSetting(
+            enabled=True,
+            ue_asset_path="/Game/Fracture/M_Cap.M_Cap",
+        ),
+        cap_material_id=cap_material_id,
+    )
+
+    base_mesh = piece_resolved.authoring_model.base_mesh
+    assert base_mesh is not None
+    assert tuple(section.material_id for section in base_mesh.sections) == (7, cap_material_id)
+    assert piece_resolved.authoring_model.materials[-1].ue_asset_path == "/Game/Fracture/M_Cap.M_Cap"
+
+    document = write_resolved_usda_document(piece_resolved, output_path=tmp_path / "Oak_fracture_00.usda")
+    text = Path(tmp_path / "Oak_fracture_00.usda").read_text(encoding="utf-8")
+    inventory = UsdaInventory.from_text(text)
+
+    assert document.text is None or "/Game/Fracture/M_Cap.M_Cap" in document.text
+    assert "/Game/Fracture/M_Cap.M_Cap" in text
+    assert inventory.has_prim("/Oak_fracture_00/AssemblyPartsInstancer/Prototypes/Oak_fracture_00_BaseMesh/SM_Oak_fracture_00_BaseMesh/Material_7_7", "GeomSubset")
+    assert inventory.has_prim(
+        f"/Oak_fracture_00/AssemblyPartsInstancer/Prototypes/Oak_fracture_00_BaseMesh/SM_Oak_fracture_00_BaseMesh/Material_{cap_material_id}_{cap_material_id}",
+        "GeomSubset",
+    )
+
+
+def test_fracture_cap_material_udim_applies_only_to_cap_faces() -> None:
+    resolved = _cap_test_resolved_tree()
+    cap_material_id = _cap_material_id(resolved.authoring_model)
+
+    piece_resolved = _piece_resolved_model(
+        resolved,
+        _single_face_piece(),
+        generate_caps=True,
+        cap_material_setting=FractureCapMaterialSetting(
+            enabled=True,
+            ue_asset_path="/Game/Fracture/M_Cap.M_Cap",
+            udim_mode=UdimMode.WRITE_SECONDARY_UV_OFFSET,
+            udim_id=1003,
+        ),
+        cap_material_id=cap_material_id,
+    )
+
+    base_mesh = piece_resolved.authoring_model.base_mesh
+    assert base_mesh is not None
+    assert piece_resolved.udim_material_settings[-1] == UdimMaterialSetting(
+        material_id=cap_material_id,
+        mode=UdimMode.WRITE_SECONDARY_UV_OFFSET,
+        udim_id=1003,
+    )
+    assert base_mesh.secondary_uv_coords[:3] == (Vector2(0.5, 0.5),) * 3
+    assert base_mesh.secondary_uv_coords[3:] == (Vector2(2.5, 0.5),) * 3
+
+
+def test_fracture_cap_material_override_rejects_disabled_caps(tmp_path: Path) -> None:
+    request = FractureExportRequest(
+        input_path="tree.xml",
+        output_path=str(tmp_path / "Oak.usda"),
+        cap_material_setting=FractureCapMaterialSetting(
+            enabled=True,
+            ue_asset_path="/Game/Fracture/M_Cap.M_Cap",
+        ),
+    )
+
+    with pytest.raises(FractureError, match="requires Generate Caps"):
+        export_fracture_usda_from_export_request(request, FractureSettings(generate_caps=False))
+
+
+@pytest.mark.parametrize("path", ("", "Not/Game/Path"))
+def test_fracture_cap_material_override_rejects_missing_or_invalid_material_path(tmp_path: Path, path: str) -> None:
+    request = FractureExportRequest(
+        input_path="tree.xml",
+        output_path=str(tmp_path / "Oak.usda"),
+        cap_material_setting=FractureCapMaterialSetting(enabled=True, ue_asset_path=path),
+    )
+
+    with pytest.raises(FractureError, match="Caps material"):
+        export_fracture_usda_from_export_request(request, FractureSettings(generate_caps=True))
 
 
 def test_fracture_export_from_conversion_request_resolves_current_operator_intent(monkeypatch, tmp_path: Path) -> None:

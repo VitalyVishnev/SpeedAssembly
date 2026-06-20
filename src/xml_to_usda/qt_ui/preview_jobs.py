@@ -264,6 +264,16 @@ class PreviewProcessJob:
         self._pending_request = None
         self._pending_settings = None
         self._pending_ready_at = 0.0
+        if self._cancel_event is not None:
+            with suppress(Exception):
+                self._cancel_event.set()
+        if self._process is not None and self._process.is_alive():
+            with suppress(Exception):
+                self._process.join(timeout=0.1)
+            if self._process.is_alive():
+                with suppress(Exception):
+                    self._process.terminate()
+                    self._process.join(timeout=0.1)
         self.close_handles()
         self._request = None
         self._settings = None

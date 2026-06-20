@@ -135,11 +135,14 @@ def test_usda_writer_public_facade_exports_stable_symbols() -> None:
 
 def test_retired_tk_gui_facade_keeps_only_non_ui_helpers() -> None:
     from xml_to_usda import gui
+    from xml_to_usda import gui_formatters
 
     assert callable(gui.main)
-    assert callable(gui.format_conversion_results)
-    assert callable(gui.format_wind_group_summary)
-    assert callable(gui.format_wind_json_result)
-    assert not hasattr(gui, "ConversionApp")
+    assert not hasattr(gui, "format_conversion_results")
+    assert not hasattr(gui, "format_wind_group_summary")
+    assert not hasattr(gui, "format_wind_json_result")
+    assert callable(gui_formatters.format_conversion_results)
+    assert callable(gui_formatters.format_wind_group_summary)
+    assert callable(gui_formatters.format_wind_json_result)
     with pytest.raises(RuntimeError, match="Tk GUI is retired"):
         gui.main()

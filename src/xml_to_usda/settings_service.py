@@ -55,6 +55,7 @@ class PartSourceSettingRecord:
     white_material_udim_mode: UdimMode = UdimMode.OFF
     white_material_udim_id: int = 1001
     fbx_material_slot_overrides: tuple[FbxMaterialSlotSettingRecord, ...] = ()
+    simplification_percent: int = 100
 
 
 @dataclass(frozen=True)
@@ -280,6 +281,14 @@ def _parse_udim_id(raw_value) -> int:
     return value if value >= 1001 else 1001
 
 
+def _parse_simplification_percent(raw_value) -> int:
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return 100
+    return max(0, min(100, value))
+
+
 def _coerce_float(raw_value, default: float) -> float:
     try:
         return float(raw_value)
@@ -379,6 +388,7 @@ def _parse_part_mesh_settings(raw_value) -> tuple[PartSourceSettingRecord, ...]:
                 fbx_material_slot_overrides=_parse_fbx_material_slot_overrides(
                     record.get("fbx_material_slot_overrides")
                 ),
+                simplification_percent=_parse_simplification_percent(record.get("simplification_percent")),
             )
         )
     return tuple(records)
@@ -516,6 +526,8 @@ def _serialize_part_mesh_settings_by_input_path(
                     }
                     for override in record.fbx_material_slot_overrides
                 ]
+            if record.simplification_percent != 100:
+                payload["simplification_percent"] = int(record.simplification_percent)
             rows.append(payload)
         serialized[str(key)] = rows
     return serialized

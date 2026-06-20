@@ -33,6 +33,7 @@ from .prototype_resolution import (
     PrototypePayloadLoader,
     resolve_prototype_sources,
 )
+from .prototype_simplification import simplify_resolved_prototypes
 from .authoring_validation import validate_authoring_model
 from .resolution_validation import validate_resolution
 from .source_validation import validate_source_model
@@ -116,6 +117,10 @@ def resolve_assembly_model(
             cancel_event=runtime.cancel_event,
             started_at=runtime.started_at,
         ),
+    )
+    authoring_model = simplify_resolved_prototypes(
+        authoring_model,
+        cancel_event=runtime.cancel_event,
     )
     if resolved_conversion_mode == ConversionMode.STATIC_ASSEMBLY:
         authoring_model = replace(authoring_model, prototype_strategy=PrototypeStrategy.INLINE_STATIC_PART)
