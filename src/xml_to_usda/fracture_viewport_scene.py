@@ -21,6 +21,7 @@ from .viewport_scene import (
 
 
 CUT_MARKER_COLOR = Color4(1.0, 0.92, 0.52, 1.0)
+COLLISION_COLOR = Color4(0.35, 0.86, 1.0, 0.25)
 
 
 def build_fracture_viewport_scene(
@@ -134,6 +135,33 @@ def build_fracture_viewport_scene(
         for marker in markers
         if marker.label
     )
+    collision_color = Color4(COLLISION_COLOR.r, COLLISION_COLOR.g, COLLISION_COLOR.b, preview.collision_opacity)
+    for index, mesh in enumerate(preview.collision_meshes):
+        triangle_count = geometry_triangle_count(mesh)
+        if triangle_count <= 0:
+            continue
+        piece_index = preview.collision_piece_indices[index] if index < len(preview.collision_piece_indices) else -1
+        batch_id = f"fracture:collision:{index:02d}"
+        batches.append(
+            ViewportMeshBatch(
+                batch_id=batch_id,
+                name=mesh.name,
+                mesh=mesh,
+                color=collision_color,
+                selectable_id=batch_id,
+            )
+        )
+        draw_calls.append(
+            ViewportDrawCall(
+                draw_id=f"{batch_id}:draw",
+                batch_id=batch_id,
+                tint=collision_color,
+                explode_direction=explode_directions.get(piece_index, Vector3(0.0, 0.0, 0.0)),
+                visibility_group="collision",
+            )
+        )
+        uploaded_triangles += triangle_count
+        logical_triangles += triangle_count
     return ViewportScene(
         scene_id=f"{preview.plan.output_stem}_fracture_preview",
         mesh_batches=tuple(batches),

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from usda_test_inventory import UsdaInventory
 
+from xml_to_usda.fracture_collision import FractureCollisionMode, FractureCollisionSettings
 from xml_to_usda.fracture_export_service import (
     FractureCapMaterialSetting,
     FractureExportRequest,
@@ -362,3 +363,31 @@ def test_fracture_export_from_conversion_request_resolves_current_operator_inten
     assert observed["udim_material_settings"] == request.udim_material_settings
     assert observed["prototype_source_configs"] == request.prototype_source_configs
     assert len(result.outputs) == 2
+
+
+def test_fracture_piece_model_authors_sphere_collision_as_base_mesh_sibling() -> None:
+    resolved = _resolved_tree()
+    piece = FracturePiece(
+        index=0,
+        name="Oak_Piece_00",
+        is_root_piece=True,
+        cut_joint_token=None,
+        joint_tokens=("root", "bone_001", "bone_002"),
+        base_face_indices=(0, 1, 2),
+        repeated_part_indices=(),
+        repeated_part_names=(),
+    )
+
+    piece_resolved = _piece_resolved_model(
+        resolved,
+        piece,
+        collision_settings=FractureCollisionSettings(
+            enabled=True,
+            mode=FractureCollisionMode.SPHERE,
+            sphere_radius_scale=0.75,
+        ),
+    )
+    document = write_resolved_usda_document(piece_resolved, output_path=None)
+
+    assert 'def Mesh "SM_Oak_Piece_00_BaseMesh"' in document.text
+    assert 'def Mesh "USP_SM_Oak_Piece_00_BaseMesh_00"' in document.text

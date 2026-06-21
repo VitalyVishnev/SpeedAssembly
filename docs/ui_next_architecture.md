@@ -118,6 +118,9 @@ Active implementation rule:
   image resampling and large visual caches that update every pixel
 - keep background, glass, and shadow effects visually simple enough that the
   shell stays fast on ordinary production machines
+- preview sliders that only affect visual state must update viewport/shader
+  state directly; do not rebuild scenes, regenerate workers, or reupload mesh
+  buffers for opacity, tint, exploded view, or visual scale
 - if a visual effect conflicts with smooth interaction, smooth interaction wins
 
 If a future visual requirement needs a heavier rendering path, treat that as an

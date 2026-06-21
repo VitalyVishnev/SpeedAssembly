@@ -56,7 +56,7 @@ class _FakeProgram:
         self.events: list[str] = []
         self.enabled_locations: list[int] = []
         self.attribute_buffers: list[tuple[int, int, int, int, int]] = []
-        self._locations = {"position": 1, "normal": 2, "pieceTint": 3, "explodeOffset": 4}
+        self._locations = {"position": 1, "normal": 2, "pieceTint": 3, "explodeOffset": 4, "scaleOrigin": 5}
 
     def bind(self) -> bool:
         self.events.append("bind")
@@ -99,12 +99,13 @@ def test_matcap_vertex_upload_binds_the_shared_mesh_layout() -> None:
     assert vertex_buffer.events == ["bind", "allocate", "release"]
     assert vertex_buffer.allocated_size == vertices.nbytes
     assert program.events == ["bind", "release"]
-    assert program.enabled_locations == [1, 2, 3, 4]
+    assert program.enabled_locations == [1, 2, 3, 4, 5]
     assert program.attribute_buffers == [
         (1, 0x1406, 0, 3, MATCAP_VERTEX_STRIDE * 4),
         (2, 0x1406, 12, 3, MATCAP_VERTEX_STRIDE * 4),
         (3, 0x1406, 24, 4, MATCAP_VERTEX_STRIDE * 4),
         (4, 0x1406, 40, 3, MATCAP_VERTEX_STRIDE * 4),
+        (5, 0x1406, 52, 3, MATCAP_VERTEX_STRIDE * 4),
     ]
 
 
@@ -348,5 +349,6 @@ def test_matcap_viewport_scene_vertices_include_explode_direction() -> None:
 
     vertices = _build_scene_vertices(scene)
 
-    assert len(vertices) == 3 * 13
+    assert len(vertices) == 3 * MATCAP_VERTEX_STRIDE
     assert tuple(vertices[10:13]) == pytest.approx((2.0, 3.0, 4.0))
+    assert tuple(vertices[13:16]) == pytest.approx((1.0 / 3.0, 1.0 / 3.0, 0.0))

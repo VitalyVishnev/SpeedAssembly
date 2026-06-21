@@ -85,6 +85,9 @@ contracts.
 - `src/xml_to_usda/proxy_mesh_service.py`
   Owns `ProxyMeshSourceRequest` and proxy companion generation/export.
 - `src/xml_to_usda/fracture_service.py`
+- `src/xml_to_usda/fracture_collision.py`
+  Owns deterministic per-piece Fracture Collision mesh generation for Convex,
+  Capsule, and Sphere modes.
 - `src/xml_to_usda/fracture_export_service.py`
   Owns `FractureExportRequest` and resolved-intent fracture USDA export.
 - `src/xml_to_usda/fracture_preview_service.py`
@@ -139,16 +142,20 @@ Operator-facing adapters over application contracts.
   their mode-specific viewport widget and settings panel content.
 - `src/xml_to_usda/qt_ui/viewport.py`
   Owns the shared Qt/OpenGL matcap/grid viewport implementation, camera/orbit
-  behavior, and `ViewportScene` mesh rendering for preview modes.
+  behavior, `ViewportScene` mesh rendering, and real-time visual-only uniforms
+  such as piece tint, exploded view, collision opacity, and collision visual
+  scale.
 - `src/xml_to_usda/qt_ui/proxy_preview.py`
   Contains the Proxy Mesh preview dialog. The dialog is UI-only for preview
   generation: it reports settings changes, accepts ready proxy results, and
   renders them through `qt_ui/viewport.py`, but does not own worker processes.
 - `src/xml_to_usda/qt_ui/fracture_preview.py`
   Contains the Fracture Preview dialog and payload adapter into the shared
-  matcap/grid viewport base. Preview generation process lifecycle is owned by
-  `qt_ui/preview_jobs.py` through `qt_ui/background_jobs.py`; shared fracture
-  overlays and picking live in `qt_ui/viewport.py`.
+  matcap/grid viewport base. It owns collision settings UI and hides controls
+  that do not apply to the selected collision mode. Preview generation process
+  lifecycle is owned by `qt_ui/preview_jobs.py` through
+  `qt_ui/background_jobs.py`; shared fracture overlays, picking, and real-time
+  visual uniforms live in `qt_ui/viewport.py`.
 - `src/xml_to_usda/qt_ui/trace.py`
   Qt-facing facade over runtime trace logging.
 - `src/xml_to_usda/qt_ui/smoke.py`

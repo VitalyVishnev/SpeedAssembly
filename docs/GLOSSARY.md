@@ -98,10 +98,22 @@ architecture terms above are more precise.
   Optional generated Base Mesh faces that close cut boundary loops on fracture
   pieces. Current caps are deterministic triangle fans over sliced piece
   boundaries; they do not perform cut-plane boolean triangle clipping.
+- **Fracture Collision**
+  Optional collision geometry generated per Fracture Piece for exported Static
+  Mesh Assembly files and previewed as ghost geometry. Current modes are one
+  simplified Convex Hull, skeleton-owned Capsules, and one bounding Sphere.
+- **Ghost Collision Preview**
+  Transparent Fracture Preview overlay for generated collision meshes. Opacity
+  and Capsule visual scale are viewport visual state and must update without
+  preview regeneration.
 - **Exploded Fracture Preview**
   Visual-only Qt viewport transform that offsets preview pieces away from the
   tree center for inspection. It never changes Fracture Piece membership or
   exported USDA.
+- **Viewport Visual State**
+  UI-only render state such as piece tint, exploded view strength, collision
+  opacity, and collision visual scale. It changes only viewport/shader state,
+  not `Viewport Scene`, domain planning, or export data.
 - **Viewport Scene**
   Qt-free preview payload that describes mesh batches, draw calls, overlays,
   selectable ids, bounds, and diagnostic stats for a preview viewport. It is

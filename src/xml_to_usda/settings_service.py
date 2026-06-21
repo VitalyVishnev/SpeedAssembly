@@ -12,6 +12,9 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .fracture_collision import FractureCollisionMode, FractureCollisionSettings
+from .fracture_preview_service import FracturePreviewSettings
+from .fracture_service import FractureSettings
 from .models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode, UdimMode
 from .proxy_mesh_service import MAX_PROXY_DENSITY_RESOLUTION, PROXY_METHOD_DENSITY_FIELD, ProxyMeshSettings
 
@@ -102,6 +105,7 @@ class GuiSettingsSnapshot:
     base_material_settings: tuple[BaseMaterialSettingRecord, ...] = ()
     part_mesh_settings: tuple[PartSourceSettingRecord, ...] = ()
     proxy_mesh_settings: ProxyMeshSettings = field(default_factory=ProxyMeshSettings)
+    fracture_preview_settings: FracturePreviewSettings = field(default_factory=FracturePreviewSettings)
     fbx_cache_max_size_gb: int = 20
     fbx_cache_max_age_days: int = 14
     debug_trace_enabled: bool = False
@@ -136,6 +140,7 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
     base_material_settings = _parse_base_material_settings(payload.get("base_material_settings"))
     part_mesh_settings = _parse_part_mesh_settings(payload.get("part_mesh_settings"))
     proxy_mesh_settings = _parse_proxy_mesh_settings(payload.get("proxy_mesh_settings"))
+    fracture_preview_settings = _parse_fracture_preview_settings(payload.get("fracture_preview_settings"))
 
     return GuiSettingsSnapshot(
         last_input_path=str(payload.get("last_input_path", "")),
@@ -153,6 +158,7 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
         base_material_settings=base_material_settings,
         part_mesh_settings=part_mesh_settings,
         proxy_mesh_settings=proxy_mesh_settings,
+        fracture_preview_settings=fracture_preview_settings,
         fbx_cache_max_size_gb=_coerce_positive_int(payload.get("fbx_cache_max_size_gb"), 20),
         fbx_cache_max_age_days=_coerce_positive_int(payload.get("fbx_cache_max_age_days"), 14),
         debug_trace_enabled=bool(payload.get("debug_trace_enabled", False)),
@@ -181,6 +187,7 @@ def save_gui_settings(settings_path: str | Path, snapshot: GuiSettingsSnapshot) 
         "base_material_settings": _serialize_base_material_settings(snapshot.base_material_settings),
         "part_mesh_settings": _serialize_part_mesh_settings(snapshot.part_mesh_settings),
         "proxy_mesh_settings": _serialize_proxy_mesh_settings(snapshot.proxy_mesh_settings),
+        "fracture_preview_settings": _serialize_fracture_preview_settings(snapshot.fracture_preview_settings),
         "fbx_cache_max_size_gb": _coerce_positive_int(snapshot.fbx_cache_max_size_gb, 20),
         "fbx_cache_max_age_days": _coerce_positive_int(snapshot.fbx_cache_max_age_days, 14),
         "debug_trace_enabled": bool(snapshot.debug_trace_enabled),
@@ -287,6 +294,14 @@ def _parse_simplification_percent(raw_value) -> int:
     except (TypeError, ValueError):
         return 100
     return max(0, min(100, value))
+
+
+def _coerce_bounded_int(raw_value, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, value))
 
 
 def _coerce_float(raw_value, default: float) -> float:
@@ -409,6 +424,57 @@ def _parse_proxy_mesh_settings(raw_value) -> ProxyMeshSettings:
         bounds_inflation=max(0.01, _coerce_float(raw_value.get("bounds_inflation"), defaults.bounds_inflation)),
         density_resolution=min(MAX_PROXY_DENSITY_RESOLUTION, density_resolution),
         base_mesh_priority=max(0.0, min(1.0, base_mesh_priority)),
+    )
+
+
+def _parse_fracture_preview_settings(raw_value) -> FracturePreviewSettings:
+    if not isinstance(raw_value, dict):
+        return FracturePreviewSettings()
+    defaults = FracturePreviewSettings()
+    fracture_payload = raw_value.get("fracture")
+    collision_payload = raw_value.get("collision")
+    fracture = defaults.fracture
+    if isinstance(fracture_payload, dict):
+        fracture = FractureSettings(
+            target_piece_count=max(1, min(64, _coerce_positive_int(fracture_payload.get("target_piece_count"), fracture.target_piece_count))),
+            generate_caps=_coerce_bool(fracture_payload.get("generate_caps"), fracture.generate_caps),
+            preserve_trunk_bias=max(0.0, min(1.0, _coerce_float(fracture_payload.get("preserve_trunk_bias"), fracture.preserve_trunk_bias))),
+            force_stump_piece=_coerce_bool(fracture_payload.get("force_stump_piece"), fracture.force_stump_piece),
+        )
+    collision = defaults.collision
+    if isinstance(collision_payload, dict):
+        try:
+            mode = FractureCollisionMode(str(collision_payload.get("mode", collision.mode.value)))
+        except ValueError:
+            mode = collision.mode
+        collision = FractureCollisionSettings(
+            enabled=_coerce_bool(collision_payload.get("enabled"), collision.enabled),
+            mode=mode,
+            include_instance_parts=_coerce_bool(
+                collision_payload.get("include_instance_parts"),
+                collision.include_instance_parts,
+            ),
+            convex_max_vertices=max(4, min(32, _coerce_positive_int(collision_payload.get("convex_max_vertices"), collision.convex_max_vertices))),
+            sphere_radius_scale=max(0.5, min(1.25, _coerce_float(collision_payload.get("sphere_radius_scale"), collision.sphere_radius_scale))),
+            capsule_simplify=_coerce_bounded_int(
+                collision_payload.get("capsule_simplify"),
+                collision.capsule_simplify,
+                0,
+                100,
+            ),
+            capsule_scale=max(0.25, min(2.0, _coerce_float(collision_payload.get("capsule_scale"), collision.capsule_scale))),
+            capsule_max_count=max(1, min(128, _coerce_positive_int(collision_payload.get("capsule_max_count"), collision.capsule_max_count))),
+            capsule_min_radius_ratio=max(0.0, min(0.25, _coerce_float(collision_payload.get("capsule_min_radius_ratio"), collision.capsule_min_radius_ratio))),
+            capsule_radius_padding=max(0.0, min(0.5, _coerce_float(collision_payload.get("capsule_radius_padding"), collision.capsule_radius_padding))),
+            ghost_opacity=max(0.05, min(0.8, _coerce_float(collision_payload.get("ghost_opacity"), collision.ghost_opacity))),
+        )
+    return FracturePreviewSettings(
+        fracture=fracture,
+        collision=collision,
+        final_polycount=_coerce_positive_int(raw_value.get("final_polycount"), defaults.final_polycount),
+        base_mesh_priority=max(0.0, min(1.0, _coerce_float(raw_value.get("base_mesh_priority"), defaults.base_mesh_priority))),
+        max_base_faces_per_piece=_coerce_positive_int(raw_value.get("max_base_faces_per_piece"), defaults.max_base_faces_per_piece),
+        max_prototype_faces=_coerce_positive_int(raw_value.get("max_prototype_faces"), defaults.max_prototype_faces),
     )
 
 
@@ -564,6 +630,34 @@ def _serialize_proxy_mesh_settings(settings: ProxyMeshSettings) -> dict[str, obj
         "bounds_inflation": round(float(settings.bounds_inflation), 4),
         "density_resolution": int(settings.density_resolution),
         "base_mesh_priority": round(float(settings.base_mesh_priority), 4),
+    }
+
+
+def _serialize_fracture_preview_settings(settings: FracturePreviewSettings) -> dict[str, object]:
+    return {
+        "fracture": {
+            "target_piece_count": int(settings.fracture.target_piece_count),
+            "generate_caps": bool(settings.fracture.generate_caps),
+            "preserve_trunk_bias": round(float(settings.fracture.preserve_trunk_bias), 4),
+            "force_stump_piece": bool(settings.fracture.force_stump_piece),
+        },
+        "collision": {
+            "enabled": bool(settings.collision.enabled),
+            "mode": settings.collision.mode.value,
+            "include_instance_parts": bool(settings.collision.include_instance_parts),
+            "convex_max_vertices": int(settings.collision.convex_max_vertices),
+            "sphere_radius_scale": round(float(settings.collision.sphere_radius_scale), 4),
+            "capsule_simplify": int(settings.collision.capsule_simplify),
+            "capsule_scale": round(float(settings.collision.capsule_scale), 4),
+            "capsule_max_count": int(settings.collision.capsule_max_count),
+            "capsule_min_radius_ratio": round(float(settings.collision.capsule_min_radius_ratio), 4),
+            "capsule_radius_padding": round(float(settings.collision.capsule_radius_padding), 4),
+            "ghost_opacity": round(float(settings.collision.ghost_opacity), 4),
+        },
+        "final_polycount": int(settings.final_polycount),
+        "base_mesh_priority": round(float(settings.base_mesh_priority), 4),
+        "max_base_faces_per_piece": int(settings.max_base_faces_per_piece),
+        "max_prototype_faces": int(settings.max_prototype_faces),
     }
 
 

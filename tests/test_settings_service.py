@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from xml_to_usda.fracture_collision import FractureCollisionMode, FractureCollisionSettings
+from xml_to_usda.fracture_preview_service import FracturePreviewSettings
+from xml_to_usda.fracture_service import FractureSettings
 from xml_to_usda.models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode, UdimMode
 from xml_to_usda.proxy_mesh_service import ProxyMeshSettings
 from xml_to_usda.settings_service import (
@@ -109,6 +112,21 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
             density_resolution=96,
             base_mesh_priority=0.22,
         ),
+        fracture_preview_settings=FracturePreviewSettings(
+            fracture=FractureSettings(target_piece_count=8, generate_caps=True, preserve_trunk_bias=0.25),
+            collision=FractureCollisionSettings(
+                enabled=True,
+                mode=FractureCollisionMode.SPHERE,
+                include_instance_parts=False,
+                sphere_radius_scale=0.75,
+                capsule_max_count=48,
+                capsule_min_radius_ratio=0.08,
+                capsule_radius_padding=0.12,
+                ghost_opacity=0.35,
+            ),
+            final_polycount=333000,
+            base_mesh_priority=0.44,
+        ),
         fbx_cache_max_size_gb=42,
         fbx_cache_max_age_days=7,
         debug_trace_enabled=True,
@@ -132,6 +150,13 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert payload["proxy_mesh_settings"]["bounds_inflation"] == 1.4
     assert payload["proxy_mesh_settings"]["density_resolution"] == 96
     assert payload["proxy_mesh_settings"]["base_mesh_priority"] == 0.22
+    assert payload["fracture_preview_settings"]["fracture"]["target_piece_count"] == 8
+    assert payload["fracture_preview_settings"]["collision"]["mode"] == "sphere"
+    assert payload["fracture_preview_settings"]["collision"]["enabled"] is True
+    assert payload["fracture_preview_settings"]["collision"]["include_instance_parts"] is False
+    assert payload["fracture_preview_settings"]["collision"]["capsule_max_count"] == 48
+    assert payload["fracture_preview_settings"]["collision"]["capsule_min_radius_ratio"] == 0.08
+    assert payload["fracture_preview_settings"]["collision"]["capsule_radius_padding"] == 0.12
     assert payload["fbx_cache_max_size_gb"] == 42
     assert payload["fbx_cache_max_age_days"] == 7
     assert payload["debug_trace_enabled"] is True
@@ -164,6 +189,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert restored.wind_group_settings == snapshot.wind_group_settings
     assert restored.base_material_settings == snapshot.base_material_settings
     assert restored.proxy_mesh_settings == snapshot.proxy_mesh_settings
+    assert restored.fracture_preview_settings == snapshot.fracture_preview_settings
     assert len(restored.part_mesh_settings) == 1
     restored_part = restored.part_mesh_settings[0]
     assert restored_part.source_name == "Twig_01"

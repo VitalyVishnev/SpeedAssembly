@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 from array import array
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -194,6 +195,30 @@ def test_fracture_viewport_scene_can_hide_repeated_parts_without_changing_base_b
     assert scene.stats.instance_count == 0
     assert scene.stats.uploaded_triangles == 2
     assert scene.stats.logical_triangles == 2
+
+
+def test_fracture_collision_draw_call_uses_piece_explode_direction() -> None:
+    preview = _fracture_preview()
+    shifted_branch = replace(
+        preview.pieces[1],
+        base_mesh=_mesh(
+            "branch_shifted",
+            points=(10.0, 0.0, 0.0, 11.0, 0.0, 0.0, 10.0, 1.0, 0.0),
+            counts=(3,),
+            indices=(0, 1, 2),
+        ),
+    )
+    preview = replace(
+        preview,
+        pieces=(preview.pieces[0], shifted_branch),
+        collision_meshes=(_triangle_mesh("collision"),),
+        collision_piece_indices=(1,),
+    )
+
+    scene = build_fracture_viewport_scene(preview)
+    collision_draw = next(draw for draw in scene.draw_calls if draw.visibility_group == "collision")
+
+    assert collision_draw.explode_direction.x > 0.0
 
 
 def _fracture_preview() -> FracturePreviewResult:

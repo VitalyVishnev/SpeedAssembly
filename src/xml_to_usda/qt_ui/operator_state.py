@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from ..fracture_preview_service import FracturePreviewSettings
 from ..models import ConversionMode, CpuProfile, MaterialPolicy
 from ..proxy_mesh_service import ProxyMeshSettings
 from ..settings_service import (
@@ -86,6 +87,7 @@ def save_operator_state(
         base_material_settings=previous_snapshot.base_material_settings,
         part_mesh_settings=previous_snapshot.part_mesh_settings,
         proxy_mesh_settings=previous_snapshot.proxy_mesh_settings,
+        fracture_preview_settings=previous_snapshot.fracture_preview_settings,
         fbx_cache_max_size_gb=previous_snapshot.fbx_cache_max_size_gb,
         fbx_cache_max_age_days=previous_snapshot.fbx_cache_max_age_days,
         debug_trace_enabled=previous_snapshot.debug_trace_enabled,
@@ -123,6 +125,7 @@ def save_nested_input_settings(
     part_source_records: tuple[PartSourceSettingRecord, ...],
     wind_group_records: dict[str, WindGroupSettingRecord],
     proxy_mesh_settings: ProxyMeshSettings | None = None,
+    fracture_preview_settings: FracturePreviewSettings | None = None,
     settings_path: str | Path | None = None,
 ) -> GuiSettingsSnapshot:
     """Persist current operator defaults plus global tab settings without replacing shared file-path history."""
@@ -134,6 +137,7 @@ def save_nested_input_settings(
         base_material_settings=base_material_records,
         part_mesh_settings=part_source_records,
         proxy_mesh_settings=proxy_mesh_settings or previous_snapshot.proxy_mesh_settings,
+        fracture_preview_settings=fracture_preview_settings or previous_snapshot.fracture_preview_settings,
         fbx_cache_max_size_gb=previous_snapshot.fbx_cache_max_size_gb,
         fbx_cache_max_age_days=previous_snapshot.fbx_cache_max_age_days,
         debug_trace_enabled=previous_snapshot.debug_trace_enabled,

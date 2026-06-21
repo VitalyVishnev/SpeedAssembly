@@ -582,6 +582,22 @@ def _emit_static_instancer_prototype(
     _emit_material_binding(sink, mesh, indent_level + 2, context.contract.root_prim_name)
     _emit_mesh_payload(sink, mesh, context.contract.mesh_orientation, indent_level + 2)
     _write_line(sink, indent_level + 1, "}")
+    if prototype.source_key == "__static_base_mesh__":
+        for collision_mesh in context.model.static_collision_meshes:
+            _emit_static_collision_mesh(sink, collision_mesh, context, indent_level + 1)
+    _write_line(sink, indent_level, "}")
+
+
+def _emit_static_collision_mesh(
+    sink,
+    mesh: MeshData,
+    context: AuthoringContext,
+    indent_level: int,
+) -> None:
+    _write_line(sink, indent_level, f'def Mesh "{mesh.name}"')
+    _write_line(sink, indent_level, "{")
+    _write_line(sink, indent_level + 1, 'uniform token subdivisionScheme = "none"')
+    _emit_mesh_payload(sink, mesh, context.contract.mesh_orientation, indent_level + 1)
     _write_line(sink, indent_level, "}")
 
 

@@ -35,6 +35,13 @@
 - Reason for deferral: UE runtime replacement requires an engine scene and destruction test harness, not just USDA import or Qt preview.
 - Likely next step: Import the intact tree and exported fracture pieces into UE 5.7.x, replace the skeletal tree with the root-pivoted Static Mesh Assembly pieces at runtime, and compare neutral-pose visual alignment.
 
+## Fracture Collision UE Import Validation Pending
+
+- Issue: Fracture collision generation now authors UE-style `UCX_`, `UCP_`, and `USP_` mesh names in per-piece Static Mesh Assembly USDA files, but USD/Interchange recognition as collision has not yet been manually validated in UE 5.7.x.
+- Location: `src/xml_to_usda/fracture_collision.py`, `src/xml_to_usda/fracture_export_service.py`, `src/xml_to_usda/usda_authoring.py`, `src/xml_to_usda/qt_ui/fracture_preview.py`
+- Reason for deferral: Epic documents these names for FBX static mesh import, but the project still needs an actual UE 5.7.x USD/Interchange import check to prove the meshes are consumed as collision and not imported as visible geometry.
+- Likely next step: Export one fracture piece for each collision mode, import through UE 5.7.x Interchange USD, inspect Static Mesh collision view and scene visibility, then either mark the naming contract validated or keep collision export disabled by default.
+
 ## Fracturing Cut-Plane Geometry Refinement Pending
 
 - Issue: Fracture export and preview can generate deterministic boundary-loop triangle-fan caps, but Base Mesh partitioning still uses whole-face ownership/centroid side tests. It does not split triangles that cross an intended cut plane or create boolean-accurate interior surfaces.

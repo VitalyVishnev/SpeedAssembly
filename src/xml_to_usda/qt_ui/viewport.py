@@ -34,13 +34,14 @@ GL_ONE_MINUS_SRC_ALPHA = 0x0303
 GL_SRC_ALPHA = 0x0302
 GL_TRIANGLES = 0x0004
 DEFAULT_MATCAP_TINT_ALPHA = 0.0
-MATCAP_VERTEX_STRIDE = 13
+MATCAP_VERTEX_STRIDE = 16
 ViewportTraceCallback = Callable[[str, dict[str, object]], None]
 _MATCAP_ATTRIBUTE_LAYOUT = (
     ("position", 0, 3),
     ("normal", 12, 3),
     ("pieceTint", 24, 4),
     ("explodeOffset", 40, 3),
+    ("scaleOrigin", 52, 3),
 )
 
 
@@ -93,16 +94,22 @@ class MatcapViewport(QOpenGLWidget):
         self._program: QOpenGLShaderProgram | None = None
         self._vertex_buffer: QOpenGLBuffer | None = None
         self._vao: QOpenGLVertexArrayObject | None = None
+        self._collision_vertex_buffer: QOpenGLBuffer | None = None
+        self._collision_vao: QOpenGLVertexArrayObject | None = None
         self._grid_program: QOpenGLShaderProgram | None = None
         self._grid_buffer: QOpenGLBuffer | None = None
         self._grid_vao: QOpenGLVertexArrayObject | None = None
         self._vertex_count = 0
+        self._collision_vertex_count = 0
         self._grid_vertex_count = 0
         self._mesh_dirty = False
         self._grid_dirty = False
         self._ground_y = 0.0
         self._matcap_tint_strength = DEFAULT_MATCAP_TINT_ALPHA
         self._exploded_view_strength = 0.0
+        self._collision_opacity = 0.25
+        self._collision_base_opacity = 0.25
+        self._collision_geometry_scale = 1.0
         self._gl_cleanup_context = None
         self._show_bones = False
         self._selected_cut_tokens: tuple[str, ...] = ()
@@ -150,6 +157,19 @@ class MatcapViewport(QOpenGLWidget):
         self._exploded_view_strength = max(0.0, min(1.0, float(value)))
         self.update()
 
+    @property
+    def collision_opacity(self) -> float:
+        return self._collision_opacity
+
+    @property
+    def collision_geometry_scale(self) -> float:
+        return self._collision_geometry_scale
+
+    def set_collision_visuals(self, *, opacity: float, geometry_scale: float = 1.0) -> None:
+        self._collision_opacity = max(0.0, min(1.0, float(opacity)))
+        self._collision_geometry_scale = max(0.001, float(geometry_scale))
+        self.update()
+
     def set_trace_callback(self, callback: ViewportTraceCallback | None) -> None:
         self._trace_callback = callback
 
@@ -183,6 +203,7 @@ class MatcapViewport(QOpenGLWidget):
         self._scene = scene
         self._mesh = None
         self._precomputed_matcap_vertices = None
+        self._collision_base_opacity = _scene_collision_opacity(scene)
         if self._hover_cut_token is not None and self._cut_marker_position(self._hover_cut_token) is None:
             self._hover_cut_token = None
         if scene is None:
@@ -238,6 +259,7 @@ class MatcapViewport(QOpenGLWidget):
             self._hover_cut_token = None
         self._update_bounds_metrics(min_point, max_point, frame_camera=frame_camera)
         self._vertex_count = int(len(self._precomputed_matcap_vertices) // MATCAP_VERTEX_STRIDE)
+        self._collision_vertex_count = 0
         self._grid_vertex_count = int(len(_build_grid_vertices(self._target, self._radius, self._ground_y)) // 4)
         self._trace_set_scene_event(scene)
         self._mesh_dirty = True
@@ -269,6 +291,10 @@ class MatcapViewport(QOpenGLWidget):
         self._vao.create()
         self._vertex_buffer = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
         self._vertex_buffer.create()
+        self._collision_vao = QOpenGLVertexArrayObject(self)
+        self._collision_vao.create()
+        self._collision_vertex_buffer = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
+        self._collision_vertex_buffer.create()
         self._grid_vao = QOpenGLVertexArrayObject(self)
         self._grid_vao.create()
         self._grid_buffer = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
@@ -310,6 +336,23 @@ class MatcapViewport(QOpenGLWidget):
                 functions.glDrawArrays(GL_TRIANGLES, 0, self._vertex_count)
                 self._vao.release()
                 self._program.release()
+        if self._program is not None and self._collision_vao is not None and self._collision_vertex_count > 0:
+            _prepare_ghost_mesh_draw(functions)
+            if self._program.bind():
+                _set_matcap_program_uniforms(
+                    self._program,
+                    functions=functions,
+                    mvp=projection * view,
+                    normal_matrix=view.normalMatrix(),
+                    piece_tint_strength=self._collision_opacity / max(self._collision_base_opacity, 0.001),
+                    exploded_view_strength=self._matcap_exploded_view_strength(),
+                    geometry_scale=self._collision_geometry_scale,
+                )
+                self._collision_vao.bind()
+                functions.glDrawArrays(GL_TRIANGLES, 0, self._collision_vertex_count)
+                self._collision_vao.release()
+                self._program.release()
+            _finish_ghost_mesh_draw(functions)
         if self._show_bones:
             self._paint_bone_overlay()
 
@@ -457,18 +500,31 @@ class MatcapViewport(QOpenGLWidget):
         if self._precomputed_matcap_vertices is not None:
             return self._precomputed_matcap_vertices
         if self._scene is not None:
-            return _build_scene_vertices(self._scene)
+            return _build_scene_vertices(self._scene, collision=False)
         return _build_viewport_vertices(self._mesh, tint_alpha=self._mesh_tint_alpha)
 
+    def _current_collision_vertices(self) -> np.ndarray:
+        if self._precomputed_matcap_vertices is not None or self._scene is None:
+            return np.asarray([], dtype=np.float32)
+        return _build_scene_vertices(self._scene, collision=True)
+
     def _upload_mesh(self) -> None:
-        if self._program is None or self._vertex_buffer is None or self._vao is None:
+        if (
+            self._program is None
+            or self._vertex_buffer is None
+            or self._vao is None
+            or self._collision_vertex_buffer is None
+            or self._collision_vao is None
+        ):
             return
         vertices = self._current_matcap_vertices()
+        collision_vertices = self._current_collision_vertices()
         self._vertex_count = int(len(vertices) // MATCAP_VERTEX_STRIDE)
+        self._collision_vertex_count = int(len(collision_vertices) // MATCAP_VERTEX_STRIDE)
         self._trace_viewport_event(
             "viewport.upload_begin",
-            vertex_count=self._vertex_count,
-            byte_count=int(vertices.nbytes),
+            vertex_count=self._vertex_count + self._collision_vertex_count,
+            byte_count=int(vertices.nbytes + collision_vertices.nbytes),
             scene_id="" if self._scene is None else self._scene.scene_id,
         )
         program_bound = _upload_matcap_vertices(
@@ -477,19 +533,26 @@ class MatcapViewport(QOpenGLWidget):
             vao=self._vao,
             vertices=vertices,
         )
+        if program_bound:
+            program_bound = _upload_matcap_vertices(
+                program=self._program,
+                vertex_buffer=self._collision_vertex_buffer,
+                vao=self._collision_vao,
+                vertices=collision_vertices,
+            )
         if not program_bound:
             self._trace_viewport_event(
                 "viewport.upload_end",
-                vertex_count=self._vertex_count,
-                byte_count=int(vertices.nbytes),
+                vertex_count=self._vertex_count + self._collision_vertex_count,
+                byte_count=int(vertices.nbytes + collision_vertices.nbytes),
                 program_bound=False,
             )
             return
         self._mesh_dirty = False
         self._trace_viewport_event(
             "viewport.upload_end",
-            vertex_count=self._vertex_count,
-            byte_count=int(vertices.nbytes),
+            vertex_count=self._vertex_count + self._collision_vertex_count,
+            byte_count=int(vertices.nbytes + collision_vertices.nbytes),
             program_bound=True,
         )
 
@@ -654,6 +717,8 @@ class MatcapViewport(QOpenGLWidget):
                 self._program,
                 self._vertex_buffer,
                 self._vao,
+                self._collision_vertex_buffer,
+                self._collision_vao,
                 self._grid_program,
                 self._grid_buffer,
                 self._grid_vao,
@@ -672,10 +737,10 @@ class MatcapViewport(QOpenGLWidget):
             self.makeCurrent()
             made_current = True
         try:
-            for buffer in (self._vertex_buffer, self._grid_buffer):
+            for buffer in (self._vertex_buffer, self._collision_vertex_buffer, self._grid_buffer):
                 if buffer is not None:
                     buffer.destroy()
-            for vao in (self._vao, self._grid_vao):
+            for vao in (self._vao, self._collision_vao, self._grid_vao):
                 if vao is not None:
                     vao.destroy()
             for program in (self._program, self._grid_program):
@@ -686,6 +751,8 @@ class MatcapViewport(QOpenGLWidget):
             self._program = None
             self._vertex_buffer = None
             self._vao = None
+            self._collision_vertex_buffer = None
+            self._collision_vao = None
             self._grid_program = None
             self._grid_buffer = None
             self._grid_vao = None
@@ -709,17 +776,33 @@ class ProxyViewport(MatcapViewport):
     pass
 
 
-def _build_scene_vertices(scene: ViewportScene | None) -> np.ndarray:
+def _build_scene_vertices(scene: ViewportScene | None, *, collision: bool = False) -> np.ndarray:
     if scene is None:
         return np.asarray([], dtype=np.float32)
     batch_by_id = {batch.batch_id: batch for batch in scene.mesh_batches}
     vertices: list[float] = []
     for draw_call in scene.draw_calls:
+        if (draw_call.visibility_group == "collision") != collision:
+            continue
         batch = batch_by_id.get(draw_call.batch_id)
         if batch is None:
             continue
         _append_draw_call_vertices(vertices, batch.mesh, draw_call=draw_call, color=draw_call.tint or batch.color)
     return np.asarray(vertices, dtype=np.float32)
+
+
+def _scene_collision_opacity(scene: ViewportScene | None) -> float:
+    if scene is None:
+        return 0.25
+    batch_by_id = {batch.batch_id: batch for batch in scene.mesh_batches}
+    for draw_call in scene.draw_calls:
+        if draw_call.visibility_group != "collision":
+            continue
+        batch = batch_by_id.get(draw_call.batch_id)
+        color = draw_call.tint or (batch.color if batch is not None else None)
+        if color is not None:
+            return max(0.001, float(color.a))
+    return 0.25
 
 
 def _append_draw_call_vertices(
@@ -733,6 +816,7 @@ def _append_draw_call_vertices(
         return
     points = list(_points(mesh))
     colors = _point_colors(mesh)
+    scale_origin = _draw_call_center(points, draw_call)
     offset = 0
     for count in mesh.face_vertex_counts:
         indices = [int(mesh.face_vertex_indices[offset + index]) for index in range(count)]
@@ -762,8 +846,23 @@ def _append_draw_call_vertices(
                         float(draw_call.explode_direction.x),
                         float(draw_call.explode_direction.y),
                         float(draw_call.explode_direction.z),
+                        scale_origin.x,
+                        scale_origin.y,
+                        scale_origin.z,
                     )
                 )
+
+
+def _draw_call_center(points: list[Vector3], draw_call: ViewportDrawCall) -> Vector3:
+    if not points:
+        return Vector3(0.0, 0.0, 0.0)
+    transformed = tuple(_transform_scene_point(point, draw_call) for point in points)
+    scale = 1.0 / len(transformed)
+    return Vector3(
+        sum(point.x for point in transformed) * scale,
+        sum(point.y for point in transformed) * scale,
+        sum(point.z for point in transformed) * scale,
+    )
 
 
 def _build_viewport_vertices(
@@ -802,6 +901,9 @@ def _build_viewport_vertices(
                         0.0,
                         0.0,
                         0.0,
+                        point.x,
+                        point.y,
+                        point.z,
                     )
                 )
     return np.asarray(vertices, dtype=np.float32)
@@ -866,16 +968,19 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
         attribute vec3 normal;
         attribute vec4 pieceTint;
         attribute vec3 explodeOffset;
+        attribute vec3 scaleOrigin;
         uniform mat4 mvp;
         uniform mat3 normalMatrix;
         uniform float explodeStrength;
         uniform float pieceTintStrength;
+        uniform float geometryScale;
         varying vec3 viewNormal;
         varying vec4 pieceColor;
         void main() {
             viewNormal = normalize(normalMatrix * normal);
-            pieceColor = vec4(pieceTint.rgb, pieceTint.a * clamp(pieceTintStrength, 0.0, 1.0));
-            gl_Position = mvp * vec4(position + explodeOffset * explodeStrength, 1.0);
+            pieceColor = vec4(pieceTint.rgb, clamp(pieceTint.a * max(pieceTintStrength, 0.0), 0.0, 1.0));
+            vec3 scaledPosition = scaleOrigin + (position - scaleOrigin) * max(geometryScale, 0.001);
+            gl_Position = mvp * vec4(scaledPosition + explodeOffset * explodeStrength, 1.0);
         }
         """,
     ):
@@ -902,7 +1007,7 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
             float luma = dot(color, vec3(0.299, 0.587, 0.114));
             vec3 tintedMatcap = pieceColor.rgb * clamp(0.28 + luma * 1.22, 0.0, 1.35);
             color = mix(color, tintedMatcap, clamp(pieceColor.a, 0.0, 1.0));
-            gl_FragColor = vec4(color, 1.0);
+            gl_FragColor = vec4(color + rim * pieceColor.rgb * 0.45, max(0.05, pieceColor.a));
         }
         """,
     ):
@@ -920,21 +1025,37 @@ def _set_matcap_program_uniforms(
     normal_matrix,
     piece_tint_strength: float,
     exploded_view_strength: float = 0.0,
+    geometry_scale: float = 1.0,
 ) -> None:
     program.setUniformValue("mvp", mvp)
     program.setUniformValue("normalMatrix", normal_matrix)
     tint_strength_location = program.uniformLocation("pieceTintStrength")
     if tint_strength_location >= 0:
-        functions.glUniform1f(tint_strength_location, float(max(0.0, min(1.0, piece_tint_strength))))
+        functions.glUniform1f(tint_strength_location, float(max(0.0, piece_tint_strength)))
     explode_strength_location = program.uniformLocation("explodeStrength")
     if explode_strength_location >= 0:
         functions.glUniform1f(explode_strength_location, float(max(0.0, min(1.0, exploded_view_strength))))
+    geometry_scale_location = program.uniformLocation("geometryScale")
+    if geometry_scale_location >= 0:
+        functions.glUniform1f(geometry_scale_location, float(max(0.001, geometry_scale)))
 
 
 def _prepare_opaque_mesh_draw(functions) -> None:
     functions.glDisable(GL_BLEND)
     functions.glEnable(GL_DEPTH_TEST)
     functions.glDepthMask(True)
+
+
+def _prepare_ghost_mesh_draw(functions) -> None:
+    functions.glEnable(GL_BLEND)
+    functions.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    functions.glEnable(GL_DEPTH_TEST)
+    functions.glDepthMask(False)
+
+
+def _finish_ghost_mesh_draw(functions) -> None:
+    functions.glDepthMask(True)
+    functions.glDisable(GL_BLEND)
 
 
 def _build_grid_program() -> QOpenGLShaderProgram:

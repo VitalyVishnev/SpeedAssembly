@@ -109,6 +109,19 @@ Current Fracturing status:
   mode
 - preview uses source-normalized XML geometry, stable per-piece colors, the
   shared Qt matcap/grid viewport, and an isolated Fracture worker process
+- preview can optionally generate per-piece collision previews and export
+  collision meshes for the piece Static Mesh Assembly files
+- supported fracture collision modes are one simplified Convex Hull, skeleton
+  Capsules, and one bounding Sphere
+- collision preview uses transparent ghost rendering; collision opacity and
+  capsule visual scale are viewport state and update in real time without
+  rebuilding the preview scene or restarting the worker
+- collision UI hides controls that do not apply to the selected mode; the
+  settings panel scrolls, and mouse-wheel input scrolls the panel instead of
+  accidentally changing numeric parameters
+- capsule fitting is skeleton-owned, ignores unrelated instance/leaf outliers
+  unless that mode explicitly includes instance parts, and uses bounded radius
+  fitting to avoid inflated tips
 - rapid fracture-preview edits now use latest-state coalescing with a short
   debounce, so one worker is not spawned for every transient toggle while the
   previous large-tree preview is still settling
@@ -122,6 +135,9 @@ Current Fracturing status:
 - preview color tint is applied through the shared matcap shader with a direct
   OpenGL scalar uniform write; PySide scalar uniform overloads were unreliable
   for this path
+- visual-only fracture viewport settings must follow the same rule: update
+  shader/viewport state directly when no topology, ownership, or draw-call
+  structure changes
 - lightweight deterministic face sampling is allowed only for Fracture Preview
   payload reduction; it must not replace Proxy Mesh QEM simplification
 - dense Spruce preview/export has been manually validated enough to continue

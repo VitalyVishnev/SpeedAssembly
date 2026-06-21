@@ -148,17 +148,35 @@ def _format_bytes(value: int) -> str:
 
 def _fracture_preview_trace_payload(settings: FracturePreviewSettings) -> dict[str, object]:
     fracture = settings.fracture
+    collision = settings.collision
     return {
         "target_piece_count": fracture.target_piece_count,
         "preserve_trunk_bias": fracture.preserve_trunk_bias,
         "force_stump_piece": fracture.force_stump_piece,
         "generate_caps": fracture.generate_caps,
         "pinned_cut_joint_tokens": fracture.pinned_cut_joint_tokens,
+        "collision_enabled": collision.enabled,
+        "collision_mode": collision.mode.value,
+        "collision_include_parts": collision.include_instance_parts,
         "final_polycount": settings.final_polycount,
         "base_mesh_priority": settings.base_mesh_priority,
         "max_base_faces_per_piece": settings.max_base_faces_per_piece,
         "max_prototype_faces": settings.max_prototype_faces,
     }
+
+
+def _fracture_preview_visual_only_settings_changed(
+    previous: FracturePreviewSettings,
+    current: FracturePreviewSettings,
+) -> bool:
+    previous_collision = previous.collision
+    current_collision = current.collision
+    normalized_previous_collision = replace(
+        previous_collision,
+        capsule_scale=current_collision.capsule_scale,
+        ghost_opacity=current_collision.ghost_opacity,
+    )
+    return replace(previous, collision=normalized_previous_collision) == current
 
 
 def _widget_trace_name(widget: QWidget) -> str:
@@ -672,6 +690,7 @@ class MainWindow(QWidget):
             with contextlib.suppress(Exception):
                 self._deps.save_gui_settings(self._operator_settings_path, self._operator_snapshot)
         self._proxy_mesh_settings = self._operator_snapshot.proxy_mesh_settings
+        self._fracture_preview_settings = self._operator_snapshot.fracture_preview_settings
         self._conversion_mode = self._operator_state.conversion_mode.value
         self._runtime_paths = resolve_runtime_paths(
             settings_dir=self._operator_settings_path.parent,
@@ -1896,6 +1915,7 @@ class MainWindow(QWidget):
                 part_source_records=self.materials_panel.serialize_part_source_records(),
                 wind_group_records=self.wind_panel.serialize_settings(),
                 proxy_mesh_settings=self._proxy_mesh_settings,
+                fracture_preview_settings=self._fracture_preview_settings,
                 settings_path=self._operator_settings_path,
             )
         except OSError:
@@ -2389,14 +2409,24 @@ class MainWindow(QWidget):
             self._fracture_preview_dialog.set_error("Preview generation failed. See log for details.")
 
     def _handle_fracture_preview_settings_changed(self, settings: FracturePreviewSettings) -> None:
+        previous_settings = self._fracture_preview_settings
         self._fracture_preview_settings = settings
         self.geometry_panel.apply_fracture_preview_settings(settings)
+        self._schedule_operator_state_save()
         self._trace(
             "settings.change",
             job="fracture_preview",
             message="Fracture Preview settings changed",
             data=_fracture_preview_trace_payload(settings),
         )
+        if _fracture_preview_visual_only_settings_changed(previous_settings, settings):
+            self._trace(
+                "scene.visual_update",
+                job="fracture_preview",
+                message="Fracture Preview visual collision settings updated",
+                data=_fracture_preview_trace_payload(settings),
+            )
+            return
         try:
             request = self._build_fracture_preview_request()
         except ValueError as exc:
@@ -2571,6 +2601,7 @@ class MainWindow(QWidget):
             return
         settings = self._fracture_preview_settings.fracture
         export_request = FractureExportRequest.from_conversion_request(plan.request)
+        export_request = replace(export_request, collision_settings=self._fracture_preview_settings.collision)
         cap_material_setting = self._current_fracture_cap_material_setting()
         if cap_material_setting.enabled:
             export_request = replace(export_request, cap_material_setting=cap_material_setting)

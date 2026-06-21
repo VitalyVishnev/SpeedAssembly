@@ -696,6 +696,16 @@ class TreeAsset:
     skeletal_support_primvars: SkeletalSupportPrimvars | None = None
     spines: tuple[SpineCurve, ...] = ()
     dynamic_wind: "DynamicWindData | None" = None
+    static_collision_meshes: tuple[MeshData, ...] = ()
+
+    def __getattribute__(self, name: str):
+        if name == "static_collision_meshes":
+            try:
+                return object.__getattribute__(self, name)
+            except AttributeError:
+                object.__setattr__(self, name, ())
+                return ()
+        return object.__getattribute__(self, name)
 
     @property
     def binding_mode(self) -> str:
@@ -703,6 +713,30 @@ class TreeAsset:
             return "none"
         max_width = max(part.binding.element_size for part in self.repeated_parts)
         return "single_joint" if max_width <= 1 else "multi_joint_capable"
+
+    def __setstate__(self, state) -> None:
+        values = list(state)
+        if len(values) == 14:
+            values.append(())
+        fields = (
+            "metadata",
+            "materials",
+            "source_objects",
+            "base_mesh",
+            "skeleton",
+            "assembly_parts",
+            "base_tree_parts",
+            "branch_segments",
+            "mesh_library",
+            "prototypes",
+            "prototype_strategy",
+            "skeletal_support_primvars",
+            "spines",
+            "dynamic_wind",
+            "static_collision_meshes",
+        )
+        for name, value in zip(fields, values):
+            object.__setattr__(self, name, value)
 
     @property
     def binding_element_size(self) -> int:

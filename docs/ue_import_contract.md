@@ -202,6 +202,30 @@ Current proxy generation is source-normalized XML based: explicit FBX/Unreal
 prototype replacement, material overrides, and UDIM settings from the main
 conversion request are not applied to the proxy companion asset.
 
+## Fracture collision companion contract
+
+Fracture Collision is optional per-piece companion geometry for Fracture Static
+Mesh Assembly exports. It does not change the intact-tree skeletal/static
+assembly contracts.
+
+Current authored collision names follow the UE static-mesh collision prefixes:
+
+- `UCX_...` for one simplified Convex Hull
+- `UCP_...` for Capsule collision meshes
+- `USP_...` for Sphere collision meshes
+
+Current generation modes:
+
+- Convex uses one hull per Fracture Piece, with optional source point sampling
+  from repeated parts
+- Sphere uses one bounding sphere per Fracture Piece, with shrink/scale support
+- Capsule uses skeleton-owned segment capsules, simplification, radius padding,
+  and visual scale; fitting is bounded to avoid leaf/tip outlier inflation
+
+UE 5.7.x USD/Interchange recognition of these authored collision meshes remains
+manual-validation pending. Until validated, treat the naming as intended
+importer contract, not proven UE behavior.
+
 ## External reuse debugging rule
 
 When an external `PartMesh` override appears to be ignored, check the generated USDA first:

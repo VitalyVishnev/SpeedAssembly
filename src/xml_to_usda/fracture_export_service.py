@@ -16,8 +16,14 @@ from .asset_paths import is_valid_unreal_asset_path, normalize_unreal_asset_path
 from .authoring_validation import validate_authoring_model
 from .canonical_loader import load_resolved_assembly_model
 from .conversion_validation import validate_conversion_request
-from .fracture_service import FractureError, FracturePiece, FracturePlan, FractureSettings, plan_fracture
+from .fracture_collision import (
+    FractureCollisionSettings,
+    build_fracture_collision_meshes,
+    collision_render_mesh_name,
+    validated_collision_settings,
+)
 from .fracture_geometry import slice_mesh_faces
+from .fracture_service import FractureError, FracturePiece, FracturePlan, FractureSettings, plan_fracture
 from .job_control import throw_if_cancelled
 from .models import (
     BaseMaterialOverride,
@@ -69,6 +75,7 @@ class FractureExportRequest:
     use_explicit_material_contract: bool = False
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = ()
     cap_material_setting: FractureCapMaterialSetting = FractureCapMaterialSetting()
+    collision_settings: FractureCollisionSettings = FractureCollisionSettings()
     conversion_mode: ConversionMode = ConversionMode.STATIC_ASSEMBLY
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024
     fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60
@@ -163,6 +170,7 @@ def export_fracture_usda_from_export_request(
     output_path = _request_output_path(request, input_path)
     export_settings = _export_settings(settings, output_path)
     cap_material_setting = _validated_cap_material_setting(request.cap_material_setting, export_settings)
+    collision_settings = validated_collision_settings(request.collision_settings)
     _, resolved = load_resolved_assembly_model(
         input_path,
         request.output_mode,
@@ -187,6 +195,7 @@ def export_fracture_usda_from_export_request(
         output_path,
         export_settings,
         cap_material_setting=cap_material_setting,
+        collision_settings=collision_settings,
         telemetry_callback=telemetry_callback,
         cancel_event=cancel_event,
     )
@@ -198,6 +207,7 @@ def export_fracture_usda(
     settings: FractureSettings | None = None,
     *,
     cap_material_setting: FractureCapMaterialSetting | None = None,
+    collision_settings: FractureCollisionSettings | None = None,
     telemetry_callback=None,
     cancel_event=None,
 ) -> FractureExportResult:
@@ -208,6 +218,7 @@ def export_fracture_usda(
         cap_material_setting or FractureCapMaterialSetting(),
         export_settings,
     )
+    resolved_collision_settings = validated_collision_settings(collision_settings)
     cap_material_id = _cap_material_id(resolved.authoring_model) if resolved_cap_material_setting.enabled else None
     plan = plan_fracture(resolved.authoring_model, export_settings)
     outputs: list[FracturePieceExport] = []
@@ -223,6 +234,7 @@ def export_fracture_usda(
             generate_caps=export_settings.generate_caps,
             cap_material_setting=resolved_cap_material_setting,
             cap_material_id=cap_material_id,
+            collision_settings=resolved_collision_settings,
         )
         diagnostics += piece_resolved.authoring_diagnostics
         document = write_resolved_usda_document(
@@ -307,6 +319,7 @@ def _piece_resolved_model(
     generate_caps: bool = False,
     cap_material_setting: FractureCapMaterialSetting | None = None,
     cap_material_id: int | None = None,
+    collision_settings: FractureCollisionSettings | None = None,
 ) -> ResolvedAssemblyModel:
     piece_model, cap_udim_settings = _piece_authoring_model(
         resolved.authoring_model,
@@ -314,6 +327,7 @@ def _piece_resolved_model(
         generate_caps=generate_caps,
         cap_material_setting=cap_material_setting or FractureCapMaterialSetting(),
         cap_material_id=cap_material_id,
+        collision_settings=collision_settings,
     )
     authoring_diagnostics = validate_authoring_model(piece_model, conversion_mode=ConversionMode.STATIC_ASSEMBLY)
     return ResolvedAssemblyModel(
@@ -335,6 +349,7 @@ def _piece_authoring_model(
     generate_caps: bool = False,
     cap_material_setting: FractureCapMaterialSetting = FractureCapMaterialSetting(),
     cap_material_id: int | None = None,
+    collision_settings: FractureCollisionSettings | None = None,
 ) -> tuple[CanonicalTreeModel, tuple[UdimMaterialSetting, ...]]:
     if model.base_mesh is None:
         raise FractureError("Fracture export requires a base mesh.")
@@ -365,6 +380,12 @@ def _piece_authoring_model(
                     udim_id=cap_material_setting.udim_id,
                 ),
             )
+    collision_meshes = build_fracture_collision_meshes(
+        model,
+        piece,
+        collision_settings,
+        render_mesh_name=collision_render_mesh_name(piece),
+    )
     return (
         replace(
             model,
@@ -376,6 +397,7 @@ def _piece_authoring_model(
             prototypes=prototypes,
             prototype_strategy=PrototypeStrategy.INLINE_STATIC_PART,
             skeletal_support_primvars=None,
+            static_collision_meshes=collision_meshes,
         ),
         cap_udim_settings,
     )

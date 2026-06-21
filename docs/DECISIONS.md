@@ -233,6 +233,31 @@ Rationale:
 - Cached reuse makes "toggle back" interactions feel immediate without changing
   the preview/export contract.
 
+## 2026-06-21: Viewport visual-only controls are real-time state
+
+Status: Accepted
+
+Decision:
+
+- Controls that do not change topology, ownership, draw-call structure, or the
+  generated preview payload must update viewport/shader state directly.
+- `Capsule Scale`, `Collision Opacity`, `Piece Color`, and `Exploded View` must
+  not rebuild `ViewportScene`, reupload mesh buffers, or restart preview
+  workers while the operator drags them.
+- Preview settings that do change collision structure, such as collision mode,
+  include-instance-parts, convex target, sphere fit, capsule simplify, or cap
+  generation, may still use the worker path.
+
+Rationale:
+
+- Real-time viewport response is the default UX contract for visual-only
+  controls.
+- Rebuilding scene payloads for opacity/scale caused avoidable stalls and
+  crash-prone event pressure.
+- Shader uniforms and viewport scalar state give the same interaction model as
+  piece tint and exploded preview while persisted export settings remain the
+  source of truth for final authoring.
+
 ## 2026-06-16: UDIM resolution is piece-local
 
 Status: Accepted

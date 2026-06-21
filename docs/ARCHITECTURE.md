@@ -238,12 +238,15 @@ domain concept.
   orbit, grid, resource lifecycle, mesh rendering, bone overlay drawing,
   selected/hover cut markers, and screen-space bone picking for `ViewportScene`
   payloads. The shared vertex format includes `ViewportDrawCall`
-  `explode_direction`, so exploded preview is viewport visual state rather than
-  Fracture Piece membership. `qt_ui/viewport.py` also owns viewport-stage trace
-  emission through a callback seam and the shared matcap vertex upload/attribute
-  layout, so mode dialogs do not fake OpenGL upload events or duplicate shader
-  binding contracts. Proxy Mesh Preview renders through
-  `MatcapViewport.set_scene()`. Fracture Preview passes the prebuilt
+  `explode_direction` and per-draw `scaleOrigin`, so exploded preview and
+  collision visual scale are viewport visual state rather than Fracture Piece
+  membership. Visual-only controls such as piece tint, exploded view, collision
+  opacity, and collision visual scale update viewport/shader state directly and
+  must not rebuild `ViewportScene` or reupload mesh buffers. `qt_ui/viewport.py`
+  also owns viewport-stage trace emission through a callback seam and the
+  shared matcap vertex upload/attribute layout, so mode dialogs do not fake
+  OpenGL upload events or duplicate shader binding contracts. Proxy Mesh
+  Preview renders through `MatcapViewport.set_scene()`. Fracture Preview passes the prebuilt
   `ViewportScene` and precomputed matcap vertex payload into the same viewport
   mesh upload, overlay, and picking path; fracture-only state such as
   `FractureViewportMesh` stays in `FracturePreviewDialog` and adapter
@@ -269,17 +272,21 @@ domain concept.
   segment cut membership, optional Stump Piece selection, Preserve Trunk Bias,
   and automatic fill. `fracture_geometry.py` owns sliced piece mesh construction
   and optional Fracture Cap generation so preview and export share the same
-  geometry contract. `fracture_export_service.py` projects those pieces into per-piece
+  geometry contract. `fracture_collision.py` owns deterministic per-piece
+  collision mesh generation for Convex, Capsule, and Sphere modes.
+  `fracture_export_service.py` projects those pieces into per-piece
   `Static Mesh Assembly` authoring models and delegates USDA writing to
   `usda_writer.py`. `fracture_preview_service.py` projects the same plan into
   diagnostic preview payloads with stable colors, lightweight geometry, and a
-  prebuilt `Viewport Scene` for rendering.
+  prebuilt `Viewport Scene` for rendering, including optional ghost collision
+  meshes.
   `fracture_viewport_scene.py` owns the Fracture Preview mode adapter from
   domain preview result to `Viewport Scene`.
-  `qt_ui/fracture_preview.py` owns the Qt preview dialog/viewport adapter and
-  adapts the prebuilt `Viewport Scene` into the current legacy matcap/grid
-  render payload. It owns visual-only fracture controls such as
-  `Hide Repeated Parts` and Exploded Fracture Preview, but shared bone overlay,
+  `qt_ui/fracture_preview.py` owns the Qt preview dialog/viewport adapter,
+  collision settings UI, and mode-specific visibility rules. It adapts the
+  prebuilt `Viewport Scene` into the current legacy matcap/grid render payload.
+  It owns visual-only fracture controls such as `Hide Repeated Parts` and
+  Exploded Fracture Preview, but shared bone overlay,
   cut marker, hover, and picking behavior lives in `qt_ui/viewport.py`. It must
   not own `Viewport Scene` construction, Fracture Piece membership, manual cut
   validity, cap generation, or source interpretation rules.

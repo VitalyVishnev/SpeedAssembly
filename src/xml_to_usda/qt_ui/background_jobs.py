@@ -1196,6 +1196,7 @@ class QtBackgroundJobsController:
             )
         if settings is not None and hasattr(settings, "fracture"):
             fracture = settings.fracture
+            collision = getattr(settings, "collision", None)
             payload.update(
                 {
                     "target_piece_count": fracture.target_piece_count,
@@ -1208,6 +1209,14 @@ class QtBackgroundJobsController:
                     "preview_prototype_faces": settings.max_prototype_faces,
                 }
             )
+            if collision is not None:
+                payload.update(
+                    {
+                        "collision_enabled": getattr(collision, "enabled", False),
+                        "collision_mode": getattr(getattr(collision, "mode", None), "value", ""),
+                        "collision_include_parts": getattr(collision, "include_instance_parts", False),
+                    }
+                )
         return payload
 
     def _proxy_preview_trace_payload(self, request, settings, job_id: int) -> dict[str, object]:

@@ -18,6 +18,7 @@ import tempfile
 from typing import TYPE_CHECKING
 
 from .canonical_loader import load_source_tree_model
+from .fracture_collision import FractureCollisionSettings, build_fracture_collision_mesh_sets, validated_collision_settings
 from .fracture_geometry import build_cap_source_context, sample_face_indices, slice_mesh_faces
 from .fracture_service import (
     FractureError,
@@ -64,6 +65,7 @@ class _InvalidFracturePreviewSourceCache(Exception):
 @dataclass(frozen=True)
 class FracturePreviewSettings:
     fracture: FractureSettings = field(default_factory=FractureSettings)
+    collision: FractureCollisionSettings = field(default_factory=FractureCollisionSettings)
     final_polycount: int = DEFAULT_FRACTURE_PREVIEW_POLYCOUNT
     base_mesh_priority: float = DEFAULT_FRACTURE_PREVIEW_BASE_PRIORITY
     max_base_faces_per_piece: int = DEFAULT_FRACTURE_PREVIEW_BASE_FACE_BUDGET
@@ -132,6 +134,9 @@ class FracturePreviewResult:
     instances: tuple[FracturePreviewInstance, ...]
     diagnostics: tuple[ValidationIssue, ...]
     bone_segments: tuple[FracturePreviewBoneSegment, ...] = ()
+    collision_meshes: tuple[GeometryBuffer, ...] = ()
+    collision_piece_indices: tuple[int, ...] = ()
+    collision_opacity: float = 0.25
     viewport_scene: "ViewportScene | None" = None
 
 
@@ -238,6 +243,10 @@ def generate_fracture_preview(
     prototypes = _preview_prototypes(model, plan, prototype_budgets)
     instances = _preview_instances(model, pieces)
     bone_segments = _preview_bone_segments(model, resolved_settings.fracture, pieces)
+    collision_settings = validated_collision_settings(resolved_settings.collision)
+    collision_sets = build_fracture_collision_mesh_sets(model, plan.pieces, collision_settings)
+    collision_meshes = tuple(geometry_buffer_from_mesh(mesh) for mesh_set in collision_sets for mesh in mesh_set.meshes)
+    collision_piece_indices = tuple(mesh_set.piece_index for mesh_set in collision_sets for _mesh in mesh_set.meshes)
     result = FracturePreviewResult(
         plan=plan,
         pieces=pieces,
@@ -245,6 +254,9 @@ def generate_fracture_preview(
         instances=instances,
         diagnostics=plan.diagnostics,
         bone_segments=bone_segments,
+        collision_meshes=collision_meshes,
+        collision_piece_indices=collision_piece_indices,
+        collision_opacity=collision_settings.ghost_opacity,
     )
     if not include_viewport_scene:
         return result
@@ -285,6 +297,7 @@ def _validate_preview_settings(settings: FracturePreviewSettings) -> None:
         raise FractureError("Fracture preview base face budget must be greater than zero.")
     if settings.max_prototype_faces <= 0:
         raise FractureError("Fracture preview prototype face budget must be greater than zero.")
+    validated_collision_settings(settings.collision)
 
 
 def _base_face_budgets(
