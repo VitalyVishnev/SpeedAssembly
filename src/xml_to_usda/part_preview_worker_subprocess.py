@@ -18,9 +18,9 @@ from .worker_commands import PART_PREVIEW_WORKER_COMMAND
 from .worker_file_protocol import (
     cleanup_file,
     read_error_payload,
-    read_pickle_payload,
+    read_worker_payload,
     write_error_payload,
-    write_pickle_atomic,
+    write_worker_payload_atomic,
 )
 
 
@@ -33,11 +33,11 @@ class PartPreviewWorkerRequest:
 
 
 def write_part_preview_worker_request(path: str | Path, request: PartPreviewWorkerRequest) -> None:
-    write_pickle_atomic(path, request)
+    write_worker_payload_atomic(path, request)
 
 
 def read_part_preview_worker_request(path: str | Path) -> PartPreviewWorkerRequest:
-    payload = read_pickle_payload(path)
+    payload = read_worker_payload(path)
     if not isinstance(payload, PartPreviewWorkerRequest):
         raise TypeError("Invalid Part Preview worker request payload.")
     return payload
@@ -51,7 +51,7 @@ def read_part_preview_worker_result(path: str | Path) -> PartPrototypePreviewRes
     result_path = Path(path)
     if not result_path.exists():
         return None
-    payload = read_pickle_payload(result_path)
+    payload = read_worker_payload(result_path)
     if isinstance(payload, PartPrototypePreviewResult):
         return payload
     raise TypeError("Invalid Part Preview worker result payload.")
@@ -63,7 +63,7 @@ def run_part_preview_worker_request_file(path: str | Path) -> int:
     try:
         apply_process_profile(request.request.cpu_profile)
         result = build_part_prototype_preview(request.request, request.settings)
-        write_pickle_atomic(request.result_path, result)
+        write_worker_payload_atomic(request.result_path, result)
         cleanup_file(request.error_path)
         return 0
     except Exception as exc:

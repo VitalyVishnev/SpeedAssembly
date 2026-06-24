@@ -150,7 +150,7 @@ def test_fbx_worker_request_round_trips_cache_policy(tmp_path: Path) -> None:
         read_material_slots=False,
         fbx_cache_max_bytes=1234,
         fbx_cache_max_age_seconds=5678,
-        result_path="result.pkl",
+        result_path="result.json",
         error_path="error.json",
     )
 
@@ -162,7 +162,7 @@ def test_fbx_worker_request_round_trips_cache_policy(tmp_path: Path) -> None:
 def test_fbx_worker_passes_cache_policy_to_store(tmp_path: Path, monkeypatch) -> None:
     import xml_to_usda.fbx_worker_subprocess as worker_module
 
-    result_path = tmp_path / "result.pkl"
+    result_path = tmp_path / "result.json"
     error_path = tmp_path / "error.json"
     request_path = tmp_path / "request.json"
     observed_store_kwargs = {}

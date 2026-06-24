@@ -30,7 +30,7 @@ from .worker_file_protocol import (
     read_json_payload,
     write_error_payload,
     write_json_atomic,
-    write_pickle_atomic,
+    write_worker_payload_atomic,
 )
 
 
@@ -115,7 +115,7 @@ def run_fbx_worker_request_file(path: str | Path) -> int:
                 )
         elif isinstance(payload, GeometryBuffer) and payload.name != request.prototype_name:
             payload = replace(payload, name=request.prototype_name)
-        write_pickle_atomic(request.result_path, payload)
+        write_worker_payload_atomic(request.result_path, payload)
         cleanup_file(request.error_path)
         return 0
     except Exception as exc:

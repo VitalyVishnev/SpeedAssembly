@@ -28,9 +28,9 @@ from .worker_commands import PROXY_MESH_WORKER_COMMAND
 from .worker_file_protocol import (
     cleanup_file,
     read_error_payload,
-    read_pickle_payload,
+    read_worker_payload,
     write_error_payload,
-    write_pickle_atomic,
+    write_worker_payload_atomic,
 )
 
 
@@ -44,11 +44,11 @@ class ProxyMeshWorkerRequest:
 
 
 def write_proxy_mesh_worker_request(path: str | Path, request: ProxyMeshWorkerRequest) -> None:
-    write_pickle_atomic(path, request)
+    write_worker_payload_atomic(path, request)
 
 
 def read_proxy_mesh_worker_request(path: str | Path) -> ProxyMeshWorkerRequest:
-    payload = read_pickle_payload(path)
+    payload = read_worker_payload(path)
     if not isinstance(payload, ProxyMeshWorkerRequest):
         raise TypeError("Invalid Proxy Mesh worker request payload.")
     return payload
@@ -94,7 +94,7 @@ def run_proxy_mesh_worker_request_file(path: str | Path) -> int:
         else:
             raise ValueError(f"Unsupported proxy mesh worker action: {request.action}")
         _worker_stage("result.write.start")
-        write_pickle_atomic(request.result_path, result)
+        write_worker_payload_atomic(request.result_path, result)
         _worker_stage("result.write.end")
         cleanup_file(request.error_path)
         return 0

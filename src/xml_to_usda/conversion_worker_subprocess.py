@@ -24,9 +24,9 @@ from .worker_commands import CONVERSION_WORKER_COMMAND
 from .worker_file_protocol import (
     cleanup_file,
     read_error_payload,
-    read_pickle_payload,
+    read_worker_payload,
     write_error_payload,
-    write_pickle_atomic,
+    write_worker_payload_atomic,
 )
 
 
@@ -40,11 +40,11 @@ class ConversionWorkerRequest:
 
 
 def write_conversion_worker_request(path: str | Path, request: ConversionWorkerRequest) -> None:
-    write_pickle_atomic(path, request)
+    write_worker_payload_atomic(path, request)
 
 
 def read_conversion_worker_request(path: str | Path) -> ConversionWorkerRequest:
-    payload = read_pickle_payload(path)
+    payload = read_worker_payload(path)
     if not isinstance(payload, ConversionWorkerRequest):
         raise TypeError("Invalid Conversion worker request payload.")
     return payload
@@ -65,13 +65,13 @@ def run_conversion_worker_request_file(path: str | Path) -> int:
             telemetry_callback=event_writer.write,
             runtime_paths=request.runtime_paths,
         )[0]
-        write_pickle_atomic(request.result_path, ConversionJobResult(result=result))
+        write_worker_payload_atomic(request.result_path, ConversionJobResult(result=result))
         cleanup_file(request.error_path)
         return 0
     except Exception as exc:
         formatted_traceback = traceback.format_exc()
         write_error_payload(request.error_path, message=str(exc), formatted_traceback=formatted_traceback)
-        write_pickle_atomic(request.result_path, ConversionJobResult(error_message=str(exc)))
+        write_worker_payload_atomic(request.result_path, ConversionJobResult(error_message=str(exc)))
         return 1
 
 
@@ -82,6 +82,6 @@ class _TelemetryEventWriter:
         self.event_dir.mkdir(parents=True, exist_ok=True)
 
     def write(self, telemetry) -> None:
-        event_path = self.event_dir / f"{self.sequence:06d}.event.pkl"
+        event_path = self.event_dir / f"{self.sequence:06d}.event.json"
         self.sequence += 1
-        write_pickle_atomic(event_path, ("telemetry", telemetry))
+        write_worker_payload_atomic(event_path, ("telemetry", telemetry))

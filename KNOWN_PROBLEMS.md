@@ -1,11 +1,11 @@
 # Known Problems
 
-## Worker File Protocol Pickle Hardening Deferred
+## Worker Request Origin Constraint Pending
 
-- Issue: Conversion, Proxy Mesh, Fracture, and FBX worker request/result files still use `pickle` for local file-backed worker payloads.
+- Issue: Worker request/result/event payloads no longer use `pickle`, but helper commands still accept any readable JSON request path supplied on the command line.
 - Location: `src/xml_to_usda/worker_file_protocol.py`, `src/xml_to_usda/conversion_worker_subprocess.py`, `src/xml_to_usda/proxy_mesh_worker_subprocess.py`, `src/xml_to_usda/fracture_worker_subprocess.py`, `src/xml_to_usda/fbx_worker_subprocess.py`
-- Reason for deferral: The current security hardening pass intentionally excluded the two pickle findings; exploitation requires local worker-file tampering or hidden worker invocation rather than a normal malicious XML/preset path.
-- Likely next step: Replace worker IPC payloads with typed JSON or another non-executing schema and constrain worker request paths to parent-created Job Workspace roots.
+- Reason for deferral: The current pass removed the code-executing deserialization sink. Request origin constraints need a separate parent-created token/root contract so packaged workers do not reject legitimate temp files.
+- Likely next step: Add a parent-generated nonce or runtime workspace root check to worker requests and validate it before reading source/output paths.
 
 ## FBX Payload Cache Pickle Hardening Deferred
 

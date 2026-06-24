@@ -24,6 +24,10 @@ RUNTIME_TEMP_FILE_PREFIXES = (
 RUNTIME_TEMP_FILE_SUFFIXES = (
     ".request.pkl",
     ".result.pkl",
+    ".payload.pkl",
+    ".request.json",
+    ".result.json",
+    ".payload.json",
     ".error.json",
     ".stderr.log",
 )

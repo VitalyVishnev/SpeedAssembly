@@ -30,8 +30,8 @@ SIMPLE_TREE_01 = (
 
 
 def test_fracture_preview_worker_does_not_depend_on_export_service(monkeypatch, tmp_path: Path) -> None:
-    request_path = tmp_path / "preview.request.pkl"
-    result_path = tmp_path / "preview.result.pkl"
+    request_path = tmp_path / "preview.request.json"
+    result_path = tmp_path / "preview.result.json"
     error_path = tmp_path / "preview.error.json"
     write_fracture_worker_request(
         request_path,
@@ -85,8 +85,8 @@ def test_fracture_preview_worker_does_not_depend_on_export_service(monkeypatch, 
 
 
 def test_fracture_preview_worker_reports_caps_stage_breadcrumbs(capsys, tmp_path: Path) -> None:
-    request_path = tmp_path / "preview_caps.request.pkl"
-    result_path = tmp_path / "preview_caps.result.pkl"
+    request_path = tmp_path / "preview_caps.request.json"
+    result_path = tmp_path / "preview_caps.result.json"
     error_path = tmp_path / "preview_caps.error.json"
     write_fracture_worker_request(
         request_path,
@@ -121,8 +121,8 @@ def test_fracture_preview_worker_reports_caps_stage_breadcrumbs(capsys, tmp_path
 
 
 def test_fracture_worker_request_write_does_not_leave_empty_final_file(monkeypatch, tmp_path: Path) -> None:
-    request_path = tmp_path / "preview.request.pkl"
-    result_path = tmp_path / "preview.result.pkl"
+    request_path = tmp_path / "preview.request.json"
+    result_path = tmp_path / "preview.result.json"
     error_path = tmp_path / "preview.error.json"
     request = FractureWorkerRequest(
         request=FracturePreviewSourceRequest(
@@ -136,14 +136,14 @@ def test_fracture_worker_request_write_does_not_leave_empty_final_file(monkeypat
     )
 
     def fail_dump(*args, **kwargs):
-        raise RuntimeError("simulated pickle failure")
+        raise RuntimeError("simulated JSON failure")
 
-    monkeypatch.setattr(worker_file_protocol.pickle, "dump", fail_dump)
+    monkeypatch.setattr(worker_file_protocol.json, "dumps", fail_dump)
 
     try:
         write_fracture_worker_request(request_path, request)
     except RuntimeError as exc:
-        assert str(exc) == "simulated pickle failure"
+        assert str(exc) == "simulated JSON failure"
     else:
         raise AssertionError("Expected simulated pickle failure.")
 
@@ -151,18 +151,13 @@ def test_fracture_worker_request_write_does_not_leave_empty_final_file(monkeypat
 
 
 def test_fracture_worker_result_write_does_not_leave_empty_final_file(monkeypatch, tmp_path: Path) -> None:
-    result_path = tmp_path / "preview.result.pkl"
-
-    def fail_dump(*args, **kwargs):
-        raise RuntimeError("simulated result pickle failure")
-
-    monkeypatch.setattr(worker_file_protocol.pickle, "dump", fail_dump)
+    result_path = tmp_path / "preview.result.json"
 
     try:
         write_fracture_worker_result(result_path, object())
-    except RuntimeError as exc:
-        assert str(exc) == "simulated result pickle failure"
+    except TypeError as exc:
+        assert "Unsupported worker payload type" in str(exc)
     else:
-        raise AssertionError("Expected simulated result pickle failure.")
+        raise AssertionError("Expected unsupported worker payload failure.")
 
     assert result_path.exists() is False

@@ -270,8 +270,8 @@ def _run_worker_stress(
     for index, fracture_settings in enumerate(settings_matrix):
         run_dir = report_root / profile_name / "worker" / f"{index:03d}"
         run_dir.mkdir(parents=True, exist_ok=True)
-        request_path = run_dir / "request.pkl"
-        result_path = run_dir / "result.pkl"
+        request_path = run_dir / "request.json"
+        result_path = run_dir / "result.json"
         error_path = run_dir / "error.json"
         stdout_path = run_dir / "stdout.txt"
         stderr_path = run_dir / "stderr.txt"

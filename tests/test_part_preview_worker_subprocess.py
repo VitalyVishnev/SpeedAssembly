@@ -17,8 +17,8 @@ from xml_to_usda.part_preview_worker_subprocess import (
 
 
 def test_part_preview_worker_writes_result(monkeypatch, tmp_path: Path) -> None:
-    request_path = tmp_path / "request.pkl"
-    result_path = tmp_path / "result.pkl"
+    request_path = tmp_path / "request.json"
+    result_path = tmp_path / "result.json"
     error_path = tmp_path / "error.json"
     result = PartPrototypePreviewResult(
         source_key="Mesh_1",

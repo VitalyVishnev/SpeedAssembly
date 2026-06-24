@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pickle
 from pathlib import Path
 from queue import Empty
 import threading
@@ -30,6 +29,7 @@ from xml_to_usda.models import ConversionJobResult, ConversionRequest
 from xml_to_usda.pipeline import convert_request
 from xml_to_usda.proxy_mesh_service import ProxyMeshJobResult, ProxyMeshSettings, ProxyMeshSourceRequest
 from xml_to_usda.runtime_paths import resolve_runtime_paths
+from xml_to_usda.worker_file_protocol import read_worker_payload
 
 
 SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "samples" / "speedtree" / "simple_tree" / "variants" / "SimpleTree_01.xml"
@@ -99,11 +99,10 @@ def _test_runtime_paths(tmp_path: Path):
     )
 
 
-def _read_pickled_events(event_dir: Path) -> list[tuple[str, object]]:
+def _read_worker_events(event_dir: Path) -> list[tuple[str, object]]:
     events: list[tuple[str, object]] = []
-    for path in sorted(event_dir.glob("*.event.pkl")):
-        with path.open("rb") as handle:
-            events.append(pickle.load(handle))
+    for path in sorted(event_dir.glob("*.event.json")):
+        events.append(read_worker_payload(path))
     return events
 
 
@@ -389,8 +388,8 @@ def test_conversion_worker_request_file_writes_telemetry_and_result(
         input_paths=(str(SIMPLE_TREE_01),),
         output_path=str(tmp_path / "worker_file_success.usda"),
     )
-    request_path = tmp_path / "conversion.request.pkl"
-    result_path = tmp_path / "conversion.result.pkl"
+    request_path = tmp_path / "conversion.request.json"
+    result_path = tmp_path / "conversion.result.json"
     error_path = tmp_path / "conversion.error.json"
     event_dir = tmp_path / "events"
 
@@ -410,11 +409,10 @@ def test_conversion_worker_request_file_writes_telemetry_and_result(
 
     assert exit_code == 0
     assert error_path.exists() is False
-    assert sorted(path.name for path in event_dir.glob("*.event.pkl"))
-    events = _read_pickled_events(event_dir)
+    assert sorted(path.name for path in event_dir.glob("*.event.json"))
+    events = _read_worker_events(event_dir)
     assert any(event_name == "telemetry" for event_name, _payload in events)
-    with result_path.open("rb") as handle:
-        job_result = pickle.load(handle)
+    job_result = read_worker_payload(result_path)
     assert isinstance(job_result, ConversionJobResult)
     assert job_result.error_message is None
     assert job_result.result is not None

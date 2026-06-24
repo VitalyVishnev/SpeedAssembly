@@ -25,9 +25,9 @@ from .worker_commands import FRACTURE_WORKER_COMMAND
 from .worker_file_protocol import (
     cleanup_file,
     read_error_payload,
-    read_pickle_payload,
+    read_worker_payload,
     write_error_payload,
-    write_pickle_atomic,
+    write_worker_payload_atomic,
 )
 
 if TYPE_CHECKING:
@@ -50,11 +50,11 @@ class FractureWorkerRequest:
 
 
 def write_fracture_worker_request(path: str | Path, request: FractureWorkerRequest) -> None:
-    write_pickle_atomic(path, request)
+    write_worker_payload_atomic(path, request)
 
 
 def read_fracture_worker_request(path: str | Path) -> FractureWorkerRequest:
-    payload = read_pickle_payload(path)
+    payload = read_worker_payload(path)
     if not isinstance(payload, FractureWorkerRequest):
         raise TypeError("Invalid Fracture worker request payload.")
     return payload
@@ -124,7 +124,7 @@ def read_fracture_worker_result(path: str | Path) -> "FractureExportResult | Fra
     result_path = Path(path)
     if not result_path.exists():
         return None
-    payload = read_pickle_payload(result_path)
+    payload = read_worker_payload(result_path)
     payload_type = type(payload)
     if payload_type.__module__ == "xml_to_usda.fracture_preview_service" and payload_type.__name__ == "FracturePreviewResult":
         return payload
@@ -137,7 +137,7 @@ def read_fracture_worker_result(path: str | Path) -> "FractureExportResult | Fra
 
 
 def write_fracture_worker_result(path: str | Path, result: object) -> None:
-    write_pickle_atomic(path, _worker_result_payload(result))
+    write_worker_payload_atomic(path, _worker_result_payload(result))
 
 
 def _worker_result_payload(result: object) -> object:

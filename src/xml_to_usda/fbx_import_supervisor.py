@@ -29,7 +29,7 @@ from .fbx_worker_subprocess import (
 from .fbx_payload_cache import FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS, FBX_PAYLOAD_CACHE_MAX_BYTES
 from .job_control import cpu_worker_count, emit_telemetry, throw_if_cancelled
 from .models import ConversionPhase, CpuProfile
-from .worker_file_protocol import cleanup_file, create_temp_path, read_pickle_payload, resolve_worker_command
+from .worker_file_protocol import cleanup_file, create_temp_path, read_worker_payload, resolve_worker_command
 
 
 @dataclass(frozen=True)
@@ -210,7 +210,7 @@ def _run_import_batch(
 
 def _launch_helper(task: FbxImportTask) -> _RunningHelper:
     request_path = _create_temp_path(".request.json")
-    result_path = _create_temp_path(".payload.pkl")
+    result_path = _create_temp_path(".payload.json")
     error_path = _create_temp_path(".error.json")
     write_fbx_worker_request(
         request_path,
@@ -304,6 +304,6 @@ def _cleanup_temp_path(path: Path) -> None:
 
 def _load_payload_file(path: Path) -> object:
     try:
-        return read_pickle_payload(path)
+        return read_worker_payload(path)
     finally:
         _cleanup_temp_path(path)

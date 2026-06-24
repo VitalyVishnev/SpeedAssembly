@@ -53,7 +53,7 @@ from .runtime_error_mode import suppress_windows_native_error_dialogs
 from .worker_file_protocol import (
     cleanup_file,
     create_temp_path,
-    read_pickle_payload,
+    read_worker_payload,
     resolve_worker_command,
 )
 
@@ -68,8 +68,8 @@ def start_conversion_process(
     runtime_paths,
 ):
     suppress_windows_native_error_dialogs()
-    request_path = _create_conversion_temp_path(".request.pkl")
-    result_path = _create_conversion_temp_path(".result.pkl")
+    request_path = _create_conversion_temp_path(".request.json")
+    result_path = _create_conversion_temp_path(".result.json")
     error_path = _create_conversion_temp_path(".error.json")
     stderr_path = _create_conversion_temp_path(".stderr.log")
     event_dir = Path(tempfile.mkdtemp(prefix="xml_to_usda_conversion_events_"))
@@ -111,8 +111,8 @@ def start_proxy_mesh_process(
     action: str,
 ):
     suppress_windows_native_error_dialogs()
-    request_path = _create_proxy_temp_path(".request.pkl")
-    result_path = _create_proxy_temp_path(".result.pkl")
+    request_path = _create_proxy_temp_path(".request.json")
+    result_path = _create_proxy_temp_path(".result.json")
     error_path = _create_proxy_temp_path(".error.json")
     stderr_path = _create_proxy_temp_path(".stderr.log")
     write_proxy_mesh_worker_request(
@@ -164,8 +164,8 @@ def start_part_preview_process(
     settings: PartPrototypePreviewSettings,
 ):
     suppress_windows_native_error_dialogs()
-    request_path = _create_part_preview_temp_path(".request.pkl")
-    result_path = _create_part_preview_temp_path(".result.pkl")
+    request_path = _create_part_preview_temp_path(".request.json")
+    result_path = _create_part_preview_temp_path(".result.json")
     error_path = _create_part_preview_temp_path(".error.json")
     stderr_path = _create_part_preview_temp_path(".stderr.log")
     write_part_preview_worker_request(
@@ -204,8 +204,8 @@ def _start_fracture_worker_process(
     action: str,
 ):
     suppress_windows_native_error_dialogs()
-    request_path = _create_fracture_temp_path(".request.pkl")
-    result_path = _create_fracture_temp_path(".result.pkl")
+    request_path = _create_fracture_temp_path(".request.json")
+    result_path = _create_fracture_temp_path(".result.json")
     error_path = _create_fracture_temp_path(".error.json")
     stderr_path = _create_fracture_temp_path(".stderr.log")
     write_fracture_worker_request(
@@ -378,11 +378,11 @@ class _ConversionWorkerQueue:
 
     def drain(self) -> list[tuple[str, object]]:
         events: list[tuple[str, object]] = []
-        for event_path in sorted(self.event_dir.glob("*.event.pkl")):
+        for event_path in sorted(self.event_dir.glob("*.event.json")):
             event_name = event_path.name
             if event_name in self.delivered_events:
                 continue
-            events.append(read_pickle_payload(event_path))
+            events.append(read_worker_payload(event_path))
             self.delivered_events.add(event_name)
 
         if self.delivered_result:
@@ -434,7 +434,7 @@ class _ProxyMeshWorkerQueue:
             ]
         if not self.result_path.exists():
             return []
-        payload = read_pickle_payload(self.result_path)
+        payload = read_worker_payload(self.result_path)
         self.delivered = True
         return [("result", payload)]
 
@@ -533,7 +533,7 @@ def _read_conversion_job_result(path: Path, *, fallback_error_message: str = "")
         return ConversionJobResult(
             error_message=fallback_error_message or "Conversion worker finished without a result."
         )
-    payload = read_pickle_payload(path)
+    payload = read_worker_payload(path)
     if isinstance(payload, ConversionJobResult):
         return payload
     return ConversionJobResult(error_message="Conversion worker returned an invalid result payload.")

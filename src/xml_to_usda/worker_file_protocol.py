@@ -10,19 +10,43 @@ from __future__ import annotations
 
 import json
 import os
-import pickle
 import sys
 import tempfile
+from array import array
+from base64 import b64decode, b64encode
+from dataclasses import fields, is_dataclass
+from enum import Enum
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
 
-def write_pickle_atomic(path: str | Path, payload: object) -> None:
+_TYPE_KEY = "__xml_to_usda_worker_payload_type__"
+_CLASS_KEY = "__xml_to_usda_worker_payload_class__"
+_WORKER_PAYLOAD_MODULES = (
+    "xml_to_usda.models",
+    "xml_to_usda.runtime_paths",
+    "xml_to_usda.conversion_worker_subprocess",
+    "xml_to_usda.proxy_mesh_service",
+    "xml_to_usda.proxy_mesh_worker_subprocess",
+    "xml_to_usda.fracture_collision",
+    "xml_to_usda.fracture_export_service",
+    "xml_to_usda.fracture_preview_service",
+    "xml_to_usda.fracture_service",
+    "xml_to_usda.fracture_worker_subprocess",
+    "xml_to_usda.part_preview_service",
+    "xml_to_usda.part_preview_worker_subprocess",
+)
+
+
+def write_worker_payload_atomic(path: str | Path, payload: object) -> None:
     target_path = Path(path)
     temp_path = target_path.with_name(f"{target_path.name}.tmp")
     try:
-        with temp_path.open("wb") as handle:
-            pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        temp_path.write_text(
+            json.dumps(_encode_worker_value(payload), separators=(",", ":")),
+            encoding="utf-8",
+        )
         temp_path.replace(target_path)
     except Exception:
         cleanup_file(temp_path)
@@ -30,9 +54,8 @@ def write_pickle_atomic(path: str | Path, payload: object) -> None:
         raise
 
 
-def read_pickle_payload(path: str | Path) -> Any:
-    with Path(path).open("rb") as handle:
-        return pickle.load(handle)
+def read_worker_payload(path: str | Path) -> Any:
+    return _decode_worker_value(json.loads(Path(path).read_text(encoding="utf-8")))
 
 
 def write_json_atomic(path: str | Path, payload: dict[str, object]) -> None:
@@ -92,3 +115,128 @@ def resolve_worker_command(command: str, request_path: str | Path) -> list[str]:
     if bool(getattr(sys, "frozen", False)):
         return [sys.executable, command, "--request", request]
     return [sys.executable, "-m", "xml_to_usda", command, "--request", request]
+
+
+def _encode_worker_value(value: object) -> object:
+    if isinstance(value, Enum):
+        return {
+            _TYPE_KEY: "enum",
+            _CLASS_KEY: _allowed_worker_class_key(type(value)),
+            "value": value.value,
+        }
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    if isinstance(value, array):
+        return {
+            _TYPE_KEY: "array",
+            "typecode": value.typecode,
+            "data": b64encode(value.tobytes()).decode("ascii"),
+        }
+    if isinstance(value, bytes):
+        return {_TYPE_KEY: "bytes", "data": b64encode(value).decode("ascii")}
+    if isinstance(value, Path):
+        return {_TYPE_KEY: "path", "value": str(value)}
+    if isinstance(value, tuple):
+        return {_TYPE_KEY: "tuple", "items": [_encode_worker_value(item) for item in value]}
+    if isinstance(value, list):
+        return [_encode_worker_value(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            _TYPE_KEY: "dict",
+            "items": [
+                [_encode_worker_value(key), _encode_worker_value(item)]
+                for key, item in value.items()
+            ],
+        }
+    if is_dataclass(value):
+        return {
+            _TYPE_KEY: "object",
+            _CLASS_KEY: _allowed_worker_class_key(type(value)),
+            "fields": {
+                field.name: _encode_worker_value(getattr(value, field.name))
+                for field in fields(value)
+            },
+        }
+    slot_names = _slot_names(type(value))
+    if slot_names:
+        return {
+            _TYPE_KEY: "object",
+            _CLASS_KEY: _allowed_worker_class_key(type(value)),
+            "fields": {name: _encode_worker_value(getattr(value, name)) for name in slot_names},
+        }
+    raise TypeError(f"Unsupported worker payload type: {type(value).__module__}.{type(value).__qualname__}.")
+
+
+def _decode_worker_value(value: object) -> object:
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    if isinstance(value, list):
+        return [_decode_worker_value(item) for item in value]
+    if not isinstance(value, dict):
+        raise TypeError(f"Invalid worker payload value type: {type(value).__name__}.")
+    payload_type = value.get(_TYPE_KEY)
+    if payload_type is None:
+        return {key: _decode_worker_value(item) for key, item in value.items()}
+    if payload_type == "array":
+        decoded = array(str(value["typecode"]))
+        decoded.frombytes(b64decode(str(value["data"]).encode("ascii")))
+        return decoded
+    if payload_type == "bytes":
+        return b64decode(str(value["data"]).encode("ascii"))
+    if payload_type == "path":
+        return Path(str(value["value"]))
+    if payload_type == "tuple":
+        items = value.get("items")
+        if not isinstance(items, list):
+            raise TypeError("Worker tuple payload must contain an item list.")
+        return tuple(_decode_worker_value(item) for item in items)
+    if payload_type == "dict":
+        items = value.get("items")
+        if not isinstance(items, list):
+            raise TypeError("Worker dict payload must contain an item list.")
+        return {_decode_worker_value(key): _decode_worker_value(item) for key, item in items}
+    if payload_type == "enum":
+        cls = _allowed_worker_class(str(value[_CLASS_KEY]))
+        if not issubclass(cls, Enum):
+            raise TypeError("Worker enum payload class is not an Enum.")
+        return cls(value["value"])
+    if payload_type == "object":
+        cls = _allowed_worker_class(str(value[_CLASS_KEY]))
+        raw_fields = value.get("fields")
+        if not isinstance(raw_fields, dict):
+            raise TypeError("Worker object payload must contain a field object.")
+        return cls(**{name: _decode_worker_value(item) for name, item in raw_fields.items()})
+    raise TypeError(f"Unsupported worker payload marker: {payload_type}.")
+
+
+def _allowed_worker_class_key(cls: type) -> str:
+    key = f"{cls.__module__}.{cls.__qualname__}"
+    if cls.__module__ not in _WORKER_PAYLOAD_MODULES or not _is_allowed_worker_payload_class(cls):
+        raise TypeError(f"Unsupported worker payload class: {key}.")
+    return key
+
+
+def _allowed_worker_class(key: str) -> type:
+    module_name, _, qualname = key.rpartition(".")
+    if module_name not in _WORKER_PAYLOAD_MODULES or not qualname:
+        raise TypeError(f"Unsupported worker payload class: {key}.")
+    obj: object = import_module(module_name)
+    for part in qualname.split("."):
+        obj = getattr(obj, part)
+    if not isinstance(obj, type) or obj.__module__ != module_name or not _is_allowed_worker_payload_class(obj):
+        raise TypeError(f"Unsupported worker payload class: {key}.")
+    return obj
+
+
+def _is_allowed_worker_payload_class(cls: type) -> bool:
+    return is_dataclass(cls) or issubclass(cls, Enum) or bool(_slot_names(cls))
+
+
+def _slot_names(cls: type) -> tuple[str, ...]:
+    names: list[str] = []
+    for owner in reversed(cls.__mro__):
+        slots = getattr(owner, "__slots__", ())
+        if isinstance(slots, str):
+            slots = (slots,)
+        names.extend(name for name in slots if name not in {"__dict__", "__weakref__"})
+    return tuple(names)

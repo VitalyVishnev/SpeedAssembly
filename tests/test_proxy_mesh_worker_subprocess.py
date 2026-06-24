@@ -11,8 +11,8 @@ from xml_to_usda.proxy_mesh_worker_subprocess import (
 
 
 def test_proxy_mesh_worker_reports_stage_breadcrumbs(monkeypatch, capsys, tmp_path: Path) -> None:
-    request_path = tmp_path / "proxy.request.pkl"
-    result_path = tmp_path / "proxy.result.pkl"
+    request_path = tmp_path / "proxy.request.json"
+    result_path = tmp_path / "proxy.result.json"
     error_path = tmp_path / "proxy.error.json"
 
     monkeypatch.setattr(

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import pickle
 from pathlib import Path
 
 import pytest
@@ -19,6 +18,7 @@ from xml_to_usda.fbx_worker_subprocess import (
 from xml_to_usda.models import CpuProfile, FbxMaterialMode, PrototypeSourceConfig, PrototypeSourceMode, Vector3
 from xml_to_usda.pipeline import convert_file, load_canonical_model
 from xml_to_usda.prototype_sources import load_prototype_source_configs_from_json
+from xml_to_usda.worker_file_protocol import read_worker_payload
 
 
 def _write_fbx_json_payload(
@@ -187,13 +187,13 @@ def test_prototype_source_fbx_loading_uses_supervisor_adapter_for_multiple_proto
     assert supervisor_calls == [("SM_BigBranch_01_HIGH", "SM_BigBranch_01_HIGH")]
 
 
-def test_cli_fbx_worker_command_writes_payload_pickle_and_returns_zero(
+def test_cli_fbx_worker_command_writes_payload_json_and_returns_zero(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import xml_to_usda.fbx_worker_subprocess as fbx_worker_subprocess_module
 
-    result_path = tmp_path / "worker_payload.pkl"
+    result_path = tmp_path / "worker_payload.json"
     error_path = tmp_path / "worker_error.json"
     request_path = tmp_path / "worker_request.json"
     written_payload = {"points": [1, 2, 3]}
@@ -219,8 +219,7 @@ def test_cli_fbx_worker_command_writes_payload_pickle_and_returns_zero(
 
     assert exit_code == 0
     assert error_path.exists() is False
-    with result_path.open("rb") as handle:
-        assert pickle.load(handle) == written_payload
+    assert read_worker_payload(result_path) == written_payload
     assert read_fbx_worker_error(error_path) is None
 
 
@@ -230,7 +229,7 @@ def test_cli_fbx_worker_command_passes_selective_read_options(
 ) -> None:
     import xml_to_usda.fbx_worker_subprocess as fbx_worker_subprocess_module
 
-    result_path = tmp_path / "worker_payload.pkl"
+    result_path = tmp_path / "worker_payload.json"
     error_path = tmp_path / "worker_error.json"
     request_path = tmp_path / "worker_request.json"
     fbx_path = tmp_path / "branch.fbx"
