@@ -9,6 +9,8 @@ do not travel through multiprocessing queues.
 
 from __future__ import annotations
 
+import faulthandler
+import sys
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
@@ -58,22 +60,51 @@ def read_proxy_mesh_worker_error(path: str | Path) -> tuple[str, str] | None:
 
 def run_proxy_mesh_worker_request_file(path: str | Path) -> int:
     suppress_windows_native_error_dialogs()
+    try:
+        faulthandler.enable(file=sys.stderr, all_threads=True)
+    except Exception:
+        pass
+    _worker_stage("request.read.start")
     request = read_proxy_mesh_worker_request(path)
     try:
+        _worker_stage(f"{request.action}.profile.start")
         apply_process_profile(request.request.cpu_profile)
         if request.action == "preview":
+            _worker_stage(
+                "preview.generate.start",
+                final_polycount=request.settings.final_polycount,
+                density_resolution=request.settings.density_resolution,
+                method=request.settings.method,
+            )
             result = ProxyMeshJobResult(
                 proxy=generate_proxy_mesh_from_source_request(request.request, request.settings)
             )
+            _worker_stage("preview.generate.end")
         elif request.action == "export":
+            _worker_stage(
+                "export.generate.start",
+                final_polycount=request.settings.final_polycount,
+                density_resolution=request.settings.density_resolution,
+                method=request.settings.method,
+            )
             result = ProxyMeshJobResult(
                 export=export_proxy_usda_from_source_request(request.request, request.settings)
             )
+            _worker_stage("export.generate.end")
         else:
             raise ValueError(f"Unsupported proxy mesh worker action: {request.action}")
+        _worker_stage("result.write.start")
         write_pickle_atomic(request.result_path, result)
+        _worker_stage("result.write.end")
         cleanup_file(request.error_path)
         return 0
     except Exception as exc:
+        _worker_stage("error.write.start", error_type=type(exc).__name__, message=str(exc))
         write_error_payload(request.error_path, message=str(exc), formatted_traceback=traceback.format_exc())
         return 1
+
+
+def _worker_stage(stage: str, **fields: object) -> None:
+    details = " ".join(f"{key}={value}" for key, value in sorted(fields.items()))
+    suffix = f" {details}" if details else ""
+    print(f"proxy-mesh-worker stage={stage}{suffix}", file=sys.stderr, flush=True)

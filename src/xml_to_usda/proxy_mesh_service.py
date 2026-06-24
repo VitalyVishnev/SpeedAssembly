@@ -358,24 +358,63 @@ def _simplify_polygon_mesh(
         )
     except Exception as exc:
         raise ProxyMeshError(f"Proxy QEM simplification failed: {exc}") from exc
+    if len(simplified_points) == 0 or len(simplified_triangles) == 0:
+        return _geometry_buffer_from_triangles(points, triangles, name=mesh.name)
+    _validate_triangle_arrays(simplified_points, simplified_triangles, name=mesh.name)
     return _geometry_buffer_from_triangles(simplified_points, simplified_triangles, name=mesh.name)
 
 
 def _triangulated_mesh_arrays(mesh: GeometryBuffer):
     import numpy as np
 
+    if len(mesh.point_components) % 3 != 0:
+        raise ProxyMeshError(f"Proxy mesh {mesh.name} point component count must be divisible by 3.")
     points = np.asarray(mesh.point_components, dtype=np.float64).reshape((-1, 3))
+    if len(points) == 0:
+        raise ProxyMeshError(f"Proxy mesh {mesh.name} has no points.")
+    if not bool(np.isfinite(points).all()):
+        raise ProxyMeshError(f"Proxy mesh {mesh.name} contains non-finite point coordinates.")
     triangles: list[tuple[int, int, int]] = []
     offset = 0
-    for count in mesh.face_vertex_counts:
+    point_count = len(points)
+    for face_index, count in enumerate(mesh.face_vertex_counts):
+        count = int(count)
+        if count < 0:
+            raise ProxyMeshError(f"Proxy mesh {mesh.name} face {face_index} has a negative vertex count.")
+        if offset + count > len(mesh.face_vertex_indices):
+            raise ProxyMeshError(f"Proxy mesh {mesh.name} face {face_index} is missing vertex indices.")
         face_indices = [int(mesh.face_vertex_indices[offset + index]) for index in range(count)]
         offset += count
+        for point_index in face_indices:
+            if point_index < 0 or point_index >= point_count:
+                raise ProxyMeshError(
+                    f"Proxy mesh {mesh.name} face {face_index} references point {point_index} outside the mesh."
+                )
         if count < 3:
             continue
         anchor = face_indices[0]
         for index in range(1, count - 1):
             triangles.append((anchor, face_indices[index], face_indices[index + 1]))
-    return points, np.asarray(triangles, dtype=np.int32)
+    if offset != len(mesh.face_vertex_indices):
+        raise ProxyMeshError(f"Proxy mesh {mesh.name} has trailing face vertex indices.")
+    triangle_array = np.asarray(triangles, dtype=np.int32)
+    _validate_triangle_arrays(points, triangle_array, name=mesh.name)
+    return points, triangle_array
+
+
+def _validate_triangle_arrays(points, triangles, *, name: str) -> None:
+    import numpy as np
+
+    if len(points) == 0:
+        raise ProxyMeshError(f"Proxy mesh {name} has no points.")
+    if not bool(np.isfinite(points).all()):
+        raise ProxyMeshError(f"Proxy mesh {name} contains non-finite point coordinates.")
+    if len(triangles) == 0:
+        return
+    if triangles.ndim != 2 or triangles.shape[1] != 3:
+        raise ProxyMeshError(f"Proxy mesh {name} simplification produced invalid triangle topology.")
+    if int(triangles.min()) < 0 or int(triangles.max()) >= len(points):
+        raise ProxyMeshError(f"Proxy mesh {name} simplification produced triangle indices outside the mesh.")
 
 
 def _geometry_buffer_from_triangles(points, triangles, *, name: str) -> GeometryBuffer:

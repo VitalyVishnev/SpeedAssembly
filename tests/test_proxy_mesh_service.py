@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import pickle
+import sys
 from array import array
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -240,6 +242,52 @@ def test_proxy_generation_fails_loudly_when_repeated_part_orientation_is_malform
 
     with pytest.raises(ProxyMeshError, match="malformed orientation quaternion"):
         generate_proxy_mesh(broken, ProxyMeshSettings(final_polycount=5000, density_resolution=128))
+
+
+def test_proxy_generation_rejects_invalid_topology_before_qem(monkeypatch) -> None:
+    monkeypatch.setitem(
+        sys.modules,
+        "fast_simplification",
+        SimpleNamespace(simplify=lambda *_args, **_kwargs: pytest.fail("QEM should not receive invalid topology")),
+    )
+    broken_base = MeshData(
+        name="BrokenBase",
+        points=(
+            Vector3(0.0, 0.0, 0.0),
+            Vector3(1.0, 0.0, 0.0),
+            Vector3(0.0, 1.0, 0.0),
+            Vector3(1.0, 1.0, 0.0),
+        ),
+        face_vertex_counts=(3, 3),
+        face_vertex_indices=(0, 1, 2, 0, 2, 99),
+    )
+    broken = replace(_model(repeated_count=0), base_mesh=broken_base, prototypes=())
+
+    with pytest.raises(ProxyMeshError, match="references point 99 outside the mesh"):
+        generate_proxy_mesh(broken, ProxyMeshSettings(final_polycount=1))
+
+
+def test_proxy_generation_rejects_non_finite_points_before_qem(monkeypatch) -> None:
+    monkeypatch.setitem(
+        sys.modules,
+        "fast_simplification",
+        SimpleNamespace(simplify=lambda *_args, **_kwargs: pytest.fail("QEM should not receive non-finite points")),
+    )
+    broken_base = MeshData(
+        name="NanBase",
+        points=(
+            Vector3(0.0, 0.0, 0.0),
+            Vector3(1.0, 0.0, 0.0),
+            Vector3(0.0, 1.0, 0.0),
+            Vector3(float("nan"), 1.0, 0.0),
+        ),
+        face_vertex_counts=(3, 3),
+        face_vertex_indices=(0, 1, 2, 0, 2, 3),
+    )
+    broken = replace(_model(repeated_count=0), base_mesh=broken_base, prototypes=())
+
+    with pytest.raises(ProxyMeshError, match="contains non-finite point coordinates"):
+        generate_proxy_mesh(broken, ProxyMeshSettings(final_polycount=1))
 
 
 def test_base_mesh_priority_controls_base_simplification_budget() -> None:
