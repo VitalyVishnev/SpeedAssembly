@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from xml.etree.ElementTree import ParseError
 
 import pytest
 
@@ -13,7 +14,7 @@ pytestmark = pytest.mark.qt
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QAbstractSpinBox, QMessageBox, QWidget
 
-from xml_to_usda.discovery_service import PrototypeDiscovery, PrototypeRowSpec
+from xml_to_usda.discovery_service import BaseMaterialDiscovery, BaseMaterialRowSpec, PrototypeDiscovery, PrototypeRowSpec
 from xml_to_usda.qt_ui.dependencies import build_default_dependencies
 from xml_to_usda.qt_ui.entry import main
 from xml_to_usda.qt_ui.entry import _build_signature_from_executable_path
@@ -93,6 +94,63 @@ def test_qt_shell_survives_startup_discovery_failure(qtbot, tmp_path) -> None:
     assert window.geometry_panel.summary_label.text() == "Selected XML file could not be loaded."
     assert window.wind_panel.summary_label.text() == "Selected XML file could not be loaded."
     assert not window.geometry_panel.has_rows()
+
+
+def test_qt_shell_startup_discovery_reads_xml_once_per_panel(qtbot, tmp_path) -> None:
+    theme = load_theme()
+    xml_path = tmp_path / "tree.xml"
+    xml_path.write_text("<Tree/>", encoding="utf-8")
+    settings_path = tmp_path / "gui_settings.json"
+    from xml_to_usda.settings_service import save_gui_settings
+
+    save_gui_settings(settings_path, GuiSettingsSnapshot(last_input_path=str(xml_path)))
+    calls = {"part": 0, "base": 0}
+    deps = build_default_dependencies()
+
+    def _discover_part_prototype_rows(input_path, persisted_records=()):
+        calls["part"] += 1
+        if calls["part"] > 1:
+            raise ParseError("simulated second startup XML parse failure")
+        assert input_path == str(xml_path)
+        return PrototypeDiscovery(
+            summary="Found 1 repeated branch instance across 1 prototype(s).",
+            rows=(
+                PrototypeRowSpec(
+                    source_key="Mesh_1",
+                    source_name="Twig_01",
+                    source_mesh_id=1,
+                    instance_count=1,
+                ),
+            ),
+        )
+
+    def _discover_base_material_rows(input_path, persisted_records=()):
+        calls["base"] += 1
+        assert input_path == str(xml_path)
+        return BaseMaterialDiscovery(
+            summary="Found 1 base XML material slot(s).",
+            rows=(BaseMaterialRowSpec(source_id=1, source_name="Bark"),),
+        )
+
+    deps = replace(
+        deps,
+        discover_part_prototype_rows=_discover_part_prototype_rows,
+        discover_base_material_rows=_discover_base_material_rows,
+    )
+
+    window = MainWindow(
+        theme,
+        UiShellState(),
+        dependencies=deps,
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=settings_path,
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    assert calls == {"part": 1, "base": 1}
+    assert window.geometry_panel.has_rows()
+    assert "Found 1 base XML material slot" in window.materials_panel.summary_label.text()
 
 
 def test_qt_shell_title_buttons_do_not_clip_text_when_theme_height_is_too_small(qtbot, tmp_path) -> None:

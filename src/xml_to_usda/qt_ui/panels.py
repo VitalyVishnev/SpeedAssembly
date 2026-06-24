@@ -729,9 +729,13 @@ class MaterialsTabPanel(QWidget):
         part_persisted_records: tuple[PartSourceSettingRecord, ...],
         geometry_snapshot: dict[str, GeometryRowState],
         cpu_profile: CpuProfile,
+        base_discovery=None,
+        part_discovery=None,
     ) -> None:
-        base_discovery = self._deps.discover_base_material_rows(input_path, persisted_records=base_persisted_records)
-        part_discovery = self._deps.discover_part_prototype_rows(input_path, persisted_records=part_persisted_records)
+        if base_discovery is None:
+            base_discovery = self._deps.discover_base_material_rows(input_path, persisted_records=base_persisted_records)
+        if part_discovery is None:
+            part_discovery = self._deps.discover_part_prototype_rows(input_path, persisted_records=part_persisted_records)
 
         self._base_rows.clear()
         self._part_rows.clear()

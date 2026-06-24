@@ -1975,12 +1975,15 @@ class MainWindow(QWidget):
         try:
             prototype_discovery = self._deps.discover_part_prototype_rows(input_path, persisted_records=part_records)
             self.geometry_panel.load(prototype_discovery)
+            base_discovery = self._deps.discover_base_material_rows(input_path, persisted_records=base_records)
             self.materials_panel.load(
                 input_path=input_path,
                 base_persisted_records=base_records,
                 part_persisted_records=part_records,
                 geometry_snapshot=self.geometry_panel.current_snapshot(),
                 cpu_profile=self._operator_state.cpu_profile,
+                base_discovery=base_discovery,
+                part_discovery=prototype_discovery,
             )
         except Exception as exc:
             self._clear_input_dependent_tabs("Selected XML file could not be loaded.")
