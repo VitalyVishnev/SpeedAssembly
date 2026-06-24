@@ -21,12 +21,19 @@
 - Reason for deferral: Current preset handling is tightly coupled to dialogs/widgets, and preview cache state does not yet have enough shared lifecycle behavior to justify a separate controller without creating a shallow abstraction.
 - Likely next step: Revisit when a concrete preset workflow change or a second preview-cache consumer appears; then extract only the behavior that hides real complexity behind a smaller interface.
 
-## Startup XML Discovery Guarded But Root Cause Unisolated
+## Normalizer Hot Path Broader Profiling Pending
 
-- Issue: First-load XML discovery in the Qt shell can still throw unexpected parser exceptions before the user interacts with the UI, even though the shell now catches the failure and stays open.
-- Location: `src/xml_to_usda/qt_ui/window.py`, `src/xml_to_usda/qt_ui/panels.py`
-- Reason for deferral: The crash path is now contained, but the exact parser/state trigger was not isolated in this pass.
-- Likely next step: Capture the failing input and reproduce the parser exception in a focused non-UI load script, then decide whether the trigger is malformed XML, transient file access, or a parser edge case.
+- Issue: The remaining normalizer hot path is still object extraction and face-varying authoring.
+- Location: `src/xml_to_usda/normalizer.py`
+- Reason for deferral: The packed-point / packed-triangle child-scan rewrite was slower on `BigSpruce`, and vertex-skinning loop simplification did not produce a stable win. Caching object child nodes and precomputing leaf reference transforms also lost on `BigSpruce`.
+- Likely next step: Profile across more than one real sample and look for a structural change, not another local loop tweak.
+
+## Synthetic Contract Fixture Replacement Pending
+
+- Issue: Some contract fixtures are synthetic and not verified real SpeedTree exports.
+- Location: `tests/data/leafrefs_on_trunk.xml`, `tests/data/leafrefs_on_branch_levels.xml`, `tests/data/invalid_leaf_bone.xml`, `tests/data/missing_leaf_refs.xml`, `tests/data/missing_skeleton.xml`, `tests/data/non_default_metadata.xml`
+- Reason for deferral: They intentionally encode error, warning, and edge-case branches that are hard to source from a single observed SpeedTree sample.
+- Likely next step: Replace any fixture with a real export if one becomes available; otherwise keep the smallest fixture that expresses the contract cleanly.
 
 ## Fracturing UE Runtime Validation Pending
 
@@ -104,20 +111,6 @@
 - Location: `src/xml_to_usda/proxy_mesh_service.py`
 - Reason for deferral: The first implementation pass needed a deterministic preview/export loop and a shippable Windows QEM backend before tuning zoned importance rules against real vegetation.
 - Likely next step: Classify density-field cells/faces by silhouette contribution and weak isolated features, then either protect shell triangles before QEM or split simplification passes by zone.
-
-## Proxy Mesh Worker Crash Isolation
-
-- Issue: Large SpeedTree XML fixtures can trigger intermittent native Windows access violations while source geometry is normalized for proxy generation. Proxy preview/export now run in an isolated worker process and suppress native modal crash dialogs, but the underlying parser/normalizer instability still needs root-cause analysis.
-- Location: `src/xml_to_usda/conversion_process.py`, `src/xml_to_usda/qt_ui/preview_jobs.py`, `src/xml_to_usda/qt_ui/background_jobs.py`
-- Reason for deferral: The immediate operator blocker is preventing the GUI from crashing or freezing during proxy preview/export. Fixing the native access violation requires a separate focused pass through XML reading/normalization memory behavior.
-- Likely next step: Add a reproducible stress test around repeated `load_canonical_model` calls for `SkeletyalAssemblyTest_Spruce_Big_low.xml`, then audit `xml_reader.py`/`normalizer.py` for unsafe C-extension or array lifetime interactions.
-
-## Preview Worker Native Crash Root Cause Pending
-
-- Issue: Isolated Proxy Mesh and Fracture Preview workers now keep native access violations outside the Qt shell, and false crash reports are guarded by result-file draining, but the original native crash source was not proven.
-- Location: `src/xml_to_usda/conversion_process.py`, `src/xml_to_usda/fracture_worker_subprocess.py`, `src/xml_to_usda/proxy_mesh_worker_subprocess.py`
-- Reason for deferral: The operator-facing workflow is stable, and speculative removal of native simplification broke Proxy Mesh quality.
-- Likely next step: Reproduce native failures with a focused packaged-worker stress loop before changing geometry backends or normalizer internals again.
 
 ## UDIM Piece-Local Real-Sample Coverage Pending
 

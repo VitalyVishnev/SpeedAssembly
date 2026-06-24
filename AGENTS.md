@@ -55,7 +55,7 @@ If theory and UE behavior disagree, UE behavior wins.
 
 1. Prefer the simplest working solution. Use the least necessary complexity. After each change, do one simplification pass. Do not add abstraction, configuration, indirection, or generic systems unless they solve a real current need.
 2. Aim for deep modules, not shallow ones. Keep interfaces small and meaningful. Avoid layers, wrappers, and concepts that do not remove complexity. Prefer fewer strong boundaries over many weak ones.
-3. Track postponed issues explicitly. If a known problem, limitation, incomplete edge case, technical debt item, or "fix later" item remains after a change, record it in `KNOWN_PROBLEMS.md` with the issue, location, reason for deferral, and likely next step.
+3. Track postponed issues explicitly. If a known problem, limitation, incomplete edge case, technical debt item, or "fix later" item remains after a change, record it in the single root ledger `KNOWN_PROBLEMS.md` with the issue, location, reason for deferral, and likely next step. Do not create another Known Problems file under `docs/` or elsewhere.
 
 ## Fail Loudly
 
