@@ -190,7 +190,8 @@ def _run_fracture_preview_smoke(context: SmokeContext) -> dict[str, Any]:
         )
         dialog = window._fracture_preview_dialog
         _assert(dialog is not None, "fracture dialog exists")
-        _assert(dialog.isModal(), "fracture dialog is modal")
+        _assert(not dialog.isModal(), "fracture dialog is non-modal")
+        _assert(window.isVisible(), "main window remains visible")
         _assert(dialog.viewport_mesh is not None, "fracture viewport mesh exists")
         _assert(dialog.viewport_mesh.uploaded_triangle_count > 0, "fracture viewport uploaded triangles")
         _assert(dialog.viewport.has_mesh(), "fracture viewport has mesh")
@@ -209,7 +210,8 @@ def _run_fracture_preview_smoke(context: SmokeContext) -> dict[str, Any]:
             name=SMOKE_SCENARIO_FRACTURE_PREVIEW,
             checks=(
                 "dialog.result",
-                "dialog.modal",
+                "dialog.non_modal",
+                "window.visible",
                 "viewport.mesh",
                 "viewport.uploaded_triangles",
                 "trace.milestones",
@@ -238,7 +240,8 @@ def _run_fracture_preview_interactive_smoke(context: SmokeContext) -> dict[str, 
         )
         dialog = window._fracture_preview_dialog
         _assert(dialog is not None, "fracture dialog exists")
-        _assert(dialog.isModal(), "fracture dialog is modal")
+        _assert(not dialog.isModal(), "fracture dialog is non-modal")
+        _assert(window.isVisible(), "main window remains visible")
         dialog.piece_count_spin.setValue(26)
         dialog.piece_count_spin.editingFinished.emit()
         _wait_until(
@@ -281,6 +284,21 @@ def _run_fracture_preview_interactive_smoke(context: SmokeContext) -> dict[str, 
                 abs(dialog.viewport.exploded_view_strength - (raw_exploded / 100.0)) < 0.001,
                 f"Exploded View updates immediately to {raw_exploded}",
             )
+        dialog.collision_mode_combo.setCurrentIndex(dialog.collision_mode_combo.findData("capsule"))
+        dialog.capsule_simplify_spin.setValue(68)
+        dialog.capsule_scale_by_length_spin.setValue(0.5)
+        dialog.collision_check.setChecked(True)
+        dialog.capsule_simplify_spin.editingFinished.emit()
+        _wait_until(
+            lambda: dialog.current_preview is not None and len(dialog.current_preview.collision_meshes) > 0,
+            timeout_ms=context.timeout_ms,
+            label="fracture capsule collision preview",
+        )
+        dialog.capsule_scale_slider.setValue(150)
+        dialog.collision_opacity_slider.setValue(68)
+        _pump_events(50)
+        _assert(dialog.viewport.collision_geometry_scale > 1.0, "Capsule Scale updates viewport state")
+        _assert(abs(dialog.viewport.collision_opacity - 0.68) < 0.001, "Collision Opacity updates viewport state")
         _assert(dialog.viewport_mesh is not None, "fracture viewport mesh exists")
         _assert(dialog.viewport_mesh.bone_segments, "bone overlay payload exists")
         _assert(dialog.viewport.bone_vertex_count > 0, "viewport bone overlay vertices exist")
@@ -288,13 +306,16 @@ def _run_fracture_preview_interactive_smoke(context: SmokeContext) -> dict[str, 
             name=SMOKE_SCENARIO_FRACTURE_PREVIEW_INTERACTIVE,
             checks=(
                 "initial.result",
-                "dialog.modal",
+                "dialog.non_modal",
+                "window.visible",
                 "target.update",
                 "method.update",
                 "caps.update",
                 "manual.bones",
                 "piece_color.visual",
                 "exploded_view.visual",
+                "capsule_collision.result",
+                "capsule_collision.visual",
                 "viewport.bones",
             ),
             data={
@@ -321,7 +342,8 @@ def _run_fracture_preview_rapid_settings_smoke(context: SmokeContext) -> dict[st
         )
         dialog = window._fracture_preview_dialog
         _assert(dialog is not None, "fracture dialog exists")
-        _assert(dialog.isModal(), "fracture dialog is modal")
+        _assert(not dialog.isModal(), "fracture dialog is non-modal")
+        _assert(window.isVisible(), "main window remains visible")
 
         for index in range(10):
             dialog.stump_piece_check.setChecked(index % 2 == 0)
@@ -383,7 +405,8 @@ def _run_proxy_preview_smoke(context: SmokeContext) -> dict[str, Any]:
         )
         dialog = window._proxy_preview_dialog
         _assert(dialog is not None, "proxy dialog exists")
-        _assert(dialog.isModal(), "proxy dialog is modal")
+        _assert(not dialog.isModal(), "proxy dialog is non-modal")
+        _assert(window.isVisible(), "main window remains visible")
         _assert(dialog.current_proxy is not None, "proxy result exists")
         _assert(dialog.viewport.has_mesh(), "proxy viewport has mesh")
         trace_text = _trace_text(context)
@@ -394,7 +417,10 @@ def _run_proxy_preview_smoke(context: SmokeContext) -> dict[str, Any]:
             '"kind":"viewport.upload_end"',
         ):
             _assert(milestone in trace_text, f"trace contains {milestone}")
-        return _passed(name=SMOKE_SCENARIO_PROXY_PREVIEW, checks=("dialog.result", "dialog.modal", "viewport.mesh"))
+        return _passed(
+            name=SMOKE_SCENARIO_PROXY_PREVIEW,
+            checks=("dialog.result", "dialog.non_modal", "window.visible", "viewport.mesh"),
+        )
     finally:
         _close_window(window)
 

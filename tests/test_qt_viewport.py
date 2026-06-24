@@ -56,7 +56,14 @@ class _FakeProgram:
         self.events: list[str] = []
         self.enabled_locations: list[int] = []
         self.attribute_buffers: list[tuple[int, int, int, int, int]] = []
-        self._locations = {"position": 1, "normal": 2, "pieceTint": 3, "explodeOffset": 4, "scaleOrigin": 5}
+        self._locations = {
+            "position": 1,
+            "normal": 2,
+            "pieceTint": 3,
+            "explodeOffset": 4,
+            "scaleOrigin": 5,
+            "lengthScale": 6,
+        }
 
     def bind(self) -> bool:
         self.events.append("bind")
@@ -99,13 +106,14 @@ def test_matcap_vertex_upload_binds_the_shared_mesh_layout() -> None:
     assert vertex_buffer.events == ["bind", "allocate", "release"]
     assert vertex_buffer.allocated_size == vertices.nbytes
     assert program.events == ["bind", "release"]
-    assert program.enabled_locations == [1, 2, 3, 4, 5]
+    assert program.enabled_locations == [1, 2, 3, 4, 5, 6]
     assert program.attribute_buffers == [
         (1, 0x1406, 0, 3, MATCAP_VERTEX_STRIDE * 4),
         (2, 0x1406, 12, 3, MATCAP_VERTEX_STRIDE * 4),
         (3, 0x1406, 24, 4, MATCAP_VERTEX_STRIDE * 4),
         (4, 0x1406, 40, 3, MATCAP_VERTEX_STRIDE * 4),
         (5, 0x1406, 52, 3, MATCAP_VERTEX_STRIDE * 4),
+        (6, 0x1406, 64, 1, MATCAP_VERTEX_STRIDE * 4),
     ]
 
 
@@ -123,6 +131,28 @@ def test_matcap_vertex_upload_releases_resources_when_program_cannot_bind() -> N
     assert program.events == ["bind"]
     assert program.enabled_locations == []
     assert program.attribute_buffers == []
+
+
+def test_sphere_collision_visual_scale_uses_center_origin() -> None:
+    mesh = GeometryBuffer(
+        name="USP_Sphere",
+        point_components=array("f", (-1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0, 0.0)),
+        face_vertex_counts=array("i", (3,)),
+        face_vertex_indices=array("i", (0, 1, 2)),
+    )
+    batch = ViewportMeshBatch(batch_id="collision", name="collision", mesh=mesh, color=Color4(0.0, 1.0, 1.0, 0.25))
+    scene = ViewportScene(
+        scene_id="sphere_collision",
+        mesh_batches=(batch,),
+        draw_calls=(ViewportDrawCall(draw_id="collision:0", batch_id=batch.batch_id, visibility_group="collision"),),
+        bounds=ViewportBounds(min_point=Vector3(-1.0, 0.0, 0.0), max_point=Vector3(1.0, 2.0, 0.0)),
+        stats=ViewportStats(uploaded_triangles=1, logical_triangles=1, batch_count=1, draw_call_count=1),
+    )
+
+    vertices = _build_scene_vertices(scene, collision=True)
+    origins = [tuple(vertices[index + 13:index + 16]) for index in range(0, len(vertices), MATCAP_VERTEX_STRIDE)]
+
+    assert origins == [(0.0, 1.0, 0.0)] * 3
 
 
 def test_matcap_viewport_accepts_viewport_scene_without_mode_specific_dialog(qtbot) -> None:
@@ -351,4 +381,64 @@ def test_matcap_viewport_scene_vertices_include_explode_direction() -> None:
 
     assert len(vertices) == 3 * MATCAP_VERTEX_STRIDE
     assert tuple(vertices[10:13]) == pytest.approx((2.0, 3.0, 4.0))
-    assert tuple(vertices[13:16]) == pytest.approx((1.0 / 3.0, 1.0 / 3.0, 0.0))
+    assert tuple(vertices[13:16]) == pytest.approx((0.0, 0.0, 0.0))
+    assert vertices[16] == pytest.approx(0.0)
+
+
+def test_matcap_collision_scale_origin_projects_vertices_to_capsule_axis() -> None:
+    mesh = GeometryBuffer(
+        name="UCP_CapsuleLike",
+        point_components=array("f", (0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0, 0.0)),
+        face_vertex_counts=array("i", (3,)),
+        face_vertex_indices=array("i", (0, 1, 2)),
+    )
+    batch = ViewportMeshBatch(batch_id="collision", name="Collision", mesh=mesh)
+    scene = ViewportScene(
+        scene_id="collision_scale_origin",
+        mesh_batches=(batch,),
+        draw_calls=(
+            ViewportDrawCall(
+                draw_id="collision:0",
+                batch_id=batch.batch_id,
+                visibility_group="collision",
+            ),
+        ),
+        bounds=ViewportBounds(min_point=Vector3(0.0, 0.0, 0.0), max_point=Vector3(1.0, 2.0, 0.0)),
+        stats=ViewportStats(uploaded_triangles=1, logical_triangles=1, batch_count=1, draw_call_count=1),
+    )
+
+    vertices = _build_scene_vertices(scene, collision=True)
+    side_vertex = vertices[MATCAP_VERTEX_STRIDE:MATCAP_VERTEX_STRIDE * 2]
+
+    assert tuple(side_vertex[0:3]) == pytest.approx((1.0, 0.0, 0.0))
+    assert tuple(side_vertex[13:16]) == pytest.approx((0.0, 0.0, 0.0))
+
+
+def test_matcap_collision_vertices_include_length_scale_relative_to_longest_call() -> None:
+    mesh = GeometryBuffer(
+        name="CapsuleLike",
+        point_components=array("f", (0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0)),
+        face_vertex_counts=array("i", (3,)),
+        face_vertex_indices=array("i", (0, 1, 2)),
+    )
+    batch = ViewportMeshBatch(batch_id="collision", name="Collision", mesh=mesh)
+    scene = ViewportScene(
+        scene_id="collision_length_scale",
+        mesh_batches=(batch,),
+        draw_calls=(
+            ViewportDrawCall(draw_id="short", batch_id=batch.batch_id, visibility_group="collision"),
+            ViewportDrawCall(
+                draw_id="long",
+                batch_id=batch.batch_id,
+                visibility_group="collision",
+                scale=Vector3(1.0, 3.0, 1.0),
+            ),
+        ),
+        bounds=ViewportBounds(min_point=Vector3(0.0, 0.0, 0.0), max_point=Vector3(1.0, 3.0, 0.0)),
+        stats=ViewportStats(uploaded_triangles=1, logical_triangles=2, batch_count=1, draw_call_count=2),
+    )
+
+    vertices = _build_scene_vertices(scene, collision=True)
+
+    assert vertices[16] == pytest.approx(1.0 / 3.0)
+    assert vertices[3 * MATCAP_VERTEX_STRIDE + 16] == pytest.approx(1.0)

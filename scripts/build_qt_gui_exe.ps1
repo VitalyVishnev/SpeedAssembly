@@ -262,13 +262,23 @@ try {
                 '--timeout-ms',
                 '180000'
             )
-            $smokeProcess = Start-Process `
-                -FilePath $exePath `
-                -ArgumentList $smokeArguments `
-                -RedirectStandardOutput $smokeStdoutPath `
-                -RedirectStandardError $smokeStderrPath `
-                -Wait `
-                -PassThru
+            $smokeStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+            $smokeStartInfo.FileName = $exePath
+            $smokeStartInfo.Arguments = $smokeArguments
+            $smokeStartInfo.UseShellExecute = $false
+            $smokeStartInfo.RedirectStandardOutput = $true
+            $smokeStartInfo.RedirectStandardError = $true
+            $smokeStartInfo.CreateNoWindow = $true
+            $smokeProcess = New-Object System.Diagnostics.Process
+            $smokeProcess.StartInfo = $smokeStartInfo
+            if (-not $smokeProcess.Start()) {
+                throw 'Packaged high-risk smoke did not start.'
+            }
+            $smokeStdout = $smokeProcess.StandardOutput.ReadToEnd()
+            $smokeStderr = $smokeProcess.StandardError.ReadToEnd()
+            $smokeProcess.WaitForExit()
+            Set-Content -LiteralPath $smokeStdoutPath -Value $smokeStdout -Encoding UTF8
+            Set-Content -LiteralPath $smokeStderrPath -Value $smokeStderr -Encoding UTF8
             if ($smokeProcess.ExitCode -ne 0) {
                 throw "Packaged high-risk smoke failed. Report: $smokeReportPath"
             }

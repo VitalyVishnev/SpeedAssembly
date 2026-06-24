@@ -120,7 +120,7 @@ def build_fracture_viewport_scene(
             end=segment.child_position,
             color=segment.color,
             selected=segment.is_selected_cut,
-            selectable_id=f"bone:{segment.parent_joint_token}->{segment.child_joint_token}",
+            selectable_id=f"bone:{segment.parent_joint_token}->{segment.child_joint_token}" if segment.selectable else None,
         )
         for segment in preview.bone_segments
     )
@@ -200,7 +200,7 @@ def _cut_site_position(cut_site: FractureCutSite, bone_segments: tuple[ViewportB
             return _lerp(segment.start, segment.end, max(0.0, min(1.0, float(t))))
     for segment in bone_segments:
         if segment.child_token == cut_site.joint_token:
-            return segment.end
+            return segment.start
     return Vector3(0.0, 0.0, 0.0)
 
 
@@ -248,7 +248,7 @@ def _average_vector(points: tuple[Vector3, ...]) -> Vector3:
 
 def _explode_direction(center: Vector3, global_center: Vector3) -> Vector3:
     x = center.x - global_center.x
-    y = center.y - global_center.y
+    y = max(0.0, center.y - global_center.y)
     z = center.z - global_center.z
     length = math.sqrt(x * x + y * y + z * z)
     if length <= 1e-8:

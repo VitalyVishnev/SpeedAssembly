@@ -119,9 +119,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
                 mode=FractureCollisionMode.SPHERE,
                 include_instance_parts=False,
                 sphere_radius_scale=0.75,
-                capsule_max_count=48,
-                capsule_min_radius_ratio=0.08,
-                capsule_radius_padding=0.12,
+                capsule_scale_by_length=0.8,
                 ghost_opacity=0.35,
             ),
             final_polycount=333000,
@@ -154,9 +152,10 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert payload["fracture_preview_settings"]["collision"]["mode"] == "sphere"
     assert payload["fracture_preview_settings"]["collision"]["enabled"] is True
     assert payload["fracture_preview_settings"]["collision"]["include_instance_parts"] is False
-    assert payload["fracture_preview_settings"]["collision"]["capsule_max_count"] == 48
-    assert payload["fracture_preview_settings"]["collision"]["capsule_min_radius_ratio"] == 0.08
-    assert payload["fracture_preview_settings"]["collision"]["capsule_radius_padding"] == 0.12
+    assert payload["fracture_preview_settings"]["collision"]["capsule_scale_by_length"] == 0.8
+    assert "capsule_max_count" not in payload["fracture_preview_settings"]["collision"]
+    assert "capsule_min_radius_ratio" not in payload["fracture_preview_settings"]["collision"]
+    assert "capsule_radius_padding" not in payload["fracture_preview_settings"]["collision"]
     assert payload["fbx_cache_max_size_gb"] == 42
     assert payload["fbx_cache_max_age_days"] == 7
     assert payload["debug_trace_enabled"] is True

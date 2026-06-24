@@ -8,6 +8,7 @@ pytest.importorskip("pytestqt")
 
 pytestmark = pytest.mark.qt
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel
 
 from xml_to_usda.qt_ui.preview_shell import PreviewShellDialog, configure_preview_dialog, focus_preview_dialog
@@ -33,15 +34,16 @@ def test_preview_shell_owns_viewport_and_settings_slots(qtbot) -> None:
     assert panel.maximumWidth() == 520
 
 
-def test_preview_shell_configures_modal_focus_contract(qtbot) -> None:
+def test_preview_shell_configures_non_modal_owned_focus_contract(qtbot) -> None:
     owner = QLabel("owner")
-    dialog = PreviewShellDialog(title="Preview", parent=owner)
+    dialog = PreviewShellDialog(title="Preview")
     qtbot.addWidget(owner)
     qtbot.addWidget(dialog)
 
     configure_preview_dialog(dialog, owner=owner, stylesheet="QLabel { color: red; }")
     focus_preview_dialog(dialog)
 
-    assert dialog.parent() is owner
+    assert dialog.parent() is None
     assert dialog.isVisible()
-    assert dialog.isModal()
+    assert dialog.windowModality() == Qt.WindowModality.NonModal
+    assert not dialog.isModal()

@@ -41,7 +41,13 @@ from xml_to_usda.qt_ui.fracture_preview import (
     build_fracture_viewport_mesh,
 )
 from xml_to_usda.qt_ui.window import _fracture_preview_visual_only_settings_changed
-from xml_to_usda.qt_ui.viewport import MatcapViewport, _prepare_opaque_mesh_draw, _set_matcap_program_uniforms
+from xml_to_usda.qt_ui.viewport import (
+    MatcapViewport,
+    _finish_ghost_mesh_draw,
+    _prepare_ghost_mesh_draw,
+    _prepare_opaque_mesh_draw,
+    _set_matcap_program_uniforms,
+)
 from xml_to_usda.viewport_scene import ViewportBoneSegment, ViewportBounds, ViewportScene, ViewportStats
 
 
@@ -153,7 +159,9 @@ def _bone_only_scene(segments: tuple[FracturePreviewBoneSegment, ...]) -> Viewpo
                 end=segment.child_position,
                 color=segment.color,
                 selected=segment.is_selected_cut,
-                selectable_id=f"bone:{segment.parent_joint_token}->{segment.child_joint_token}",
+                selectable_id=(
+                    f"bone:{segment.parent_joint_token}->{segment.child_joint_token}" if segment.selectable else None
+                ),
             )
             for segment in segments
         ),
@@ -347,25 +355,33 @@ def test_fracture_preview_dialog_hides_collision_controls_for_other_modes(qtbot)
     dialog = FracturePreviewDialog(settings=FracturePreviewSettings())
     qtbot.addWidget(dialog)
 
+    assert dialog.hide_repeated_parts_check.isChecked()
     assert dialog.convex_vertices_label.isHidden()
 
     dialog.collision_check.setChecked(True)
 
     assert not dialog.convex_vertices_label.isHidden()
+    assert not dialog.collision_include_parts_check.isHidden()
     assert dialog.sphere_scale_label.isHidden()
     assert dialog.capsule_simplify_label.isHidden()
+    assert dialog.collision_mode_buttons[FractureCollisionMode.CONVEX].isChecked()
 
     dialog.collision_mode_combo.setCurrentIndex(dialog.collision_mode_combo.findData("sphere"))
 
     assert dialog.convex_vertices_label.isHidden()
+    assert not dialog.collision_include_parts_check.isHidden()
     assert not dialog.sphere_scale_label.isHidden()
     assert dialog.capsule_simplify_label.isHidden()
+    assert dialog.collision_mode_buttons[FractureCollisionMode.SPHERE].isChecked()
 
-    dialog.collision_mode_combo.setCurrentIndex(dialog.collision_mode_combo.findData("capsule"))
+    dialog.collision_mode_buttons[FractureCollisionMode.CAPSULE].click()
 
     assert dialog.convex_vertices_label.isHidden()
+    assert dialog.collision_include_parts_check.isHidden()
     assert dialog.sphere_scale_label.isHidden()
     assert not dialog.capsule_simplify_label.isHidden()
+    assert not dialog.capsule_scale_by_length_label.isHidden()
+    assert dialog.collision_mode_combo.currentData() == "capsule"
 
 
 def test_fracture_preview_dialog_wheel_over_parameter_scrolls_panel(qtbot) -> None:
@@ -501,6 +517,10 @@ def test_fracture_viewport_exploded_view_updates_uniform_state_without_reuploadi
     assert upload_calls == 0
     assert viewport.exploded_view_strength == pytest.approx(1.0)
 
+    viewport.set_exploded_view_strength(2.5)
+
+    assert viewport.exploded_view_strength == pytest.approx(2.0)
+
 
 def test_fracture_preview_dialog_enables_manual_bones_visibility_and_hides_repeated_parts(qtbot) -> None:
     preview = generate_fracture_preview(
@@ -528,7 +548,8 @@ def test_fracture_preview_dialog_enables_manual_bones_visibility_and_hides_repea
 
     assert dialog.show_bones_check.isEnabled()
     assert not dialog.viewport.show_bones
-    assert dialog.viewport_mesh.instance_count == 2
+    assert dialog.hide_repeated_parts_check.isChecked()
+    assert dialog.viewport_mesh.instance_count == 0
 
     dialog.show_bones_check.setChecked(True)
 
@@ -538,9 +559,9 @@ def test_fracture_preview_dialog_enables_manual_bones_visibility_and_hides_repea
 
     assert not dialog.viewport.show_bones
 
-    dialog.hide_repeated_parts_check.setChecked(True)
+    dialog.hide_repeated_parts_check.setChecked(False)
 
-    assert dialog.viewport_mesh.instance_count == 0
+    assert dialog.viewport_mesh.instance_count == 2
     assert dialog.current_preview is preview
     assert preview.instances
 
@@ -599,12 +620,13 @@ def test_fracture_preview_dialog_visual_sliders_do_not_emit_preview_settings(qtb
 
     dialog.color_strength_slider.setValue(24)
     dialog.exploded_view_slider.setValue(67)
+    dialog.exploded_view_slider.setValue(200)
 
     assert emitted == []
     assert dialog.color_strength_spin.value() == pytest.approx(0.24)
     assert dialog.viewport.matcap_tint_strength == pytest.approx(0.24)
-    assert dialog.exploded_view_spin.value() == pytest.approx(0.67)
-    assert dialog.viewport.exploded_view_strength == pytest.approx(0.67)
+    assert dialog.exploded_view_spin.value() == pytest.approx(2.0)
+    assert dialog.viewport.exploded_view_strength == pytest.approx(2.0)
 
 
 def test_fracture_preview_dialog_collision_visual_sliders_update_existing_preview(qtbot) -> None:
@@ -642,6 +664,74 @@ def test_fracture_preview_dialog_collision_visual_sliders_update_existing_previe
     assert dialog.viewport.collision_opacity == pytest.approx(0.4)
 
 
+def test_fracture_preview_dialog_sphere_scale_updates_existing_preview_without_rebuild(qtbot) -> None:
+    emitted: list[FracturePreviewSettings] = []
+    settings = FracturePreviewSettings(
+        fracture=FractureSettings(target_piece_count=3, output_stem="Oak"),
+        collision=FractureCollisionSettings(
+            enabled=True,
+            mode=FractureCollisionMode.SPHERE,
+            sphere_radius_scale=1.0,
+            ghost_opacity=0.25,
+        ),
+        max_base_faces_per_piece=1,
+        max_prototype_faces=1,
+    )
+    preview = generate_fracture_preview(_tree(), settings)
+    assert preview.collision_meshes
+    dialog = FracturePreviewDialog(settings=settings, preview=preview, on_settings_changed=emitted.append)
+    qtbot.addWidget(dialog)
+    upload_calls = 0
+
+    def count_upload() -> None:
+        nonlocal upload_calls
+        upload_calls += 1
+
+    dialog.viewport._mesh_dirty = False
+    dialog.viewport._upload_mesh = count_upload  # type: ignore[method-assign]
+
+    dialog.sphere_scale_slider.setValue(50)
+    dialog.collision_opacity_slider.setValue(40)
+
+    assert emitted == []
+    assert upload_calls == 0
+    assert dialog.viewport.collision_geometry_scale == pytest.approx(0.5)
+    assert dialog.viewport.collision_opacity == pytest.approx(0.4)
+
+
+def test_fracture_preview_dialog_capsule_scale_by_length_updates_existing_preview_without_rebuild(qtbot) -> None:
+    emitted: list[FracturePreviewSettings] = []
+    settings = FracturePreviewSettings(
+        fracture=FractureSettings(target_piece_count=3, output_stem="Oak"),
+        collision=FractureCollisionSettings(
+            enabled=True,
+            mode=FractureCollisionMode.CAPSULE,
+            capsule_scale=0.75,
+            capsule_scale_by_length=0.5,
+        ),
+        max_base_faces_per_piece=1,
+        max_prototype_faces=1,
+    )
+    preview = generate_fracture_preview(_tree(), settings)
+    assert preview.collision_meshes
+    dialog = FracturePreviewDialog(settings=settings, preview=preview, on_settings_changed=emitted.append)
+    qtbot.addWidget(dialog)
+    upload_calls = 0
+
+    def count_upload() -> None:
+        nonlocal upload_calls
+        upload_calls += 1
+
+    dialog.viewport._mesh_dirty = False
+    dialog.viewport._upload_mesh = count_upload  # type: ignore[method-assign]
+
+    dialog.capsule_scale_by_length_slider.setValue(125)
+
+    assert emitted == []
+    assert upload_calls == 0
+    assert dialog.viewport.collision_length_scale == pytest.approx(1.25)
+
+
 def test_fracture_preview_window_treats_collision_scale_and_opacity_as_visual_only() -> None:
     previous = FracturePreviewSettings(
         collision=FractureCollisionSettings(
@@ -654,7 +744,23 @@ def test_fracture_preview_window_treats_collision_scale_and_opacity_as_visual_on
 
     assert _fracture_preview_visual_only_settings_changed(
         previous,
-        replace(previous, collision=replace(previous.collision, capsule_scale=1.5, ghost_opacity=0.4)),
+        replace(
+            previous,
+            collision=replace(
+                previous.collision,
+                capsule_scale=1.5,
+                capsule_scale_by_length=1.25,
+                ghost_opacity=0.4,
+            ),
+        ),
+    )
+    sphere_previous = replace(
+        previous,
+        collision=replace(previous.collision, mode=FractureCollisionMode.SPHERE, sphere_radius_scale=1.0),
+    )
+    assert _fracture_preview_visual_only_settings_changed(
+        sphere_previous,
+        replace(sphere_previous, collision=replace(sphere_previous.collision, sphere_radius_scale=0.5)),
     )
     assert not _fracture_preview_visual_only_settings_changed(
         previous,
@@ -888,6 +994,36 @@ def test_fracture_viewport_prepares_opaque_mesh_draw_after_blended_grid() -> Non
         ("glEnable", 0x0B71),
         ("glDepthMask", True),
     ]
+
+
+def test_fracture_viewport_culls_ghost_mesh_backfaces() -> None:
+    class _Functions:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def glBlendFunc(self, source: int, target: int) -> None:
+            self.calls.append(("glBlendFunc", source, target))
+
+        def glCullFace(self, value: int) -> None:
+            self.calls.append(("glCullFace", value))
+
+        def glDepthMask(self, value: bool) -> None:
+            self.calls.append(("glDepthMask", value))
+
+        def glDisable(self, value: int) -> None:
+            self.calls.append(("glDisable", value))
+
+        def glEnable(self, value: int) -> None:
+            self.calls.append(("glEnable", value))
+
+    functions = _Functions()
+
+    _prepare_ghost_mesh_draw(functions)
+    _finish_ghost_mesh_draw(functions)
+
+    assert ("glEnable", 0x0B44) in functions.calls
+    assert ("glCullFace", 0x0405) in functions.calls
+    assert functions.calls[-2:] == [("glDisable", 0x0B44), ("glDisable", 0x0BE2)]
 
 
 def test_fracture_viewport_releases_gl_resources_with_current_context(qtbot, monkeypatch) -> None:

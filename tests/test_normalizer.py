@@ -81,6 +81,8 @@ def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
     assert model.base_mesh.uv_coords
     assert (model.skeleton[0].bind_translate.x, model.skeleton[0].bind_translate.y, model.skeleton[0].bind_translate.z) == pytest.approx((0.0, 0.0, 0.0))
     assert (model.skeleton[0].rest_translate.x, model.skeleton[0].rest_translate.y, model.skeleton[0].rest_translate.z) == pytest.approx((0.0, 0.0, 0.0))
+    assert model.skeleton[0].bind_end_translate is not None
+    assert model.skeleton[0].bind_end_translate.y > 0.5
     assert model.skeleton[1].bind_translate == pytest.approx(model.skeleton[1].rest_translate)
     assert abs(model.skeleton[1].bind_translate.y) > 0
     assert len(model.base_mesh.skel_joint_indices) == len(model.base_mesh.points)

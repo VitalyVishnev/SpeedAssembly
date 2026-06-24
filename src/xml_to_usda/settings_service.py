@@ -462,10 +462,17 @@ def _parse_fracture_preview_settings(raw_value) -> FracturePreviewSettings:
                 0,
                 100,
             ),
-            capsule_scale=max(0.25, min(2.0, _coerce_float(collision_payload.get("capsule_scale"), collision.capsule_scale))),
-            capsule_max_count=max(1, min(128, _coerce_positive_int(collision_payload.get("capsule_max_count"), collision.capsule_max_count))),
-            capsule_min_radius_ratio=max(0.0, min(0.25, _coerce_float(collision_payload.get("capsule_min_radius_ratio"), collision.capsule_min_radius_ratio))),
-            capsule_radius_padding=max(0.0, min(0.5, _coerce_float(collision_payload.get("capsule_radius_padding"), collision.capsule_radius_padding))),
+            capsule_scale=max(0.05, min(6.0, _coerce_float(collision_payload.get("capsule_scale"), collision.capsule_scale))),
+            capsule_scale_by_length=max(
+                0.0,
+                min(
+                    6.0,
+                    _coerce_float(
+                        collision_payload.get("capsule_scale_by_length"),
+                        collision.capsule_scale_by_length,
+                    ),
+                ),
+            ),
             ghost_opacity=max(0.05, min(0.8, _coerce_float(collision_payload.get("ghost_opacity"), collision.ghost_opacity))),
         )
     return FracturePreviewSettings(
@@ -649,9 +656,7 @@ def _serialize_fracture_preview_settings(settings: FracturePreviewSettings) -> d
             "sphere_radius_scale": round(float(settings.collision.sphere_radius_scale), 4),
             "capsule_simplify": int(settings.collision.capsule_simplify),
             "capsule_scale": round(float(settings.collision.capsule_scale), 4),
-            "capsule_max_count": int(settings.collision.capsule_max_count),
-            "capsule_min_radius_ratio": round(float(settings.collision.capsule_min_radius_ratio), 4),
-            "capsule_radius_padding": round(float(settings.collision.capsule_radius_padding), 4),
+            "capsule_scale_by_length": round(float(settings.collision.capsule_scale_by_length), 4),
             "ghost_opacity": round(float(settings.collision.ghost_opacity), 4),
         },
         "final_polycount": int(settings.final_polycount),

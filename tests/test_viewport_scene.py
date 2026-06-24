@@ -221,6 +221,53 @@ def test_fracture_collision_draw_call_uses_piece_explode_direction() -> None:
     assert collision_draw.explode_direction.x > 0.0
 
 
+def test_exploded_view_does_not_send_lower_pieces_below_grid() -> None:
+    preview = _fracture_preview()
+    low_root = replace(
+        preview.pieces[0],
+        base_mesh=_mesh(
+            "root_low",
+            points=(0.0, -4.0, 0.0, 1.0, -4.0, 0.0, 0.0, -3.0, 0.0),
+            counts=(3,),
+            indices=(0, 1, 2),
+        ),
+    )
+    high_branch = replace(
+        preview.pieces[1],
+        base_mesh=_mesh(
+            "branch_high",
+            points=(0.0, 4.0, 0.0, 1.0, 4.0, 0.0, 0.0, 5.0, 0.0),
+            counts=(3,),
+            indices=(0, 1, 2),
+        ),
+    )
+    preview = replace(preview, pieces=(low_root, high_branch))
+
+    scene = build_fracture_viewport_scene(preview)
+
+    assert all(draw.explode_direction.y >= 0.0 for draw in scene.draw_calls)
+
+
+def test_repeated_parts_use_owner_piece_explode_direction() -> None:
+    preview = _fracture_preview()
+    shifted_branch = replace(
+        preview.pieces[1],
+        base_mesh=_mesh(
+            "branch_shifted",
+            points=(10.0, 0.0, 0.0, 11.0, 0.0, 0.0, 10.0, 1.0, 0.0),
+            counts=(3,),
+            indices=(0, 1, 2),
+        ),
+    )
+    preview = replace(preview, pieces=(preview.pieces[0], shifted_branch))
+
+    scene = build_fracture_viewport_scene(preview)
+    branch_draw = next(draw for draw in scene.draw_calls if draw.draw_id == "fracture:piece:01:base:draw")
+    repeated_draw = next(draw for draw in scene.draw_calls if draw.visibility_group == "repeated_parts")
+
+    assert repeated_draw.explode_direction == branch_draw.explode_direction
+
+
 def _fracture_preview() -> FracturePreviewResult:
     root_piece = FracturePiece(
         index=0,

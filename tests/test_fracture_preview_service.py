@@ -329,6 +329,39 @@ def test_fracture_preview_includes_bone_overlay_segments_and_selected_manual_cut
     assert bone_003_segment.color == piece_color_by_joint["bone_001"]
 
 
+def test_fracture_preview_uses_speedtree_bone_end_segments() -> None:
+    from xml_to_usda.fracture_viewport_scene import build_fracture_viewport_scene
+
+    source_tree = _tree()
+    tip = Vector3(0.0, 2.6, 0.0)
+    skeleton = tuple(
+        replace(joint, bind_end_transform=Matrix4d.from_translation(tip)) if joint.name == "bone_004" else joint
+        for joint in source_tree.skeleton
+    )
+    source_tree = replace(
+        source_tree,
+        skeleton=skeleton,
+    )
+
+    result = generate_fracture_preview(
+        source_tree,
+        FracturePreviewSettings(
+            fracture=FractureSettings(target_piece_count=3, output_stem="Oak"),
+            max_base_faces_per_piece=1,
+            max_prototype_faces=1,
+        ),
+        include_viewport_scene=False,
+    )
+    tip_segment = next(segment for segment in result.bone_segments if segment.child_joint_token == "bone_004")
+    scene_tip_segment = next(segment for segment in build_fracture_viewport_scene(result).bone_segments if segment.child_token == "bone_004")
+
+    assert tip_segment.parent_joint_token == "bone_003"
+    assert tip_segment.selectable is True
+    assert tip_segment.parent_position == source_tree.skeleton[-1].bind_translate
+    assert tip_segment.child_position == tip
+    assert scene_tip_segment.selectable_id == "bone:bone_003->bone_004"
+
+
 def test_fracture_preview_distributes_target_polycount_between_base_and_repeated_parts() -> None:
     result = generate_fracture_preview(
         _tree_with_repeated_branch_count(25),

@@ -110,7 +110,8 @@ class FracturePreviewDialog(PreviewShellDialog):
         self._manual_cut_undo_stack = list(self._manual_cut_tokens)
         self._cut_delete_buttons: dict[str, QPushButton] = {}
         self._parameter_wheel_filter = None
-        self._collision_visual_base_scale = max(0.001, float(self._settings.collision.capsule_scale))
+        self._collision_visual_base_scale = self._collision_geometry_setting(self._settings.collision)
+        self._collision_visual_base_length_scale = self._collision_length_setting(self._settings.collision)
         self.current_preview: FracturePreviewResult | None = None
         self.viewport_mesh: FractureViewportMesh | None = None
 
@@ -200,7 +201,7 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.exploded_view_slider, self.exploded_view_spin = _build_float_slider_row(
             settings_panel,
             minimum=0.0,
-            maximum=1.0,
+            maximum=2.0,
             value=0.0,
             step=0.01,
             scale=100,
@@ -221,6 +222,7 @@ class FracturePreviewDialog(PreviewShellDialog):
 
         self.show_bones_check = QCheckBox("Show Bones", settings_panel)
         self.hide_repeated_parts_check = QCheckBox("Hide Repeated Parts", settings_panel)
+        self.hide_repeated_parts_check.setChecked(True)
         self.generate_caps_check = QCheckBox("Generate Caps", settings_panel)
         self.override_caps_material_check = QCheckBox("Override Caps Material", settings_panel)
         self.caps_material_row = MaterialUdimRow(
@@ -237,6 +239,23 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.collision_mode_combo.addItem("Convex Hull", FractureCollisionMode.CONVEX.value)
         self.collision_mode_combo.addItem("Capsules", FractureCollisionMode.CAPSULE.value)
         self.collision_mode_combo.addItem("Sphere", FractureCollisionMode.SPHERE.value)
+        self.collision_mode_combo.hide()
+        self.collision_mode_button_row = QWidget(settings_panel)
+        collision_mode_button_layout = QHBoxLayout(self.collision_mode_button_row)
+        collision_mode_button_layout.setContentsMargins(0, 0, 0, 0)
+        collision_mode_button_layout.setSpacing(6)
+        self.collision_mode_buttons: dict[FractureCollisionMode, QPushButton] = {}
+        for label, mode in (
+            ("Convex", FractureCollisionMode.CONVEX),
+            ("Capsule", FractureCollisionMode.CAPSULE),
+            ("Sphere", FractureCollisionMode.SPHERE),
+        ):
+            button = QPushButton(label, self.collision_mode_button_row)
+            button.setCheckable(True)
+            button.setObjectName("CollisionModeButton")
+            button.clicked.connect(lambda _checked, selected=mode: self._select_collision_mode(selected))
+            collision_mode_button_layout.addWidget(button)
+            self.collision_mode_buttons[mode] = button
         self.collision_include_parts_check = QCheckBox("Collision Includes Parts", settings_panel)
         self.convex_vertices_slider, self.convex_vertices_spin = _build_int_slider_row(
             settings_panel,
@@ -262,32 +281,17 @@ class FracturePreviewDialog(PreviewShellDialog):
         )
         self.capsule_scale_slider, self.capsule_scale_spin = _build_float_slider_row(
             settings_panel,
-            minimum=0.25,
-            maximum=2.0,
+            minimum=0.05,
+            maximum=6.0,
             value=float(self._settings.collision.capsule_scale),
             step=0.01,
             scale=100,
         )
-        self.capsule_max_count_slider, self.capsule_max_count_spin = _build_int_slider_row(
-            settings_panel,
-            minimum=1,
-            maximum=128,
-            value=int(self._settings.collision.capsule_max_count),
-            step=1,
-        )
-        self.capsule_min_radius_slider, self.capsule_min_radius_spin = _build_float_slider_row(
+        self.capsule_scale_by_length_slider, self.capsule_scale_by_length_spin = _build_float_slider_row(
             settings_panel,
             minimum=0.0,
-            maximum=0.25,
-            value=float(self._settings.collision.capsule_min_radius_ratio),
-            step=0.01,
-            scale=100,
-        )
-        self.capsule_padding_slider, self.capsule_padding_spin = _build_float_slider_row(
-            settings_panel,
-            minimum=0.0,
-            maximum=0.5,
-            value=float(self._settings.collision.capsule_radius_padding),
+            maximum=6.0,
+            value=float(self._settings.collision.capsule_scale_by_length),
             step=0.01,
             scale=100,
         )
@@ -313,12 +317,10 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.sphere_scale_label = QLabel("Sphere Scale", settings_panel)
         self.capsule_simplify_label = QLabel("Capsule Simplify", settings_panel)
         self.capsule_scale_label = QLabel("Capsule Scale", settings_panel)
-        self.capsule_max_count_label = QLabel("Capsule Max Count", settings_panel)
-        self.capsule_min_radius_label = QLabel("Capsule Min Radius", settings_panel)
-        self.capsule_padding_label = QLabel("Capsule Padding", settings_panel)
+        self.capsule_scale_by_length_label = QLabel("Capsule Scale By Length", settings_panel)
         self.collision_opacity_label = QLabel("Collision Opacity", settings_panel)
         settings_layout.addWidget(self.collision_mode_label)
-        settings_layout.addWidget(self.collision_mode_combo)
+        settings_layout.addWidget(self.collision_mode_button_row)
         settings_layout.addWidget(self.collision_include_parts_check)
         settings_layout.addWidget(self.convex_vertices_label)
         settings_layout.addLayout(_slider_row(self.convex_vertices_slider, self.convex_vertices_spin))
@@ -335,12 +337,8 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.capsule_tuning_label.setWordWrap(True)
         self.capsule_tuning_label.setObjectName("MutedLabel")
         settings_layout.addWidget(self.capsule_tuning_label)
-        settings_layout.addWidget(self.capsule_max_count_label)
-        settings_layout.addLayout(_slider_row(self.capsule_max_count_slider, self.capsule_max_count_spin))
-        settings_layout.addWidget(self.capsule_min_radius_label)
-        settings_layout.addLayout(_slider_row(self.capsule_min_radius_slider, self.capsule_min_radius_spin))
-        settings_layout.addWidget(self.capsule_padding_label)
-        settings_layout.addLayout(_slider_row(self.capsule_padding_slider, self.capsule_padding_spin))
+        settings_layout.addWidget(self.capsule_scale_by_length_label)
+        settings_layout.addLayout(_slider_row(self.capsule_scale_by_length_slider, self.capsule_scale_by_length_spin))
         settings_layout.addWidget(self.collision_opacity_label)
         settings_layout.addLayout(_slider_row(self.collision_opacity_slider, self.collision_opacity_spin))
         settings_layout.addWidget(self.reset_cuts_button)
@@ -392,24 +390,16 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.collision_include_parts_check.toggled.connect(lambda _checked: self._emit_settings_changed())
         self.convex_vertices_slider.sliderReleased.connect(self._emit_settings_changed)
         self.convex_vertices_spin.editingFinished.connect(self._emit_settings_changed)
-        self.sphere_scale_slider.sliderReleased.connect(self._emit_settings_changed)
-        self.sphere_scale_spin.editingFinished.connect(self._emit_settings_changed)
+        self.sphere_scale_slider.valueChanged.connect(lambda _raw: self._handle_collision_visual_changed())
+        self.sphere_scale_spin.valueChanged.connect(lambda _value: self._handle_collision_visual_changed())
         self.capsule_simplify_slider.sliderReleased.connect(self._emit_settings_changed)
         self.capsule_simplify_spin.editingFinished.connect(self._emit_settings_changed)
         self.capsule_scale_slider.valueChanged.connect(lambda _raw: self._handle_collision_visual_changed())
         self.capsule_scale_spin.valueChanged.connect(lambda _value: self._handle_collision_visual_changed())
-        self.capsule_scale_slider.sliderReleased.connect(self._emit_settings_changed)
-        self.capsule_scale_spin.editingFinished.connect(self._emit_settings_changed)
-        self.capsule_max_count_slider.sliderReleased.connect(self._emit_settings_changed)
-        self.capsule_max_count_spin.editingFinished.connect(self._emit_settings_changed)
-        self.capsule_min_radius_slider.sliderReleased.connect(self._emit_settings_changed)
-        self.capsule_min_radius_spin.editingFinished.connect(self._emit_settings_changed)
-        self.capsule_padding_slider.sliderReleased.connect(self._emit_settings_changed)
-        self.capsule_padding_spin.editingFinished.connect(self._emit_settings_changed)
+        self.capsule_scale_by_length_slider.valueChanged.connect(lambda _raw: self._handle_collision_visual_changed())
+        self.capsule_scale_by_length_spin.valueChanged.connect(lambda _value: self._handle_collision_visual_changed())
         self.collision_opacity_slider.valueChanged.connect(lambda _raw: self._handle_collision_visual_changed())
         self.collision_opacity_spin.valueChanged.connect(lambda _value: self._handle_collision_visual_changed())
-        self.collision_opacity_slider.sliderReleased.connect(self._emit_settings_changed)
-        self.collision_opacity_spin.editingFinished.connect(self._emit_settings_changed)
         if preview is not None:
             self.set_preview(preview)
 
@@ -430,9 +420,7 @@ class FracturePreviewDialog(PreviewShellDialog):
                 sphere_radius_scale=float(self.sphere_scale_spin.value()),
                 capsule_simplify=int(self.capsule_simplify_spin.value()),
                 capsule_scale=float(self.capsule_scale_spin.value()),
-                capsule_max_count=int(self.capsule_max_count_spin.value()),
-                capsule_min_radius_ratio=float(self.capsule_min_radius_spin.value()),
-                capsule_radius_padding=float(self.capsule_padding_spin.value()),
+                capsule_scale_by_length=float(self.capsule_scale_by_length_spin.value()),
                 ghost_opacity=float(self.collision_opacity_spin.value()),
             ),
             final_polycount=int(self.polycount_spin.value() or DEFAULT_FRACTURE_PREVIEW_POLYCOUNT),
@@ -460,16 +448,20 @@ class FracturePreviewDialog(PreviewShellDialog):
         frame_camera = self.current_preview is None
         if preview.viewport_scene is None:
             preview = replace(preview, viewport_scene=build_fracture_viewport_scene(preview))
-        self._collision_visual_base_scale = max(0.001, float(self._settings.collision.capsule_scale))
+        self._collision_visual_base_scale = self._collision_geometry_setting(self._settings.collision)
+        self._collision_visual_base_length_scale = self._collision_length_setting(self._settings.collision)
         self.current_preview = preview
-        self.viewport_mesh = build_fracture_viewport_mesh_from_scene(
+        viewport_scene = _filtered_repeated_parts_scene(
             preview.viewport_scene,
             include_repeated_parts=not self.hide_repeated_parts_check.isChecked(),
+        )
+        self.viewport_mesh = build_fracture_viewport_mesh_from_scene(
+            viewport_scene,
         )
         apply_fracture_viewport_mesh(
             self.viewport,
             self.viewport_mesh,
-            scene=preview.viewport_scene,
+            scene=viewport_scene,
             frame_camera=frame_camera,
         )
         self._apply_collision_visual_settings()
@@ -507,6 +499,7 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.collision_check,
             self.collision_mode_label,
             self.collision_mode_combo,
+            self.collision_mode_button_row,
             self.collision_include_parts_check,
             self.convex_vertices_label,
             self.convex_vertices_slider,
@@ -521,15 +514,9 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.capsule_scale_slider,
             self.capsule_scale_spin,
             self.capsule_tuning_label,
-            self.capsule_max_count_label,
-            self.capsule_max_count_slider,
-            self.capsule_max_count_spin,
-            self.capsule_min_radius_label,
-            self.capsule_min_radius_slider,
-            self.capsule_min_radius_spin,
-            self.capsule_padding_label,
-            self.capsule_padding_slider,
-            self.capsule_padding_spin,
+            self.capsule_scale_by_length_label,
+            self.capsule_scale_by_length_slider,
+            self.capsule_scale_by_length_spin,
             self.collision_opacity_label,
             self.collision_opacity_slider,
             self.collision_opacity_spin,
@@ -549,6 +536,7 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.stump_piece_check.setChecked(settings.fracture.force_stump_piece)
             self.collision_check.setChecked(settings.collision.enabled)
             _set_combo_data(self.collision_mode_combo, settings.collision.mode.value)
+            self._sync_collision_mode_buttons()
             self.collision_include_parts_check.setChecked(settings.collision.include_instance_parts)
             self.convex_vertices_slider.setValue(int(settings.collision.convex_max_vertices))
             self.convex_vertices_spin.setValue(int(settings.collision.convex_max_vertices))
@@ -558,12 +546,8 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.capsule_simplify_spin.setValue(int(settings.collision.capsule_simplify))
             self.capsule_scale_slider.setValue(int(round(float(settings.collision.capsule_scale) * 100)))
             self.capsule_scale_spin.setValue(float(settings.collision.capsule_scale))
-            self.capsule_max_count_slider.setValue(int(settings.collision.capsule_max_count))
-            self.capsule_max_count_spin.setValue(int(settings.collision.capsule_max_count))
-            self.capsule_min_radius_slider.setValue(int(round(float(settings.collision.capsule_min_radius_ratio) * 100)))
-            self.capsule_min_radius_spin.setValue(float(settings.collision.capsule_min_radius_ratio))
-            self.capsule_padding_slider.setValue(int(round(float(settings.collision.capsule_radius_padding) * 100)))
-            self.capsule_padding_spin.setValue(float(settings.collision.capsule_radius_padding))
+            self.capsule_scale_by_length_slider.setValue(int(round(float(settings.collision.capsule_scale_by_length) * 100)))
+            self.capsule_scale_by_length_spin.setValue(float(settings.collision.capsule_scale_by_length))
             self.collision_opacity_slider.setValue(int(round(float(settings.collision.ghost_opacity) * 100)))
             self.collision_opacity_spin.setValue(float(settings.collision.ghost_opacity))
             if not settings.fracture.generate_caps:
@@ -584,26 +568,53 @@ class FracturePreviewDialog(PreviewShellDialog):
         self._emit_settings_changed()
 
     def _handle_collision_controls_changed(self) -> None:
+        self._sync_collision_mode_buttons()
         self._sync_collision_controls()
         self._emit_settings_changed()
+
+    def _select_collision_mode(self, mode: FractureCollisionMode) -> None:
+        before = self.collision_mode_combo.currentData()
+        _set_combo_data(self.collision_mode_combo, mode.value)
+        if before == mode.value:
+            self._sync_collision_mode_buttons()
+
+    def _sync_collision_mode_buttons(self) -> None:
+        current = str(self.collision_mode_combo.currentData())
+        for mode, button in self.collision_mode_buttons.items():
+            with QSignalBlocker(button):
+                button.setChecked(mode.value == current)
 
     def _handle_collision_visual_changed(self) -> None:
         self._apply_collision_visual_settings()
 
     def _apply_collision_visual_settings(self) -> None:
         settings = self.settings().collision
-        scale = 1.0
+        scale = self._collision_geometry_setting(settings) / max(0.001, self._collision_visual_base_scale)
+        self.viewport.set_collision_visuals(
+            opacity=float(settings.ghost_opacity),
+            geometry_scale=scale,
+            length_scale=self._collision_length_setting(settings),
+            base_length_scale=self._collision_visual_base_length_scale,
+        )
+
+    def _collision_geometry_setting(self, settings: FractureCollisionSettings) -> float:
         if settings.mode == FractureCollisionMode.CAPSULE:
-            scale = max(0.001, float(settings.capsule_scale)) / max(0.001, self._collision_visual_base_scale)
-        self.viewport.set_collision_visuals(opacity=float(settings.ghost_opacity), geometry_scale=scale)
+            return max(0.001, float(settings.capsule_scale))
+        if settings.mode == FractureCollisionMode.SPHERE:
+            return max(0.001, float(settings.sphere_radius_scale))
+        return 1.0
+
+    def _collision_length_setting(self, settings: FractureCollisionSettings) -> float:
+        if settings.mode == FractureCollisionMode.CAPSULE:
+            return max(0.0, float(settings.capsule_scale_by_length))
+        return 0.0
 
     def _sync_collision_controls(self) -> None:
         enabled = self.collision_check.isChecked()
         mode = FractureCollisionMode(str(self.collision_mode_combo.currentData()))
         always = (
             self.collision_mode_label,
-            self.collision_mode_combo,
-            self.collision_include_parts_check,
+            self.collision_mode_button_row,
             self.collision_opacity_label,
             self.collision_opacity_slider,
             self.collision_opacity_spin,
@@ -626,19 +637,17 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.capsule_scale_slider,
             self.capsule_scale_spin,
             self.capsule_tuning_label,
-            self.capsule_max_count_label,
-            self.capsule_max_count_slider,
-            self.capsule_max_count_spin,
-            self.capsule_min_radius_label,
-            self.capsule_min_radius_slider,
-            self.capsule_min_radius_spin,
-            self.capsule_padding_label,
-            self.capsule_padding_slider,
-            self.capsule_padding_spin,
+            self.capsule_scale_by_length_label,
+            self.capsule_scale_by_length_slider,
+            self.capsule_scale_by_length_spin,
         )
-        for widget in (*always, *convex, *sphere, *capsule):
+        for widget in (*always, self.collision_include_parts_check, *convex, *sphere, *capsule):
             widget.setEnabled(enabled)
             widget.setVisible(enabled)
+        for button in self.collision_mode_buttons.values():
+            button.setEnabled(enabled)
+            button.setVisible(enabled)
+        self.collision_include_parts_check.setVisible(enabled and mode != FractureCollisionMode.CAPSULE)
         for widget in convex:
             widget.setVisible(enabled and mode == FractureCollisionMode.CONVEX)
         for widget in sphere:
@@ -871,7 +880,17 @@ def build_fracture_viewport_mesh(
     scene = preview.viewport_scene
     if scene is None:
         scene = build_fracture_viewport_scene(preview)
-    return build_fracture_viewport_mesh_from_scene(scene, include_repeated_parts=include_repeated_parts)
+    scene = _filtered_repeated_parts_scene(scene, include_repeated_parts=include_repeated_parts)
+    return build_fracture_viewport_mesh_from_scene(scene)
+
+
+def _filtered_repeated_parts_scene(scene: ViewportScene, *, include_repeated_parts: bool) -> ViewportScene:
+    if include_repeated_parts:
+        return scene
+    return replace(
+        scene,
+        draw_calls=tuple(draw_call for draw_call in scene.draw_calls if draw_call.visibility_group != "repeated_parts"),
+    )
 
 
 def build_fracture_viewport_mesh_from_scene(
@@ -941,6 +960,7 @@ def build_fracture_viewport_mesh_from_scene(
             child_position=segment.end,
             is_selected_cut=segment.selected,
             color=segment.color,
+            selectable=segment.selectable_id is not None,
         )
         for segment in scene.bone_segments
     )
@@ -1038,6 +1058,7 @@ def _build_fracture_render_payload(
             dtype=np.float32,
         )
         render_vertices[output_start:output_end, 13:16] = positions
+        render_vertices[output_start:output_end, 16] = 0.0
         min_values = np.minimum(min_values, positions.min(axis=0))
         max_values = np.maximum(max_values, positions.max(axis=0))
         output_start = output_end

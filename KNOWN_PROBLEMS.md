@@ -35,6 +35,13 @@
 - Reason for deferral: UE runtime replacement requires an engine scene and destruction test harness, not just USDA import or Qt preview.
 - Likely next step: Import the intact tree and exported fracture pieces into UE 5.7.x, replace the skeletal tree with the root-pivoted Static Mesh Assembly pieces at runtime, and compare neutral-pose visual alignment.
 
+## Automatic Fracture Priority Policy Pending
+
+- Issue: Automatic Fracture can still split simple trunks unevenly because cut priority is not yet based on skeleton path trunk/branch structure.
+- Location: `src/xml_to_usda/fracture_service.py`
+- Reason for deferral: Current pass fixed collision stability/performance; replacing automatic cut priority is a separate planner change.
+- Likely next step: Use ordered skeleton paths to split large branches from trunk first, then split trunk/branches by preserve-trunk bias and even path distance.
+
 ## Fracture Collision UE Import Validation Pending
 
 - Issue: Fracture collision generation now authors UE-style `UCX_`, `UCP_`, and `USP_` mesh names in per-piece Static Mesh Assembly USDA files, but USD/Interchange recognition as collision has not yet been manually validated in UE 5.7.x.

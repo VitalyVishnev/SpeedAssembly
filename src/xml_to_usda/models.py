@@ -185,6 +185,7 @@ class Joint:
     generator_level: int | None = None
     bind_transform: "Matrix4d" = field(default_factory=lambda: Matrix4d.identity())
     rest_transform: "Matrix4d" = field(default_factory=lambda: Matrix4d.identity())
+    bind_end_transform: "Matrix4d | None" = None
 
     @property
     def bind_translate(self) -> Vector3:
@@ -193,6 +194,11 @@ class Joint:
     @property
     def rest_translate(self) -> Vector3:
         return self.rest_transform.translation
+
+    @property
+    def bind_end_translate(self) -> Vector3 | None:
+        bind_end_transform = getattr(self, "bind_end_transform", None)
+        return None if bind_end_transform is None else bind_end_transform.translation
 
 
 @dataclass(frozen=True, slots=True)

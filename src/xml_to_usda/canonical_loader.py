@@ -43,7 +43,7 @@ from .source_validation import validate_source_model
 from .xml_reader import analyze_xml, read_source_xml
 
 
-SOURCE_MODEL_CACHE_SCHEMA_VERSION = 5
+SOURCE_MODEL_CACHE_SCHEMA_VERSION = 6
 SOURCE_MODEL_CACHE_MAGIC = b"XMLTOUSDA_SOURCE_MODEL_CACHE_V1"
 
 

@@ -173,7 +173,9 @@ def _fracture_preview_visual_only_settings_changed(
     current_collision = current.collision
     normalized_previous_collision = replace(
         previous_collision,
+        sphere_radius_scale=current_collision.sphere_radius_scale,
         capsule_scale=current_collision.capsule_scale,
+        capsule_scale_by_length=current_collision.capsule_scale_by_length,
         ghost_opacity=current_collision.ghost_opacity,
     )
     return replace(previous, collision=normalized_previous_collision) == current
@@ -2163,7 +2165,7 @@ class MainWindow(QWidget):
                 settings,
                 proxy,
             ),
-            parent=self,
+            parent=None,
         )
         configure_preview_dialog(dialog, owner=self, stylesheet=self.styleSheet())
         self._attach_preview_viewport_trace(dialog.viewport, job="proxy_preview")
@@ -2196,7 +2198,7 @@ class MainWindow(QWidget):
             inspect_fbx_slots=self._inspect_part_preview_fbx_slots,
             on_apply=self._apply_part_preview_value,
             on_preview_requested=self._start_part_preview,
-            parent=self,
+            parent=None,
         )
         configure_preview_dialog(dialog, owner=self, stylesheet=self.styleSheet())
         self._attach_preview_viewport_trace(dialog.viewport, job="part_preview")
@@ -2302,7 +2304,7 @@ class MainWindow(QWidget):
             settings=settings,
             on_settings_changed=self._handle_fracture_preview_settings_changed,
             on_export_requested=self.run_export_fracture_usda,
-            parent=self,
+            parent=None,
         )
         configure_preview_dialog(dialog, owner=self, stylesheet=self.styleSheet())
         self._attach_preview_viewport_trace(dialog.viewport, job="fracture_preview")
@@ -2334,7 +2336,7 @@ class MainWindow(QWidget):
                 settings=self._fracture_preview_settings,
                 on_settings_changed=self._handle_fracture_preview_settings_changed,
                 on_export_requested=self.run_export_fracture_usda,
-                parent=self,
+                parent=None,
             )
             configure_preview_dialog(dialog, owner=self, stylesheet=self.styleSheet())
             self._attach_preview_viewport_trace(dialog.viewport, job="fracture_preview")
@@ -2375,7 +2377,16 @@ class MainWindow(QWidget):
         )
         self._append_runtime_log("INFO Fracture Preview preparing viewport mesh")
         self._trace("viewport.prepare", job="fracture_preview", message="Fracture Preview preparing viewport mesh")
-        dialog.set_preview(preview)
+        try:
+            dialog.set_preview(preview)
+        except Exception as exc:
+            detail = traceback.format_exc()
+            self._append_runtime_log("ERROR Fracture Preview viewport failed", detail)
+            self._trace("viewport.error", job="fracture_preview", message=str(exc), data={"traceback": detail})
+            dialog.set_error("Preview viewport failed. See log for details.")
+            self._set_status("Fracture Preview viewport failed.")
+            focus_preview_dialog(dialog)
+            return
         viewport_mesh = dialog.viewport_mesh
         if viewport_mesh is not None:
             self._append_runtime_log(
@@ -2594,6 +2605,10 @@ class MainWindow(QWidget):
 
     def run_export_fracture_usda(self) -> None:
         self._source_refresh_timer.stop()
+        if self._fracture_preview_dialog is not None:
+            self._fracture_preview_settings = self._fracture_preview_dialog.settings()
+            self.geometry_panel.apply_fracture_preview_settings(self._fracture_preview_settings)
+            self._schedule_operator_state_save()
         try:
             plan = self._prepare_current_conversion_plan()
         except ValueError as exc:

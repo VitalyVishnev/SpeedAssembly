@@ -54,7 +54,7 @@ DEFAULT_FRACTURE_PREVIEW_POLYCOUNT = 1_000_000
 DEFAULT_FRACTURE_PREVIEW_BASE_PRIORITY = 0.33
 DEFAULT_FRACTURE_PREVIEW_BASE_FACE_BUDGET = 50_000
 DEFAULT_FRACTURE_PREVIEW_PROTOTYPE_FACE_BUDGET = 2_000
-FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION = 4
+FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION = 6
 FRACTURE_PREVIEW_SOURCE_CACHE_MAGIC = b"XMLTOUSDA_FRACTURE_PREVIEW_SOURCE_CACHE_V1"
 
 
@@ -124,6 +124,7 @@ class FracturePreviewBoneSegment:
     child_position: Vector3
     is_selected_cut: bool = False
     color: Color4 = Color4(0.64, 0.82, 0.95, 1.0)
+    selectable: bool = True
 
 
 @dataclass(frozen=True)
@@ -510,22 +511,33 @@ def _preview_bone_segments(
             color_by_joint_token[joint_token] = piece.color
     segments: list[FracturePreviewBoneSegment] = []
     for joint in model.skeleton:
-        if joint.parent is None:
-            continue
-        parent = joints_by_name.get(joint.parent)
-        if parent is None:
+        parent = joints_by_name.get(joint.parent or "")
+        if joint.parent is not None and parent is None:
             raise FractureError(f"Fracture preview skeleton joint {joint.name} references missing parent {joint.parent}.")
+        start, end = _source_bone_segment_positions(joint, parent)
+        if start == end:
+            continue
         segments.append(
             FracturePreviewBoneSegment(
-                parent_joint_token=parent.name,
+                parent_joint_token=parent.name if parent is not None else joint.name,
                 child_joint_token=joint.name,
-                parent_position=parent.bind_translate,
-                child_position=joint.bind_translate,
-                is_selected_cut=joint.name in selected_tokens,
-                color=color_by_joint_token.get(parent.name, Color4(0.64, 0.82, 0.95, 1.0)),
+                parent_position=start,
+                child_position=end,
+                is_selected_cut=joint.parent is not None and joint.name in selected_tokens,
+                color=color_by_joint_token.get(parent.name if parent is not None else joint.name, Color4(0.64, 0.82, 0.95, 1.0)),
+                selectable=joint.parent is not None,
             )
         )
     return tuple(segments)
+
+
+def _source_bone_segment_positions(joint, parent) -> tuple[Vector3, Vector3]:
+    end = joint.bind_end_translate
+    if end is not None:
+        return joint.bind_translate, end
+    if parent is not None:
+        return parent.bind_translate, joint.bind_translate
+    return joint.bind_translate, joint.bind_translate
 
 
 def _prototype_mesh(prototype: Prototype) -> MeshData:

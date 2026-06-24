@@ -544,7 +544,7 @@ def _extract_skeleton(bones: tuple[ET.Element, ...], messages: list[str], source
     if not bones:
         return []
 
-    raw_bones: list[tuple[int, int | None, Vector3, str, int]] = []
+    raw_bones: list[tuple[int, int | None, Vector3, Vector3 | None, str | None, int | None]] = []
     for bone in bones:
         bone_id = bone.attrib.get("ID")
         if bone_id is None or not bone_id.lstrip("-").isdigit():
@@ -553,6 +553,9 @@ def _extract_skeleton(bones: tuple[ET.Element, ...], messages: list[str], source
         start_x = _find_float(bone, ("StartX",), default=None)
         start_y = _find_float(bone, ("StartY",), default=None)
         start_z = _find_float(bone, ("StartZ",), default=None)
+        end_x = _find_float(bone, ("EndX",), default=None)
+        end_y = _find_float(bone, ("EndY",), default=None)
+        end_z = _find_float(bone, ("EndZ",), default=None)
         if start_x is None or start_y is None or start_z is None:
             messages.append(
                 f"missing_skeleton_transform: bone {bone_id} is missing StartX/StartY/StartZ required for rest pose authoring"
@@ -562,19 +565,25 @@ def _extract_skeleton(bones: tuple[ET.Element, ...], messages: list[str], source
         if parent_id not in {None, "", "-1"} and parent_id.lstrip("-").isdigit():
             parsed_parent_id = int(parent_id)
         generator_label, generator_level = parse_generator_label(bone.attrib.get("Generator"), int(bone_id))
+        end = (
+            source_transform.point_components_to_stage(end_x, end_y, end_z)
+            if end_x is not None and end_y is not None and end_z is not None
+            else None
+        )
         raw_bones.append(
             (
                 int(bone_id),
                 parsed_parent_id,
                 source_transform.point_components_to_stage(start_x, start_y, start_z),
+                end,
                 generator_label,
                 generator_level,
             )
         )
 
-    start_by_id = {bone_id: start for bone_id, _, start, _, _ in raw_bones}
+    start_by_id = {bone_id: start for bone_id, _, start, _, _, _ in raw_bones}
     joints: list[Joint] = []
-    for bone_id, parsed_parent_id, start, generator_label, generator_level in raw_bones:
+    for bone_id, parsed_parent_id, start, end, generator_label, generator_level in raw_bones:
         parent = joint_name_from_bone_id(parsed_parent_id) if parsed_parent_id is not None else None
         if parsed_parent_id is None or parsed_parent_id not in start_by_id:
             rest_translate = start
@@ -594,6 +603,7 @@ def _extract_skeleton(bones: tuple[ET.Element, ...], messages: list[str], source
                 generator_level=generator_level,
                 bind_transform=Matrix4d.from_translation(start),
                 rest_transform=Matrix4d.from_translation(rest_translate),
+                bind_end_transform=Matrix4d.from_translation(end) if end is not None else None,
             )
         )
     return joints

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from xml_to_usda.fracture_collision import FractureCollisionMode, FractureCollisionSettings
 from xml_to_usda.fracture_export_service import FractureExportRequest, export_fracture_usda_from_export_request
 from xml_to_usda.fracture_preview_service import (
     FracturePreviewSettings,
@@ -52,3 +53,24 @@ def test_fracture_preview_and_export_on_real_simple_tree_sample(tmp_path: Path) 
         "SimpleTree_01_fracture_04.usda",
     )
     assert all(Path(output.output_path).exists() for output in export.outputs)
+
+
+def test_fracture_preview_capsule_collision_on_real_simple_tree_sample(tmp_path: Path) -> None:
+    request = ConversionRequest(
+        input_paths=(str(SIMPLE_TREE_01),),
+        output_path=str(tmp_path / "SimpleTree_01.usda"),
+    )
+
+    preview = generate_fracture_preview_from_source_request(
+        FracturePreviewSourceRequest.from_conversion_request(request),
+        FracturePreviewSettings(
+            fracture=FractureSettings(target_piece_count=11),
+            collision=FractureCollisionSettings(enabled=True, mode=FractureCollisionMode.CAPSULE),
+            final_polycount=1_000_000,
+            base_mesh_priority=0.3,
+            max_prototype_faces=2_000,
+        ),
+    )
+
+    assert preview.plan.actual_piece_count == 11
+    assert len(preview.collision_meshes) > 0

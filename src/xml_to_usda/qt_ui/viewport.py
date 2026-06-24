@@ -28,13 +28,15 @@ GL_COLOR_BUFFER_BIT = 0x00004000
 GL_DEPTH_BUFFER_BIT = 0x00000100
 GL_DEPTH_TEST = 0x0B71
 GL_BLEND = 0x0BE2
+GL_BACK = 0x0405
+GL_CULL_FACE = 0x0B44
 GL_FLOAT = 0x1406
 GL_LINES = 0x0001
 GL_ONE_MINUS_SRC_ALPHA = 0x0303
 GL_SRC_ALPHA = 0x0302
 GL_TRIANGLES = 0x0004
 DEFAULT_MATCAP_TINT_ALPHA = 0.0
-MATCAP_VERTEX_STRIDE = 16
+MATCAP_VERTEX_STRIDE = 17
 ViewportTraceCallback = Callable[[str, dict[str, object]], None]
 _MATCAP_ATTRIBUTE_LAYOUT = (
     ("position", 0, 3),
@@ -42,6 +44,7 @@ _MATCAP_ATTRIBUTE_LAYOUT = (
     ("pieceTint", 24, 4),
     ("explodeOffset", 40, 3),
     ("scaleOrigin", 52, 3),
+    ("lengthScale", 64, 1),
 )
 
 
@@ -110,6 +113,8 @@ class MatcapViewport(QOpenGLWidget):
         self._collision_opacity = 0.25
         self._collision_base_opacity = 0.25
         self._collision_geometry_scale = 1.0
+        self._collision_length_scale = 0.0
+        self._collision_base_length_scale = 0.0
         self._gl_cleanup_context = None
         self._show_bones = False
         self._selected_cut_tokens: tuple[str, ...] = ()
@@ -154,7 +159,7 @@ class MatcapViewport(QOpenGLWidget):
         return self._exploded_view_strength
 
     def set_exploded_view_strength(self, value: float) -> None:
-        self._exploded_view_strength = max(0.0, min(1.0, float(value)))
+        self._exploded_view_strength = max(0.0, min(2.0, float(value)))
         self.update()
 
     @property
@@ -165,9 +170,22 @@ class MatcapViewport(QOpenGLWidget):
     def collision_geometry_scale(self) -> float:
         return self._collision_geometry_scale
 
-    def set_collision_visuals(self, *, opacity: float, geometry_scale: float = 1.0) -> None:
+    @property
+    def collision_length_scale(self) -> float:
+        return self._collision_length_scale
+
+    def set_collision_visuals(
+        self,
+        *,
+        opacity: float,
+        geometry_scale: float = 1.0,
+        length_scale: float = 0.0,
+        base_length_scale: float = 0.0,
+    ) -> None:
         self._collision_opacity = max(0.0, min(1.0, float(opacity)))
         self._collision_geometry_scale = max(0.001, float(geometry_scale))
+        self._collision_length_scale = max(0.0, float(length_scale))
+        self._collision_base_length_scale = max(0.0, float(base_length_scale))
         self.update()
 
     def set_trace_callback(self, callback: ViewportTraceCallback | None) -> None:
@@ -347,6 +365,8 @@ class MatcapViewport(QOpenGLWidget):
                     piece_tint_strength=self._collision_opacity / max(self._collision_base_opacity, 0.001),
                     exploded_view_strength=self._matcap_exploded_view_strength(),
                     geometry_scale=self._collision_geometry_scale,
+                    capsule_length_scale=self._collision_length_scale,
+                    capsule_base_length_scale=self._collision_base_length_scale,
                 )
                 self._collision_vao.bind()
                 functions.glDrawArrays(GL_TRIANGLES, 0, self._collision_vertex_count)
@@ -673,7 +693,7 @@ class MatcapViewport(QOpenGLWidget):
         segment = self._bone_segment_by_child_token(cut_token)
         if segment is None:
             return None
-        return self._project_point_to_screen(segment.end)
+        return self._project_point_to_screen(segment.start)
 
     def _paint_bone_overlay(self) -> None:
         bone_segments = self._bone_segments_for_overlay()
@@ -780,6 +800,7 @@ def _build_scene_vertices(scene: ViewportScene | None, *, collision: bool = Fals
     if scene is None:
         return np.asarray([], dtype=np.float32)
     batch_by_id = {batch.batch_id: batch for batch in scene.mesh_batches}
+    length_scales = _collision_length_scales(scene, batch_by_id) if collision else {}
     vertices: list[float] = []
     for draw_call in scene.draw_calls:
         if (draw_call.visibility_group == "collision") != collision:
@@ -787,8 +808,33 @@ def _build_scene_vertices(scene: ViewportScene | None, *, collision: bool = Fals
         batch = batch_by_id.get(draw_call.batch_id)
         if batch is None:
             continue
-        _append_draw_call_vertices(vertices, batch.mesh, draw_call=draw_call, color=draw_call.tint or batch.color)
+        _append_draw_call_vertices(
+            vertices,
+            batch.mesh,
+            draw_call=draw_call,
+            color=draw_call.tint or batch.color,
+            length_scale=length_scales.get(draw_call.draw_id, 0.0),
+        )
     return np.asarray(vertices, dtype=np.float32)
+
+
+def _collision_length_scales(
+    scene: ViewportScene,
+    batch_by_id: dict[str, ViewportMeshBatch],
+) -> dict[str, float]:
+    lengths: list[tuple[str, float]] = []
+    for draw_call in scene.draw_calls:
+        if draw_call.visibility_group != "collision":
+            continue
+        batch = batch_by_id.get(draw_call.batch_id)
+        if batch is None:
+            continue
+        points = tuple(_transform_scene_point(point, draw_call) for point in _points(batch.mesh))
+        lengths.append((draw_call.draw_id, _collision_axis_length(points)))
+    reference = max((length for _draw_id, length in lengths), default=0.0)
+    if reference <= 1e-8:
+        return {}
+    return {draw_id: max(0.0, min(1.0, length / reference)) for draw_id, length in lengths}
 
 
 def _scene_collision_opacity(scene: ViewportScene | None) -> float:
@@ -811,12 +857,14 @@ def _append_draw_call_vertices(
     *,
     draw_call: ViewportDrawCall,
     color: Color4 | None,
+    length_scale: float = 0.0,
 ) -> None:
     if mesh.point_count == 0:
         return
     points = list(_points(mesh))
     colors = _point_colors(mesh)
-    scale_origin = _draw_call_center(points, draw_call)
+    transformed_points = tuple(_transform_scene_point(point, draw_call) for point in points)
+    scale_origins = _draw_call_scale_origins(transformed_points, mesh, draw_call)
     offset = 0
     for count in mesh.face_vertex_counts:
         indices = [int(mesh.face_vertex_indices[offset + index]) for index in range(count)]
@@ -825,12 +873,13 @@ def _append_draw_call_vertices(
             continue
         for index in range(1, count - 1):
             triangle = tuple(
-                _transform_scene_point(points[point_index], draw_call)
+                transformed_points[point_index]
                 for point_index in (indices[0], indices[index], indices[index + 1])
             )
             normal = _face_normal(triangle)  # type: ignore[arg-type]
             for point_index, point in zip((indices[0], indices[index], indices[index + 1]), triangle):
                 source_color = color or _color4_from_tuple(colors[point_index])
+                scale_origin = scale_origins[point_index]
                 vertices.extend(
                     (
                         point.x,
@@ -849,20 +898,58 @@ def _append_draw_call_vertices(
                         scale_origin.x,
                         scale_origin.y,
                         scale_origin.z,
+                        float(length_scale),
                     )
                 )
 
 
-def _draw_call_center(points: list[Vector3], draw_call: ViewportDrawCall) -> Vector3:
+def _draw_call_scale_origins(
+    points: tuple[Vector3, ...],
+    mesh: GeometryBuffer,
+    draw_call: ViewportDrawCall,
+) -> tuple[Vector3, ...]:
     if not points:
-        return Vector3(0.0, 0.0, 0.0)
-    transformed = tuple(_transform_scene_point(point, draw_call) for point in points)
-    scale = 1.0 / len(transformed)
+        return ()
+    if draw_call.visibility_group == "collision" and _is_capsule_collision_mesh(mesh) and len(points) >= 2:
+        start = points[0]
+        end = points[-1]
+        return tuple(_closest_point_on_segment(point, start, end) for point in points)
+    if draw_call.visibility_group == "collision":
+        center = _point_bounds_center(points)
+        return tuple(center for _point in points)
+    return points
+
+
+def _is_capsule_collision_mesh(mesh: GeometryBuffer) -> bool:
+    return str(mesh.name).startswith("UCP_")
+
+
+def _point_bounds_center(points: tuple[Vector3, ...]) -> Vector3:
     return Vector3(
-        sum(point.x for point in transformed) * scale,
-        sum(point.y for point in transformed) * scale,
-        sum(point.z for point in transformed) * scale,
+        (min(point.x for point in points) + max(point.x for point in points)) * 0.5,
+        (min(point.y for point in points) + max(point.y for point in points)) * 0.5,
+        (min(point.z for point in points) + max(point.z for point in points)) * 0.5,
     )
+
+
+def _collision_axis_length(points: tuple[Vector3, ...]) -> float:
+    if len(points) < 2:
+        return 0.0
+    return math.sqrt(
+        (points[-1].x - points[0].x) ** 2
+        + (points[-1].y - points[0].y) ** 2
+        + (points[-1].z - points[0].z) ** 2
+    )
+
+
+def _closest_point_on_segment(point: Vector3, start: Vector3, end: Vector3) -> Vector3:
+    ax, ay, az = point.x - start.x, point.y - start.y, point.z - start.z
+    bx, by, bz = end.x - start.x, end.y - start.y, end.z - start.z
+    denom = bx * bx + by * by + bz * bz
+    if denom <= 1e-12:
+        return start
+    t = max(0.0, min(1.0, (ax * bx + ay * by + az * bz) / denom))
+    return Vector3(start.x + bx * t, start.y + by * t, start.z + bz * t)
 
 
 def _build_viewport_vertices(
@@ -904,6 +991,7 @@ def _build_viewport_vertices(
                         point.x,
                         point.y,
                         point.z,
+                        0.0,
                     )
                 )
     return np.asarray(vertices, dtype=np.float32)
@@ -969,17 +1057,22 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
         attribute vec4 pieceTint;
         attribute vec3 explodeOffset;
         attribute vec3 scaleOrigin;
+        attribute float lengthScale;
         uniform mat4 mvp;
         uniform mat3 normalMatrix;
         uniform float explodeStrength;
         uniform float pieceTintStrength;
         uniform float geometryScale;
+        uniform float capsuleLengthScale;
+        uniform float capsuleBaseLengthScale;
         varying vec3 viewNormal;
         varying vec4 pieceColor;
         void main() {
             viewNormal = normalize(normalMatrix * normal);
             pieceColor = vec4(pieceTint.rgb, clamp(pieceTint.a * max(pieceTintStrength, 0.0), 0.0, 1.0));
-            vec3 scaledPosition = scaleOrigin + (position - scaleOrigin) * max(geometryScale, 0.001);
+            float baseLength = max(0.001, 1.0 + max(capsuleBaseLengthScale, 0.0) * lengthScale);
+            float currentLength = 1.0 + max(capsuleLengthScale, 0.0) * lengthScale;
+            vec3 scaledPosition = scaleOrigin + (position - scaleOrigin) * max(geometryScale, 0.001) * currentLength / baseLength;
             gl_Position = mvp * vec4(scaledPosition + explodeOffset * explodeStrength, 1.0);
         }
         """,
@@ -1026,6 +1119,8 @@ def _set_matcap_program_uniforms(
     piece_tint_strength: float,
     exploded_view_strength: float = 0.0,
     geometry_scale: float = 1.0,
+    capsule_length_scale: float = 0.0,
+    capsule_base_length_scale: float = 0.0,
 ) -> None:
     program.setUniformValue("mvp", mvp)
     program.setUniformValue("normalMatrix", normal_matrix)
@@ -1034,10 +1129,16 @@ def _set_matcap_program_uniforms(
         functions.glUniform1f(tint_strength_location, float(max(0.0, piece_tint_strength)))
     explode_strength_location = program.uniformLocation("explodeStrength")
     if explode_strength_location >= 0:
-        functions.glUniform1f(explode_strength_location, float(max(0.0, min(1.0, exploded_view_strength))))
+        functions.glUniform1f(explode_strength_location, float(max(0.0, min(2.0, exploded_view_strength))))
     geometry_scale_location = program.uniformLocation("geometryScale")
     if geometry_scale_location >= 0:
         functions.glUniform1f(geometry_scale_location, float(max(0.001, geometry_scale)))
+    capsule_length_scale_location = program.uniformLocation("capsuleLengthScale")
+    if capsule_length_scale_location >= 0:
+        functions.glUniform1f(capsule_length_scale_location, float(max(0.0, capsule_length_scale)))
+    capsule_base_length_scale_location = program.uniformLocation("capsuleBaseLengthScale")
+    if capsule_base_length_scale_location >= 0:
+        functions.glUniform1f(capsule_base_length_scale_location, float(max(0.0, capsule_base_length_scale)))
 
 
 def _prepare_opaque_mesh_draw(functions) -> None:
@@ -1050,11 +1151,14 @@ def _prepare_ghost_mesh_draw(functions) -> None:
     functions.glEnable(GL_BLEND)
     functions.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
     functions.glEnable(GL_DEPTH_TEST)
+    functions.glEnable(GL_CULL_FACE)
+    functions.glCullFace(GL_BACK)
     functions.glDepthMask(False)
 
 
 def _finish_ghost_mesh_draw(functions) -> None:
     functions.glDepthMask(True)
+    functions.glDisable(GL_CULL_FACE)
     functions.glDisable(GL_BLEND)
 
 

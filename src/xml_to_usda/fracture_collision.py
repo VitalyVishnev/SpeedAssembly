@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from array import array
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from itertools import combinations
 
@@ -16,7 +16,7 @@ from .models import CanonicalTreeModel, MeshData, Quaternion, Vector3
 from .naming import make_stable_prim_name
 
 
-_CAPSULE_RADIUS_MODEL_SCALE = 0.5
+_CAPSULE_RADIUS_REFERENCE_SCALE = 0.0125
 
 
 class FractureCollisionMode(str, Enum):
@@ -32,11 +32,9 @@ class FractureCollisionSettings:
     include_instance_parts: bool = False
     convex_max_vertices: int = 12
     sphere_radius_scale: float = 1.0
-    capsule_simplify: int = 0
+    capsule_simplify: int = 70
     capsule_scale: float = 0.75
-    capsule_max_count: int = 64
-    capsule_min_radius_ratio: float = 0.05
-    capsule_radius_padding: float = 0.0
+    capsule_scale_by_length: float = 0.5
     ghost_opacity: float = 0.25
     point_sample_limit: int = 4_096
 
@@ -53,6 +51,20 @@ class _SamplePoint:
     joint_token: str = ""
 
 
+@dataclass(frozen=True)
+class _CapsulePath:
+    tokens: tuple[str, ...]
+    points: tuple[Vector3, ...]
+    segments: tuple[tuple[Vector3, Vector3], ...]
+
+
+@dataclass(frozen=True)
+class _CapsuleSkeletonContext:
+    joint_by_token: dict[str, object]
+    order_by_token: dict[str, int]
+    children_by_parent: dict[str, tuple[str, ...]]
+
+
 def validated_collision_settings(settings: FractureCollisionSettings | None) -> FractureCollisionSettings:
     resolved = settings or FractureCollisionSettings()
     try:
@@ -65,14 +77,10 @@ def validated_collision_settings(settings: FractureCollisionSettings | None) -> 
         raise FractureError("Sphere collision radius scale must be between 0.5 and 1.25.")
     if not 0 <= int(resolved.capsule_simplify) <= 100:
         raise FractureError("Capsule collision simplify must be between 0 and 100.")
-    if not 0.25 <= float(resolved.capsule_scale) <= 2.0:
-        raise FractureError("Capsule collision scale must be between 0.25 and 2.0.")
-    if not 1 <= int(resolved.capsule_max_count) <= 128:
-        raise FractureError("Capsule collision max count must be between 1 and 128.")
-    if not 0.0 <= float(resolved.capsule_min_radius_ratio) <= 0.25:
-        raise FractureError("Capsule collision min radius ratio must be between 0 and 0.25.")
-    if not 0.0 <= float(resolved.capsule_radius_padding) <= 0.5:
-        raise FractureError("Capsule collision radius padding must be between 0 and 0.5.")
+    if not 0.05 <= float(resolved.capsule_scale) <= 6.0:
+        raise FractureError("Capsule collision scale must be between 0.05 and 6.")
+    if not 0.0 <= float(resolved.capsule_scale_by_length) <= 6.0:
+        raise FractureError("Capsule collision scale by length must be between 0 and 6.")
     if not 0.05 <= float(resolved.ghost_opacity) <= 0.8:
         raise FractureError("Collision ghost opacity must be between 0.05 and 0.8.")
     if int(resolved.point_sample_limit) <= 0:
@@ -85,9 +93,7 @@ def validated_collision_settings(settings: FractureCollisionSettings | None) -> 
         sphere_radius_scale=float(resolved.sphere_radius_scale),
         capsule_simplify=int(resolved.capsule_simplify),
         capsule_scale=float(resolved.capsule_scale),
-        capsule_max_count=int(resolved.capsule_max_count),
-        capsule_min_radius_ratio=float(resolved.capsule_min_radius_ratio),
-        capsule_radius_padding=float(resolved.capsule_radius_padding),
+        capsule_scale_by_length=float(resolved.capsule_scale_by_length),
         ghost_opacity=float(resolved.ghost_opacity),
         point_sample_limit=int(resolved.point_sample_limit),
     )
@@ -105,14 +111,16 @@ def build_fracture_collision_mesh_sets(
     resolved = validated_collision_settings(settings)
     if not resolved.enabled:
         return ()
+    capsule_context = _capsule_skeleton_context(model) if resolved.mode == FractureCollisionMode.CAPSULE else None
     return tuple(
         CollisionMeshSet(
             piece_index=piece.index,
-            meshes=build_fracture_collision_meshes(
+            meshes=_build_fracture_collision_meshes_validated(
                 model,
                 piece,
                 resolved,
                 render_mesh_name=collision_render_mesh_name(piece),
+                capsule_context=capsule_context,
             ),
         )
         for piece in pieces
@@ -127,8 +135,28 @@ def build_fracture_collision_meshes(
     render_mesh_name: str,
 ) -> tuple[MeshData, ...]:
     resolved = validated_collision_settings(settings)
+    return _build_fracture_collision_meshes_validated(model, piece, resolved, render_mesh_name=render_mesh_name)
+
+
+def _build_fracture_collision_meshes_validated(
+    model: CanonicalTreeModel,
+    piece: FracturePiece,
+    settings: FractureCollisionSettings,
+    *,
+    render_mesh_name: str,
+    capsule_context: _CapsuleSkeletonContext | None = None,
+) -> tuple[MeshData, ...]:
+    resolved = settings
     if not resolved.enabled:
         return ()
+    if resolved.mode == FractureCollisionMode.CAPSULE:
+        return _capsule_meshes(
+            model,
+            piece,
+            render_mesh_name,
+            resolved,
+            capsule_context or _capsule_skeleton_context(model),
+        )
     samples = _sample_piece_points(model, piece, resolved)
     if not samples:
         raise FractureError(f"Fracture collision for {piece.name} has no geometry points.")
@@ -136,8 +164,6 @@ def build_fracture_collision_meshes(
     if resolved.mode == FractureCollisionMode.SPHERE:
         center, radius = _minimal_enclosing_sphere(points)
         return (_sphere_mesh(f"USP_{render_mesh_name}_00", center, radius * resolved.sphere_radius_scale),)
-    if resolved.mode == FractureCollisionMode.CAPSULE:
-        return _capsule_meshes(model, piece, samples, render_mesh_name, resolved)
     return (_convex_mesh(f"UCX_{render_mesh_name}_00", points, resolved.convex_max_vertices),)
 
 
@@ -432,109 +458,206 @@ def _inflate_to_cover(hull_points: np.ndarray, source_points: np.ndarray) -> np.
 def _capsule_meshes(
     model: CanonicalTreeModel,
     piece: FracturePiece,
-    samples: tuple[_SamplePoint, ...],
+    render_mesh_name: str,
+    settings: FractureCollisionSettings,
+    context: _CapsuleSkeletonContext,
+) -> tuple[MeshData, ...]:
+    paths = _piece_capsule_paths(context, piece)
+    if not paths:
+        return _fallback_capsule_meshes(model, piece, render_mesh_name, settings)
+    reference_length = max((_source_segment_length(path) for path in paths), default=1.0)
+    selected = tuple(
+        (start, end, _capsule_path_radius(start, end, reference_length, settings))
+        for path in paths
+        for start, end in _capsule_path_segments(path, settings.capsule_simplify)
+    )
+    return tuple(
+        _capsule_mesh(f"UCP_{render_mesh_name}_{index:02d}", start, end, radius)
+        for index, (start, end, radius) in enumerate(selected)
+    )
+
+
+def _capsule_skeleton_context(model: CanonicalTreeModel) -> _CapsuleSkeletonContext:
+    joint_by_token = {joint.name: joint for joint in model.skeleton}
+    order_by_token = {joint.name: index for index, joint in enumerate(model.skeleton)}
+    children: dict[str, list[str]] = {joint.name: [] for joint in model.skeleton}
+    for joint in model.skeleton:
+        if joint.parent in joint_by_token:
+            children.setdefault(joint.parent, []).append(joint.name)
+    for child_names in children.values():
+        child_names.sort(key=lambda token: order_by_token[token])
+    return _CapsuleSkeletonContext(
+        joint_by_token=joint_by_token,
+        order_by_token=order_by_token,
+        children_by_parent={token: tuple(child_names) for token, child_names in children.items()},
+    )
+
+
+def _fallback_capsule_meshes(
+    model: CanonicalTreeModel,
+    piece: FracturePiece,
     render_mesh_name: str,
     settings: FractureCollisionSettings,
 ) -> tuple[MeshData, ...]:
-    segments = _piece_segments(model, piece)
-    if settings.capsule_simplify >= 100 or not segments:
-        start, end, radius = _pca_capsule(tuple(sample.point for sample in samples))
-        radius = max(radius, _distance(start, end) * settings.capsule_min_radius_ratio)
-        return (_capsule_mesh(f"UCP_{render_mesh_name}_00", start, end, _padded_radius(radius, settings)),)
-    ranked = sorted(
-        ((_segment_score(segment, samples, settings), segment) for segment in segments),
-        key=lambda item: (item[0], item[1][0]),
-        reverse=True,
-    )
-    target = max(1, round(len(ranked) * (100 - settings.capsule_simplify) / 100))
-    target = min(settings.capsule_max_count, target)
-    selected = _refit_selected_segments(tuple(segment for _score, segment in ranked[:target]), samples, settings)
-    return tuple(
-        _capsule_mesh(f"UCP_{render_mesh_name}_{index:02d}", start, end, radius)
-        for index, (start, end, radius, _score) in enumerate(selected)
-    )
+    samples = _sample_piece_points(model, piece, settings)
+    if not samples and piece.repeated_part_indices and not settings.include_instance_parts:
+        samples = _sample_piece_points(model, piece, replace(settings, include_instance_parts=True))
+    if not samples:
+        raise FractureError(f"Fracture capsule collision for {piece.name} has no skeleton or geometry points.")
+    start, end, reference_length = _aabb_capsule_axis(tuple(sample.point for sample in samples))
+    radius = _capsule_path_radius(start, end, reference_length, settings)
+    return (_capsule_mesh(f"UCP_{render_mesh_name}_00", start, end, radius),)
 
 
-def _piece_segments(model: CanonicalTreeModel, piece: FracturePiece) -> tuple[tuple[str, Vector3, Vector3], ...]:
+def _aabb_capsule_axis(points: tuple[Vector3, ...]) -> tuple[Vector3, Vector3, float]:
+    xs = tuple(point.x for point in points)
+    ys = tuple(point.y for point in points)
+    zs = tuple(point.z for point in points)
+    mins = (min(xs), min(ys), min(zs))
+    maxs = (max(xs), max(ys), max(zs))
+    spans = tuple(maxs[index] - mins[index] for index in range(3))
+    axis_index = max(range(3), key=lambda index: spans[index])
+    center = tuple((mins[index] + maxs[index]) * 0.5 for index in range(3))
+    start_values = list(center)
+    end_values = list(center)
+    start_values[axis_index] = mins[axis_index]
+    end_values[axis_index] = maxs[axis_index]
+    diagonal = math.sqrt(sum(span * span for span in spans))
+    if spans[axis_index] <= 1e-8:
+        pad = max(diagonal * 0.5, 0.05)
+        start_values[1] -= pad
+        end_values[1] += pad
+    return _vector3(start_values), _vector3(end_values), max(spans[axis_index], diagonal, 1.0)
+
+
+def _piece_capsule_paths(context: _CapsuleSkeletonContext, piece: FracturePiece) -> tuple[_CapsulePath, ...]:
     owned = set(piece.joint_tokens)
-    joints = {joint.name: joint for joint in model.skeleton}
-    segments = []
-    for token in piece.joint_tokens:
-        joint = joints.get(token)
-        parent = joints.get(joint.parent) if joint is not None and joint.parent else None
-        if joint is None or parent is None or parent.name not in owned:
+    if not owned:
+        return ()
+    joint_by_token = {token: context.joint_by_token[token] for token in owned if token in context.joint_by_token}
+    order_by_token = {token: context.order_by_token[token] for token in joint_by_token}
+    children_by_parent = {
+        token: tuple(child for child in context.children_by_parent.get(token, ()) if child in owned)
+        for token in joint_by_token
+    }
+
+    remaining = set(joint_by_token)
+    assigned: set[str] = set()
+    paths: list[_CapsulePath] = []
+    while remaining:
+        start = _next_capsule_path_start(remaining, assigned, joint_by_token, order_by_token)
+        if start is None:
             continue
-        segments.append((token, parent.bind_translate, joint.bind_translate))
-    return tuple(segments)
+        points: list[Vector3] = []
+        tokens = []
+        source_segments: list[tuple[Vector3, Vector3]] = []
+        current: str | None = start
+        while current is not None and current in remaining:
+            remaining.remove(current)
+            assigned.add(current)
+            tokens.append(current)
+            joint = joint_by_token[current]
+            parent = joint_by_token.get(joint.parent or "")
+            segment_start = joint.bind_translate
+            segment_end = joint.bind_end_translate
+            if segment_end is None and parent is not None:
+                segment_start = parent.bind_translate
+                segment_end = joint.bind_translate
+            if segment_end is None:
+                current = next((child for child in children_by_parent.get(current, ()) if child in remaining), None)
+                continue
+            if not points:
+                points.append(segment_start)
+            elif _distance(points[-1], segment_start) > 1e-8:
+                points.append(segment_start)
+            if _distance(segment_start, segment_end) > 1e-8:
+                source_segments.append((segment_start, segment_end))
+                points.append(segment_end)
+            current = next((child for child in children_by_parent.get(current, ()) if child in remaining), None)
+        if source_segments:
+            paths.append(_CapsulePath(tokens=tuple(tokens), points=tuple(points), segments=tuple(source_segments)))
+    return tuple(paths)
 
 
-def _segment_score(
-    segment: tuple[str, Vector3, Vector3],
-    samples: tuple[_SamplePoint, ...],
-    settings: FractureCollisionSettings,
-) -> float:
-    token, start, end = segment
-    points = tuple(sample.point for sample in samples if sample.joint_token == token)
-    if not points:
-        points = (start, end)
-    length = _distance(start, end)
-    radius = _bounded_segment_radius(points, start, end, settings)
-    radius = max(radius, length * settings.capsule_min_radius_ratio, 0.001)
-    return max(1.0, len(points)) * radius * max(length, 0.001)
+def _source_segment_length(path: _CapsulePath) -> float:
+    return sum(_distance(start, end) for start, end in path.segments)
 
 
-def _refit_selected_segments(
-    segments: tuple[tuple[str, Vector3, Vector3], ...],
-    samples: tuple[_SamplePoint, ...],
-    settings: FractureCollisionSettings,
-) -> tuple[tuple[Vector3, Vector3, float, float], ...]:
-    buckets: dict[str, list[Vector3]] = {token: [] for token, _start, _end in segments}
-    selected_tokens = set(buckets)
-    for sample in samples:
-        if sample.joint_token in selected_tokens:
-            buckets[sample.joint_token].append(sample.point)
-    fitted = []
-    for token, start, end in segments:
-        points = tuple(buckets[token]) or (start, end)
+def _capsule_path_segments(path: _CapsulePath, simplify: int) -> tuple[tuple[Vector3, Vector3], ...]:
+    if simplify <= 0:
+        return path.segments
+    return _resampled_path_segments(path.points, simplify)
+
+
+def _next_capsule_path_start(
+    remaining: set[str],
+    assigned: set[str],
+    joint_by_token,
+    order_by_token: dict[str, int],
+) -> str | None:
+    if not remaining:
+        return None
+    if not assigned:
+        roots = [token for token in remaining if joint_by_token[token].parent not in remaining]
+        return min(roots or remaining, key=lambda token: order_by_token[token])
+    connected = [token for token in remaining if joint_by_token[token].parent in assigned]
+    return min(connected or remaining, key=lambda token: order_by_token[token])
+
+
+def _resampled_path_segments(points: tuple[Vector3, ...], simplify: int) -> tuple[tuple[Vector3, Vector3], ...]:
+    if len(points) < 2:
+        return ()
+    clean_points = _nonzero_polyline_points(points)
+    if len(clean_points) < 2:
+        return ()
+    original_edges = len(clean_points) - 1
+    if simplify <= 0:
+        return tuple((clean_points[index], clean_points[index + 1]) for index in range(original_edges))
+    target_segments = max(1, round(original_edges * (100 - max(0, min(100, simplify))) / 100))
+    total_length = _polyline_length(clean_points)
+    if total_length <= 0.0:
+        return ()
+    sampled = tuple(_point_at_polyline_distance(clean_points, total_length * index / target_segments) for index in range(target_segments + 1))
+    return tuple((sampled[index], sampled[index + 1]) for index in range(target_segments))
+
+
+def _nonzero_polyline_points(points: tuple[Vector3, ...]) -> tuple[Vector3, ...]:
+    clean = [points[0]]
+    for point in points[1:]:
+        if _distance(clean[-1], point) > 1e-8:
+            clean.append(point)
+    return tuple(clean)
+
+
+def _polyline_length(points: tuple[Vector3, ...]) -> float:
+    return sum(_distance(points[index], points[index + 1]) for index in range(len(points) - 1))
+
+
+def _point_at_polyline_distance(points: tuple[Vector3, ...], distance: float) -> Vector3:
+    remaining = max(0.0, float(distance))
+    for index in range(len(points) - 1):
+        start = points[index]
+        end = points[index + 1]
         length = _distance(start, end)
-        radius = _bounded_segment_radius(points, start, end, settings)
-        radius = max(radius, length * settings.capsule_min_radius_ratio, 0.001)
-        radius = _padded_radius(radius, settings)
-        fitted.append((start, end, radius, max(1.0, len(points)) * radius * max(length, 0.001)))
-    return tuple(fitted)
+        if length <= 1e-8:
+            continue
+        if remaining <= length:
+            return _lerp(start, end, remaining / length)
+        remaining -= length
+    return points[-1]
 
 
-def _bounded_segment_radius(
-    points: tuple[Vector3, ...],
+def _capsule_path_radius(
     start: Vector3,
     end: Vector3,
+    reference_length: float,
     settings: FractureCollisionSettings,
 ) -> float:
-    length = _distance(start, end)
-    distances = sorted(_distance_to_segment(point, start, end) for point in points)
-    if not distances:
-        return max(length * settings.capsule_min_radius_ratio, 0.001)
-    percentile_index = min(len(distances) - 1, max(0, round((len(distances) - 1) * 0.82)))
-    radius = distances[percentile_index]
-    max_radius = max(length * 0.32, length * settings.capsule_min_radius_ratio, 0.001)
-    return min(radius, max_radius)
-
-
-def _padded_radius(radius: float, settings: FractureCollisionSettings) -> float:
-    return radius * _CAPSULE_RADIUS_MODEL_SCALE * settings.capsule_scale * (1.0 + settings.capsule_radius_padding)
-
-
-def _pca_capsule(points: tuple[Vector3, ...]) -> tuple[Vector3, Vector3, float]:
-    arr = _np_points(points)
-    center = arr.mean(axis=0)
-    centered = arr - center
-    _, _, vh = np.linalg.svd(centered, full_matrices=False)
-    axis = vh[0]
-    projections = centered @ axis
-    start = center + axis * float(projections.min())
-    end = center + axis * float(projections.max())
-    radius = max(float(np.linalg.norm(point - (start + axis * np.clip((point - start) @ axis, 0.0, np.linalg.norm(end - start))))) for point in arr)
-    return _vector3(start), _vector3(end), max(radius, 0.001)
+    resolved_reference = max(0.001, float(reference_length))
+    segment01 = max(0.0, min(1.0, _distance(start, end) / resolved_reference))
+    radius = resolved_reference * _CAPSULE_RADIUS_REFERENCE_SCALE * settings.capsule_scale
+    radius *= 1.0 + settings.capsule_scale_by_length * segment01
+    return max(0.001, radius)
 
 
 def _minimal_enclosing_sphere(points: tuple[Vector3, ...]) -> tuple[Vector3, float]:
@@ -584,8 +707,9 @@ def _sphere_mesh(name: str, center: Vector3, radius: float) -> MeshData:
 def _capsule_mesh(name: str, start: Vector3, end: Vector3, radius: float) -> MeshData:
     axis = _normalize(Vector3(end.x - start.x, end.y - start.y, end.z - start.z))
     u, v = _basis(axis)
-    segments = 12
-    hemisphere_steps = 4
+    segments = 8
+    hemisphere_steps = 3
+    angles = tuple(2.0 * math.pi * index / segments for index in range(segments))
     rings: list[tuple[Vector3, ...]] = []
     for step in range(1, hemisphere_steps + 1):
         phi = -math.pi * 0.5 + step * (math.pi * 0.5 / hemisphere_steps)
@@ -595,16 +719,7 @@ def _capsule_mesh(name: str, start: Vector3, end: Vector3, radius: float) -> Mes
             start.z + axis.z * math.sin(phi) * radius,
         )
         ring_radius = math.cos(phi) * radius
-        rings.append(
-            tuple(
-                Vector3(
-                    center.x + (math.cos(theta) * u.x + math.sin(theta) * v.x) * ring_radius,
-                    center.y + (math.cos(theta) * u.y + math.sin(theta) * v.y) * ring_radius,
-                    center.z + (math.cos(theta) * u.z + math.sin(theta) * v.z) * ring_radius,
-                )
-                for theta in (2.0 * math.pi * segment / segments for segment in range(segments))
-            )
-        )
+        rings.append(_capsule_ring(center, u, v, ring_radius, angles))
     for step in range(0, hemisphere_steps):
         phi = step * (math.pi * 0.5 / hemisphere_steps)
         center = Vector3(
@@ -613,16 +728,7 @@ def _capsule_mesh(name: str, start: Vector3, end: Vector3, radius: float) -> Mes
             end.z + axis.z * math.sin(phi) * radius,
         )
         ring_radius = math.cos(phi) * radius
-        rings.append(
-            tuple(
-                Vector3(
-                    center.x + (math.cos(theta) * u.x + math.sin(theta) * v.x) * ring_radius,
-                    center.y + (math.cos(theta) * u.y + math.sin(theta) * v.y) * ring_radius,
-                    center.z + (math.cos(theta) * u.z + math.sin(theta) * v.z) * ring_radius,
-                )
-                for theta in (2.0 * math.pi * segment / segments for segment in range(segments))
-            )
-        )
+        rings.append(_capsule_ring(center, u, v, ring_radius, angles))
     bottom = Vector3(start.x - axis.x * radius, start.y - axis.y * radius, start.z - axis.z * radius)
     top = Vector3(end.x + axis.x * radius, end.y + axis.y * radius, end.z + axis.z * radius)
     points = [bottom, *(point for ring in rings for point in ring), top]
@@ -642,6 +748,19 @@ def _capsule_mesh(name: str, start: Vector3, end: Vector3, radius: float) -> Mes
         nxt = (segment + 1) % segments
         faces.append((top_index, last_row + nxt, last_row + segment))
     return _mesh_from_faces(name, tuple(points), tuple(faces))
+
+
+def _capsule_ring(center: Vector3, u: Vector3, v: Vector3, radius: float, angles: tuple[float, ...]) -> tuple[Vector3, ...]:
+    points = []
+    for theta in angles:
+        points.append(
+            Vector3(
+                center.x + (math.cos(theta) * u.x + math.sin(theta) * v.x) * radius,
+                center.y + (math.cos(theta) * u.y + math.sin(theta) * v.y) * radius,
+                center.z + (math.cos(theta) * u.z + math.sin(theta) * v.z) * radius,
+            )
+        )
+    return tuple(points)
 
 
 def _mesh_from_triangles(name: str, points: np.ndarray, triangles: np.ndarray) -> MeshData:
@@ -665,19 +784,16 @@ def _mesh_from_faces(name: str, points: tuple[Vector3, ...], faces: tuple[tuple[
     )
 
 
-def _distance_to_segment(point: Vector3, start: Vector3, end: Vector3) -> float:
-    ax, ay, az = point.x - start.x, point.y - start.y, point.z - start.z
-    bx, by, bz = end.x - start.x, end.y - start.y, end.z - start.z
-    denom = bx * bx + by * by + bz * bz
-    if denom <= 0.0:
-        return _distance(point, start)
-    t = max(0.0, min(1.0, (ax * bx + ay * by + az * bz) / denom))
-    closest = Vector3(start.x + bx * t, start.y + by * t, start.z + bz * t)
-    return _distance(point, closest)
-
-
 def _distance(a: Vector3, b: Vector3) -> float:
     return math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2)
+
+
+def _lerp(start: Vector3, end: Vector3, t: float) -> Vector3:
+    return Vector3(
+        start.x + (end.x - start.x) * t,
+        start.y + (end.y - start.y) * t,
+        start.z + (end.z - start.z) * t,
+    )
 
 
 def _normalize(vector: Vector3) -> Vector3:

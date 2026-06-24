@@ -1183,9 +1183,10 @@ def test_qt_window_opens_proxy_preview_from_geometry_tab(monkeypatch, qtbot, tmp
     assert window._proxy_preview_dialog is not None
     assert window._proxy_preview_dialog.isVisible()
     assert isinstance(window._proxy_preview_dialog.viewport, QOpenGLWidget)
-    assert window._proxy_preview_dialog.parent() is window
-    assert window._proxy_preview_dialog.windowModality() == Qt.WindowModality.ApplicationModal
-    assert window._proxy_preview_dialog.isModal()
+    assert window._proxy_preview_dialog.parent() is None
+    assert window.isVisible()
+    assert window._proxy_preview_dialog.windowModality() == Qt.WindowModality.NonModal
+    assert not window._proxy_preview_dialog.isModal()
     first_dialog = window._proxy_preview_dialog
     window.open_proxy_preview_dialog()
     assert window._proxy_preview_dialog is first_dialog
@@ -1294,9 +1295,10 @@ def test_qt_window_opens_fracture_preview_from_geometry_tab(monkeypatch, qtbot, 
     )
 
     assert isinstance(window._fracture_preview_dialog.viewport, QOpenGLWidget)
-    assert window._fracture_preview_dialog.parent() is window
-    assert window._fracture_preview_dialog.windowModality() == Qt.WindowModality.ApplicationModal
-    assert window._fracture_preview_dialog.isModal()
+    assert window._fracture_preview_dialog.parent() is None
+    assert window.isVisible()
+    assert window._fracture_preview_dialog.windowModality() == Qt.WindowModality.NonModal
+    assert not window._fracture_preview_dialog.isModal()
     first_dialog = window._fracture_preview_dialog
     window.open_fracture_preview_dialog()
     assert window._fracture_preview_dialog is first_dialog

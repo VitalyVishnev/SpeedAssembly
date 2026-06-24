@@ -174,9 +174,10 @@ def test_smoke_runner_fail_on_retry_marks_report_failed_from_trace_even_after_su
 def test_qt_package_build_waits_for_windowed_smoke_process() -> None:
     script = Path("scripts/build_qt_gui_exe.ps1").read_text(encoding="utf-8")
 
-    assert "Start-Process" in script
-    assert "-Wait" in script
-    assert "-PassThru" in script
+    assert "System.Diagnostics.ProcessStartInfo" in script
+    assert "RedirectStandardOutput = $true" in script
+    assert "RedirectStandardError = $true" in script
+    assert "$smokeProcess.WaitForExit()" in script
     assert "Test-Path $smokeReportPath" in script
 
 

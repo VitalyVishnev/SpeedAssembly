@@ -344,6 +344,13 @@ QPushButton {{
 QPushButton:hover {{
     background: {accent_fill};
 }}
+QPushButton#CollisionModeButton {{
+    min-width: 0px;
+    padding: 6px 10px;
+}}
+QPushButton#CollisionModeButton:checked {{
+    background: {accent_fill};
+}}
 QPushButton:disabled {{
     background: {button_fill_disabled};
     color: rgba(19, 19, 15, 0.6);
