@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pickle
 from dataclasses import replace
 from pathlib import Path
 
@@ -255,7 +256,7 @@ def test_fracture_preview_source_request_reuses_on_disk_preview_cache(monkeypatc
         settings,
         include_viewport_scene=False,
     )
-    assert list(cache_root.glob("*.pkl"))
+    assert list(cache_root.glob("*.json"))
 
     def fail_load_source_tree_model(*args, **kwargs):  # type: ignore[no-untyped-def]
         raise AssertionError("source XML should not be reloaded when the fracture preview cache is warm")
@@ -278,10 +279,17 @@ def test_fracture_preview_source_cache_ignores_legacy_pickle_without_unpickling(
     cache_root.mkdir(parents=True)
     monkeypatch.setattr(fracture_preview_service, "_preview_source_model_cache_root", lambda: cache_root)
     cache_path = fracture_preview_service._preview_source_model_cache_path(str(BIG_SPRUCE))
-    cache_path.write_bytes(b"\x80\x05legacy fracture preview payload")
+    called: list[str] = []
+
+    class _Exploit:
+        def __reduce__(self):
+            return (called.append, ("executed",))
+
+    cache_path.write_bytes(pickle.dumps(_Exploit()))
 
     assert fracture_preview_service._read_preview_source_model_cache(str(BIG_SPRUCE)) is None
     assert not cache_path.exists()
+    assert called == []
 
 
 def test_fracture_preview_includes_bone_overlay_segments_and_selected_manual_cuts() -> None:

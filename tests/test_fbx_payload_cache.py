@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import pickle
 from array import array
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from xml_to_usda.fbx_payload_cache import (
     summarize_fbx_payload_cache,
     sweep_fbx_payload_cache,
 )
-from xml_to_usda.models import CpuProfile, GeometryBuffer
+from xml_to_usda.models import CompactMeshSection, CpuProfile, FbxMaterialSlotSpec, GeometryBuffer
 
 
 def _payload(name: str = "CachedBranch") -> GeometryBuffer:
@@ -24,6 +25,11 @@ def _payload(name: str = "CachedBranch") -> GeometryBuffer:
         point_components=array("f", [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]),
         face_vertex_counts=array("i", [3]),
         face_vertex_indices=array("i", [0, 1, 2]),
+        uv_components=array("f", [0.0, 0.0, 1.0, 0.0, 0.0, 1.0]),
+        vertex_color_components=array("f", [1.0, 0.0, 0.0, 1.0]),
+        vertex_color_warning="sample warning",
+        fbx_material_slots=(FbxMaterialSlotSpec(source_id=7, name="Bark", face_count=1),),
+        sections=(CompactMeshSection(material_id=7, face_indices=array("i", [0])),),
     )
 
 
@@ -33,6 +39,10 @@ def _options(*, read_vertex_colors: bool = True, read_material_slots: bool = Fal
         read_material_slots=read_material_slots,
         strict_vertex_colors=read_vertex_colors,
     )
+
+
+def _meta_path(payload_path: Path) -> Path:
+    return payload_path.with_name(payload_path.name.replace(".payload.json", ".meta.json"))
 
 
 def test_fbx_payload_cache_hit_avoids_reimporting_stable_payload(tmp_path: Path) -> None:
@@ -91,13 +101,35 @@ def test_fbx_payload_cache_corrupt_entry_falls_back_to_import(tmp_path: Path) ->
     cache_root = tmp_path / "cache"
     stored = store_fbx_payload_in_cache(str(fbx_path), _options(), _payload(), cache_root=cache_root)
     assert stored.cache_path is not None
-    stored.cache_path.write_bytes(b"not a pickle")
+    stored.cache_path.write_bytes(b"not json")
 
     cached = load_fbx_payload_from_cache(str(fbx_path), _options(), cache_root=cache_root)
 
     assert cached.hit is False
     assert cached.payload is None
     assert "cache_read_failed" in cached.message
+
+
+def test_fbx_payload_cache_rejects_pickle_without_executing(tmp_path: Path) -> None:
+    fbx_path = tmp_path / "branch.fbx"
+    fbx_path.write_bytes(b"fbx")
+    cache_root = tmp_path / "cache"
+    stored = store_fbx_payload_in_cache(str(fbx_path), _options(), _payload(), cache_root=cache_root)
+    assert stored.cache_path is not None
+    called: list[str] = []
+
+    class _Exploit:
+        def __reduce__(self):
+            return (called.append, ("executed",))
+
+    stored.cache_path.write_bytes(pickle.dumps(_Exploit()))
+
+    cached = load_fbx_payload_from_cache(str(fbx_path), _options(), cache_root=cache_root)
+
+    assert cached.hit is False
+    assert cached.payload is None
+    assert "cache_read_failed" in cached.message
+    assert called == []
 
 
 def test_fbx_payload_cache_summary_and_clear_report_payload_entries(tmp_path: Path) -> None:
@@ -123,7 +155,7 @@ def test_fbx_payload_cache_summary_and_clear_report_payload_entries(tmp_path: Pa
     assert cleared.failed_paths == ()
     assert after_clear.entry_count == 0
     assert stored.cache_path.exists() is False
-    assert stored.cache_path.with_suffix(".json").exists() is False
+    assert _meta_path(stored.cache_path).exists() is False
 
 
 def test_fbx_payload_cache_clear_missing_directory_is_empty_summary(tmp_path: Path) -> None:
@@ -148,12 +180,12 @@ def test_fbx_payload_cache_sweep_removes_oldest_payload_over_size_limit(tmp_path
     assert first.cache_path is not None
     assert second.cache_path is not None
     os.utime(first.cache_path, (1.0, 1.0))
-    os.utime(first.cache_path.with_suffix(".json"), (1.0, 1.0))
+    os.utime(_meta_path(first.cache_path), (1.0, 1.0))
 
     summary = sweep_fbx_payload_cache(cache_root=cache_root, max_bytes=second.cache_path.stat().st_size)
 
     assert first.cache_path.exists() is False
-    assert first.cache_path.with_suffix(".json").exists() is False
+    assert _meta_path(first.cache_path).exists() is False
     assert second.cache_path.exists() is True
     assert summary.entry_count == 1
     assert summary.removed_entries == 1
@@ -166,12 +198,12 @@ def test_fbx_payload_cache_sweep_removes_stale_payload(tmp_path: Path) -> None:
     stored = store_fbx_payload_in_cache(str(fbx_path), _options(), _payload(), cache_root=cache_root)
     assert stored.cache_path is not None
     os.utime(stored.cache_path, (1.0, 1.0))
-    os.utime(stored.cache_path.with_suffix(".json"), (1.0, 1.0))
+    os.utime(_meta_path(stored.cache_path), (1.0, 1.0))
 
     summary = sweep_fbx_payload_cache(cache_root=cache_root, max_age_seconds=1, now=10.0)
 
     assert stored.cache_path.exists() is False
-    assert stored.cache_path.with_suffix(".json").exists() is False
+    assert _meta_path(stored.cache_path).exists() is False
     assert summary.entry_count == 0
     assert summary.removed_entries == 1
 

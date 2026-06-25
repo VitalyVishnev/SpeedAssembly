@@ -11,7 +11,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
-import pickle
 import time
 import tempfile
 from pathlib import Path
@@ -40,11 +39,11 @@ from .models import (
 )
 from .normalizer import normalize_to_canonical
 from .source_validation import validate_source_model
+from .worker_file_protocol import read_worker_payload, write_worker_payload_atomic
 from .xml_reader import analyze_xml, read_source_xml
 
 
-SOURCE_MODEL_CACHE_SCHEMA_VERSION = 6
-SOURCE_MODEL_CACHE_MAGIC = b"XMLTOUSDA_SOURCE_MODEL_CACHE_V1"
+SOURCE_MODEL_CACHE_SCHEMA_VERSION = 7
 
 
 class _InvalidSourceModelCache(Exception):
@@ -261,7 +260,7 @@ def _source_model_cache_path(input_path: str) -> Path:
     try:
         stat_result = xml_path.stat()
     except OSError:
-        return _source_model_cache_root() / "unavailable.pkl"
+        return _source_model_cache_root() / "unavailable.json"
     signature = "|".join(
         (
             str(SOURCE_MODEL_CACHE_SCHEMA_VERSION),
@@ -272,7 +271,7 @@ def _source_model_cache_path(input_path: str) -> Path:
         )
     )
     cache_key = hashlib.sha256(signature.encode("utf-8")).hexdigest()
-    return _source_model_cache_root() / f"{cache_key}.pkl"
+    return _source_model_cache_root() / f"{cache_key}.json"
 
 
 def _source_model_cache_parser_key() -> str:
@@ -283,19 +282,8 @@ def _source_model_cache_parser_key() -> str:
 
 def _read_source_model_cache(cache_path: Path):
     try:
-        with cache_path.open("rb") as handle:
-            header = handle.readline().rstrip(b"\n")
-            if header != SOURCE_MODEL_CACHE_MAGIC:
-                raise _InvalidSourceModelCache()
-            schema_line = handle.readline().decode("ascii", errors="replace").strip()
-            if schema_line != str(SOURCE_MODEL_CACHE_SCHEMA_VERSION):
-                raise _InvalidSourceModelCache()
-            payload = pickle.load(handle)
+        payload = read_worker_payload(cache_path)
     except FileNotFoundError:
-        return None
-    except _InvalidSourceModelCache:
-        with contextlib.suppress(Exception):
-            cache_path.unlink(missing_ok=True)
         return None
     except Exception:
         with contextlib.suppress(Exception):
@@ -322,16 +310,9 @@ def _read_source_model_cache(cache_path: Path):
 
 
 def _write_source_model_cache(cache_path: Path, payload: tuple[ObservedXmlSchemaReport, CanonicalTreeModel, tuple[ValidationIssue, ...]]) -> None:
-    temp_path = cache_path.with_name(f"{cache_path.name}.tmp")
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        with temp_path.open("wb") as handle:
-            handle.write(SOURCE_MODEL_CACHE_MAGIC + b"\n")
-            handle.write(f"{SOURCE_MODEL_CACHE_SCHEMA_VERSION}\n".encode("ascii"))
-            pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        temp_path.replace(cache_path)
+        write_worker_payload_atomic(cache_path, payload)
     except Exception:
-        with contextlib.suppress(Exception):
-            temp_path.unlink(missing_ok=True)
         with contextlib.suppress(Exception):
             cache_path.unlink(missing_ok=True)

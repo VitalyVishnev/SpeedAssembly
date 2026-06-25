@@ -3,18 +3,21 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import pickle
 import time
+from array import array
+from base64 import b64decode, b64encode
 from dataclasses import dataclass
 from pathlib import Path
 
-from .models import GeometryBuffer
+from .models import CompactMeshSection, FbxMaterialSlotSpec, GeometryBuffer
 from .runtime_paths import resolve_runtime_paths
 
 
-FBX_PAYLOAD_CACHE_SCHEMA_VERSION = 1
+FBX_PAYLOAD_CACHE_SCHEMA_VERSION = 2
 FBX_PAYLOAD_CACHE_MAX_BYTES = 20 * 1024 * 1024 * 1024
 FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS = 14 * 24 * 60 * 60
+_PAYLOAD_SUFFIX = ".payload.json"
+_META_SUFFIX = ".meta.json"
 
 
 @dataclass(frozen=True)
@@ -58,8 +61,7 @@ def load_fbx_payload_from_cache(
         metadata = json.loads(meta_path.read_text(encoding="utf-8"))
         if metadata.get("schema_version") != FBX_PAYLOAD_CACHE_SCHEMA_VERSION:
             return FbxPayloadCacheResult(None, hit=False, message="schema_mismatch", cache_path=payload_path)
-        with payload_path.open("rb") as handle:
-            payload = pickle.load(handle)
+        payload = _read_geometry_payload_json(payload_path)
         if not isinstance(payload, GeometryBuffer):
             return FbxPayloadCacheResult(None, hit=False, message="payload_type_mismatch", cache_path=payload_path)
         _touch_cache_files(payload_path, meta_path)
@@ -89,8 +91,7 @@ def store_fbx_payload_in_cache(
     payload_tmp = payload_path.with_suffix(f"{payload_path.suffix}.partial")
     meta_tmp = meta_path.with_suffix(f"{meta_path.suffix}.partial")
     try:
-        with payload_tmp.open("wb") as handle:
-            pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        _write_geometry_payload_json(payload_tmp, payload)
         metadata = _metadata_for(fbx_path, options)
         metadata["created_at_unix"] = time.time()
         metadata["payload_bytes"] = payload_tmp.stat().st_size
@@ -112,7 +113,7 @@ def summarize_fbx_payload_cache(*, cache_root: Path | None = None) -> FbxPayload
     entry_count = 0
     total_bytes = 0
     failed_paths: list[Path] = []
-    for payload_path in root.glob("*.pkl"):
+    for payload_path in _iter_cache_payload_paths(root):
         try:
             stat = payload_path.stat()
         except OSError:
@@ -134,8 +135,8 @@ def clear_fbx_payload_cache(*, cache_root: Path | None = None) -> FbxPayloadCach
     removed_entries = 0
     removed_bytes = 0
     failed_paths: list[Path] = []
-    for payload_path in root.glob("*.pkl"):
-        meta_path = payload_path.with_suffix(".json")
+    for payload_path in _iter_cache_payload_paths(root):
+        meta_path = _meta_path_for_payload(payload_path)
         size = _payload_size_or_zero(payload_path, failed_paths)
         if _unlink_report(payload_path, failed_paths):
             removed_entries += 1
@@ -166,8 +167,8 @@ def sweep_fbx_payload_cache(
     removed_entries = 0
     removed_bytes = 0
     failed_paths: list[Path] = []
-    for payload_path in root.glob("*.pkl"):
-        meta_path = payload_path.with_suffix(".json")
+    for payload_path in _iter_cache_payload_paths(root):
+        meta_path = _meta_path_for_payload(payload_path)
         try:
             stat = payload_path.stat()
         except OSError:
@@ -221,8 +222,8 @@ def _cache_paths(
     except OSError:
         return None, None
     root = cache_root or _default_fbx_cache_root()
-    payload_path = root / f"{key}.pkl"
-    return payload_path, payload_path.with_suffix(".json")
+    payload_path = root / f"{key}{_PAYLOAD_SUFFIX}"
+    return payload_path, root / f"{key}{_META_SUFFIX}"
 
 
 def _cache_key(fbx_path: str, options: FbxPayloadCacheOptions) -> str:
@@ -247,6 +248,106 @@ def _metadata_for(fbx_path: str, options: FbxPayloadCacheOptions) -> dict[str, o
 
 def _default_fbx_cache_root() -> Path:
     return resolve_runtime_paths().cache_root / "fbx-payloads"
+
+
+def _write_geometry_payload_json(path: Path, payload: GeometryBuffer) -> None:
+    path.write_text(json.dumps(_geometry_payload_to_json(payload), separators=(",", ":")), encoding="utf-8")
+
+
+def _read_geometry_payload_json(path: Path) -> GeometryBuffer:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or raw.get("payload_type") != "GeometryBuffer":
+        raise TypeError("FBX payload cache entry must contain a GeometryBuffer payload.")
+    return GeometryBuffer(
+        name=str(raw["name"]),
+        point_components=_array_from_json(raw["point_components"], "f"),
+        face_vertex_counts=_array_from_json(raw["face_vertex_counts"], "i"),
+        face_vertex_indices=_array_from_json(raw["face_vertex_indices"], "i"),
+        uv_components=_array_from_json(raw.get("uv_components", _array_to_json(array("f"))), "f"),
+        secondary_uv_components=_array_from_json(
+            raw.get("secondary_uv_components", _array_to_json(array("f"))),
+            "f",
+        ),
+        vertex_color_components=_array_from_json(raw.get("vertex_color_components", _array_to_json(array("f"))), "f"),
+        vertex_color_warning=raw.get("vertex_color_warning"),
+        fbx_material_slots=tuple(
+            FbxMaterialSlotSpec(
+                source_id=int(slot["source_id"]),
+                name=str(slot["name"]),
+                face_count=int(slot.get("face_count", 0)),
+            )
+            for slot in _object_list(raw.get("fbx_material_slots", []), "fbx_material_slots")
+        ),
+        sections=tuple(
+            CompactMeshSection(
+                material_id=int(section["material_id"]),
+                face_indices=_array_from_json(section["face_indices"], "i"),
+            )
+            for section in _object_list(raw.get("sections", []), "sections")
+        ),
+        skel_joint_indices=_array_from_json(raw.get("skel_joint_indices", _array_to_json(array("i"))), "i"),
+        skel_joint_weights=_array_from_json(raw.get("skel_joint_weights", _array_to_json(array("f"))), "f"),
+        skel_element_size=int(raw.get("skel_element_size", 0)),
+    )
+
+
+def _geometry_payload_to_json(payload: GeometryBuffer) -> dict[str, object]:
+    return {
+        "payload_type": "GeometryBuffer",
+        "name": payload.name,
+        "point_components": _array_to_json(payload.point_components),
+        "face_vertex_counts": _array_to_json(payload.face_vertex_counts),
+        "face_vertex_indices": _array_to_json(payload.face_vertex_indices),
+        "uv_components": _array_to_json(payload.uv_components),
+        "secondary_uv_components": _array_to_json(payload.secondary_uv_components),
+        "vertex_color_components": _array_to_json(payload.vertex_color_components),
+        "vertex_color_warning": payload.vertex_color_warning,
+        "fbx_material_slots": [
+            {"source_id": slot.source_id, "name": slot.name, "face_count": slot.face_count}
+            for slot in payload.fbx_material_slots
+        ],
+        "sections": [
+            {"material_id": section.material_id, "face_indices": _array_to_json(section.face_indices)}
+            for section in payload.sections
+        ],
+        "skel_joint_indices": _array_to_json(payload.skel_joint_indices),
+        "skel_joint_weights": _array_to_json(payload.skel_joint_weights),
+        "skel_element_size": payload.skel_element_size,
+    }
+
+
+def _array_to_json(values: array) -> dict[str, str]:
+    return {
+        "typecode": values.typecode,
+        "data": b64encode(values.tobytes()).decode("ascii"),
+    }
+
+
+def _array_from_json(raw: object, expected_typecode: str) -> array:
+    if not isinstance(raw, dict) or raw.get("typecode") != expected_typecode:
+        raise TypeError(f"FBX payload cache array must be array('{expected_typecode}').")
+    values = array(expected_typecode)
+    values.frombytes(b64decode(str(raw.get("data", "")).encode("ascii")))
+    return values
+
+
+def _object_list(raw: object, field_name: str) -> list[dict[str, object]]:
+    if not isinstance(raw, list):
+        raise TypeError(f"FBX payload cache {field_name} must be a list.")
+    if not all(isinstance(item, dict) for item in raw):
+        raise TypeError(f"FBX payload cache {field_name} entries must be objects.")
+    return raw
+
+
+def _iter_cache_payload_paths(root: Path) -> tuple[Path, ...]:
+    return tuple(root.glob(f"*{_PAYLOAD_SUFFIX}")) + tuple(root.glob("*.pkl"))
+
+
+def _meta_path_for_payload(payload_path: Path) -> Path:
+    name = payload_path.name
+    if name.endswith(_PAYLOAD_SUFFIX):
+        return payload_path.with_name(f"{name[:-len(_PAYLOAD_SUFFIX)]}{_META_SUFFIX}")
+    return payload_path.with_suffix(".json")
 
 
 def _is_cacheable_source_path(fbx_path: str) -> bool:

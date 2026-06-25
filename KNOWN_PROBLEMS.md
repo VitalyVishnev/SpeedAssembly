@@ -7,13 +7,6 @@
 - Reason for deferral: The current pass removed the code-executing deserialization sink. Request origin constraints need a separate parent-created token/root contract so packaged workers do not reject legitimate temp files.
 - Likely next step: Add a parent-generated nonce or runtime workspace root check to worker requests and validate it before reading source/output paths.
 
-## FBX Payload Cache Pickle Hardening Deferred
-
-- Issue: Persistent FBX payload cache entries are still serialized and loaded with `pickle`.
-- Location: `src/xml_to_usda/fbx_payload_cache.py`
-- Reason for deferral: The current security hardening pass intentionally excluded persistent cache deserialization; cache poisoning requires write access to the runtime cache and a matching cache key.
-- Likely next step: Replace the persistent cache payload format with a non-executing typed format such as `.npz` or structured JSON plus binary arrays, then add a malicious-cache regression test.
-
 ## Qt Shell Preset And Preview Cache Ownership Pending
 
 - Issue: `MainWindow` still owns preset dialog orchestration and Proxy Mesh preview cache lifecycle. Phase 4 only extracted diagnostics bundle request construction and removed an obsolete dependency entry; a broader controller split was deferred.

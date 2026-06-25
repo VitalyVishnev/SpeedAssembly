@@ -11,7 +11,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
-import pickle
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 import tempfile
@@ -45,6 +44,7 @@ from .models import (
     Vector3,
 )
 from .output_resolution import render_output_file_name
+from .worker_file_protocol import read_worker_payload, write_worker_payload_atomic
 
 if TYPE_CHECKING:
     from .viewport_scene import ViewportScene
@@ -54,8 +54,7 @@ DEFAULT_FRACTURE_PREVIEW_POLYCOUNT = 1_000_000
 DEFAULT_FRACTURE_PREVIEW_BASE_PRIORITY = 0.33
 DEFAULT_FRACTURE_PREVIEW_BASE_FACE_BUDGET = 50_000
 DEFAULT_FRACTURE_PREVIEW_PROTOTYPE_FACE_BUDGET = 2_000
-FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION = 6
-FRACTURE_PREVIEW_SOURCE_CACHE_MAGIC = b"XMLTOUSDA_FRACTURE_PREVIEW_SOURCE_CACHE_V1"
+FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION = 7
 
 
 class _InvalidFracturePreviewSourceCache(Exception):
@@ -587,19 +586,8 @@ def _read_preview_source_model_cache(
 ) -> tuple[object, CanonicalTreeModel, tuple[ValidationIssue, ...], _FracturePlanCache] | None:
     cache_path = _preview_source_model_cache_path(input_path)
     try:
-        with cache_path.open("rb") as handle:
-            header = handle.readline().rstrip(b"\n")
-            if header != FRACTURE_PREVIEW_SOURCE_CACHE_MAGIC:
-                raise _InvalidFracturePreviewSourceCache()
-            schema_line = handle.readline().decode("ascii", errors="replace").strip()
-            if schema_line != str(FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION):
-                raise _InvalidFracturePreviewSourceCache()
-            payload = pickle.load(handle)
+        payload = read_worker_payload(cache_path)
     except FileNotFoundError:
-        return None
-    except _InvalidFracturePreviewSourceCache:
-        with contextlib.suppress(Exception):
-            cache_path.unlink(missing_ok=True)
         return None
     except Exception:
         with contextlib.suppress(Exception):
@@ -626,17 +614,10 @@ def _write_preview_source_model_cache(
     payload: tuple[object, CanonicalTreeModel, tuple[ValidationIssue, ...], _FracturePlanCache],
 ) -> None:
     cache_path = _preview_source_model_cache_path(input_path)
-    temp_path = cache_path.with_name(f"{cache_path.name}.tmp")
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        with temp_path.open("wb") as handle:
-            handle.write(FRACTURE_PREVIEW_SOURCE_CACHE_MAGIC + b"\n")
-            handle.write(f"{FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION}\n".encode("ascii"))
-            pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        temp_path.replace(cache_path)
+        write_worker_payload_atomic(cache_path, payload)
     except Exception:
-        with contextlib.suppress(Exception):
-            temp_path.unlink(missing_ok=True)
         with contextlib.suppress(Exception):
             cache_path.unlink(missing_ok=True)
 
@@ -646,7 +627,7 @@ def _preview_source_model_cache_path(input_path: str) -> Path:
     try:
         stat_result = xml_path.stat()
     except OSError:
-        return _preview_source_model_cache_root() / "unavailable.pkl"
+        return _preview_source_model_cache_root() / "unavailable.json"
     signature = "|".join(
         (
             str(FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION),
@@ -657,7 +638,7 @@ def _preview_source_model_cache_path(input_path: str) -> Path:
         )
     )
     cache_key = hashlib.sha256(signature.encode("utf-8")).hexdigest()
-    return _preview_source_model_cache_root() / f"{cache_key}.pkl"
+    return _preview_source_model_cache_root() / f"{cache_key}.json"
 
 
 def _preview_source_model_cache_parser_key() -> str:
