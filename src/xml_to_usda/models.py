@@ -66,6 +66,11 @@ class Quaternion:
         return f"({self.real:g}, {self.i:g}, {self.j:g}, {self.k:g})"
 
 
+class StaticCollisionPrimitiveType(StrEnum):
+    CAPSULE = "capsule"
+    SPHERE = "sphere"
+
+
 class OutputMode(StrEnum):
     SELF_CONTAINED = "self_contained"
     EXTERNAL_REFS = "external_refs"
@@ -242,6 +247,16 @@ def _materialized_tuple_field(owner: object, field_name: str) -> tuple:
         raise TypeError(
             f"{type(owner).__name__}.{field_name} must be tuple-compatible, got {type(value).__name__}."
         ) from exc
+
+
+@dataclass(frozen=True, slots=True)
+class StaticCollisionPrimitive:
+    name: str
+    primitive_type: StaticCollisionPrimitiveType
+    center: Vector3
+    radius: float
+    height: float = 0.0
+    orientation: Quaternion = field(default_factory=lambda: Quaternion(1.0, 0.0, 0.0, 0.0))
 
 
 @dataclass(frozen=True, slots=True)
@@ -703,9 +718,10 @@ class TreeAsset:
     spines: tuple[SpineCurve, ...] = ()
     dynamic_wind: "DynamicWindData | None" = None
     static_collision_meshes: tuple[MeshData, ...] = ()
+    static_collision_primitives: tuple[StaticCollisionPrimitive, ...] = ()
 
     def __getattribute__(self, name: str):
-        if name == "static_collision_meshes":
+        if name in {"static_collision_meshes", "static_collision_primitives"}:
             try:
                 return object.__getattribute__(self, name)
             except AttributeError:
@@ -724,6 +740,8 @@ class TreeAsset:
         values = list(state)
         if len(values) == 14:
             values.append(())
+        if len(values) == 15:
+            values.append(())
         fields = (
             "metadata",
             "materials",
@@ -740,6 +758,7 @@ class TreeAsset:
             "spines",
             "dynamic_wind",
             "static_collision_meshes",
+            "static_collision_primitives",
         )
         for name, value in zip(fields, values):
             object.__setattr__(self, name, value)

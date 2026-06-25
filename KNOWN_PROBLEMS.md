@@ -1,25 +1,11 @@
 # Known Problems
 
-## Worker Request Origin Constraint Pending
-
-- Issue: Worker request/result/event payloads no longer use `pickle`, but helper commands still accept any readable JSON request path supplied on the command line.
-- Location: `src/xml_to_usda/worker_file_protocol.py`, `src/xml_to_usda/conversion_worker_subprocess.py`, `src/xml_to_usda/proxy_mesh_worker_subprocess.py`, `src/xml_to_usda/fracture_worker_subprocess.py`, `src/xml_to_usda/fbx_worker_subprocess.py`
-- Reason for deferral: The current pass removed the code-executing deserialization sink. Request origin constraints need a separate parent-created token/root contract so packaged workers do not reject legitimate temp files.
-- Likely next step: Add a parent-generated nonce or runtime workspace root check to worker requests and validate it before reading source/output paths.
-
 ## Qt Shell Preset And Preview Cache Ownership Pending
 
 - Issue: `MainWindow` still owns preset dialog orchestration and Proxy Mesh preview cache lifecycle. Phase 4 only extracted diagnostics bundle request construction and removed an obsolete dependency entry; a broader controller split was deferred.
 - Location: `src/xml_to_usda/qt_ui/window.py`
 - Reason for deferral: Current preset handling is tightly coupled to dialogs/widgets, and preview cache state does not yet have enough shared lifecycle behavior to justify a separate controller without creating a shallow abstraction.
 - Likely next step: Revisit when a concrete preset workflow change or a second preview-cache consumer appears; then extract only the behavior that hides real complexity behind a smaller interface.
-
-## Normalizer Hot Path Broader Profiling Pending
-
-- Issue: The remaining normalizer hot path is still object extraction and face-varying authoring.
-- Location: `src/xml_to_usda/normalizer.py`
-- Reason for deferral: The packed-point / packed-triangle child-scan rewrite was slower on `BigSpruce`, and vertex-skinning loop simplification did not produce a stable win. Caching object child nodes and precomputing leaf reference transforms also lost on `BigSpruce`.
-- Likely next step: Profile across more than one real sample and look for a structural change, not another local loop tweak.
 
 ## Synthetic Contract Fixture Replacement Pending
 
@@ -55,20 +41,6 @@
 - Location: `src/xml_to_usda/fracture_geometry.py`, `src/xml_to_usda/fracture_service.py`, `src/xml_to_usda/fracture_export_service.py`
 - Reason for deferral: Boundary caps are enough for first inspection/export parity, while true cut-plane clipping needs a separate mesh refinement pass and UE validation.
 - Likely next step: Add cut-plane triangle splitting for manual segment and automatic cut sites, then feed those new boundary loops into the existing cap generation path.
-
-## Fracturing Closely Spaced Manual Cuts Need Rejection
-
-- Issue: If two manual fracture cuts are placed too close together, the planner can still fail to build a non-empty mesh for one of the pieces and report that the mesh was not generated.
-- Location: `src/xml_to_usda/fracture_service.py`, `src/xml_to_usda/fracture_geometry.py`
-- Reason for deferral: The current planner is now stable and the remaining issue is a geometry validity rule for cut spacing and empty-piece rejection, not a crash fix.
-- Likely next step: Reject or merge cuts that collapse a piece below the minimum face budget before cap generation and preview authoring start.
-
-## Fracturing Synthetic Cut Instance Assignment Pending
-
-- Issue: The fracture planner can synthesize deterministic mid-segment base-face splits for safe pieces without repeated instances, allowing a single long trunk to split roughly in half when the hierarchy has no usable joint cut site. It still does not split a segment that owns repeated parts, because assigning those instances to one side of an intra-bone cut requires spatial side classification instead of skeleton ownership alone.
-- Location: `src/xml_to_usda/fracture_service.py`
-- Reason for deferral: Repeated-part side assignment inside one skeleton segment is a separate geometric classification problem; guessing it would break the root-pivoted static assembly contract.
-- Likely next step: Add split-plane side tests for repeated-part instance origins/bounds and reject ambiguous instances loudly instead of assigning by fallback.
 
 ## Manual Segment Fracture Cut Repeated-Part Classification Pending
 

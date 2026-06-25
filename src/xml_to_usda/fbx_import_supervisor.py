@@ -29,7 +29,14 @@ from .fbx_worker_subprocess import (
 from .fbx_payload_cache import FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS, FBX_PAYLOAD_CACHE_MAX_BYTES
 from .job_control import cpu_worker_count, emit_telemetry, throw_if_cancelled
 from .models import ConversionPhase, CpuProfile
-from .worker_file_protocol import cleanup_file, create_temp_path, read_worker_payload, resolve_worker_command
+from .worker_file_protocol import (
+    cleanup_file,
+    create_temp_path,
+    new_worker_token,
+    read_worker_payload,
+    resolve_worker_command,
+    worker_env,
+)
 
 
 @dataclass(frozen=True)
@@ -212,6 +219,7 @@ def _launch_helper(task: FbxImportTask) -> _RunningHelper:
     request_path = _create_temp_path(".request.json")
     result_path = _create_temp_path(".payload.json")
     error_path = _create_temp_path(".error.json")
+    worker_token = new_worker_token()
     write_fbx_worker_request(
         request_path,
         FbxWorkerRequest(
@@ -225,6 +233,7 @@ def _launch_helper(task: FbxImportTask) -> _RunningHelper:
             fbx_cache_max_age_seconds=task.fbx_cache_max_age_seconds,
             result_path=str(result_path),
             error_path=str(error_path),
+            worker_token=worker_token,
         ),
     )
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -233,6 +242,7 @@ def _launch_helper(task: FbxImportTask) -> _RunningHelper:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         creationflags=creation_flags,
+        env=worker_env(worker_token),
     )
     return _RunningHelper(
         process=process,

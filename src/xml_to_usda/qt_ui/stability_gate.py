@@ -265,6 +265,7 @@ def _run_worker_stress(
         write_fracture_worker_request,
     )
     from ..worker_commands import FRACTURE_WORKER_COMMAND
+    from ..worker_file_protocol import new_worker_token, worker_env
 
     settings_matrix = _worker_settings_matrix(_effective_worker_iterations(options))
     for index, fracture_settings in enumerate(settings_matrix):
@@ -275,6 +276,7 @@ def _run_worker_stress(
         error_path = run_dir / "error.json"
         stdout_path = run_dir / "stdout.txt"
         stderr_path = run_dir / "stderr.txt"
+        worker_token = new_worker_token()
         write_fracture_worker_request(
             request_path,
             FractureWorkerRequest(
@@ -286,6 +288,7 @@ def _run_worker_stress(
                 action=FRACTURE_WORKER_ACTION_PREVIEW,
                 result_path=str(result_path),
                 error_path=str(error_path),
+                worker_token=worker_token,
             ),
         )
         with stdout_path.open("wb") as stdout_handle, stderr_path.open("wb") as stderr_handle:
@@ -295,6 +298,7 @@ def _run_worker_stress(
                 stderr=stderr_handle,
                 timeout=options.timeout_ms / 1000,
                 check=False,
+                env=worker_env(worker_token),
             )
         passed = process.returncode == 0 and result_path.exists() and not error_path.exists()
         runs.append(

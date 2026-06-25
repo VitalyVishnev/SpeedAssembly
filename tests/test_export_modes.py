@@ -232,7 +232,7 @@ def test_static_assembly_mode_authors_point_instancer_without_skeletal_fields() 
     )
     inventory = UsdaInventory.from_text(usda.text)
 
-    assert 'defaultPrim = "StaticAssembly"' not in usda.text
+    assert 'defaultPrim = "StaticAssembly"' in usda.text
     assert inventory.has_prim("/StaticAssembly", "Xform")
     assert inventory.has_api_schema("/StaticAssembly", "NaniteAssemblyRootAPI")
     assert inventory.has_attribute("/StaticAssembly", "unreal:naniteAssembly:meshType")

@@ -17,6 +17,7 @@ from xml_to_usda.fracture_worker_subprocess import (
     write_fracture_worker_request,
     write_fracture_worker_result,
 )
+from xml_to_usda.worker_file_protocol import WORKER_TOKEN_ENV
 
 
 SIMPLE_TREE_01 = (
@@ -33,6 +34,8 @@ def test_fracture_preview_worker_does_not_depend_on_export_service(monkeypatch, 
     request_path = tmp_path / "preview.request.json"
     result_path = tmp_path / "preview.result.json"
     error_path = tmp_path / "preview.error.json"
+    worker_token = "test-worker-token"
+    monkeypatch.setenv(WORKER_TOKEN_ENV, worker_token)
     write_fracture_worker_request(
         request_path,
         FractureWorkerRequest(
@@ -48,6 +51,7 @@ def test_fracture_preview_worker_does_not_depend_on_export_service(monkeypatch, 
             action=FRACTURE_WORKER_ACTION_PREVIEW,
             result_path=str(result_path),
             error_path=str(error_path),
+            worker_token=worker_token,
         ),
     )
 
@@ -84,10 +88,12 @@ def test_fracture_preview_worker_does_not_depend_on_export_service(monkeypatch, 
     assert error_path.exists() is False
 
 
-def test_fracture_preview_worker_reports_caps_stage_breadcrumbs(capsys, tmp_path: Path) -> None:
+def test_fracture_preview_worker_reports_caps_stage_breadcrumbs(monkeypatch, capsys, tmp_path: Path) -> None:
     request_path = tmp_path / "preview_caps.request.json"
     result_path = tmp_path / "preview_caps.result.json"
     error_path = tmp_path / "preview_caps.error.json"
+    worker_token = "test-worker-token"
+    monkeypatch.setenv(WORKER_TOKEN_ENV, worker_token)
     write_fracture_worker_request(
         request_path,
         FractureWorkerRequest(
@@ -103,6 +109,7 @@ def test_fracture_preview_worker_reports_caps_stage_breadcrumbs(capsys, tmp_path
             action=FRACTURE_WORKER_ACTION_PREVIEW,
             result_path=str(result_path),
             error_path=str(error_path),
+            worker_token=worker_token,
         ),
     )
 
@@ -133,6 +140,7 @@ def test_fracture_worker_request_write_does_not_leave_empty_final_file(monkeypat
         action=FRACTURE_WORKER_ACTION_PREVIEW,
         result_path=str(result_path),
         error_path=str(error_path),
+        worker_token="test-worker-token",
     )
 
     def fail_dump(*args, **kwargs):
@@ -148,6 +156,32 @@ def test_fracture_worker_request_write_does_not_leave_empty_final_file(monkeypat
         raise AssertionError("Expected simulated pickle failure.")
 
     assert request_path.exists() is False
+
+
+def test_fracture_worker_rejects_mismatched_origin_token(monkeypatch, tmp_path: Path) -> None:
+    request_path = tmp_path / "preview.request.json"
+    result_path = tmp_path / "preview.result.json"
+    error_path = tmp_path / "preview.error.json"
+
+    monkeypatch.setenv(WORKER_TOKEN_ENV, "expected-token")
+    write_fracture_worker_request(
+        request_path,
+        FractureWorkerRequest(
+            request=FracturePreviewSourceRequest(
+                input_path=str(SIMPLE_TREE_01),
+                output_path=str(tmp_path / "SimpleTree_01.usda"),
+            ),
+            settings=FracturePreviewSettings(),
+            action=FRACTURE_WORKER_ACTION_PREVIEW,
+            result_path=str(result_path),
+            error_path=str(error_path),
+            worker_token="wrong-token",
+        ),
+    )
+
+    assert run_fracture_worker_request_file(request_path) == 1
+    assert error_path.exists()
+    assert result_path.exists() is False
 
 
 def test_fracture_worker_result_write_does_not_leave_empty_final_file(monkeypatch, tmp_path: Path) -> None:

@@ -17,8 +17,10 @@ from .authoring_validation import validate_authoring_model
 from .canonical_loader import load_resolved_assembly_model
 from .conversion_validation import validate_conversion_request
 from .fracture_collision import (
+    FractureCollisionMode,
     FractureCollisionSettings,
     build_fracture_collision_meshes,
+    build_fracture_collision_primitives,
     collision_render_mesh_name,
     validated_collision_settings,
 )
@@ -380,12 +382,25 @@ def _piece_authoring_model(
                     udim_id=cap_material_setting.udim_id,
                 ),
             )
-    collision_meshes = build_fracture_collision_meshes(
-        model,
-        piece,
-        collision_settings,
-        render_mesh_name=collision_render_mesh_name(piece),
-    )
+    resolved_collision = validated_collision_settings(collision_settings)
+    collision_meshes = ()
+    collision_primitives = ()
+    if resolved_collision.enabled:
+        render_mesh_name = collision_render_mesh_name(piece)
+        if resolved_collision.mode == FractureCollisionMode.CONVEX:
+            collision_meshes = build_fracture_collision_meshes(
+                model,
+                piece,
+                resolved_collision,
+                render_mesh_name=render_mesh_name,
+            )
+        else:
+            collision_primitives = build_fracture_collision_primitives(
+                model,
+                piece,
+                resolved_collision,
+                render_mesh_name=render_mesh_name,
+            )
     return (
         replace(
             model,
@@ -398,6 +413,7 @@ def _piece_authoring_model(
             prototype_strategy=PrototypeStrategy.INLINE_STATIC_PART,
             skeletal_support_primvars=None,
             static_collision_meshes=collision_meshes,
+            static_collision_primitives=collision_primitives,
         ),
         cap_udim_settings,
     )

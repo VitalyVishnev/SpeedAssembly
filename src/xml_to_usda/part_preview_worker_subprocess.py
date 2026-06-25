@@ -19,6 +19,7 @@ from .worker_file_protocol import (
     cleanup_file,
     read_error_payload,
     read_worker_payload,
+    validate_worker_token,
     write_error_payload,
     write_worker_payload_atomic,
 )
@@ -30,6 +31,7 @@ class PartPreviewWorkerRequest:
     settings: PartPrototypePreviewSettings
     result_path: str
     error_path: str
+    worker_token: str
 
 
 def write_part_preview_worker_request(path: str | Path, request: PartPreviewWorkerRequest) -> None:
@@ -61,6 +63,7 @@ def run_part_preview_worker_request_file(path: str | Path) -> int:
     suppress_windows_native_error_dialogs()
     request = read_part_preview_worker_request(path)
     try:
+        validate_worker_token(request.worker_token)
         apply_process_profile(request.request.cpu_profile)
         result = build_part_prototype_preview(request.request, request.settings)
         write_worker_payload_atomic(request.result_path, result)

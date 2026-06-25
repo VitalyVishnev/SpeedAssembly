@@ -28,6 +28,7 @@ from .worker_file_protocol import (
     cleanup_file,
     read_error_payload,
     read_json_payload,
+    validate_worker_token,
     write_error_payload,
     write_json_atomic,
     write_worker_payload_atomic,
@@ -42,6 +43,7 @@ class FbxWorkerRequest:
     strict_vertex_colors: bool
     result_path: str
     error_path: str
+    worker_token: str
     read_vertex_colors: bool = True
     read_material_slots: bool = True
     fbx_cache_max_bytes: int = FBX_PAYLOAD_CACHE_MAX_BYTES
@@ -62,6 +64,7 @@ def write_fbx_worker_request(path: str | Path, request: FbxWorkerRequest) -> Non
             "fbx_cache_max_age_seconds": request.fbx_cache_max_age_seconds,
             "result_path": request.result_path,
             "error_path": request.error_path,
+            "worker_token": request.worker_token,
         },
     )
 
@@ -79,6 +82,7 @@ def read_fbx_worker_request(path: str | Path) -> FbxWorkerRequest:
         fbx_cache_max_age_seconds=int(payload.get("fbx_cache_max_age_seconds", FBX_PAYLOAD_CACHE_MAX_AGE_SECONDS)),
         result_path=str(payload["result_path"]),
         error_path=str(payload["error_path"]),
+        worker_token=str(payload["worker_token"]),
     )
 
 
@@ -89,6 +93,7 @@ def read_fbx_worker_error(path: str | Path) -> tuple[str, str] | None:
 def run_fbx_worker_request_file(path: str | Path) -> int:
     request = read_fbx_worker_request(path)
     try:
+        validate_worker_token(request.worker_token)
         cache_options = FbxPayloadCacheOptions(
             read_vertex_colors=request.read_vertex_colors,
             read_material_slots=request.read_material_slots,

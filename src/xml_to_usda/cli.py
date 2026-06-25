@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import multiprocessing
+import statistics
 import sys
 import time
 
@@ -13,6 +14,7 @@ from .conversion_orchestrator import convert_request
 from .conversion_service import prepare_conversion_plan
 from .fracture_worker_subprocess import FRACTURE_WORKER_COMMAND, run_fracture_worker_request_file
 from .models import CleanupPolicy, CpuProfile, FbxMaterialMode, GeometryBuffer, MaterialPolicy
+from .normalizer import normalize_to_canonical
 from .part_preview_worker_subprocess import PART_PREVIEW_WORKER_COMMAND, run_part_preview_worker_request_file
 from .pipeline import generate_wind_json, inspect_source
 from .prototype_sources import fbx_import_read_options_for_material_mode, load_prototype_source_configs_from_json
@@ -20,6 +22,7 @@ from .proxy_mesh_worker_subprocess import PROXY_MESH_WORKER_COMMAND, run_proxy_m
 from .runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
 from .udim_settings import load_udim_material_settings_from_json
 from .xml_reader import render_inspect_report
+from .xml_reader import analyze_xml, read_source_xml
 
 
 CLI_ASYNC_THRESHOLD_BYTES = 2**63 - 1
@@ -82,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=CpuProfile.BALANCED.value,
         help="CPU usage profile for the benchmark. Default: balanced.",
     )
+
+    benchmark_normalizer_parser = subparsers.add_parser("benchmark-normalizer", help="Benchmark XML inspection and canonical normalization.")
+    benchmark_normalizer_parser.add_argument("inputs", nargs="+", help="Path(s) to SpeedTree XML files.")
+    benchmark_normalizer_parser.add_argument("--iterations", type=int, default=5, help="Measured iterations per input. Default: 5.")
+    benchmark_normalizer_parser.add_argument("--warmup", type=int, default=1, help="Warmup iterations per input. Default: 1.")
 
     subparsers.add_parser("gui", help="Launch the primary PySide6 desktop GUI.")
     fbx_worker_parser = subparsers.add_parser(FBX_WORKER_COMMAND, help=argparse.SUPPRESS)
@@ -150,6 +158,12 @@ def main(argv: list[str] | None = None) -> int:
                 args.input,
                 material_mode=FbxMaterialMode(args.material_mode),
                 cpu_profile=CpuProfile(args.cpu_profile),
+            )
+        if args.command == "benchmark-normalizer":
+            return _run_benchmark_normalizer(
+                tuple(args.inputs),
+                iterations=args.iterations,
+                warmup=args.warmup,
             )
         if args.command == "gui":
             from .qt_ui.entry import main as gui_main
@@ -272,6 +286,58 @@ def _run_benchmark_fbx(
     for message in telemetry_messages:
         if message:
             sys.stdout.write(f"stage: {message}\n")
+    return 0
+
+
+def _run_benchmark_normalizer(
+    input_paths: tuple[str, ...],
+    *,
+    iterations: int,
+    warmup: int,
+) -> int:
+    if iterations <= 0:
+        raise ValueError("Normalizer benchmark iterations must be greater than zero.")
+    if warmup < 0:
+        raise ValueError("Normalizer benchmark warmup must not be negative.")
+
+    for input_path in input_paths:
+        parse_seconds: list[float] = []
+        inspect_seconds: list[float] = []
+        normalize_seconds: list[float] = []
+        total_seconds: list[float] = []
+        last_model = None
+        for run_index in range(warmup + iterations):
+            total_started_at = time.perf_counter()
+            started_at = time.perf_counter()
+            document = read_source_xml(input_path)
+            parse_elapsed = time.perf_counter() - started_at
+
+            started_at = time.perf_counter()
+            analysis = analyze_xml(document)
+            inspect_elapsed = time.perf_counter() - started_at
+
+            started_at = time.perf_counter()
+            last_model = normalize_to_canonical(document, analysis.report, source_nodes=analysis.source_nodes)
+            normalize_elapsed = time.perf_counter() - started_at
+            total_elapsed = time.perf_counter() - total_started_at
+
+            if run_index < warmup:
+                continue
+            parse_seconds.append(parse_elapsed)
+            inspect_seconds.append(inspect_elapsed)
+            normalize_seconds.append(normalize_elapsed)
+            total_seconds.append(total_elapsed)
+
+        sys.stdout.write(f"Normalizer benchmark: {input_path}\n")
+        sys.stdout.write(f"iterations: {iterations}\n")
+        sys.stdout.write(f"parse_seconds_median: {statistics.median(parse_seconds):.6f}\n")
+        sys.stdout.write(f"inspect_seconds_median: {statistics.median(inspect_seconds):.6f}\n")
+        sys.stdout.write(f"normalize_seconds_median: {statistics.median(normalize_seconds):.6f}\n")
+        sys.stdout.write(f"total_seconds_median: {statistics.median(total_seconds):.6f}\n")
+        if last_model is not None:
+            sys.stdout.write(f"base_faces: {len(last_model.base_mesh.face_vertex_counts) if last_model.base_mesh else 0}\n")
+            sys.stdout.write(f"skeleton_joints: {len(last_model.skeleton)}\n")
+            sys.stdout.write(f"repeated_parts: {len(last_model.repeated_parts)}\n")
     return 0
 
 

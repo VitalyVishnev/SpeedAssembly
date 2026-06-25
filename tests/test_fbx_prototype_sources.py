@@ -13,12 +13,13 @@ from xml_to_usda.fbx_worker_subprocess import (
     FBX_WORKER_COMMAND,
     FbxWorkerRequest,
     read_fbx_worker_error,
+    read_fbx_worker_request,
     write_fbx_worker_request,
 )
 from xml_to_usda.models import CpuProfile, FbxMaterialMode, PrototypeSourceConfig, PrototypeSourceMode, Vector3
 from xml_to_usda.pipeline import convert_file, load_canonical_model
 from xml_to_usda.prototype_sources import load_prototype_source_configs_from_json
-from xml_to_usda.worker_file_protocol import read_worker_payload
+from xml_to_usda.worker_file_protocol import WORKER_TOKEN_ENV, read_worker_payload
 
 
 def _write_fbx_json_payload(
@@ -197,7 +198,9 @@ def test_cli_fbx_worker_command_writes_payload_json_and_returns_zero(
     error_path = tmp_path / "worker_error.json"
     request_path = tmp_path / "worker_request.json"
     written_payload = {"points": [1, 2, 3]}
+    worker_token = "test-worker-token"
 
+    monkeypatch.setenv(WORKER_TOKEN_ENV, worker_token)
     monkeypatch.setattr(
         fbx_worker_subprocess_module,
         "load_fbx_geometry",
@@ -212,6 +215,7 @@ def test_cli_fbx_worker_command_writes_payload_json_and_returns_zero(
             strict_vertex_colors=False,
             result_path=str(result_path),
             error_path=str(error_path),
+            worker_token=worker_token,
         ),
     )
 
@@ -235,7 +239,9 @@ def test_cli_fbx_worker_command_passes_selective_read_options(
     fbx_path = tmp_path / "branch.fbx"
     fbx_path.write_bytes(b"fbx")
     observed_kwargs = {}
+    worker_token = "test-worker-token"
 
+    monkeypatch.setenv(WORKER_TOKEN_ENV, worker_token)
     def _fake_load_fbx_geometry(*_args, **kwargs):
         observed_kwargs.update(kwargs)
         return {"points": [1, 2, 3]}
@@ -260,6 +266,7 @@ def test_cli_fbx_worker_command_passes_selective_read_options(
             strict_vertex_colors=False,
             result_path=str(result_path),
             error_path=str(error_path),
+            worker_token=worker_token,
             read_vertex_colors=False,
             read_material_slots=True,
         ),
@@ -340,6 +347,46 @@ def test_fbx_import_supervisor_keeps_requested_initial_concurrency_for_heavy_inp
     )
 
     assert worker_count == 4
+
+
+def test_fbx_import_supervisor_launches_helper_with_origin_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    import xml_to_usda.fbx_import_supervisor as supervisor_module
+
+    class _DummyProcess:
+        pid = 12345
+
+        def poll(self):
+            return 0
+
+        def terminate(self) -> None:
+            pass
+
+        def wait(self, timeout=None):
+            return 0
+
+    popen_calls: list[dict[str, object]] = []
+
+    def _fake_popen(args, **kwargs):
+        popen_calls.append({"args": args, "kwargs": kwargs})
+        return _DummyProcess()
+
+    monkeypatch.setattr(supervisor_module.subprocess, "Popen", _fake_popen)
+
+    helper = supervisor_module._launch_helper(
+        FbxImportTask(
+            task_id=0,
+            display_name="SM_BigBranch_01_HIGH",
+            prototype_name="SM_BigBranch_01_HIGH",
+            fbx_path="first.fbx",
+            cpu_profile=CpuProfile.BALANCED,
+        )
+    )
+    try:
+        payload = read_fbx_worker_request(helper.request_path)
+        env = popen_calls[0]["kwargs"]["env"]
+        assert payload.worker_token == env[WORKER_TOKEN_ENV]
+    finally:
+        supervisor_module._terminate_helper(helper)
 
 
 def test_fbx_import_supervisor_retries_remaining_tasks_with_lower_concurrency(

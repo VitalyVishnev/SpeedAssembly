@@ -249,7 +249,7 @@ In `static_assembly` mode:
 - `LeafReferences` position, rotation, and scale data become Instance Transform
   input, then `PointInstancer` placement data on Authored Instances
 - the authoring result is a single USD file with `NaniteAssemblyRootAPI` and `meshType = "staticMesh"`
-- the root prim is the stage root itself; a `defaultPrim` is not required for this mode
+- the stage `defaultPrim` points at the static assembly root
 - the root `PointInstancer` carries all placed geometry, including one synthetic base Authored Prototype at the tree pivot when a base mesh exists
 - no skeleton data is authored
 - no skeletal binding arrays are authored

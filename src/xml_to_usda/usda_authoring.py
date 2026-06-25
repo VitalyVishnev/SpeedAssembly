@@ -9,6 +9,7 @@ directly.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 from itertools import islice
@@ -35,6 +36,8 @@ from .models import (
     Quaternion,
     ResolvedAssemblyModel,
     SkeletalSupportPrimvars,
+    StaticCollisionPrimitive,
+    StaticCollisionPrimitiveType,
     ValidationIssue,
     Vector3,
 )
@@ -385,6 +388,7 @@ def _emit_static_assembly_document(
     _write_line(sink, 0, "(")
     _write_line(sink, 1, f"metersPerUnit = {contract.stage_meters_per_unit:g}")
     _write_line(sink, 1, f'upAxis = "{contract.stage_up_axis}"')
+    _write_line(sink, 1, f'defaultPrim = "{contract.root_prim_name}"')
     _write_line(sink, 0, ")")
     _write_line(sink, 0)
     _write_line(sink, 0, f'def Xform "{contract.root_prim_name}" (')
@@ -585,6 +589,8 @@ def _emit_static_instancer_prototype(
     if prototype.source_key == "__static_base_mesh__":
         for collision_mesh in context.model.static_collision_meshes:
             _emit_static_collision_mesh(sink, collision_mesh, context, indent_level + 1)
+        for collision_primitive in context.model.static_collision_primitives:
+            _emit_static_collision_primitive(sink, collision_primitive, indent_level + 1)
     _write_line(sink, indent_level, "}")
 
 
@@ -596,9 +602,142 @@ def _emit_static_collision_mesh(
 ) -> None:
     _write_line(sink, indent_level, f'def Mesh "{mesh.name}"')
     _write_line(sink, indent_level, "{")
+    _write_line(sink, indent_level + 1, 'uniform token purpose = "guide"')
     _write_line(sink, indent_level + 1, 'uniform token subdivisionScheme = "none"')
     _emit_mesh_payload(sink, mesh, context.contract.mesh_orientation, indent_level + 1)
     _write_line(sink, indent_level, "}")
+
+
+def _emit_static_collision_primitive(
+    sink,
+    primitive: StaticCollisionPrimitive,
+    indent_level: int,
+) -> None:
+    mesh = _static_collision_primitive_mesh(primitive)
+    _write_line(sink, indent_level, f'def Mesh "{primitive.name}"')
+    _write_line(sink, indent_level, "{")
+    _write_line(sink, indent_level + 1, 'uniform token purpose = "guide"')
+    _write_line(sink, indent_level + 1, 'uniform token subdivisionScheme = "none"')
+    _emit_mesh_payload(sink, mesh, "rightHanded", indent_level + 1)
+    _write_line(sink, indent_level, "}")
+
+
+def _static_collision_primitive_mesh(primitive: StaticCollisionPrimitive) -> MeshData:
+    if primitive.primitive_type == StaticCollisionPrimitiveType.SPHERE:
+        mesh = _static_collision_sphere_mesh(primitive.name, primitive.radius)
+    else:
+        mesh = _static_collision_capsule_mesh(primitive.name, primitive.height, primitive.radius)
+    return _transform_collision_mesh(mesh, primitive)
+
+
+def _static_collision_sphere_mesh(name: str, radius: float) -> MeshData:
+    rings = 8
+    segments = 12
+    points = [Vector3(0.0, radius, 0.0)]
+    for ring in range(1, rings):
+        phi = math.pi * ring / rings
+        y = math.cos(phi) * radius
+        ring_radius = math.sin(phi) * radius
+        for segment in range(segments):
+            theta = 2.0 * math.pi * segment / segments
+            points.append(Vector3(math.cos(theta) * ring_radius, y, math.sin(theta) * ring_radius))
+    points.append(Vector3(0.0, -radius, 0.0))
+    bottom = len(points) - 1
+    faces: list[tuple[int, ...]] = []
+    for segment in range(segments):
+        faces.append((0, 1 + segment, 1 + ((segment + 1) % segments)))
+    for ring in range(rings - 2):
+        row = 1 + ring * segments
+        next_row = row + segments
+        for segment in range(segments):
+            faces.append((row + segment, next_row + segment, next_row + ((segment + 1) % segments), row + ((segment + 1) % segments)))
+    last_row = 1 + (rings - 2) * segments
+    for segment in range(segments):
+        faces.append((last_row + ((segment + 1) % segments), last_row + segment, bottom))
+    return _mesh_from_local_faces(name, tuple(points), tuple(faces))
+
+
+def _static_collision_capsule_mesh(name: str, height: float, radius: float) -> MeshData:
+    segments = 8
+    hemisphere_steps = 3
+    angles = tuple(2.0 * math.pi * index / segments for index in range(segments))
+    half_height = height * 0.5
+    rings: list[tuple[Vector3, ...]] = []
+    for step in range(1, hemisphere_steps + 1):
+        phi = -math.pi * 0.5 + step * (math.pi * 0.5 / hemisphere_steps)
+        z = -half_height + math.sin(phi) * radius
+        ring_radius = math.cos(phi) * radius
+        rings.append(tuple(Vector3(math.cos(theta) * ring_radius, math.sin(theta) * ring_radius, z) for theta in angles))
+    for step in range(0, hemisphere_steps):
+        phi = step * (math.pi * 0.5 / hemisphere_steps)
+        z = half_height + math.sin(phi) * radius
+        ring_radius = math.cos(phi) * radius
+        rings.append(tuple(Vector3(math.cos(theta) * ring_radius, math.sin(theta) * ring_radius, z) for theta in angles))
+    bottom = Vector3(0.0, 0.0, -half_height - radius)
+    top = Vector3(0.0, 0.0, half_height + radius)
+    points = [bottom, *(point for ring in rings for point in ring), top]
+    top_index = len(points) - 1
+    faces: list[tuple[int, ...]] = []
+    for segment in range(segments):
+        faces.append((0, 1 + segment, 1 + ((segment + 1) % segments)))
+    for ring_index in range(len(rings) - 1):
+        row = 1 + ring_index * segments
+        next_row = row + segments
+        for segment in range(segments):
+            nxt = (segment + 1) % segments
+            faces.append((row + segment, row + nxt, next_row + nxt, next_row + segment))
+    last_row = 1 + (len(rings) - 1) * segments
+    for segment in range(segments):
+        nxt = (segment + 1) % segments
+        faces.append((top_index, last_row + nxt, last_row + segment))
+    return _mesh_from_local_faces(name, tuple(points), tuple(faces))
+
+
+def _mesh_from_local_faces(name: str, points: tuple[Vector3, ...], faces: tuple[tuple[int, ...], ...]) -> MeshData:
+    return MeshData(
+        name=name,
+        points=points,
+        face_vertex_counts=tuple(len(face) for face in faces),
+        face_vertex_indices=tuple(index for face in faces for index in face),
+    )
+
+
+def _transform_collision_mesh(mesh: MeshData, primitive: StaticCollisionPrimitive) -> MeshData:
+    transform = _collision_primitive_transform_rows(primitive)
+    return MeshData(
+        name=mesh.name,
+        points=tuple(_transform_point(point, transform) for point in mesh.points),
+        face_vertex_counts=mesh.face_vertex_counts,
+        face_vertex_indices=mesh.face_vertex_indices,
+    )
+
+
+def _transform_point(point: Vector3, rows: tuple[tuple[float, float, float, float], ...]) -> Vector3:
+    return Vector3(
+        point.x * rows[0][0] + point.y * rows[1][0] + point.z * rows[2][0] + rows[3][0],
+        point.x * rows[0][1] + point.y * rows[1][1] + point.z * rows[2][1] + rows[3][1],
+        point.x * rows[0][2] + point.y * rows[1][2] + point.z * rows[2][2] + rows[3][2],
+    )
+
+
+def _collision_primitive_transform_rows(primitive: StaticCollisionPrimitive) -> tuple[tuple[float, float, float, float], ...]:
+    q = primitive.orientation
+    xx = q.i * q.i
+    yy = q.j * q.j
+    zz = q.k * q.k
+    xy = q.i * q.j
+    xz = q.i * q.k
+    yz = q.j * q.k
+    wx = q.real * q.i
+    wy = q.real * q.j
+    wz = q.real * q.k
+    rows = (
+        (1.0 - 2.0 * (yy + zz), 2.0 * (xy + wz), 2.0 * (xz - wy), 0.0),
+        (2.0 * (xy - wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz + wx), 0.0),
+        (2.0 * (xz + wy), 2.0 * (yz - wx), 1.0 - 2.0 * (xx + yy), 0.0),
+        (primitive.center.x, primitive.center.y, primitive.center.z, 1.0),
+    )
+    return rows
 
 
 def _static_prototype_index(prototype_key: str, prototype_index_map: dict[str, int], instance_name: str) -> int:
@@ -978,7 +1117,7 @@ def _emit_material_binding(
     indent_level: int,
     root_prim_name: str | None,
 ) -> None:
-    sections = mesh.sections
+    sections = _material_sections_by_id(mesh.sections)
     if not sections:
         return
     if len(sections) == 1:
@@ -991,6 +1130,18 @@ def _emit_material_binding(
     _write_line(sink, indent_level, 'uniform token subsetFamily:materialBind:familyType = "nonOverlapping"')
     for section in sections:
         _emit_geom_subset(sink, section, indent_level, root_prim_name)
+
+
+def _material_sections_by_id(
+    sections: tuple[MeshSection, ...] | tuple[CompactMeshSection, ...],
+) -> tuple[MeshSection, ...]:
+    face_indices_by_material: dict[int, list[int]] = {}
+    for section in sections:
+        face_indices_by_material.setdefault(int(section.material_id), []).extend(int(index) for index in section.face_indices)
+    return tuple(
+        MeshSection(material_id=material_id, face_indices=tuple(face_indices))
+        for material_id, face_indices in face_indices_by_material.items()
+    )
 
 
 def _emit_geom_subset(

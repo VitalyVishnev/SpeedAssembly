@@ -25,6 +25,7 @@ from .worker_file_protocol import (
     cleanup_file,
     read_error_payload,
     read_worker_payload,
+    validate_worker_token,
     write_error_payload,
     write_worker_payload_atomic,
 )
@@ -37,6 +38,7 @@ class ConversionWorkerRequest:
     result_path: str
     error_path: str
     event_dir: str
+    worker_token: str
 
 
 def write_conversion_worker_request(path: str | Path, request: ConversionWorkerRequest) -> None:
@@ -57,6 +59,11 @@ def read_conversion_worker_error(path: str | Path) -> tuple[str, str] | None:
 def run_conversion_worker_request_file(path: str | Path) -> int:
     suppress_windows_native_error_dialogs()
     request = read_conversion_worker_request(path)
+    try:
+        validate_worker_token(request.worker_token)
+    except Exception as exc:
+        write_error_payload(request.error_path, message=str(exc), formatted_traceback=traceback.format_exc())
+        return 1
     event_writer = _TelemetryEventWriter(Path(request.event_dir))
     try:
         apply_process_profile(request.request.cpu_profile)

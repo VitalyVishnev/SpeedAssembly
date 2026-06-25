@@ -19,6 +19,8 @@ from xml_to_usda.models import (
     Joint,
     Matrix4d,
     MeshData,
+    Prototype,
+    PrototypeIdentity,
     Quaternion,
     RepeatedPartInstance,
     TreeAsset,
@@ -108,6 +110,38 @@ def _repeated_part(name: str, joint_token: str) -> RepeatedPartInstance:
     )
 
 
+def _repeated_part_at(name: str, joint_token: str, x: float, *, prototype_key: str = "Mesh_1") -> RepeatedPartInstance:
+    return RepeatedPartInstance(
+        name=name,
+        prototype_key=prototype_key,
+        position=Vector3(x, 0.0, 0.0),
+        orientation=Quaternion(1.0, 0.0, 0.0, 0.0),
+        scale=Vector3(1.0, 1.0, 1.0),
+        binding=InstanceBinding(joint_tokens=(joint_token,), weights=(1.0,)),
+        source_object_id=None,
+        source_mesh_id=1,
+    )
+
+
+def _box_prototype(source_key: str = "Mesh_1", *, half_extent: float = 0.1) -> Prototype:
+    mesh = MeshData(
+        name=source_key,
+        points=(
+            Vector3(-half_extent, -half_extent, -half_extent),
+            Vector3(half_extent, half_extent, half_extent),
+        ),
+        face_vertex_counts=(),
+        face_vertex_indices=(),
+    )
+    return Prototype(
+        identity=PrototypeIdentity(source_key=source_key, prim_name=source_key),
+        mesh=mesh,
+        source_key=source_key,
+        source_mesh_id=1,
+        source_name=source_key,
+    )
+
+
 def _tree() -> TreeAsset:
     skeleton = (
         _joint("root", 0, None, 0.0, 0),
@@ -191,6 +225,44 @@ def test_fracture_uses_synthetic_mid_segment_face_split_when_hierarchy_has_no_sa
     assert plan.selected_cut_sites[-1].kind == "synthetic_mid_segment"
     assert plan.selected_cut_sites[-1].reason == "base_face_midpoint"
     assert not any(issue.code == "fracture_piece_count_clamped" for issue in plan.diagnostics)
+
+
+def test_synthetic_face_split_assigns_repeated_parts_by_transformed_bounds() -> None:
+    tree = replace(
+        _single_root_trunk(4),
+        assembly_parts=(
+            _repeated_part_at("LeftLeaves", "root", 0.5),
+            _repeated_part_at("RightLeaves", "root", 3.0),
+        ),
+        prototypes=(_box_prototype(),),
+    )
+
+    plan = plan_fracture(tree, FractureSettings(target_piece_count=2, output_stem="Trunk"))
+
+    assert tuple(piece.base_face_indices for piece in plan.pieces) == ((0, 1), (2, 3))
+    assert tuple(piece.repeated_part_names for piece in plan.pieces) == (("LeftLeaves",), ("RightLeaves",))
+
+
+def test_synthetic_face_split_rejects_repeated_part_bounds_crossing_split_plane() -> None:
+    tree = replace(
+        _single_root_trunk(4),
+        assembly_parts=(_repeated_part_at("CrossingLeaves", "root", 2.0),),
+        prototypes=(_box_prototype(half_extent=0.5),),
+    )
+
+    with pytest.raises(FractureError, match="split plane crosses repeated part CrossingLeaves"):
+        plan_fracture(tree, FractureSettings(target_piece_count=2, output_stem="Trunk"))
+
+
+def test_synthetic_face_split_rejects_repeated_part_without_prototype_bounds() -> None:
+    tree = replace(
+        _single_root_trunk(4),
+        assembly_parts=(_repeated_part_at("UnknownLeaves", "root", 0.5),),
+        prototypes=(),
+    )
+
+    with pytest.raises(FractureError, match="prototype Mesh_1 has no mesh bounds"):
+        plan_fracture(tree, FractureSettings(target_piece_count=2, output_stem="Trunk"))
 
 
 def test_fracture_refines_existing_cut_order_when_target_count_grows() -> None:
@@ -322,6 +394,38 @@ def test_manual_segment_cut_splits_base_faces_between_joints_by_cut_position() -
     assert tuple(piece.base_face_indices for piece in plan.pieces) == ((0, 1), (2, 3))
     assert plan.pieces[1].cut_joint_token == "root->top@0.500"
     assert plan.pieces[1].joint_tokens == ("top",)
+
+
+def test_manual_segment_cuts_on_same_edge_must_not_be_too_close() -> None:
+    with pytest.raises(FractureError, match="same skeleton edge must be at least 0.02 apart"):
+        plan_fracture(
+            _simple_segment_trunk(),
+            FractureSettings(
+                target_piece_count=3,
+                output_stem="Trunk",
+                pinned_cut_joint_tokens=(
+                    format_manual_segment_cut_token("root", "top", 0.50),
+                    format_manual_segment_cut_token("root", "top", 0.51),
+                ),
+            ),
+        )
+
+
+def test_separated_manual_segment_cuts_on_same_edge_remain_valid() -> None:
+    plan = plan_fracture(
+        _simple_segment_trunk(),
+        FractureSettings(
+            target_piece_count=3,
+            output_stem="Trunk",
+            pinned_cut_joint_tokens=(
+                format_manual_segment_cut_token("root", "top", 0.30),
+                format_manual_segment_cut_token("root", "top", 0.70),
+            ),
+        ),
+    )
+
+    assert plan.actual_piece_count == 3
+    assert tuple(piece.base_face_indices for piece in plan.pieces) == ((0,), (1, 2), (3,))
 
 
 def test_stump_piece_uses_first_main_axis_child_joint_not_lowest_face_centroid() -> None:

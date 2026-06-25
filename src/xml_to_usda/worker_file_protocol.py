@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import sys
 import tempfile
 from array import array
@@ -23,6 +24,7 @@ from typing import Any
 
 _TYPE_KEY = "__xml_to_usda_worker_payload_type__"
 _CLASS_KEY = "__xml_to_usda_worker_payload_class__"
+WORKER_TOKEN_ENV = "XML_TO_USDA_WORKER_TOKEN"
 _WORKER_PAYLOAD_MODULES = (
     "xml_to_usda.models",
     "xml_to_usda.runtime_paths",
@@ -56,6 +58,26 @@ def write_worker_payload_atomic(path: str | Path, payload: object) -> None:
 
 def read_worker_payload(path: str | Path) -> Any:
     return _decode_worker_value(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+def new_worker_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def worker_env(token: str) -> dict[str, str]:
+    env = os.environ.copy()
+    env[WORKER_TOKEN_ENV] = token
+    return env
+
+
+def validate_worker_token(request_token: str) -> None:
+    expected = os.environ.get(WORKER_TOKEN_ENV)
+    if not expected:
+        raise RuntimeError("Worker request origin token is missing from environment.")
+    if not request_token:
+        raise RuntimeError("Worker request origin token is missing from request payload.")
+    if not secrets.compare_digest(request_token, expected):
+        raise RuntimeError("Worker request origin token mismatch.")
 
 
 def write_json_atomic(path: str | Path, payload: dict[str, object]) -> None:

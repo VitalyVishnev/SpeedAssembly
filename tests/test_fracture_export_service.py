@@ -254,6 +254,21 @@ def test_fracture_cap_material_override_authors_cap_section_and_material_binding
     )
 
 
+def test_fracture_caps_merge_matching_material_subsets_for_valid_usd(tmp_path: Path) -> None:
+    piece_resolved = _piece_resolved_model(
+        _cap_test_resolved_tree(),
+        _single_face_piece(),
+        generate_caps=True,
+    )
+
+    write_resolved_usda_document(piece_resolved, output_path=tmp_path / "Oak_fracture_00.usda")
+    text = Path(tmp_path / "Oak_fracture_00.usda").read_text(encoding="utf-8")
+
+    assert text.count('def GeomSubset "Material_7_7"') <= 1
+    assert "rel material:binding = </Oak_fracture_00/Materials/Material_7_7>" in text
+    assert 'defaultPrim = "Oak_fracture_00"' in text
+
+
 def test_fracture_cap_material_udim_applies_only_to_cap_faces() -> None:
     resolved = _cap_test_resolved_tree()
     cap_material_id = _cap_material_id(resolved.authoring_model)
@@ -391,3 +406,58 @@ def test_fracture_piece_model_authors_sphere_collision_as_base_mesh_sibling() ->
 
     assert 'def Mesh "SM_Oak_Piece_00_BaseMesh"' in document.text
     assert 'def Mesh "USP_SM_Oak_Piece_00_BaseMesh_00"' in document.text
+    assert 'uniform token purpose = "guide"' in document.text
+    assert "xformOp:transform" not in document.text
+    assert "PhysicsCollisionAPI" not in document.text
+    assert 'def Mesh "UCX_Oak_Piece_00_00"' not in document.text
+
+
+def test_fracture_piece_model_authors_capsule_collision_as_baked_ucp_mesh() -> None:
+    resolved = _resolved_tree()
+    piece = FracturePiece(
+        index=0,
+        name="Oak_Piece_00",
+        is_root_piece=True,
+        cut_joint_token=None,
+        joint_tokens=("root", "bone_001", "bone_002"),
+        base_face_indices=(0, 1, 2),
+        repeated_part_indices=(),
+        repeated_part_names=(),
+    )
+
+    piece_resolved = _piece_resolved_model(
+        resolved,
+        piece,
+        collision_settings=FractureCollisionSettings(
+            enabled=True,
+            mode=FractureCollisionMode.CAPSULE,
+            capsule_simplify=100,
+        ),
+    )
+    document = write_resolved_usda_document(piece_resolved, output_path=None)
+
+    assert 'def Mesh "UCP_SM_Oak_Piece_00_BaseMesh_00"' in document.text
+    assert 'uniform token purpose = "guide"' in document.text
+    assert "xformOp:transform" not in document.text
+    assert "2.02812" in document.text
+    assert "PhysicsCollisionAPI" not in document.text
+    assert 'def Mesh "UCX_Oak_Piece_00_00"' not in document.text
+
+
+def test_fracture_piece_model_authors_convex_collision_as_plain_ucx_mesh() -> None:
+    piece_resolved = _piece_resolved_model(
+        _resolved_tree(),
+        _single_face_piece(),
+        collision_settings=FractureCollisionSettings(
+            enabled=True,
+            mode=FractureCollisionMode.CONVEX,
+            convex_max_vertices=8,
+        ),
+    )
+
+    document = write_resolved_usda_document(piece_resolved, output_path=None)
+
+    assert 'def Mesh "UCX_SM_Oak_fracture_00_BaseMesh_00"' in document.text
+    assert 'uniform token purpose = "guide"' in document.text
+    assert "PhysicsMeshCollisionAPI" not in document.text
+    assert "physics:approximation" not in document.text

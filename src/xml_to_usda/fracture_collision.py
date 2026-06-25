@@ -12,7 +12,7 @@ import numpy as np
 
 from .fracture_service import FractureError, FracturePiece
 from .geometry_buffers import iter_face_ranges
-from .models import CanonicalTreeModel, MeshData, Quaternion, Vector3
+from .models import CanonicalTreeModel, MeshData, Quaternion, StaticCollisionPrimitive, StaticCollisionPrimitiveType, Vector3
 from .naming import make_stable_prim_name
 
 
@@ -136,6 +136,34 @@ def build_fracture_collision_meshes(
 ) -> tuple[MeshData, ...]:
     resolved = validated_collision_settings(settings)
     return _build_fracture_collision_meshes_validated(model, piece, resolved, render_mesh_name=render_mesh_name)
+
+
+def build_fracture_collision_primitives(
+    model: CanonicalTreeModel,
+    piece: FracturePiece,
+    settings: FractureCollisionSettings | None,
+    *,
+    render_mesh_name: str,
+) -> tuple[StaticCollisionPrimitive, ...]:
+    resolved = validated_collision_settings(settings)
+    if not resolved.enabled:
+        return ()
+    if resolved.mode == FractureCollisionMode.CAPSULE:
+        return _capsule_primitives(model, piece, render_mesh_name, resolved, _capsule_skeleton_context(model))
+    if resolved.mode == FractureCollisionMode.SPHERE:
+        samples = _sample_piece_points(model, piece, resolved)
+        if not samples:
+            raise FractureError(f"Fracture collision for {piece.name} has no geometry points.")
+        center, radius = _minimal_enclosing_sphere(tuple(sample.point for sample in samples))
+        return (
+            StaticCollisionPrimitive(
+                name=make_stable_prim_name(f"USP_{render_mesh_name}_00", fallback="USP_Collision_00"),
+                primitive_type=StaticCollisionPrimitiveType.SPHERE,
+                center=center,
+                radius=max(0.001, radius * resolved.sphere_radius_scale),
+            ),
+        )
+    return ()
 
 
 def _build_fracture_collision_meshes_validated(
@@ -477,6 +505,56 @@ def _capsule_meshes(
     )
 
 
+def _capsule_primitives(
+    model: CanonicalTreeModel,
+    piece: FracturePiece,
+    render_mesh_name: str,
+    settings: FractureCollisionSettings,
+    context: _CapsuleSkeletonContext,
+) -> tuple[StaticCollisionPrimitive, ...]:
+    paths = _piece_capsule_paths(context, piece)
+    if paths:
+        reference_length = max((_source_segment_length(path) for path in paths), default=1.0)
+        segments = tuple(
+            (start, end, _capsule_path_radius(start, end, reference_length, settings))
+            for path in paths
+            for start, end in _capsule_path_segments(path, settings.capsule_simplify)
+        )
+    else:
+        segments = _fallback_capsule_segments(model, piece, settings)
+    return tuple(
+        _capsule_primitive(f"UCP_{render_mesh_name}_{index:02d}", start, end, radius)
+        for index, (start, end, radius) in enumerate(segments)
+    )
+
+
+def _capsule_primitive(name: str, start: Vector3, end: Vector3, radius: float) -> StaticCollisionPrimitive:
+    axis = Vector3(end.x - start.x, end.y - start.y, end.z - start.z)
+    length = _distance(start, end)
+    center = Vector3((start.x + end.x) * 0.5, (start.y + end.y) * 0.5, (start.z + end.z) * 0.5)
+    return StaticCollisionPrimitive(
+        name=make_stable_prim_name(name, fallback="UCP_Collision_00"),
+        primitive_type=StaticCollisionPrimitiveType.CAPSULE,
+        center=center,
+        radius=max(0.001, radius),
+        height=max(0.001, length),
+        orientation=_quaternion_from_z_axis(axis),
+    )
+
+
+def _quaternion_from_z_axis(axis: Vector3) -> Quaternion:
+    normalized = _normalize(axis)
+    if normalized.z < -0.999999:
+        return Quaternion(0.0, 1.0, 0.0, 0.0)
+    cross_x = -normalized.y
+    cross_y = normalized.x
+    real = 1.0 + normalized.z
+    length = math.sqrt(real * real + cross_x * cross_x + cross_y * cross_y)
+    if length <= 1e-12:
+        return Quaternion(1.0, 0.0, 0.0, 0.0)
+    return Quaternion(real / length, cross_x / length, cross_y / length, 0.0)
+
+
 def _capsule_skeleton_context(model: CanonicalTreeModel) -> _CapsuleSkeletonContext:
     joint_by_token = {joint.name: joint for joint in model.skeleton}
     order_by_token = {joint.name: index for index, joint in enumerate(model.skeleton)}
@@ -499,6 +577,17 @@ def _fallback_capsule_meshes(
     render_mesh_name: str,
     settings: FractureCollisionSettings,
 ) -> tuple[MeshData, ...]:
+    return tuple(
+        _capsule_mesh(f"UCP_{render_mesh_name}_{index:02d}", start, end, radius)
+        for index, (start, end, radius) in enumerate(_fallback_capsule_segments(model, piece, settings))
+    )
+
+
+def _fallback_capsule_segments(
+    model: CanonicalTreeModel,
+    piece: FracturePiece,
+    settings: FractureCollisionSettings,
+) -> tuple[tuple[Vector3, Vector3, float], ...]:
     samples = _sample_piece_points(model, piece, settings)
     if not samples and piece.repeated_part_indices and not settings.include_instance_parts:
         samples = _sample_piece_points(model, piece, replace(settings, include_instance_parts=True))
@@ -506,7 +595,7 @@ def _fallback_capsule_meshes(
         raise FractureError(f"Fracture capsule collision for {piece.name} has no skeleton or geometry points.")
     start, end, reference_length = _aabb_capsule_axis(tuple(sample.point for sample in samples))
     radius = _capsule_path_radius(start, end, reference_length, settings)
-    return (_capsule_mesh(f"UCP_{render_mesh_name}_00", start, end, radius),)
+    return ((start, end, radius),)
 
 
 def _aabb_capsule_axis(points: tuple[Vector3, ...]) -> tuple[Vector3, Vector3, float]:
@@ -827,6 +916,7 @@ __all__ = [
     "FractureCollisionSettings",
     "build_fracture_collision_mesh_sets",
     "build_fracture_collision_meshes",
+    "build_fracture_collision_primitives",
     "collision_render_mesh_name",
     "validated_collision_settings",
 ]

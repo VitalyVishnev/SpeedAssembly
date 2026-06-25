@@ -29,6 +29,7 @@ from .worker_file_protocol import (
     cleanup_file,
     read_error_payload,
     read_worker_payload,
+    validate_worker_token,
     write_error_payload,
     write_worker_payload_atomic,
 )
@@ -41,6 +42,7 @@ class ProxyMeshWorkerRequest:
     action: str
     result_path: str
     error_path: str
+    worker_token: str
 
 
 def write_proxy_mesh_worker_request(path: str | Path, request: ProxyMeshWorkerRequest) -> None:
@@ -67,6 +69,7 @@ def run_proxy_mesh_worker_request_file(path: str | Path) -> int:
     _worker_stage("request.read.start")
     request = read_proxy_mesh_worker_request(path)
     try:
+        validate_worker_token(request.worker_token)
         _worker_stage(f"{request.action}.profile.start")
         apply_process_profile(request.request.cpu_profile)
         if request.action == "preview":

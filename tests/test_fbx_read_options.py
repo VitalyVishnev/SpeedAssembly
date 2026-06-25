@@ -21,6 +21,7 @@ from xml_to_usda.fbx_worker_subprocess import (
     run_fbx_worker_request_file,
     write_fbx_worker_request,
 )
+from xml_to_usda.worker_file_protocol import WORKER_TOKEN_ENV
 
 
 def _prepared_import(tmp_path: Path, mode: FbxMaterialMode) -> _PreparedFbxImport:
@@ -152,6 +153,7 @@ def test_fbx_worker_request_round_trips_cache_policy(tmp_path: Path) -> None:
         fbx_cache_max_age_seconds=5678,
         result_path="result.json",
         error_path="error.json",
+        worker_token="test-worker-token",
     )
 
     write_fbx_worker_request(request_path, request)
@@ -166,6 +168,7 @@ def test_fbx_worker_passes_cache_policy_to_store(tmp_path: Path, monkeypatch) ->
     error_path = tmp_path / "error.json"
     request_path = tmp_path / "request.json"
     observed_store_kwargs = {}
+    worker_token = "test-worker-token"
     payload = GeometryBuffer(
         name="Branch",
         point_components=array("f", [0.0, 0.0, 0.0]),
@@ -173,6 +176,7 @@ def test_fbx_worker_passes_cache_policy_to_store(tmp_path: Path, monkeypatch) ->
         face_vertex_indices=array("i"),
     )
 
+    monkeypatch.setenv(WORKER_TOKEN_ENV, worker_token)
     monkeypatch.setattr(worker_module, "load_fbx_payload_from_cache", lambda *_args, **_kwargs: FbxPayloadCacheResult(None, hit=False))
     monkeypatch.setattr(worker_module, "load_fbx_geometry", lambda *_args, **_kwargs: payload)
     monkeypatch.setattr(
@@ -191,6 +195,7 @@ def test_fbx_worker_passes_cache_policy_to_store(tmp_path: Path, monkeypatch) ->
             fbx_cache_max_age_seconds=5678,
             result_path=str(result_path),
             error_path=str(error_path),
+            worker_token=worker_token,
         ),
     )
 

@@ -143,3 +143,23 @@ def test_cli_part_source_config_uses_shared_explicit_material_contract(
     assert exit_code == 0
     assert observed["request"].use_explicit_material_contract is True
     assert observed["request"].prototype_source_configs[0].single_material_path == "/Game/TreeParts/M_Twig.M_Twig"
+
+
+def test_cli_benchmark_normalizer_reports_stage_medians(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    from xml_to_usda.cli import main
+
+    _install_runtime_paths(monkeypatch, tmp_path)
+
+    exit_code = main(["benchmark-normalizer", str(SIMPLE_TREE_01), "--iterations", "1", "--warmup", "0"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Normalizer benchmark:" in captured.out
+    assert "parse_seconds_median:" in captured.out
+    assert "inspect_seconds_median:" in captured.out
+    assert "normalize_seconds_median:" in captured.out
+    assert "base_faces:" in captured.out

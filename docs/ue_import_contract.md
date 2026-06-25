@@ -166,7 +166,7 @@ For `static_assembly` mode, the required importer-facing shape is:
 - root `Xform` with `NaniteAssemblyRootAPI`
 - root `unreal:naniteAssembly:meshType = "staticMesh"`
 - root `kind = "group"`
-- the stage root does not require a `defaultPrim`; the root prim itself is the assembly root
+- the stage declares `defaultPrim` pointing at the assembly root
 - no skeleton relationship on the root
 - no `SkelRoot`
 - no `Skeleton`
@@ -208,23 +208,40 @@ Fracture Collision is optional per-piece companion geometry for Fracture Static
 Mesh Assembly exports. It does not change the intact-tree skeletal/static
 assembly contracts.
 
-Current authored collision names follow the UE static-mesh collision prefixes:
+Current UE 5.7.x policy: generated simple collision is authored for and
+validated on the piece `BaseMesh`/`BaseMeshPart` asset. The final
+Nanite Assembly does not inherit that collision on import; transfer it in UE
+with Static Mesh Editor `Copy Collision from Selected Static Mesh`.
+
+Fracture collision export uses UE/Interchange static-mesh collision prefixes:
 
 - `UCX_...` for one simplified Convex Hull
 - `UCP_...` for Capsule collision meshes
 - `USP_...` for Sphere collision meshes
+
+Capsule and Sphere exports bake position/orientation into mesh points. UE 5.7.x
+recognized transformed `UCP_` meshes as capsules but ignored their prim
+`xformOp` when creating the `SphylElem`, leaving capsules at the origin.
+Collision meshes are authored with `purpose = "guide"` so they are available to
+collision import without becoming visible assembly geometry.
+
+Manual UE 5.7.x validation showed that adding USD Physics APIs to these sibling
+collision prims makes them import as separate geometry instead of Static Mesh
+simple collision. Do not add `PhysicsCollisionAPI`/`PhysicsMeshCollisionAPI`
+to `UCX_`, `UCP_`, or `USP_` sibling collision meshes unless UE behavior
+changes.
+
+Manual UE 5.7.x validation showed that prototype-local `UCX_...BaseMesh...`
+collision imports onto the synthetic BaseMesh asset, but is not inherited by
+the final Static Mesh Assembly asset. Do not export capsule or sphere
+collisions as `UCX`; those are different collision primitive types.
 
 Current generation modes:
 
 - Convex uses one hull per Fracture Piece, with optional source point sampling
   from repeated parts
 - Sphere uses one bounding sphere per Fracture Piece, with shrink/scale support
-- Capsule uses skeleton-owned segment capsules, simplification, radius padding,
-  and visual scale; fitting is bounded to avoid leaf/tip outlier inflation
-
-UE 5.7.x USD/Interchange recognition of these authored collision meshes remains
-manual-validation pending. Until validated, treat the naming as intended
-importer contract, not proven UE behavior.
+- Capsule uses skeleton-owned segment capsules, simplification, and radius scale
 
 ## External reuse debugging rule
 

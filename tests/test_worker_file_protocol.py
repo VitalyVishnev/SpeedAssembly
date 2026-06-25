@@ -101,3 +101,32 @@ def test_worker_command_resolution_uses_self_executable_in_frozen_mode(monkeypat
         "--request",
         str(request_path),
     ]
+
+
+def test_worker_token_validation_rejects_missing_env(monkeypatch) -> None:
+    from xml_to_usda.worker_file_protocol import WORKER_TOKEN_ENV, validate_worker_token
+
+    monkeypatch.delenv(WORKER_TOKEN_ENV, raising=False)
+
+    with pytest.raises(RuntimeError, match="missing from environment"):
+        validate_worker_token("request-token")
+
+
+def test_worker_token_validation_rejects_mismatch(monkeypatch) -> None:
+    from xml_to_usda.worker_file_protocol import WORKER_TOKEN_ENV, validate_worker_token
+
+    monkeypatch.setenv(WORKER_TOKEN_ENV, "expected-token")
+
+    with pytest.raises(RuntimeError, match="mismatch"):
+        validate_worker_token("wrong-token")
+
+
+def test_worker_env_carries_token(monkeypatch) -> None:
+    from xml_to_usda.worker_file_protocol import WORKER_TOKEN_ENV, worker_env
+
+    monkeypatch.setenv("XML_TO_USDA_TEST_KEEP", "yes")
+
+    env = worker_env("request-token")
+
+    assert env[WORKER_TOKEN_ENV] == "request-token"
+    assert env["XML_TO_USDA_TEST_KEEP"] == "yes"

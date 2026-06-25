@@ -53,8 +53,10 @@ from .runtime_error_mode import suppress_windows_native_error_dialogs
 from .worker_file_protocol import (
     cleanup_file,
     create_temp_path,
+    new_worker_token,
     read_worker_payload,
     resolve_worker_command,
+    worker_env,
 )
 
 
@@ -72,6 +74,7 @@ def start_conversion_process(
     result_path = _create_conversion_temp_path(".result.json")
     error_path = _create_conversion_temp_path(".error.json")
     stderr_path = _create_conversion_temp_path(".stderr.log")
+    worker_token = new_worker_token()
     event_dir = Path(tempfile.mkdtemp(prefix="xml_to_usda_conversion_events_"))
     write_conversion_worker_request(
         request_path,
@@ -81,6 +84,7 @@ def start_conversion_process(
             result_path=str(result_path),
             error_path=str(error_path),
             event_dir=str(event_dir),
+            worker_token=worker_token,
         ),
     )
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -90,6 +94,7 @@ def start_conversion_process(
             stdout=subprocess.DEVNULL,
             stderr=stderr_handle,
             creationflags=creation_flags,
+            env=worker_env(worker_token),
         )
     return (
         _SubprocessWorkerProcess(process),
@@ -115,6 +120,7 @@ def start_proxy_mesh_process(
     result_path = _create_proxy_temp_path(".result.json")
     error_path = _create_proxy_temp_path(".error.json")
     stderr_path = _create_proxy_temp_path(".stderr.log")
+    worker_token = new_worker_token()
     write_proxy_mesh_worker_request(
         request_path,
         ProxyMeshWorkerRequest(
@@ -123,6 +129,7 @@ def start_proxy_mesh_process(
             action=action,
             result_path=str(result_path),
             error_path=str(error_path),
+            worker_token=worker_token,
         ),
     )
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -132,6 +139,7 @@ def start_proxy_mesh_process(
             stdout=subprocess.DEVNULL,
             stderr=stderr_handle,
             creationflags=creation_flags,
+            env=worker_env(worker_token),
         )
     return (
         _SubprocessWorkerProcess(process),
@@ -168,6 +176,7 @@ def start_part_preview_process(
     result_path = _create_part_preview_temp_path(".result.json")
     error_path = _create_part_preview_temp_path(".error.json")
     stderr_path = _create_part_preview_temp_path(".stderr.log")
+    worker_token = new_worker_token()
     write_part_preview_worker_request(
         request_path,
         PartPreviewWorkerRequest(
@@ -175,6 +184,7 @@ def start_part_preview_process(
             settings=settings,
             result_path=str(result_path),
             error_path=str(error_path),
+            worker_token=worker_token,
         ),
     )
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -184,6 +194,7 @@ def start_part_preview_process(
             stdout=subprocess.DEVNULL,
             stderr=stderr_handle,
             creationflags=creation_flags,
+            env=worker_env(worker_token),
         )
     return (
         _SubprocessWorkerProcess(process),
@@ -208,6 +219,7 @@ def _start_fracture_worker_process(
     result_path = _create_fracture_temp_path(".result.json")
     error_path = _create_fracture_temp_path(".error.json")
     stderr_path = _create_fracture_temp_path(".stderr.log")
+    worker_token = new_worker_token()
     write_fracture_worker_request(
         request_path,
         FractureWorkerRequest(
@@ -216,6 +228,7 @@ def _start_fracture_worker_process(
             action=action,
             result_path=str(result_path),
             error_path=str(error_path),
+            worker_token=worker_token,
         ),
     )
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -225,6 +238,7 @@ def _start_fracture_worker_process(
             stdout=subprocess.DEVNULL,
             stderr=stderr_handle,
             creationflags=creation_flags,
+            env=worker_env(worker_token),
         )
     return (
         _SubprocessWorkerProcess(process),

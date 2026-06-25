@@ -21,6 +21,7 @@ _LEGACY_METHODS = {
     "branch_base_greedy",
     "manual_pinned_bones",
 }
+_MIN_MANUAL_SEGMENT_CUT_SEPARATION = 0.02
 
 
 class FractureError(ValueError):
@@ -167,11 +168,13 @@ def plan_fracture(
 
     if len(pieces) < resolved_settings.target_piece_count:
         pieces, synthetic_cut_sites = _refine_with_synthetic_face_splits(
+            model,
             pieces,
             target_piece_count=resolved_settings.target_piece_count,
             output_stem=resolved_settings.output_stem,
         )
         selected.extend(synthetic_cut_sites)
+        _raise_for_empty_manual_cut_pieces(selected, pieces)
 
     diagnostics = candidate_diagnostics + _manual_piece_count_diagnostics(resolved_settings, pieces)
     if len(pieces) < resolved_settings.target_piece_count:
@@ -277,8 +280,11 @@ def _manual_cut_sites(
 ) -> list[FractureCutSite]:
     cut_sites: list[FractureCutSite] = []
     seen: set[str] = set()
+    segment_t_by_edge: dict[tuple[str, str], list[float]] = {}
     for token in settings.pinned_cut_joint_tokens:
         cut_site = _manual_cut_site_from_token(token, graph)
+        if cut_site.kind == "manual_segment":
+            _raise_for_closely_spaced_manual_segment_cut(cut_site, segment_t_by_edge)
         if cut_site.joint_token in seen:
             continue
         seen.add(cut_site.joint_token)
@@ -291,6 +297,26 @@ def _manual_cut_sites(
                 )
         cut_sites.append(cut_site)
     return sorted(cut_sites, key=lambda cut_site: _cut_site_sort_key(cut_site, graph))
+
+
+def _raise_for_closely_spaced_manual_segment_cut(
+    cut_site: FractureCutSite,
+    segment_t_by_edge: dict[tuple[str, str], list[float]],
+) -> None:
+    parent = cut_site.parent_joint_token
+    child = cut_site.child_joint_token
+    segment_t = cut_site.segment_t
+    if parent is None or child is None or segment_t is None:
+        raise FractureError(f"Manual fracture segment cut token is incomplete: {cut_site.joint_token}.")
+    edge = (parent, child)
+    for existing_t in segment_t_by_edge.setdefault(edge, []):
+        if abs(segment_t - existing_t) < _MIN_MANUAL_SEGMENT_CUT_SEPARATION:
+            raise FractureError(
+                "Manual fracture segment cuts on the same skeleton edge must be at least "
+                f"{_MIN_MANUAL_SEGMENT_CUT_SEPARATION:.2f} apart: {cut_site.joint_token} is too close to "
+                f"{format_manual_segment_cut_token(parent, child, existing_t)}."
+            )
+    segment_t_by_edge[edge].append(segment_t)
 
 
 def _manual_cut_site_from_token(token: str, graph: _SkeletonGraph) -> FractureCutSite:
@@ -736,6 +762,7 @@ def _raise_for_empty_manual_cut_pieces(
 
 
 def _refine_with_synthetic_face_splits(
+    model: CanonicalTreeModel,
     pieces: tuple[FracturePiece, ...],
     *,
     target_piece_count: int,
@@ -743,16 +770,21 @@ def _refine_with_synthetic_face_splits(
 ) -> tuple[tuple[FracturePiece, ...], tuple[FractureCutSite, ...]]:
     refined = list(pieces)
     synthetic_cut_sites: list[FractureCutSite] = []
+    face_centroids = _base_face_centroids(model)
+    prototype_bounds_by_key = _prototype_bounds_by_key(model)
     while len(refined) < target_piece_count:
         split_index = _synthetic_split_piece_index(refined)
         if split_index is None:
             break
         piece = refined[split_index]
-        split_at = len(piece.base_face_indices) // 2
-        left_faces = piece.base_face_indices[:split_at]
-        right_faces = piece.base_face_indices[split_at:]
+        split = _split_piece_spatially(piece, face_centroids, model, prototype_bounds_by_key)
+        if split is None:
+            break
+        left_faces, right_faces, left_repeated, right_repeated = split
         if not left_faces or not right_faces:
             break
+        left_repeated_names = tuple(model.repeated_parts[index].name for index in left_repeated)
+        right_repeated_names = tuple(model.repeated_parts[index].name for index in right_repeated)
         cut_token = f"{piece.cut_joint_token or 'root'}#face_split_{len(synthetic_cut_sites) + 1:02d}"
         refined[split_index] = FracturePiece(
             index=piece.index,
@@ -761,8 +793,8 @@ def _refine_with_synthetic_face_splits(
             cut_joint_token=piece.cut_joint_token,
             joint_tokens=piece.joint_tokens,
             base_face_indices=left_faces,
-            repeated_part_indices=piece.repeated_part_indices,
-            repeated_part_names=piece.repeated_part_names,
+            repeated_part_indices=left_repeated,
+            repeated_part_names=left_repeated_names,
         )
         refined.insert(
             split_index + 1,
@@ -773,8 +805,8 @@ def _refine_with_synthetic_face_splits(
                 cut_joint_token=cut_token,
                 joint_tokens=piece.joint_tokens,
                 base_face_indices=right_faces,
-                repeated_part_indices=(),
-                repeated_part_names=(),
+                repeated_part_indices=right_repeated,
+                repeated_part_names=right_repeated_names,
             ),
         )
         synthetic_cut_sites.append(
@@ -792,12 +824,146 @@ def _synthetic_split_piece_index(pieces: list[FracturePiece]) -> int | None:
     candidates = [
         (len(piece.base_face_indices), index)
         for index, piece in enumerate(pieces)
-        if len(piece.base_face_indices) > 1 and not piece.repeated_part_indices
+        if len(piece.base_face_indices) > 1
     ]
     if not candidates:
         return None
     _face_count, index = max(candidates, key=lambda item: (item[0], item[1]))
     return index
+
+
+def _split_piece_spatially(
+    piece: FracturePiece,
+    face_centroids: tuple[Vector3 | None, ...],
+    model: CanonicalTreeModel,
+    prototype_bounds_by_key: dict[str, tuple[Vector3, Vector3]],
+) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]] | None:
+    centroids = [(face_index, face_centroids[face_index]) for face_index in piece.base_face_indices]
+    if any(centroid is None for _face_index, centroid in centroids):
+        return None
+    points = tuple(centroid for _face_index, centroid in centroids if centroid is not None)
+    axis = _widest_axis(points)
+    projections = sorted(_axis_value(point, axis) for point in points)
+    threshold = projections[len(projections) // 2]
+    left_faces = tuple(face_index for face_index, centroid in centroids if _axis_value(centroid, axis) < threshold)
+    right_faces = tuple(face_index for face_index, centroid in centroids if _axis_value(centroid, axis) >= threshold)
+    if not left_faces or not right_faces:
+        return None
+
+    left_repeated: list[int] = []
+    right_repeated: list[int] = []
+    for part_index in piece.repeated_part_indices:
+        side = _repeated_part_split_side(model.repeated_parts[part_index], prototype_bounds_by_key, axis, threshold)
+        if side == "left":
+            left_repeated.append(part_index)
+        else:
+            right_repeated.append(part_index)
+    return left_faces, right_faces, tuple(left_repeated), tuple(right_repeated)
+
+
+def _widest_axis(points: tuple[Vector3, ...]) -> str:
+    spans = {
+        "x": max(point.x for point in points) - min(point.x for point in points),
+        "y": max(point.y for point in points) - min(point.y for point in points),
+        "z": max(point.z for point in points) - min(point.z for point in points),
+    }
+    return max(("x", "y", "z"), key=lambda axis: (spans[axis], axis))
+
+
+def _axis_value(point: Vector3, axis: str) -> float:
+    return getattr(point, axis)
+
+
+def _prototype_bounds_by_key(model: CanonicalTreeModel) -> dict[str, tuple[Vector3, Vector3]]:
+    bounds: dict[str, tuple[Vector3, Vector3]] = {}
+    for prototype in model.prototypes:
+        points = _prototype_points(prototype)
+        if points:
+            bounds[prototype.source_key] = _points_bounds(points)
+    return bounds
+
+
+def _prototype_points(prototype) -> tuple[Vector3, ...]:
+    if prototype.mesh is not None:
+        return prototype.mesh.points
+    payload = prototype.geometry_payload
+    if payload is None:
+        return ()
+    components = payload.point_components
+    return tuple(
+        Vector3(float(components[index]), float(components[index + 1]), float(components[index + 2]))
+        for index in range(0, len(components), 3)
+    )
+
+
+def _points_bounds(points: tuple[Vector3, ...]) -> tuple[Vector3, Vector3]:
+    return (
+        Vector3(min(point.x for point in points), min(point.y for point in points), min(point.z for point in points)),
+        Vector3(max(point.x for point in points), max(point.y for point in points), max(point.z for point in points)),
+    )
+
+
+def _repeated_part_split_side(
+    part: RepeatedPartInstance,
+    prototype_bounds_by_key: dict[str, tuple[Vector3, Vector3]],
+    axis: str,
+    threshold: float,
+) -> str:
+    bounds = prototype_bounds_by_key.get(part.prototype_key)
+    if bounds is None:
+        raise FractureError(
+            f"Synthetic fracture split cannot classify repeated part {part.name}: "
+            f"prototype {part.prototype_key} has no mesh bounds."
+        )
+    projections = tuple(
+        _axis_value(_transform_point(corner, part.position, part.orientation, part.scale), axis)
+        for corner in _bounds_corners(bounds)
+    )
+    if max(projections) < threshold:
+        return "left"
+    if min(projections) >= threshold:
+        return "right"
+    raise FractureError(
+        f"Synthetic fracture split plane crosses repeated part {part.name}; "
+        "author a manual cut or provide a different target piece count."
+    )
+
+
+def _bounds_corners(bounds: tuple[Vector3, Vector3]) -> tuple[Vector3, ...]:
+    minimum, maximum = bounds
+    return (
+        Vector3(minimum.x, minimum.y, minimum.z),
+        Vector3(minimum.x, minimum.y, maximum.z),
+        Vector3(minimum.x, maximum.y, minimum.z),
+        Vector3(minimum.x, maximum.y, maximum.z),
+        Vector3(maximum.x, minimum.y, minimum.z),
+        Vector3(maximum.x, minimum.y, maximum.z),
+        Vector3(maximum.x, maximum.y, minimum.z),
+        Vector3(maximum.x, maximum.y, maximum.z),
+    )
+
+
+def _transform_point(point: Vector3, translate: Vector3, orientation, scale: Vector3) -> Vector3:
+    scaled = Vector3(point.x * scale.x, point.y * scale.y, point.z * scale.z)
+    rotated = _rotate_vector(scaled, orientation)
+    return Vector3(rotated.x + translate.x, rotated.y + translate.y, rotated.z + translate.z)
+
+
+def _rotate_vector(vector: Vector3, q) -> Vector3:
+    w, x, y, z = float(q.real), float(q.i), float(q.j), float(q.k)
+    length = sqrt(w * w + x * x + y * y + z * z)
+    if length <= 0.0:
+        raise FractureError("Synthetic fracture split encountered a zero-length repeated part orientation quaternion.")
+    w, x, y, z = w / length, x / length, y / length, z / length
+    vx, vy, vz = vector.x, vector.y, vector.z
+    tx = 2.0 * (y * vz - z * vy)
+    ty = 2.0 * (z * vx - x * vz)
+    tz = 2.0 * (x * vy - y * vx)
+    return Vector3(
+        vx + w * tx + (y * tz - z * ty),
+        vy + w * ty + (z * tx - x * tz),
+        vz + w * tz + (x * ty - y * tx),
+    )
 
 
 def _renumber_pieces(pieces: tuple[FracturePiece, ...], *, output_stem: str) -> tuple[FracturePiece, ...]:

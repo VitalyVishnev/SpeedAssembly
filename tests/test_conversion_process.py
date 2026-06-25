@@ -29,7 +29,7 @@ from xml_to_usda.models import ConversionJobResult, ConversionRequest
 from xml_to_usda.pipeline import convert_request
 from xml_to_usda.proxy_mesh_service import ProxyMeshJobResult, ProxyMeshSettings, ProxyMeshSourceRequest
 from xml_to_usda.runtime_paths import resolve_runtime_paths
-from xml_to_usda.worker_file_protocol import read_worker_payload
+from xml_to_usda.worker_file_protocol import WORKER_TOKEN_ENV, read_worker_payload
 
 
 SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "samples" / "speedtree" / "simple_tree" / "variants" / "SimpleTree_01.xml"
@@ -140,6 +140,7 @@ def test_start_conversion_process_uses_file_based_worker(monkeypatch, tmp_path: 
     assert popen_calls
     assert process.is_alive() is True
     assert "--request" in popen_calls[0].args
+    assert popen_calls[0].kwargs["env"][WORKER_TOKEN_ENV]
     assert popen_calls[0].kwargs["stdout"] is not None
     assert popen_calls[0].kwargs["stderr"] is not None
     cancel_event.set()
@@ -182,6 +183,7 @@ def test_start_proxy_mesh_process_uses_file_based_worker(monkeypatch) -> None:
     assert popen_calls
     assert process.is_alive() is True
     assert "--request" in popen_calls[0].args
+    assert popen_calls[0].kwargs["env"][WORKER_TOKEN_ENV]
     assert popen_calls[0].kwargs["stdout"] is not None
     assert popen_calls[0].kwargs["stderr"] is not None
     cancel_event.set()
@@ -225,6 +227,7 @@ def test_start_fracture_export_process_uses_file_based_worker(monkeypatch) -> No
     assert "--request" in popen_calls[0].args
     request_path = Path(popen_calls[0].args[popen_calls[0].args.index("--request") + 1])
     payload = read_fracture_worker_request(request_path)
+    assert payload.worker_token == popen_calls[0].kwargs["env"][WORKER_TOKEN_ENV]
     assert payload.request.output_path == "output.usda"
     assert isinstance(payload.request, FractureExportRequest)
     assert payload.action == "export"
@@ -272,6 +275,7 @@ def test_start_fracture_preview_process_uses_file_based_worker(monkeypatch) -> N
     assert "--request" in popen_calls[0].args
     request_path = Path(popen_calls[0].args[popen_calls[0].args.index("--request") + 1])
     payload = read_fracture_worker_request(request_path)
+    assert payload.worker_token == popen_calls[0].kwargs["env"][WORKER_TOKEN_ENV]
     assert payload.request.output_path == "output.usda"
     assert isinstance(payload.request, FracturePreviewSourceRequest)
     assert payload.action == "preview"
@@ -392,7 +396,9 @@ def test_conversion_worker_request_file_writes_telemetry_and_result(
     result_path = tmp_path / "conversion.result.json"
     error_path = tmp_path / "conversion.error.json"
     event_dir = tmp_path / "events"
+    worker_token = "test-worker-token"
 
+    monkeypatch.setenv(WORKER_TOKEN_ENV, worker_token)
     monkeypatch.setattr("xml_to_usda.conversion_worker_subprocess.apply_process_profile", lambda _profile: None)
     write_conversion_worker_request(
         request_path,
@@ -402,6 +408,7 @@ def test_conversion_worker_request_file_writes_telemetry_and_result(
             result_path=str(result_path),
             error_path=str(error_path),
             event_dir=str(event_dir),
+            worker_token=worker_token,
         ),
     )
 
@@ -417,6 +424,30 @@ def test_conversion_worker_request_file_writes_telemetry_and_result(
     assert job_result.error_message is None
     assert job_result.result is not None
     assert job_result.result.output_path == str(tmp_path / "worker_file_success.usda")
+
+
+def test_conversion_worker_rejects_missing_origin_token(monkeypatch, tmp_path: Path) -> None:
+    runtime_paths = _test_runtime_paths(tmp_path)
+    request_path = tmp_path / "conversion.request.json"
+    result_path = tmp_path / "conversion.result.json"
+    error_path = tmp_path / "conversion.error.json"
+
+    monkeypatch.delenv(WORKER_TOKEN_ENV, raising=False)
+    write_conversion_worker_request(
+        request_path,
+        ConversionWorkerRequest(
+            request=ConversionRequest(input_paths=(str(SIMPLE_TREE_01),), output_path=str(tmp_path / "out.usda")),
+            runtime_paths=runtime_paths,
+            result_path=str(result_path),
+            error_path=str(error_path),
+            event_dir=str(tmp_path / "events"),
+            worker_token="request-token",
+        ),
+    )
+
+    assert run_conversion_worker_request_file(request_path) == 1
+    assert error_path.exists()
+    assert result_path.exists() is False
 
 
 def test_conversion_process_entry_reports_traceback_then_error_result_on_failure(
