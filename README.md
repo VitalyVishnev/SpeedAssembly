@@ -28,7 +28,7 @@ Current status:
 
 Environment note:
 
-- use [`.venv310`](D:/3D%20Personal/VibeCode/XMLtoUSDAconverter/.venv310) as the default working environment for this repository
+- use [`.venv310`](./.venv310) as the default working environment for this repository
 - real FBX import support is wired through Autodesk `FBX Python SDK 2020.3.4` installed into `.venv310`
 - tests and build helpers should also run from `.venv310`
 - do not assume the legacy `.venv` or global Python install has working FBX bindings
@@ -180,30 +180,17 @@ Notes:
 ## Docs
 
 - `AGENTS.md`
-  Mission, hard rules, and canonical terminology.
-- `docs/PROJECT_MAP.md`
-  Navigation entry point for architecture reviews and AI-assisted exploration.
-- `docs/GLOSSARY.md`
-  Project domain vocabulary for architecture suggestions.
-- `docs/ARCHITECTURE.md`
-  Module map, interfaces, seams, adapters, and architecture review checklist.
-- `docs/DECISIONS.md`
-  Architecture decisions that should not be re-litigated without new evidence.
-- `docs/ue_import_contract.md`
-  Importer-facing USDA structure and required UE/USD contract.
-- `docs/speedtree_mapping.md`
-  SpeedTree XML to project-concept mapping.
-- `docs/workflow_status.md`
-  Baseline sample, current status, and workflow.
-- `docs/troubleshooting.md`
-  Fast checks for common exporter and UE importer dead-ends.
-- `docs/local-python-environment.md`
-  Local environment setup.
+  Mission, hard rules, and wiki maintenance rules.
+- `docs/wiki/index.md`
+  Maintained project memory and navigation.
+- `docs/raw/`
+  Legacy source material preserved for reference.
 
 ## Repo areas
 
 - `samples/` holds controlled XML inputs and generated outputs.
-- `docs/` holds the normative project docs plus architecture-review entry points.
+- `docs/wiki/` holds the maintained project memory.
+- `docs/raw/` holds the preserved legacy source material.
 - `vault/` holds reference USDA, UE schema, importer source, and related research artifacts.
 
 

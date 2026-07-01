@@ -1,0 +1,48 @@
+# Glossary
+
+- `Converter` - deterministic SpeedTree Raw XML to USDA pipeline for UE 5.7.x vegetation import.
+- `Observed Source XML` - a real SpeedTree XML sample treated as observed schema, not a formal spec.
+- `Skeletal Assembly` (`Skeletal Mesh Nanite Assembly`) - the skeletal import shape: Assembly Root, Main Skeleton, Base Skeletal Tree, and repeated skeletal Assembly Parts.
+- `Static Assembly` (`Static Mesh Nanite Assembly`) - the secondary rigid export shape: Assembly Root, rigid prototypes, and repeated static Assembly Parts without skeletons.
+- `Assembly Root` - the root prim of the authored USD scene.
+- `Base Skeletal Tree` - the unique tree geometry bound to the Main Skeleton.
+- `Main Skeleton` - the shared skeleton used by the base tree and skeletal assembly parts.
+- `Assembly Part` - authored repeated geometry placed through `PointInstancer`.
+- `Repeated Part` - source-level repeated geometry interpreted from `LeafReferences`.
+- `Source Prototype` - a reusable repeated-part definition from `Meshes/Mesh`.
+- `Resolved Prototype` - a prototype after source facts are combined with operator intent.
+- `Authored Prototype` - the USD prototype subtree written for `PointInstancer`.
+- `Repeated Part Instance` - a source-level placed record from `LeafReferences`.
+- `Resolved Instance` - a repeated part instance after operator intent is applied.
+- `Authored Instance` - the per-instance data written into USDA arrays.
+- `Attachment` - source or resolved placement relationship for a repeated part.
+- `Skeletal Binding` - the authored USD contract that binds skeletal geometry to the Main Skeleton.
+- `Source Material` - XML ids, names, vertex colors, and FBX slot names before overrides.
+- `Resolved Material Assignment` - material choice after source facts are combined with operator intent.
+- `Authored Material Binding` - USDA material prims, `material:binding`, and `GeomSubset` output.
+- `Source Space` - transform space as observed in XML or imported source payloads.
+- `Stage Space` - transform space authored into USDA after axis and basis conversion.
+- `Prototype Space` - the local space of a source, resolved, or authored prototype.
+- `Attachment Space` - the space used to interpret how a repeated part relates to its attachment.
+- `Instance Transform` - the resolved per-instance position, orientation, and scale before USD array authoring.
+- `Authored PointInstancer Transform` - the final `positions`, `orientations`, `scales`, and `protoIndices` authored into USDA.
+- `Output Stem` - the file stem chosen from the output USDA path.
+- `Prim Name` - a USD-valid identifier used for a prim in authored USDA.
+- `Authored Asset Name` - the intended authored or imported asset identity.
+- `Unreal Asset Path` - a UE package/object path such as `/Game/Trees/SK_Branch.SK_Branch`.
+- `PointInstancer` - the USD mechanism that places repeated parts.
+- `CanonicalTreeModel` - the normalized source-facts model used by conversion and validation.
+- `ResolvedAssemblyModel` - the authoring-stage model that combines source facts with operator intent.
+- `Operator State` - the current UI-selected values for a conversion workflow.
+- `Persisted Operator Settings` - saved global operator values and presets.
+- `UI Shell State` - window geometry, theme, tabs, and other visual shell state.
+- `Runtime Job` - one executing conversion run with telemetry, cleanup, workers, and a job workspace.
+- `Job Workspace` - the per-run temp/cache directory and diagnostics surface.
+- `Conversion Worker` - the subprocess that owns a large conversion outside the UI process.
+- `FBX Helper` - the isolated native Autodesk FBX import helper process.
+- `Proxy Mesh` - a companion USDA asset for a compact static preview/export mesh.
+- `Fracturing` - a companion destructibility workflow that outputs root-pivoted static pieces.
+- `Fracture Piece` - one planned destructible tree piece in the fracture workflow.
+- `Dynamic Wind` - the separate Unreal JSON wind output generated from the normalized skeleton.
+- `Source Name` - any name observed in XML, FBX, or source filenames.
+- `Instance` - shorthand for a placed occurrence of a prototype when the stage is already obvious.
