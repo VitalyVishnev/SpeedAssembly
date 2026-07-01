@@ -53,6 +53,7 @@ from .viewport import MATCAP_VERTEX_STRIDE, MatcapViewport
 FRACTURE_SOURCE_VERTEX_STRIDE = 10
 FRACTURE_VERTEX_STRIDE = MATCAP_VERTEX_STRIDE
 FRACTURE_MATCAP_TINT_STRENGTH = 0.78
+BRANCH_PRUNE_SLIDER_EXPONENT = 4.0
 
 
 @dataclass(frozen=True)
@@ -175,6 +176,13 @@ class FracturePreviewDialog(PreviewShellDialog):
         )
         settings_layout.addWidget(QLabel("Preview Polycount", settings_panel))
         settings_layout.addLayout(_slider_row(self.polycount_slider, self.polycount_spin))
+
+        self.branch_prune_slider, self.branch_prune_spin = _build_branch_prune_slider_row(
+            settings_panel,
+            value=float(self._settings.branch_prune_aggression),
+        )
+        settings_layout.addWidget(QLabel("Remove Small Branches", settings_panel))
+        settings_layout.addLayout(_slider_row(self.branch_prune_slider, self.branch_prune_spin))
 
         self.base_priority_slider, self.base_priority_spin = _build_float_slider_row(
             settings_panel,
@@ -370,6 +378,8 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.piece_count_spin.editingFinished.connect(self._emit_settings_changed)
         self.polycount_slider.sliderReleased.connect(self._emit_settings_changed)
         self.polycount_spin.editingFinished.connect(self._emit_settings_changed)
+        self.branch_prune_slider.sliderReleased.connect(self._emit_settings_changed)
+        self.branch_prune_spin.editingFinished.connect(self._emit_settings_changed)
         self.base_priority_slider.sliderReleased.connect(self._emit_settings_changed)
         self.base_priority_spin.editingFinished.connect(self._emit_settings_changed)
         self.preserve_trunk_slider.sliderReleased.connect(self._emit_settings_changed)
@@ -425,6 +435,7 @@ class FracturePreviewDialog(PreviewShellDialog):
             ),
             final_polycount=int(self.polycount_spin.value() or DEFAULT_FRACTURE_PREVIEW_POLYCOUNT),
             base_mesh_priority=float(self.base_priority_spin.value()),
+            branch_prune_aggression=float(self.branch_prune_spin.value()),
         )
 
     def caps_material_override_enabled(self) -> bool:
@@ -488,6 +499,8 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.piece_count_spin,
             self.polycount_slider,
             self.polycount_spin,
+            self.branch_prune_slider,
+            self.branch_prune_spin,
             self.base_priority_slider,
             self.base_priority_spin,
             self.preserve_trunk_slider,
@@ -528,6 +541,8 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.piece_count_spin.setValue(int(settings.fracture.target_piece_count))
             self.polycount_slider.setValue(int(settings.final_polycount))
             self.polycount_spin.setValue(int(settings.final_polycount))
+            self.branch_prune_slider.setValue(_branch_prune_value_to_slider(float(settings.branch_prune_aggression)))
+            self.branch_prune_spin.setValue(float(settings.branch_prune_aggression))
             self.base_priority_slider.setValue(int(round(float(settings.base_mesh_priority) * 100)))
             self.base_priority_spin.setValue(float(settings.base_mesh_priority))
             self.preserve_trunk_slider.setValue(int(round(float(settings.fracture.preserve_trunk_bias) * 100)))
@@ -813,6 +828,27 @@ def _build_float_slider_row(
     return slider, spin
 
 
+def _build_branch_prune_slider_row(parent, *, value: float) -> tuple[QSlider, QDoubleSpinBox]:
+    slider = QSlider(Qt.Orientation.Horizontal, parent)
+    slider.setRange(0, 100)
+    slider.setSingleStep(1)
+    slider.setPageStep(4)
+    slider.setValue(_branch_prune_value_to_slider(value))
+
+    spin = QDoubleSpinBox(parent)
+    spin.setRange(0.0, 1.0)
+    spin.setSingleStep(0.001)
+    spin.setDecimals(4)
+    spin.setValue(max(0.0, min(1.0, value)))
+    spin.setKeyboardTracking(False)
+    spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+    spin.setFixedWidth(82)
+
+    slider.valueChanged.connect(lambda raw: _sync_branch_prune_spin(spin, raw))
+    spin.editingFinished.connect(lambda: _sync_branch_prune_slider(slider, spin.value()))
+    return slider, spin
+
+
 def _slider_row(slider: QSlider, spin) -> QHBoxLayout:
     row = QHBoxLayout()
     row.setContentsMargins(0, 0, 0, 0)
@@ -870,6 +906,31 @@ def _sync_float_spin(spin: QDoubleSpinBox, value: int, scale: int) -> None:
 def _sync_float_slider(slider: QSlider, value: float, scale: int) -> None:
     with QSignalBlocker(slider):
         slider.setValue(int(round(value * scale)))
+
+
+def _sync_branch_prune_spin(spin: QDoubleSpinBox, slider_value: int) -> None:
+    with QSignalBlocker(spin):
+        spin.setValue(_branch_prune_slider_to_value(slider_value))
+
+
+def _sync_branch_prune_slider(slider: QSlider, value: float) -> None:
+    with QSignalBlocker(slider):
+        slider.setValue(_branch_prune_value_to_slider(value))
+
+
+def _branch_prune_slider_to_value(slider_value: int) -> float:
+    position = max(0.0, min(1.0, float(slider_value) / 100.0))
+    return 1.0 - ((1.0 - position) ** BRANCH_PRUNE_SLIDER_EXPONENT)
+
+
+def _branch_prune_value_to_slider(value: float) -> int:
+    clamped = max(0.0, min(1.0, value))
+    if clamped <= 0.0:
+        return 0
+    if clamped >= 1.0:
+        return 100
+    position = 1.0 - math.pow(1.0 - clamped, 1.0 / BRANCH_PRUNE_SLIDER_EXPONENT)
+    return int(round(position * 100.0))
 
 
 def build_fracture_viewport_mesh(

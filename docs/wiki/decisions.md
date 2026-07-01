@@ -257,7 +257,7 @@ Reasoning:
 Cheaper diagnostic paths are acceptable only when they do not weaken the exported topology contract.
 
 Consequences:
-Face sampling stays rejected for proxy simplification, and worker polling must drain result/error files before treating a stopped worker as a crash.
+Face sampling stays rejected for proxy simplification. Preview/proxy base-mesh paths may apply deterministic connected-component pruning before their own simplification pass to discard tiny disconnected terminal details: `Remove Small Branches` is a percentage of smallest connected islands to remove, not a relative size cutoff. QEM remains the Proxy Mesh topology simplification backend. Worker polling must drain result/error files before treating a stopped worker as a crash.
 
 Related files:
 - `docs/raw/DECISIONS.md`

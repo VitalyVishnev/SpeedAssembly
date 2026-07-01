@@ -120,6 +120,51 @@ def _quad_grid_mesh(name: str, width: int, height: int) -> MeshData:
     )
 
 
+def _branchy_base_mesh_with_tiny_terminal_parts() -> MeshData:
+    points: list[Vector3] = []
+    face_counts: list[int] = []
+    face_indices: list[int] = []
+
+    def add_face(face_points: tuple[Vector3, ...]) -> None:
+        point_offset = len(points)
+        points.extend(face_points)
+        face_counts.append(len(face_points))
+        face_indices.extend(range(point_offset, point_offset + len(face_points)))
+
+    add_face(
+        (
+            Vector3(-2.0, 0.0, -1.0),
+            Vector3(2.0, 0.0, -1.0),
+            Vector3(2.0, 12.0, -1.0),
+            Vector3(-2.0, 12.0, -1.0),
+        ),
+    )
+    add_face(
+        (
+            Vector3(0.0, 8.0, -0.5),
+            Vector3(8.0, 11.0, -0.5),
+            Vector3(8.0, 12.0, -0.5),
+            Vector3(0.0, 9.0, -0.5),
+        ),
+    )
+    for index in range(80):
+        x = 20.0 + index * 0.1
+        add_face(
+            (
+                Vector3(x, 16.0, 0.0),
+                Vector3(x + 0.02, 16.0, 0.0),
+                Vector3(x, 16.02, 0.0),
+            ),
+        )
+
+    return MeshData(
+        name="BranchyBase",
+        points=tuple(points),
+        face_vertex_counts=tuple(face_counts),
+        face_vertex_indices=tuple(face_indices),
+    )
+
+
 def _model(*, repeated_count: int = 2, prototype_payload: MeshData | GeometryBuffer | None = None) -> TreeAsset:
     if prototype_payload is None:
         prototype_payload = _triangle_mesh("LeafCluster")
@@ -303,6 +348,47 @@ def test_base_mesh_priority_controls_base_simplification_budget() -> None:
     )
 
     assert _mesh_signature(low_priority.mesh) != _mesh_signature(high_priority.mesh)
+
+
+def test_base_mesh_prefilter_passes_percent_prune_setting_before_qem(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = replace(_model(repeated_count=1), base_mesh=_branchy_base_mesh_with_tiny_terminal_parts(), skeleton=())
+    calls: dict[str, object] = {}
+
+    def fake_select_large_connected_face_indices(
+        mesh: MeshData,
+        *,
+        aggression: float,
+        candidate_face_indices: tuple[int, ...] | None = None,
+    ) -> tuple[int, ...]:
+        calls["mesh"] = mesh
+        calls["aggression"] = aggression
+        calls["candidate_face_indices"] = candidate_face_indices
+        return (0, 1)
+
+    monkeypatch.setattr(
+        "xml_to_usda.proxy_mesh_service.select_large_connected_face_indices",
+        fake_select_large_connected_face_indices,
+    )
+
+    result = generate_proxy_mesh(
+        model,
+        ProxyMeshSettings(
+            final_polycount=20,
+            density_resolution=12,
+            base_mesh_priority=0.5,
+            branch_prune_aggression=0.01,
+        ),
+    )
+
+    assert result.included_base_mesh is True
+    assert calls["mesh"] is model.base_mesh
+    assert calls["aggression"] == pytest.approx(0.01)
+    assert calls["candidate_face_indices"] is None
+
+
+def test_proxy_generation_rejects_invalid_branch_prune_aggression() -> None:
+    with pytest.raises(ProxyMeshError, match="branch prune aggression"):
+        generate_proxy_mesh(_model(repeated_count=1), ProxyMeshSettings(branch_prune_aggression=1.5))
 
 
 def test_proxy_generation_rejects_invalid_base_mesh_priority() -> None:

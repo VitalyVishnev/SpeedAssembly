@@ -26,7 +26,7 @@ def test_proxy_mesh_worker_reports_stage_breadcrumbs(monkeypatch, capsys, tmp_pa
         request_path,
         ProxyMeshWorkerRequest(
             request=ProxyMeshSourceRequest(input_path="tree.xml", output_path=str(tmp_path / "tree.usda")),
-            settings=ProxyMeshSettings(final_polycount=5000, density_resolution=12),
+            settings=ProxyMeshSettings(final_polycount=5000, density_resolution=12, branch_prune_aggression=0.4),
             action="preview",
             result_path=str(result_path),
             error_path=str(error_path),
@@ -40,6 +40,7 @@ def test_proxy_mesh_worker_reports_stage_breadcrumbs(monkeypatch, capsys, tmp_pa
     assert "proxy-mesh-worker stage=request.read.start" in stderr
     assert "proxy-mesh-worker stage=preview.generate.start" in stderr
     assert "density_resolution=12" in stderr
+    assert "branch_prune_aggression=0.4" in stderr
     assert "proxy-mesh-worker stage=preview.generate.end" in stderr
     assert "proxy-mesh-worker stage=result.write.end" in stderr
     assert result_path.exists()

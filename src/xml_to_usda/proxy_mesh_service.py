@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .canonical_loader import load_canonical_model
+from .mesh_pruning import DEFAULT_BRANCH_PRUNE_AGGRESSION, select_large_connected_face_indices
 from .models import CanonicalTreeModel, GeometryBuffer, MeshData, Prototype, Quaternion, Vector3
 from .models import ConversionMode, ConversionRequest, CpuProfile, OutputMode
 from .naming import make_stable_prim_name
@@ -37,6 +38,7 @@ class ProxyMeshSettings:
     bounds_inflation: float = 1.0
     density_resolution: int = 64
     base_mesh_priority: float = 0.33
+    branch_prune_aggression: float = DEFAULT_BRANCH_PRUNE_AGGRESSION
 
 
 @dataclass(frozen=True)
@@ -138,6 +140,8 @@ def generate_proxy_mesh(model: CanonicalTreeModel, settings: ProxyMeshSettings |
         raise ProxyMeshError(f"Proxy density resolution must be between 1 and {MAX_PROXY_DENSITY_RESOLUTION}.")
     if not 0.0 <= resolved_settings.base_mesh_priority <= 1.0:
         raise ProxyMeshError("Proxy base mesh priority must be between zero and one.")
+    if not 0.0 <= resolved_settings.branch_prune_aggression <= 1.0:
+        raise ProxyMeshError("Proxy branch prune aggression must be between zero and one.")
 
     if resolved_settings.method == PROXY_METHOD_INSTANCE_BOUNDS:
         source_boxes, included_base = _collect_source_boxes(model, resolved_settings)
@@ -231,7 +235,6 @@ def _collect_density_field_sources(
     model: CanonicalTreeModel,
     settings: ProxyMeshSettings,
 ) -> _DensityFieldSources:
-    base_mesh = _mesh_to_geometry_buffer(model.base_mesh, name="BaseProxyMesh") if model.base_mesh is not None else None
     prototypes = {prototype.source_key: prototype for prototype in model.prototypes}
     prototype_bounds: dict[str, _Bounds] = {}
     foliage_instances: list[_FoliageKernelInstance] = []
@@ -260,6 +263,11 @@ def _collect_density_field_sources(
                 scale=instance.scale,
             )
         )
+    base_mesh = (
+        _base_proxy_geometry_buffer(model, settings=settings, has_foliage=bool(foliage_instances))
+        if model.base_mesh is not None
+        else None
+    )
     return _DensityFieldSources(base_mesh=base_mesh, foliage_instances=tuple(foliage_instances))
 
 
@@ -311,6 +319,58 @@ def _base_mesh_budget(mesh: GeometryBuffer, *, settings: ProxyMeshSettings, has_
     available_for_base = max(1, settings.final_polycount - 6)
     weighted_budget = int(round(available_for_base * settings.base_mesh_priority))
     return max(1, min(source_triangle_count, weighted_budget, available_for_base))
+
+
+def _base_proxy_geometry_buffer(
+    model: CanonicalTreeModel,
+    *,
+    settings: ProxyMeshSettings,
+    has_foliage: bool,
+) -> GeometryBuffer:
+    mesh = model.base_mesh
+    if mesh is None:
+        raise ProxyMeshError("Proxy base mesh is missing.")
+    buffer = _mesh_to_geometry_buffer(mesh, name="BaseProxyMesh")
+    if not has_foliage:
+        return buffer
+    face_indices = select_large_connected_face_indices(
+        mesh,
+        aggression=settings.branch_prune_aggression,
+    )
+    if face_indices is None:
+        return buffer
+    return _mesh_faces_to_geometry_buffer(mesh, face_indices, name="BaseProxyMesh")
+
+
+def _mesh_faces_to_geometry_buffer(mesh: MeshData, face_indices: tuple[int, ...], *, name: str) -> GeometryBuffer:
+    points = array("f")
+    face_counts = array("i")
+    face_vertex_indices = array("i")
+    original_to_new_point: dict[int, int] = {}
+    face_set = set(face_indices)
+    offset = 0
+    for face_index, count in enumerate(mesh.face_vertex_counts):
+        end = offset + int(count)
+        if face_index not in face_set:
+            offset = end
+            continue
+        face_counts.append(int(count))
+        for source_point_index in mesh.face_vertex_indices[offset:end]:
+            source_point_index = int(source_point_index)
+            new_point_index = original_to_new_point.get(source_point_index)
+            if new_point_index is None:
+                point = mesh.points[source_point_index]
+                new_point_index = len(points) // 3
+                original_to_new_point[source_point_index] = new_point_index
+                points.extend((point.x, point.y, point.z))
+            face_vertex_indices.append(new_point_index)
+        offset = end
+    return GeometryBuffer(
+        name=name,
+        point_components=points,
+        face_vertex_counts=face_counts,
+        face_vertex_indices=face_vertex_indices,
+    )
 
 
 def _build_foliage_density_field_mesh(

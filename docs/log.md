@@ -51,3 +51,15 @@ Major moves:
 - Added short-plus-full assembly naming to the maintained overview and glossary.
 - Moved the fixed large-GUI worker isolation note out of `docs/wiki/known-bugs.md` and into `docs/wiki/decisions.md`.
 - Narrowed `docs/wiki/known-bugs.md` to current dangerous or still-open issues.
+
+## 2026-07-01 - Proxy base-mesh simplification priority
+
+- Added deterministic connected-component pruning before Proxy Mesh base-mesh QEM simplification.
+- Documented that the fix targets branchy base meshes with tiny terminal geometry and is not full foliage/shell zoning.
+
+## 2026-07-01 - Shared small-branch pruning module
+
+- Moved base-mesh connected-component pruning behind `src/xml_to_usda/mesh_pruning.py`.
+- Added a persisted `branch_prune_aggression` setting for Proxy Mesh Preview and Fracture Preview.
+- Wired Fracture Preview to prune tiny disconnected base-mesh branch islands before face sampling.
+- Made `Remove Small Branches` literal and linear: it removes the requested percentage of the smallest connected islands, with no hidden face-budget cutoff.

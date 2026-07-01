@@ -7,6 +7,7 @@ This is a lightweight GPU 3D viewport for the same mesh object that export uses.
 
 from __future__ import annotations
 
+import math
 from array import array
 
 from PySide6.QtCore import Qt, QSignalBlocker, QTimer
@@ -34,6 +35,7 @@ from .viewport import ProxyViewport
 
 
 PROXY_PREVIEW_MAX_POLYCOUNT = 100_000
+BRANCH_PRUNE_SLIDER_EXPONENT = 4.0
 
 
 class ProxyPreviewDialog(PreviewShellDialog):
@@ -115,6 +117,13 @@ class ProxyPreviewDialog(PreviewShellDialog):
         settings_layout.addWidget(QLabel("Base Mesh Priority", settings_panel))
         settings_layout.addLayout(_slider_row(self.base_priority_slider, self.base_priority_spin))
 
+        self.branch_prune_slider, self.branch_prune_spin = _build_branch_prune_slider_row(
+            settings_panel,
+            value=float(settings.branch_prune_aggression),
+        )
+        settings_layout.addWidget(QLabel("Remove Small Branches", settings_panel))
+        settings_layout.addLayout(_slider_row(self.branch_prune_slider, self.branch_prune_spin))
+
         self.status_label = QLabel("", settings_panel)
         self.status_label.setWordWrap(True)
         settings_layout.addWidget(self.status_label)
@@ -133,6 +142,8 @@ class ProxyPreviewDialog(PreviewShellDialog):
         self.density_resolution_spin.editingFinished.connect(self.regenerate)
         self.base_priority_slider.sliderReleased.connect(self.regenerate)
         self.base_priority_spin.editingFinished.connect(self.regenerate)
+        self.branch_prune_slider.sliderReleased.connect(self.regenerate)
+        self.branch_prune_spin.editingFinished.connect(self.regenerate)
         QTimer.singleShot(0, self.regenerate)
 
     @property
@@ -146,6 +157,7 @@ class ProxyPreviewDialog(PreviewShellDialog):
             bounds_inflation=float(self.inflation_spin.value()),
             density_resolution=int(self.density_resolution_spin.value()),
             base_mesh_priority=float(self.base_priority_spin.value()),
+            branch_prune_aggression=float(self.branch_prune_spin.value()),
         )
 
     def regenerate(self) -> None:
@@ -244,6 +256,27 @@ def _build_float_slider_row(
     return slider, spin
 
 
+def _build_branch_prune_slider_row(parent, *, value: float) -> tuple[QSlider, QDoubleSpinBox]:
+    slider = QSlider(Qt.Orientation.Horizontal, parent)
+    slider.setRange(0, 100)
+    slider.setSingleStep(1)
+    slider.setPageStep(4)
+    slider.setValue(_branch_prune_value_to_slider(value))
+
+    spin = QDoubleSpinBox(parent)
+    spin.setRange(0.0, 1.0)
+    spin.setSingleStep(0.001)
+    spin.setDecimals(4)
+    spin.setValue(max(0.0, min(1.0, value)))
+    spin.setKeyboardTracking(False)
+    spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+    spin.setFixedWidth(82)
+
+    slider.valueChanged.connect(lambda raw: _sync_branch_prune_spin(spin, raw))
+    spin.editingFinished.connect(lambda: _sync_branch_prune_slider(slider, spin.value()))
+    return slider, spin
+
+
 def _slider_row(slider: QSlider, spin) -> QHBoxLayout:
     row = QHBoxLayout()
     row.setContentsMargins(0, 0, 0, 0)
@@ -272,6 +305,31 @@ def _sync_float_spin(spin: QDoubleSpinBox, value: int, scale: int) -> None:
 def _sync_float_slider(slider: QSlider, value: float, scale: int) -> None:
     with QSignalBlocker(slider):
         slider.setValue(int(round(value * scale)))
+
+
+def _sync_branch_prune_spin(spin: QDoubleSpinBox, slider_value: int) -> None:
+    with QSignalBlocker(spin):
+        spin.setValue(_branch_prune_slider_to_value(slider_value))
+
+
+def _sync_branch_prune_slider(slider: QSlider, value: float) -> None:
+    with QSignalBlocker(slider):
+        slider.setValue(_branch_prune_value_to_slider(value))
+
+
+def _branch_prune_slider_to_value(slider_value: int) -> float:
+    position = max(0.0, min(1.0, float(slider_value) / 100.0))
+    return 1.0 - ((1.0 - position) ** BRANCH_PRUNE_SLIDER_EXPONENT)
+
+
+def _branch_prune_value_to_slider(value: float) -> int:
+    clamped = max(0.0, min(1.0, value))
+    if clamped <= 0.0:
+        return 0
+    if clamped >= 1.0:
+        return 100
+    position = 1.0 - math.pow(1.0 - clamped, 1.0 / BRANCH_PRUNE_SLIDER_EXPONENT)
+    return int(round(position * 100.0))
 
 
 def build_preview_cube_mesh() -> GeometryBuffer:

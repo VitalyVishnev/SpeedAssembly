@@ -253,21 +253,21 @@ Related files:
 - `docs/raw/KNOWN_PROBLEMS.md`
 - `src/xml_to_usda/proxy_mesh_service.py`
 
-## Bug: Proxy Mesh zoned simplification is not implemented
+## Bug: Proxy Mesh zoned simplification is only partial
 
 Status: Open
 
 Symptoms:
-The current proxy simplification runs QEM on one mesh instead of applying separate importance zones.
+The base-mesh Proxy Mesh and Fracture Preview paths now prune tiny disconnected terminal components before simplification, but foliage/interior/shell zone policy is still not broadly tuned across real vegetation.
 
 Likely cause:
-The first release pass prioritized deterministic output over zoned tuning.
+The current fix targets branchy base meshes specifically and does not replace the need for real-sample proxy quality comparison.
 
 Current workaround:
-Keep the current one-mesh QEM approach until the zone policy exists.
+Keep QEM as the Proxy Mesh backend. Treat shared percentage-based base-mesh connected-component pruning as a targeted priority rule, not full vegetation-aware proxy zoning.
 
 Do not repeat:
-Do not treat shell/interior/outside importance as already implemented.
+Do not treat shell/interior/outside importance, foliage coverage, or lighting usefulness as fully validated.
 
 Related files:
 - `docs/raw/KNOWN_PROBLEMS.md`

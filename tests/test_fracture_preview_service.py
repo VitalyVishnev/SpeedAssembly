@@ -212,6 +212,11 @@ def test_fracture_preview_can_skip_viewport_scene_for_worker_transport() -> None
     assert preview.pieces
 
 
+def test_fracture_preview_rejects_invalid_branch_prune_aggression() -> None:
+    with pytest.raises(FractureError, match="branch prune aggression"):
+        generate_fracture_preview(_tree(), FracturePreviewSettings(branch_prune_aggression=1.5))
+
+
 def test_fracture_preview_reuses_base_cap_source_context_for_all_pieces(monkeypatch) -> None:
     import xml_to_usda.fracture_geometry as fracture_geometry
 

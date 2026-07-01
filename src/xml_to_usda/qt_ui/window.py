@@ -160,6 +160,7 @@ def _fracture_preview_trace_payload(settings: FracturePreviewSettings) -> dict[s
         "collision_include_parts": collision.include_instance_parts,
         "final_polycount": settings.final_polycount,
         "base_mesh_priority": settings.base_mesh_priority,
+        "branch_prune_aggression": settings.branch_prune_aggression,
         "max_base_faces_per_piece": settings.max_base_faces_per_piece,
         "max_prototype_faces": settings.max_prototype_faces,
     }
@@ -2280,6 +2281,7 @@ class MainWindow(QWidget):
                     f"force_stump_piece={settings.fracture.force_stump_piece}",
                     f"generate_caps={settings.fracture.generate_caps}",
                     f"preview_polycount={settings.final_polycount}",
+                    f"remove_small_branches={settings.branch_prune_aggression}",
                     f"preview_base_priority={settings.base_mesh_priority}",
                     f"preview_prototype_faces={settings.max_prototype_faces}",
                 )
@@ -2297,6 +2299,7 @@ class MainWindow(QWidget):
                 "force_stump_piece": settings.fracture.force_stump_piece,
                 "generate_caps": settings.fracture.generate_caps,
                 "preview_polycount": settings.final_polycount,
+                "remove_small_branches": settings.branch_prune_aggression,
             },
             debug_data={
                 "preview_base_priority": settings.base_mesh_priority,
@@ -2455,6 +2458,7 @@ class MainWindow(QWidget):
                     f"force_stump_piece={settings.fracture.force_stump_piece}",
                     f"generate_caps={settings.fracture.generate_caps}",
                     f"preview_polycount={settings.final_polycount}",
+                    f"remove_small_branches={settings.branch_prune_aggression}",
                     f"preview_base_priority={settings.base_mesh_priority}",
                 )
             ),
@@ -2526,6 +2530,7 @@ class MainWindow(QWidget):
                 "output_path": request.output_path,
                 "final_polycount": settings.final_polycount,
                 "base_mesh_priority": settings.base_mesh_priority,
+                "branch_prune_aggression": settings.branch_prune_aggression,
                 "density_resolution": settings.density_resolution,
             },
         )

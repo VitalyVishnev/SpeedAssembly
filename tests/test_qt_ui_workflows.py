@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import zipfile
 from dataclasses import replace
 from pathlib import Path
@@ -64,6 +65,20 @@ from xml_to_usda.settings_service import (
     save_gui_settings,
 )
 from xml_to_usda.wind_service import WindGenerationRequest, WindInspectionPlan, WindInspectionRequest
+
+
+def _expected_branch_prune_value(slider_value: int) -> float:
+    position = max(0.0, min(1.0, float(slider_value) / 100.0))
+    return 1.0 - ((1.0 - position) ** 4.0)
+
+
+def _expected_branch_prune_slider(value: float) -> int:
+    clamped = max(0.0, min(1.0, value))
+    if clamped <= 0.0:
+        return 0
+    if clamped >= 1.0:
+        return 100
+    return int(round((1.0 - math.pow(1.0 - clamped, 0.25)) * 100.0))
 
 
 def _build_fake_deps(calls: dict[str, object]) -> QtUiDependencies:
@@ -1170,7 +1185,11 @@ def test_qt_window_opens_proxy_preview_from_geometry_tab(monkeypatch, qtbot, tmp
     tree_xml.write_text("<tree/>", encoding="utf-8")
     window.source_input.setText(str(tree_xml))
     window.output_input.setText(str(tmp_path / "tree.usda"))
-    window._proxy_mesh_settings = ProxyMeshSettings(final_polycount=2400, base_mesh_priority=0.72)
+    window._proxy_mesh_settings = ProxyMeshSettings(
+        final_polycount=2400,
+        base_mesh_priority=0.72,
+        branch_prune_aggression=0.62,
+    )
     window.geometry_panel.apply_proxy_settings(window._proxy_mesh_settings)
 
     assert window.geometry_panel.preview_proxy_button.isEnabled()
@@ -1196,10 +1215,13 @@ def test_qt_window_opens_proxy_preview_from_geometry_tab(monkeypatch, qtbot, tmp
     assert window._proxy_preview_dialog.polycount_spin.width() >= window._proxy_preview_dialog.polycount_spin.fontMetrics().horizontalAdvance("100000")
     assert window._proxy_preview_dialog.density_resolution_spin.value() == 64
     assert window._proxy_preview_dialog.density_resolution_spin.maximum() == 256
+    assert window._proxy_preview_dialog.branch_prune_spin.value() == pytest.approx(0.62)
+    assert window._proxy_preview_dialog.branch_prune_slider.value() == _expected_branch_prune_slider(0.62)
     assert calls["start_proxy_mesh_process"]["action"] == "preview"
     assert calls["generate_proxy_mesh_from_source_request"]["settings"].method == "density_field"
     assert calls["generate_proxy_mesh_from_source_request"]["settings"].final_polycount == 2400
     assert calls["generate_proxy_mesh_from_source_request"]["settings"].base_mesh_priority == pytest.approx(0.72)
+    assert calls["generate_proxy_mesh_from_source_request"]["settings"].branch_prune_aggression == pytest.approx(0.62)
     assert calls["generate_proxy_mesh_from_source_request"]["request"].output_path == str(tmp_path / "tree.usda")
 
     window._proxy_preview_dialog.polycount_spin.setValue(3600)
@@ -1221,6 +1243,28 @@ def test_qt_window_opens_proxy_preview_from_geometry_tab(monkeypatch, qtbot, tmp
 
     assert calls["generate_proxy_mesh_from_source_request"]["settings"].base_mesh_priority == pytest.approx(0.21)
 
+    window._proxy_preview_dialog.branch_prune_slider.setValue(60)
+    window._proxy_preview_dialog.branch_prune_slider.sliderReleased.emit()
+    slider_prune = _expected_branch_prune_value(60)
+    qtbot.waitUntil(
+        lambda: calls["generate_proxy_mesh_from_source_request"]["settings"].branch_prune_aggression
+        == pytest.approx(slider_prune),
+        timeout=3000,
+    )
+
+    assert window._proxy_preview_dialog.branch_prune_spin.value() == pytest.approx(slider_prune)
+
+    window._proxy_preview_dialog.branch_prune_spin.setValue(0.35)
+    window._proxy_preview_dialog.branch_prune_spin.editingFinished.emit()
+    qtbot.waitUntil(
+        lambda: calls["generate_proxy_mesh_from_source_request"]["settings"].branch_prune_aggression == pytest.approx(0.35),
+        timeout=3000,
+    )
+    qtbot.waitUntil(
+        lambda: window._proxy_preview_dialog.current_proxy.settings.branch_prune_aggression == pytest.approx(0.35),
+        timeout=3000,
+    )
+
     trace_text = (tmp_path / "gui_trace.jsonl").read_text(encoding="utf-8")
     assert '"kind":"job.result"' in trace_text
     assert '"job":"proxy_preview"' in trace_text
@@ -1239,15 +1283,20 @@ def test_qt_window_opens_proxy_preview_from_geometry_tab(monkeypatch, qtbot, tmp
     saved_settings = load_gui_settings(tmp_path / "gui_settings.json").proxy_mesh_settings
     assert saved_settings.final_polycount == 3600
     assert saved_settings.density_resolution == 18
+    assert saved_settings.branch_prune_aggression == pytest.approx(0.35)
     assert window.geometry_panel.proxy_settings().final_polycount == 3600
     assert window.geometry_panel.proxy_settings().base_mesh_priority == pytest.approx(0.21)
+    assert window.geometry_panel.proxy_settings().branch_prune_aggression == pytest.approx(0.35)
 
     qtbot.mouseClick(window.generate_proxy_button, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: "Wrote Proxy Mesh USDA" in window.status_label.text(), timeout=3000)
 
     assert calls["export_generated_proxy_usda_from_source_request"]["proxy"].settings.final_polycount == 3600
     assert calls["export_generated_proxy_usda_from_source_request"]["proxy"].settings.density_resolution == 18
+    assert calls["export_generated_proxy_usda_from_source_request"]["proxy"].settings.branch_prune_aggression == pytest.approx(0.35)
     assert [event["action"] for event in calls["start_proxy_mesh_process_events"]] == [
+        "preview",
+        "preview",
         "preview",
         "preview",
         "preview",
@@ -1278,6 +1327,7 @@ def test_qt_window_opens_fracture_preview_from_geometry_tab(monkeypatch, qtbot, 
         fracture=FractureSettings(target_piece_count=3),
         final_polycount=240000,
         base_mesh_priority=0.42,
+        branch_prune_aggression=0.31,
     )
     window.geometry_panel.apply_fracture_preview_settings(window._fracture_preview_settings)
 
@@ -1306,6 +1356,8 @@ def test_qt_window_opens_fracture_preview_from_geometry_tab(monkeypatch, qtbot, 
     assert window._fracture_preview_dialog.piece_count_slider.value() == 3
     assert window._fracture_preview_dialog.polycount_spin.value() == 240000
     assert window._fracture_preview_dialog.polycount_slider.value() == 240000
+    assert window._fracture_preview_dialog.branch_prune_spin.value() == pytest.approx(0.31)
+    assert window._fracture_preview_dialog.branch_prune_slider.value() == _expected_branch_prune_slider(0.31)
     assert window._fracture_preview_dialog.base_priority_spin.value() == pytest.approx(0.42)
     assert window._fracture_preview_dialog.base_priority_slider.value() == 42
     assert window._fracture_preview_dialog.color_strength_slider.value() == 78
@@ -1322,6 +1374,7 @@ def test_qt_window_opens_fracture_preview_from_geometry_tab(monkeypatch, qtbot, 
     assert call["settings"].fracture.preserve_trunk_bias == pytest.approx(0.5)
     assert call["settings"].final_polycount == 240000
     assert call["settings"].base_mesh_priority == pytest.approx(0.42)
+    assert call["settings"].branch_prune_aggression == pytest.approx(0.31)
 
     window._fracture_preview_dialog.polycount_spin.setValue(360000)
     window._fracture_preview_dialog.polycount_spin.editingFinished.emit()
@@ -1332,6 +1385,28 @@ def test_qt_window_opens_fracture_preview_from_geometry_tab(monkeypatch, qtbot, 
 
     assert window._fracture_preview_settings.final_polycount == 360000
     assert window.geometry_panel.fracture_preview_settings().final_polycount == 360000
+
+    window._fracture_preview_dialog.branch_prune_slider.setValue(60)
+    window._fracture_preview_dialog.branch_prune_slider.sliderReleased.emit()
+    slider_prune = _expected_branch_prune_value(60)
+    qtbot.waitUntil(
+        lambda: calls["generate_fracture_preview_from_source_request"]["settings"].branch_prune_aggression
+        == pytest.approx(slider_prune),
+        timeout=3000,
+    )
+
+    assert window._fracture_preview_dialog.branch_prune_spin.value() == pytest.approx(slider_prune)
+
+    window._fracture_preview_dialog.branch_prune_spin.setValue(0.73)
+    window._fracture_preview_dialog.branch_prune_spin.editingFinished.emit()
+    qtbot.waitUntil(
+        lambda: calls["generate_fracture_preview_from_source_request"]["settings"].branch_prune_aggression
+        == pytest.approx(0.73),
+        timeout=3000,
+    )
+
+    assert window._fracture_preview_settings.branch_prune_aggression == pytest.approx(0.73)
+    assert window.geometry_panel.fracture_preview_settings().branch_prune_aggression == pytest.approx(0.73)
 
     window._fracture_preview_dialog.piece_count_slider.setValue(4)
     window._fracture_preview_dialog.piece_count_slider.sliderReleased.emit()

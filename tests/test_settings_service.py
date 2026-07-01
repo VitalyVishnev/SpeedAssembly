@@ -111,6 +111,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
             bounds_inflation=1.4,
             density_resolution=96,
             base_mesh_priority=0.22,
+            branch_prune_aggression=0.61,
         ),
         fracture_preview_settings=FracturePreviewSettings(
             fracture=FractureSettings(target_piece_count=8, generate_caps=True, preserve_trunk_bias=0.25),
@@ -124,6 +125,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
             ),
             final_polycount=333000,
             base_mesh_priority=0.44,
+            branch_prune_aggression=0.72,
         ),
         fbx_cache_max_size_gb=42,
         fbx_cache_max_age_days=7,
@@ -148,11 +150,13 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert payload["proxy_mesh_settings"]["bounds_inflation"] == 1.4
     assert payload["proxy_mesh_settings"]["density_resolution"] == 96
     assert payload["proxy_mesh_settings"]["base_mesh_priority"] == 0.22
+    assert payload["proxy_mesh_settings"]["branch_prune_aggression"] == 0.61
     assert payload["fracture_preview_settings"]["fracture"]["target_piece_count"] == 8
     assert payload["fracture_preview_settings"]["collision"]["mode"] == "sphere"
     assert payload["fracture_preview_settings"]["collision"]["enabled"] is True
     assert payload["fracture_preview_settings"]["collision"]["include_instance_parts"] is False
     assert payload["fracture_preview_settings"]["collision"]["capsule_scale_by_length"] == 0.8
+    assert payload["fracture_preview_settings"]["branch_prune_aggression"] == 0.72
     assert "capsule_max_count" not in payload["fracture_preview_settings"]["collision"]
     assert "capsule_min_radius_ratio" not in payload["fracture_preview_settings"]["collision"]
     assert "capsule_radius_padding" not in payload["fracture_preview_settings"]["collision"]
@@ -228,6 +232,40 @@ def test_load_gui_settings_clamps_imported_proxy_density_to_supported_cap(tmp_pa
     restored = load_gui_settings(settings_path)
 
     assert restored.proxy_mesh_settings.density_resolution == 256
+
+
+def test_load_gui_settings_clamps_imported_proxy_branch_prune_aggression(tmp_path: Path) -> None:
+    settings_path = tmp_path / "gui_settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "schema_version": GUI_SETTINGS_SCHEMA_VERSION,
+                "proxy_mesh_settings": {"branch_prune_aggression": 5.0},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    restored = load_gui_settings(settings_path)
+
+    assert restored.proxy_mesh_settings.branch_prune_aggression == 1.0
+
+
+def test_load_gui_settings_clamps_imported_fracture_branch_prune_aggression(tmp_path: Path) -> None:
+    settings_path = tmp_path / "gui_settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "schema_version": GUI_SETTINGS_SCHEMA_VERSION,
+                "fracture_preview_settings": {"branch_prune_aggression": -5.0},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    restored = load_gui_settings(settings_path)
+
+    assert restored.fracture_preview_settings.branch_prune_aggression == 0.0
 
 
 def test_save_gui_settings_preserves_base_material_udim_settings(tmp_path: Path) -> None:

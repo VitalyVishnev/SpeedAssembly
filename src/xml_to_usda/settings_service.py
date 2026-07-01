@@ -417,6 +417,10 @@ def _parse_proxy_mesh_settings(raw_value) -> ProxyMeshSettings:
     if method != PROXY_METHOD_DENSITY_FIELD:
         method = defaults.method
     base_mesh_priority = _coerce_float(raw_value.get("base_mesh_priority"), defaults.base_mesh_priority)
+    branch_prune_aggression = _coerce_float(
+        raw_value.get("branch_prune_aggression"),
+        defaults.branch_prune_aggression,
+    )
     density_resolution = _coerce_positive_int(raw_value.get("density_resolution"), defaults.density_resolution)
     return ProxyMeshSettings(
         method=method,
@@ -424,6 +428,7 @@ def _parse_proxy_mesh_settings(raw_value) -> ProxyMeshSettings:
         bounds_inflation=max(0.01, _coerce_float(raw_value.get("bounds_inflation"), defaults.bounds_inflation)),
         density_resolution=min(MAX_PROXY_DENSITY_RESOLUTION, density_resolution),
         base_mesh_priority=max(0.0, min(1.0, base_mesh_priority)),
+        branch_prune_aggression=max(0.0, min(1.0, branch_prune_aggression)),
     )
 
 
@@ -480,6 +485,13 @@ def _parse_fracture_preview_settings(raw_value) -> FracturePreviewSettings:
         collision=collision,
         final_polycount=_coerce_positive_int(raw_value.get("final_polycount"), defaults.final_polycount),
         base_mesh_priority=max(0.0, min(1.0, _coerce_float(raw_value.get("base_mesh_priority"), defaults.base_mesh_priority))),
+        branch_prune_aggression=max(
+            0.0,
+            min(
+                1.0,
+                _coerce_float(raw_value.get("branch_prune_aggression"), defaults.branch_prune_aggression),
+            ),
+        ),
         max_base_faces_per_piece=_coerce_positive_int(raw_value.get("max_base_faces_per_piece"), defaults.max_base_faces_per_piece),
         max_prototype_faces=_coerce_positive_int(raw_value.get("max_prototype_faces"), defaults.max_prototype_faces),
     )
@@ -637,6 +649,7 @@ def _serialize_proxy_mesh_settings(settings: ProxyMeshSettings) -> dict[str, obj
         "bounds_inflation": round(float(settings.bounds_inflation), 4),
         "density_resolution": int(settings.density_resolution),
         "base_mesh_priority": round(float(settings.base_mesh_priority), 4),
+        "branch_prune_aggression": round(float(settings.branch_prune_aggression), 4),
     }
 
 
@@ -661,6 +674,7 @@ def _serialize_fracture_preview_settings(settings: FracturePreviewSettings) -> d
         },
         "final_polycount": int(settings.final_polycount),
         "base_mesh_priority": round(float(settings.base_mesh_priority), 4),
+        "branch_prune_aggression": round(float(settings.branch_prune_aggression), 4),
         "max_base_faces_per_piece": int(settings.max_base_faces_per_piece),
         "max_prototype_faces": int(settings.max_prototype_faces),
     }

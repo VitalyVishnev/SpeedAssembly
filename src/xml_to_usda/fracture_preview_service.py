@@ -30,6 +30,7 @@ from .fracture_service import (
 )
 from .geometry_buffers import geometry_buffer_from_mesh, geometry_buffer_to_mesh
 from .job_control import throw_if_cancelled
+from .mesh_pruning import DEFAULT_BRANCH_PRUNE_AGGRESSION, select_large_connected_face_indices
 from .models import (
     CanonicalTreeModel,
     Color4,
@@ -67,6 +68,7 @@ class FracturePreviewSettings:
     collision: FractureCollisionSettings = field(default_factory=FractureCollisionSettings)
     final_polycount: int = DEFAULT_FRACTURE_PREVIEW_POLYCOUNT
     base_mesh_priority: float = DEFAULT_FRACTURE_PREVIEW_BASE_PRIORITY
+    branch_prune_aggression: float = DEFAULT_BRANCH_PRUNE_AGGRESSION
     max_base_faces_per_piece: int = DEFAULT_FRACTURE_PREVIEW_BASE_FACE_BUDGET
     max_prototype_faces: int = DEFAULT_FRACTURE_PREVIEW_PROTOTYPE_FACE_BUDGET
 
@@ -235,6 +237,7 @@ def generate_fracture_preview(
             model,
             piece,
             base_face_budgets[piece.index],
+            branch_prune_aggression=resolved_settings.branch_prune_aggression,
             generate_caps=resolved_settings.fracture.generate_caps,
             cap_context=cap_context,
         )
@@ -293,6 +296,8 @@ def _validate_preview_settings(settings: FracturePreviewSettings) -> None:
         raise FractureError("Fracture preview target polycount must be greater than zero.")
     if not 0.0 <= settings.base_mesh_priority <= 1.0:
         raise FractureError("Fracture preview base mesh priority must be between 0 and 1.")
+    if not 0.0 <= settings.branch_prune_aggression <= 1.0:
+        raise FractureError("Fracture preview branch prune aggression must be between 0 and 1.")
     if settings.max_base_faces_per_piece <= 0:
         raise FractureError("Fracture preview base face budget must be greater than zero.")
     if settings.max_prototype_faces <= 0:
@@ -328,12 +333,18 @@ def _preview_piece(
     piece: FracturePiece,
     face_budget: int,
     *,
+    branch_prune_aggression: float,
     generate_caps: bool,
     cap_context=None,
 ) -> FracturePreviewPiece:
     if model.base_mesh is None:
         raise FractureError("Fracture preview requires a base mesh.")
-    sampled_faces = sample_face_indices(piece.base_face_indices, face_budget)
+    pruned_faces = select_large_connected_face_indices(
+        model.base_mesh,
+        aggression=branch_prune_aggression,
+        candidate_face_indices=piece.base_face_indices,
+    )
+    sampled_faces = sample_face_indices(pruned_faces or piece.base_face_indices, face_budget)
     mesh = slice_mesh_faces(
         model.base_mesh,
         sampled_faces,

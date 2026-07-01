@@ -995,6 +995,7 @@ class QtBackgroundJobsController:
                     f"  force_stump_piece={fracture.force_stump_piece}",
                     f"  generate_caps={fracture.generate_caps}",
                     f"  preview_polycount={settings.final_polycount}",
+                    f"  remove_small_branches={settings.branch_prune_aggression}",
                     f"  preview_base_priority={settings.base_mesh_priority}",
                     f"  preview_prototype_faces={settings.max_prototype_faces}",
                 )
@@ -1205,6 +1206,7 @@ class QtBackgroundJobsController:
                     "generate_caps": fracture.generate_caps,
                     "pinned_cut_joint_tokens": fracture.pinned_cut_joint_tokens,
                     "preview_polycount": settings.final_polycount,
+                    "remove_small_branches": settings.branch_prune_aggression,
                     "preview_base_priority": settings.base_mesh_priority,
                     "preview_prototype_faces": settings.max_prototype_faces,
                 }
@@ -1236,6 +1238,7 @@ class QtBackgroundJobsController:
                     "bounds_inflation": getattr(settings, "bounds_inflation", None),
                     "density_resolution": getattr(settings, "density_resolution", None),
                     "base_mesh_priority": getattr(settings, "base_mesh_priority", None),
+                    "branch_prune_aggression": getattr(settings, "branch_prune_aggression", None),
                 }
             )
         return payload
