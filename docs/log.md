@@ -68,3 +68,9 @@ Major moves:
 
 - Updated `AGENTS.md` and `docs/wiki/decisions.md` to keep existing tests but avoid adding or rewriting tests for every small edit or intermediate experiment.
 - Clarified that new tests should protect stable features, new modules, public contracts, and importer-facing invariants with compact intent-level coverage.
+
+## 2026-07-01 - Proxy Mesh large-tree speed pass
+
+- Disabled the generic source-model JSON cache for Proxy Mesh source loading after profiling showed cache serialization dominating large-tree jobs.
+- Trimmed proxy hot-path overhead in base-mesh budget counting, connected-component pruning, foliage bounds preparation, and XML source-limit traversal.
+- Measured `SK_BirchAltai_Assembly_13.xml` at about 5.2s after the pass versus about 17.1s before, without adding the temporary tree to the repository.

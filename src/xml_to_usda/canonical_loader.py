@@ -53,6 +53,7 @@ class _InvalidSourceModelCache(Exception):
 def load_source_tree_model(
     input_path: str,
     *,
+    source_cache_enabled: bool = True,
     telemetry_callback=None,
     cancel_event=None,
 ) -> tuple[ObservedXmlSchemaReport, CanonicalTreeModel, tuple[ValidationIssue, ...]]:
@@ -65,24 +66,26 @@ def load_source_tree_model(
         started_at=started_at,
     )
     throw_if_cancelled(cancel_event)
-    cache_path = _source_model_cache_path(input_path)
-    cached = _read_source_model_cache(cache_path)
-    if cached is not None:
-        report, model, diagnostics = cached
-        emit_telemetry(
-            telemetry_callback,
-            ConversionPhase.XML_NORMALIZATION,
-            message="Reusing cached XML source model.",
-            started_at=started_at,
-        )
-        return report, model, diagnostics
+    cache_path = _source_model_cache_path(input_path) if source_cache_enabled else None
+    if cache_path is not None:
+        cached = _read_source_model_cache(cache_path)
+        if cached is not None:
+            report, model, diagnostics = cached
+            emit_telemetry(
+                telemetry_callback,
+                ConversionPhase.XML_NORMALIZATION,
+                message="Reusing cached XML source model.",
+                started_at=started_at,
+            )
+            return report, model, diagnostics
 
     document = read_source_xml(input_path)
     analysis = analyze_xml(document)
     report = analysis.report
     model = normalize_to_canonical(document, report, source_nodes=analysis.source_nodes)
     diagnostics = validate_source_model(model)
-    _write_source_model_cache(cache_path, (report, model, diagnostics))
+    if cache_path is not None:
+        _write_source_model_cache(cache_path, (report, model, diagnostics))
     return report, model, diagnostics
 
 
@@ -150,12 +153,14 @@ def load_resolved_assembly_model(
     output_stem: str | None = None,
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
     fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60,
+    source_cache_enabled: bool = True,
     telemetry_callback=None,
     cancel_event=None,
 ) -> tuple[ObservedXmlSchemaReport, ResolvedAssemblyModel]:
     """Load XML source facts and resolve them into authoring-ready state."""
     report, source_model, source_diagnostics = load_source_tree_model(
         input_path,
+        source_cache_enabled=source_cache_enabled,
         telemetry_callback=telemetry_callback,
         cancel_event=cancel_event,
     )
@@ -197,6 +202,7 @@ def load_canonical_model(
     conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY,
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
     fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60,
+    source_cache_enabled: bool = True,
     telemetry_callback=None,
     cancel_event=None,
 ) -> tuple[ObservedXmlSchemaReport, CanonicalTreeModel, tuple[ValidationIssue, ...]]:
@@ -216,6 +222,7 @@ def load_canonical_model(
         conversion_mode=conversion_mode,
         fbx_cache_max_bytes=fbx_cache_max_bytes,
         fbx_cache_max_age_seconds=fbx_cache_max_age_seconds,
+        source_cache_enabled=source_cache_enabled,
         telemetry_callback=telemetry_callback,
         cancel_event=cancel_event,
     )

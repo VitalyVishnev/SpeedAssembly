@@ -273,6 +273,27 @@ Related files:
 - `docs/raw/KNOWN_PROBLEMS.md`
 - `src/xml_to_usda/proxy_mesh_service.py`
 
+## Bug: Generic source-model JSON cache is too slow for very large trees
+
+Status: Open
+
+Symptoms:
+Large source models can take longer to serialize into the generic worker-payload JSON cache than to parse and normalize from XML.
+
+Likely cause:
+The generic cache recursively encodes full dataclass graphs into JSON. That format is useful for safe worker exchange, but inefficient as a large source-model cache.
+
+Current workaround:
+Proxy Mesh source loading bypasses this cache. Normal conversion callers still use the existing cache until a faster typed cache is justified.
+
+Do not repeat:
+Do not re-enable the generic source-model cache for Proxy Mesh without fresh timings on large real trees.
+
+Related files:
+- `src/xml_to_usda/canonical_loader.py`
+- `src/xml_to_usda/worker_file_protocol.py`
+- `src/xml_to_usda/proxy_mesh_service.py`
+
 ## Bug: Piece-local UDIM real-sample coverage is incomplete
 
 Status: Unverified

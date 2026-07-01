@@ -484,6 +484,7 @@ def test_proxy_request_generation_ignores_operator_fbx_replacement(monkeypatch) 
 
     assert result.mesh.face_count > 0
     assert calls["input_path"] == "tree.xml"
+    assert calls["kwargs"]["source_cache_enabled"] is False
     assert "prototype_source_configs" not in calls["kwargs"]
     assert "use_explicit_material_contract" not in calls["kwargs"]
 
@@ -513,6 +514,7 @@ def test_proxy_request_export_ignores_operator_fbx_replacement(monkeypatch, tmp_
     result = export_proxy_usda_from_source_request(source_request, ProxyMeshSettings(final_polycount=5000))
 
     assert result.output_path == str(tmp_path / "tree_proxy.usda")
+    assert calls["kwargs"]["source_cache_enabled"] is False
     assert "prototype_source_configs" not in calls["kwargs"]
     assert "use_explicit_material_contract" not in calls["kwargs"]
 

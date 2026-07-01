@@ -383,3 +383,23 @@ UI state, operator intent, and runtime jobs must stay distinct.
 Related files:
 - `docs/raw/ARCHITECTURE.md`
 - `docs/raw/ui_next_architecture.md`
+
+## Decision: Proxy source loading bypasses the generic source-model cache
+
+Status: Active
+
+Context:
+Proxy Mesh generation on large SpeedTree XML files only needs the current source facts once per worker job. The generic JSON source-model cache can cost more to read or write than reparsing and normalizing the XML, especially on branch-heavy real samples.
+
+Decision:
+Keep the generic cache for normal conversion callers, but disable it for the Proxy Mesh source request path.
+
+Reasoning:
+Measured Proxy Mesh timings on `SK_BirchAltai_Assembly_13.xml` improved from about 17.1s to about 5.2s without changing QEM simplification, pruning policy, output geometry settings, or importer-facing contracts.
+
+Consequences:
+Proxy preview/export reparses XML instead of using the generic cache. Revisit only if a faster typed cache replaces the generic JSON worker-payload cache.
+
+Related files:
+- `src/xml_to_usda/canonical_loader.py`
+- `src/xml_to_usda/proxy_mesh_service.py`

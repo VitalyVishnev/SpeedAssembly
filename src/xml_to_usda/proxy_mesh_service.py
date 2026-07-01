@@ -208,16 +208,7 @@ def _collect_source_boxes(
 @dataclass(frozen=True)
 class _DensityFieldSources:
     base_mesh: GeometryBuffer | None
-    foliage_instances: tuple["_FoliageKernelInstance", ...]
-
-
-@dataclass(frozen=True)
-class _FoliageKernelInstance:
-    name: str
-    local_bounds: "_Bounds"
-    position: Vector3
-    orientation: Quaternion
-    scale: Vector3
+    foliage_instances: tuple["_PreparedFoliageKernel", ...]
 
 
 @dataclass(frozen=True)
@@ -237,7 +228,7 @@ def _collect_density_field_sources(
 ) -> _DensityFieldSources:
     prototypes = {prototype.source_key: prototype for prototype in model.prototypes}
     prototype_bounds: dict[str, _Bounds] = {}
-    foliage_instances: list[_FoliageKernelInstance] = []
+    foliage_instances: list[_PreparedFoliageKernel] = []
 
     for instance in model.repeated_parts:
         prototype = prototypes.get(instance.prototype_key)
@@ -255,7 +246,7 @@ def _collect_density_field_sources(
             local_bounds = _inflate_bounds(_mesh_bounds(payload), settings.bounds_inflation)
             prototype_bounds[instance.prototype_key] = local_bounds
         foliage_instances.append(
-            _FoliageKernelInstance(
+            _prepare_foliage_kernel(
                 name=instance.name,
                 local_bounds=local_bounds,
                 position=instance.position,
@@ -312,13 +303,16 @@ def _build_density_field_mesh(sources: _DensityFieldSources, settings: ProxyMesh
 
 
 def _base_mesh_budget(mesh: GeometryBuffer, *, settings: ProxyMeshSettings, has_foliage: bool) -> int:
-    _points, triangles = _triangulated_mesh_arrays(mesh)
-    source_triangle_count = max(1, len(triangles))
+    source_triangle_count = max(1, _triangulated_face_count(mesh))
     if not has_foliage:
         return max(1, settings.final_polycount)
     available_for_base = max(1, settings.final_polycount - 6)
     weighted_budget = int(round(available_for_base * settings.base_mesh_priority))
     return max(1, min(source_triangle_count, weighted_budget, available_for_base))
+
+
+def _triangulated_face_count(mesh: GeometryBuffer) -> int:
+    return sum(max(0, int(count) - 2) for count in mesh.face_vertex_counts)
 
 
 def _base_proxy_geometry_buffer(
@@ -330,15 +324,14 @@ def _base_proxy_geometry_buffer(
     mesh = model.base_mesh
     if mesh is None:
         raise ProxyMeshError("Proxy base mesh is missing.")
-    buffer = _mesh_to_geometry_buffer(mesh, name="BaseProxyMesh")
     if not has_foliage:
-        return buffer
+        return _mesh_to_geometry_buffer(mesh, name="BaseProxyMesh")
     face_indices = select_large_connected_face_indices(
         mesh,
         aggression=settings.branch_prune_aggression,
     )
     if face_indices is None:
-        return buffer
+        return _mesh_to_geometry_buffer(mesh, name="BaseProxyMesh")
     return _mesh_faces_to_geometry_buffer(mesh, face_indices, name="BaseProxyMesh")
 
 
@@ -374,16 +367,15 @@ def _mesh_faces_to_geometry_buffer(mesh: MeshData, face_indices: tuple[int, ...]
 
 
 def _build_foliage_density_field_mesh(
-    instances: tuple[_FoliageKernelInstance, ...],
+    instances: tuple[_PreparedFoliageKernel, ...],
     *,
     settings: ProxyMeshSettings,
     target_triangle_count: int,
 ) -> GeometryBuffer:
-    prepared_instances = tuple(_prepare_foliage_kernel(instance) for instance in instances)
-    instance_bounds = tuple(instance.world_bounds for instance in prepared_instances)
+    instance_bounds = tuple(instance.world_bounds for instance in instances)
     overall = _non_degenerate_bounds(_combine_bounds(instance_bounds))
     occupied, cell_size, grid_minimum = _occupied_foliage_density_cells(
-        prepared_instances,
+        instances,
         overall,
         settings.density_resolution,
     )
@@ -780,12 +772,49 @@ def _transformed_bounds(
     orientation: Quaternion,
     scale: Vector3,
 ) -> _Bounds:
-    points: list[Vector3] = []
-    for corner in _box_corners(bounds, inflation=1.0):
-        scaled = Vector3(corner.x * scale.x, corner.y * scale.y, corner.z * scale.z)
-        rotated = _rotate_vector(orientation, scaled)
-        points.append(Vector3(rotated.x + translate.x, rotated.y + translate.y, rotated.z + translate.z))
-    return _bounds_from_points(points)
+    center = Vector3(
+        (bounds.minimum.x + bounds.maximum.x) * 0.5 * scale.x,
+        (bounds.minimum.y + bounds.maximum.y) * 0.5 * scale.y,
+        (bounds.minimum.z + bounds.maximum.z) * 0.5 * scale.z,
+    )
+    half_x = abs((bounds.maximum.x - bounds.minimum.x) * 0.5 * scale.x)
+    half_y = abs((bounds.maximum.y - bounds.minimum.y) * 0.5 * scale.y)
+    half_z = abs((bounds.maximum.z - bounds.minimum.z) * 0.5 * scale.z)
+    rows = _quaternion_matrix_rows(orientation)
+    rotated_center = _rotate_vector(orientation, center)
+    world_center = Vector3(
+        rotated_center.x + translate.x,
+        rotated_center.y + translate.y,
+        rotated_center.z + translate.z,
+    )
+    world_half_x = abs(rows[0][0]) * half_x + abs(rows[0][1]) * half_y + abs(rows[0][2]) * half_z
+    world_half_y = abs(rows[1][0]) * half_x + abs(rows[1][1]) * half_y + abs(rows[1][2]) * half_z
+    world_half_z = abs(rows[2][0]) * half_x + abs(rows[2][1]) * half_y + abs(rows[2][2]) * half_z
+    return _Bounds(
+        Vector3(world_center.x - world_half_x, world_center.y - world_half_y, world_center.z - world_half_z),
+        Vector3(world_center.x + world_half_x, world_center.y + world_half_y, world_center.z + world_half_z),
+    )
+
+
+def _quaternion_matrix_rows(q: Quaternion) -> tuple[tuple[float, float, float], ...]:
+    qw = q.real
+    qx = q.i
+    qy = q.j
+    qz = q.k
+    xx = qx * qx
+    yy = qy * qy
+    zz = qz * qz
+    xy = qx * qy
+    xz = qx * qz
+    yz = qy * qz
+    wx = qw * qx
+    wy = qw * qy
+    wz = qw * qz
+    return (
+        (1.0 - 2.0 * (yy + zz), 2.0 * (xy - wz), 2.0 * (xz + wy)),
+        (2.0 * (xy + wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz - wx)),
+        (2.0 * (xz - wy), 2.0 * (yz + wx), 1.0 - 2.0 * (xx + yy)),
+    )
 
 
 def _bounds_from_points(points: list[Vector3]) -> _Bounds:
@@ -839,10 +868,17 @@ def _non_degenerate_bounds(bounds: _Bounds) -> _Bounds:
     return _Bounds(Vector3(min_x, min_y, min_z), Vector3(max_x, max_y, max_z))
 
 
-def _prepare_foliage_kernel(instance: _FoliageKernelInstance) -> _PreparedFoliageKernel:
-    if abs(instance.scale.x) < 1e-9 or abs(instance.scale.y) < 1e-9 or abs(instance.scale.z) < 1e-9:
+def _prepare_foliage_kernel(
+    *,
+    name: str,
+    local_bounds: _Bounds,
+    position: Vector3,
+    orientation: Quaternion,
+    scale: Vector3,
+) -> _PreparedFoliageKernel:
+    if abs(scale.x) < 1e-9 or abs(scale.y) < 1e-9 or abs(scale.z) < 1e-9:
         raise ProxyMeshError("Proxy foliage instance has a zero scale component.")
-    bounds = instance.local_bounds
+    bounds = local_bounds
     local_center = Vector3(
         (bounds.minimum.x + bounds.maximum.x) * 0.5,
         (bounds.minimum.y + bounds.maximum.y) * 0.5,
@@ -854,16 +890,16 @@ def _prepare_foliage_kernel(instance: _FoliageKernelInstance) -> _PreparedFoliag
         max((bounds.maximum.z - bounds.minimum.z) * 0.5, 1e-9),
     )
     return _PreparedFoliageKernel(
-        name=instance.name,
+        name=name,
         world_bounds=_transformed_bounds(
             bounds,
-            translate=instance.position,
-            orientation=instance.orientation,
-            scale=instance.scale,
+            translate=position,
+            orientation=orientation,
+            scale=scale,
         ),
-        position=instance.position,
-        inverse_orientation=_inverse_quaternion(instance.orientation, label=f"repeated part {instance.name}"),
-        inverse_scale=Vector3(1.0 / instance.scale.x, 1.0 / instance.scale.y, 1.0 / instance.scale.z),
+        position=position,
+        inverse_orientation=_inverse_quaternion(orientation, label=f"repeated part {name}"),
+        inverse_scale=Vector3(1.0 / scale.x, 1.0 / scale.y, 1.0 / scale.z),
         local_center=local_center,
         local_half_extent=local_half_extent,
     )
@@ -1145,6 +1181,7 @@ def _load_proxy_source_model(request: ProxyMeshSourceRequest) -> tuple[str, Cano
         conversion_mode=ConversionMode.STATIC_ASSEMBLY,
         fbx_cache_max_bytes=request.fbx_cache_max_bytes,
         fbx_cache_max_age_seconds=request.fbx_cache_max_age_seconds,
+        source_cache_enabled=False,
     )
     _raise_for_proxy_blocking_diagnostics(diagnostics)
     return input_path, model

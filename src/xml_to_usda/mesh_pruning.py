@@ -125,46 +125,42 @@ def _ranked_component_scores(
 ) -> list[tuple[float, float, int, tuple[int, ...]]]:
     scores: list[tuple[float, float, int, tuple[int, ...]]] = []
     for component in components:
-        area = sum(_face_area(mesh, face_points[face_index]) for face_index in component)
+        area = 0.0
+        source_faces: list[int] = []
+        min_x = min_y = min_z = float("inf")
+        max_x = max_y = max_z = float("-inf")
+        for face_index in component:
+            face = face_points[face_index]
+            source_faces.append(face[0])
+            area += _face_area(mesh, face)
+            for point_index in face[1:]:
+                point = mesh.points[point_index]
+                if point.x < min_x:
+                    min_x = point.x
+                if point.y < min_y:
+                    min_y = point.y
+                if point.z < min_z:
+                    min_z = point.z
+                if point.x > max_x:
+                    max_x = point.x
+                if point.y > max_y:
+                    max_y = point.y
+                if point.z > max_z:
+                    max_z = point.z
         if area <= 0.0:
             continue
-        diagonal_squared = max(_component_bounds_diagonal_squared(mesh, face_points, component), 1e-12)
-        source_faces = tuple(face_points[local_face_index][0] for local_face_index in component)
-        scores.append((area * diagonal_squared, area, source_faces[0], source_faces))
+        diagonal_squared = max((max_x - min_x) ** 2 + (max_y - min_y) ** 2 + (max_z - min_z) ** 2, 1e-12)
+        scores.append((area * diagonal_squared, area, source_faces[0], tuple(source_faces)))
     return sorted(scores, key=lambda item: (item[0], item[1], item[2]))
 
 
-def _component_bounds_diagonal_squared(
-    mesh: MeshData,
-    face_points: tuple[tuple[int, ...], ...],
-    component: tuple[int, ...],
-) -> float:
-    point_indices: set[int] = set()
-    for local_face_index in component:
-        point_indices.update(face_points[local_face_index][1:])
-    if not point_indices:
-        return 0.0
-    points = tuple(mesh.points[index] for index in point_indices)
-    min_x = min(point.x for point in points)
-    min_y = min(point.y for point in points)
-    min_z = min(point.z for point in points)
-    max_x = max(point.x for point in points)
-    max_y = max(point.y for point in points)
-    max_z = max(point.z for point in points)
-    return (max_x - min_x) ** 2 + (max_y - min_y) ** 2 + (max_z - min_z) ** 2
-
-
 def _face_area(mesh: MeshData, face_point_indices: tuple[int, ...]) -> float:
-    return _polygon_area(tuple(mesh.points[index] for index in face_point_indices[1:]))
-
-
-def _polygon_area(points: tuple[Vector3, ...]) -> float:
-    if len(points) < 3:
+    if len(face_point_indices) < 4:
         return 0.0
-    anchor = points[0]
+    anchor = mesh.points[face_point_indices[1]]
     area = 0.0
-    for index in range(1, len(points) - 1):
-        area += _triangle_area(anchor, points[index], points[index + 1])
+    for index in range(2, len(face_point_indices) - 1):
+        area += _triangle_area(anchor, mesh.points[face_point_indices[index]], mesh.points[face_point_indices[index + 1]])
     return area
 
 

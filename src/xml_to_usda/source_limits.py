@@ -123,7 +123,7 @@ def enforce_source_tree_budgets(
     while stack:
         elem, depth = stack.pop()
         tracker.observe_element(elem, depth=depth)
-        for child in reversed(tuple(elem)):
+        for child in reversed(elem):
             stack.append((child, depth + 1))
 
 
