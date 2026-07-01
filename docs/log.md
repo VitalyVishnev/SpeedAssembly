@@ -63,3 +63,8 @@ Major moves:
 - Added a persisted `branch_prune_aggression` setting for Proxy Mesh Preview and Fracture Preview.
 - Wired Fracture Preview to prune tiny disconnected base-mesh branch islands before face sampling.
 - Made `Remove Small Branches` literal and linear: it removes the requested percentage of the smallest connected islands, with no hidden face-budget cutoff.
+
+## 2026-07-01 - Practical test-density policy
+
+- Updated `AGENTS.md` and `docs/wiki/decisions.md` to keep existing tests but avoid adding or rewriting tests for every small edit or intermediate experiment.
+- Clarified that new tests should protect stable features, new modules, public contracts, and importer-facing invariants with compact intent-level coverage.

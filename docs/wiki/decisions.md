@@ -83,6 +83,27 @@ Related files:
 - `docs/raw/DECISIONS.md`
 - `docs/raw/ARCHITECTURE.md`
 
+## Decision: Test density is practical, not exhaustive
+
+Status: Active
+
+Context:
+The test suite already protects many conversion, UI, runtime, and importer-contract paths. During experimental work, repeatedly adding or rewriting tests for every small attempt slows implementation and can encode temporary behavior before the operator has confirmed that the feature works.
+
+Decision:
+Keep existing tests, but add new tests selectively. New modules, public contracts, stable feature behavior, and importer-facing invariants need focused regression coverage. Simple edits, UI polish, documentation, mechanical cleanup, and intermediate experiments should usually rely on relevant existing checks until the behavior is accepted.
+
+Reasoning:
+Tests should protect completed intent and dangerous contracts, not mirror every implementation step. Prefer broad intent-level tests that catch meaningful breakage; when they fail, inspect the code to locate the exact cause.
+
+Consequences:
+Agents should not treat every small code change as requiring a new test. For experiments, prove the behavior with the smallest useful manual or focused check first, then freeze the accepted behavior with a compact regression test.
+
+Related files:
+- `AGENTS.md`
+- `docs/raw/test_tiers.md`
+- `docs/raw/test_suite_map.md`
+
 ## Decision: Repeated Part is source-level, Assembly Part is authored
 
 Status: Active

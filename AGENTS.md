@@ -107,6 +107,8 @@ If the converter cannot safely determine skeleton hierarchy, prototype identity,
 
 Importer-facing changes are not done until they are covered by tests and validated in UE 5.7.x. For fixed XML and config, output must stay logically stable, skeleton topology must match, and instance counts must match. Compare against `vault` examples when useful.
 
+Test density should stay practical. Preserve existing tests, but do not add or rewrite tests after every small edit, polish pass, or experiment iteration. Add the smallest useful test only when behavior becomes a stable feature, a new module or public contract is introduced, or an importer-facing invariant could regress silently. Prefer broad intent-level regression checks over exhaustive case-by-case encoding; when such a test fails, inspect the code to find the precise cause.
+
 ## Forbidden Shortcuts
 
 - Guess UE schema attributes from memory
@@ -149,6 +151,8 @@ If unsure why existing code is structured a certain way, ask.
 ### Rule 7 - Tests verify intent, not just behavior
 Tests must encode WHY behavior matters, not just WHAT it does.
 A test that can't fail when business logic changes is wrong.
+Do not test every implementation detail or every intermediate experiment.
+For simple edits, run the relevant existing checks instead of creating new tests by default.
 
 ### Rule 8 - Match the codebase's conventions, even if you disagree
 Conformance > taste inside the codebase.
