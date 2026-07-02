@@ -61,6 +61,7 @@ from .material_controls import (
     make_path_edit,
     make_udim_controls,
     make_udim_id_cell,
+    set_tooltip,
     set_combo_value,
 )
 from .part_source_controls import PartSourceMaterialValue
@@ -242,6 +243,14 @@ class WindTabPanel(QWidget):
         self.ground_cover_checkbox.toggled.connect(lambda _checked: self._on_change())
         self.gust_spin = self._make_spin(0.0, 1.0, 0.01, 0.0)
         self.gust_spin.valueChanged.connect(lambda _value: self._on_change())
+        set_tooltip(
+            "Marks the tree as low vegetation. Off uses normal tree wind; on uses ground-cover wind behavior.",
+            self.ground_cover_checkbox,
+        )
+        set_tooltip(
+            "Reduces gust strength globally. Lower keeps sharper gusts; higher softens sudden gust motion.",
+            self.gust_spin,
+        )
         # Wind inspection is now owned by the Wind tab itself instead of the
         # global action column so the operator can tweak wind globals and refresh
         # from the same focused surface.
@@ -251,7 +260,9 @@ class WindTabPanel(QWidget):
 
         controls_layout.addWidget(self.ground_cover_checkbox, 0, 0, 1, 2)
         controls_layout.addWidget(self.refresh_button, 0, 2, 1, 1)
-        controls_layout.addWidget(QLabel("Gust Attenuation", controls), 1, 0)
+        gust_label = QLabel("Gust Attenuation", controls)
+        set_tooltip(self.gust_spin.toolTip(), gust_label)
+        controls_layout.addWidget(gust_label, 1, 0)
         controls_layout.addWidget(self.gust_spin, 1, 1, 1, 2)
         controls_layout.setColumnStretch(1, 1)
         controls_layout.setColumnStretch(3, 1)
@@ -303,9 +314,17 @@ class WindTabPanel(QWidget):
             header.addWidget(header_label, 1)
             trunk_checkbox = QCheckBox("Trunk", card)
             trunk_checkbox.setChecked(self._persisted_group_bool(group.group_index, "is_trunk_group", group.is_trunk_group))
+            set_tooltip(
+                "Treats this group as primary trunk wind. Off bends like branches; on keeps trunk-style motion.",
+                trunk_checkbox,
+            )
             header.addWidget(trunk_checkbox, 0)
             dual_checkbox = QCheckBox("Dual Influence", card)
             dual_checkbox.setChecked(self._persisted_group_bool(group.group_index, "use_dual_influence", group.use_dual_influence))
+            set_tooltip(
+                "Uses a base-to-top influence range. Off uses one strength; on blends from Min to Max.",
+                dual_checkbox,
+            )
             header.addWidget(dual_checkbox, 0)
             card_layout.addLayout(header)
 
@@ -313,7 +332,13 @@ class WindTabPanel(QWidget):
             single_layout = QFormLayout(single_frame)
             single_layout.setContentsMargins(0, 0, 0, 0)
             influence_spin = self._make_spin(0.0, 1.0, 0.05, self._persisted_group_value(group.group_index, "influence", group.influence))
-            single_layout.addRow("Influence", influence_spin)
+            influence_label = QLabel("Influence", single_frame)
+            set_tooltip(
+                "Wind strength for this generator group. Lower barely moves it; higher bends it more.",
+                influence_label,
+                influence_spin,
+            )
+            single_layout.addRow(influence_label, influence_spin)
             card_layout.addWidget(single_frame)
 
             dual_frame = QFrame(card)
@@ -323,9 +348,27 @@ class WindTabPanel(QWidget):
             max_default = group.max_influence if group.max_influence else group.influence
             max_spin = self._make_spin(0.0, 1.0, 0.01, self._persisted_group_value(group.group_index, "max_influence", max_default))
             shift_spin = self._make_spin(0.0, 1.0, 0.01, self._persisted_group_value(group.group_index, "shift_top", group.shift_top))
-            dual_layout.addRow("Min Influence", min_spin)
-            dual_layout.addRow("Max Influence", max_spin)
-            dual_layout.addRow("Shift Top", shift_spin)
+            min_label = QLabel("Min Influence", dual_frame)
+            max_label = QLabel("Max Influence", dual_frame)
+            shift_label = QLabel("Shift Top", dual_frame)
+            set_tooltip(
+                "Lower-end wind strength. Lower keeps bases calmer; higher moves the whole group more.",
+                min_label,
+                min_spin,
+            )
+            set_tooltip(
+                "Upper-end wind strength. Lower calms tips; higher makes tips bend more.",
+                max_label,
+                max_spin,
+            )
+            set_tooltip(
+                "Moves the high-influence zone toward the tip. Lower spreads motion down; higher concentrates it at the top.",
+                shift_label,
+                shift_spin,
+            )
+            dual_layout.addRow(min_label, min_spin)
+            dual_layout.addRow(max_label, max_spin)
+            dual_layout.addRow(shift_label, shift_spin)
             card_layout.addWidget(dual_frame)
 
             row = WindRowWidgets(
@@ -468,8 +511,14 @@ class GeometryTabPanel(QWidget):
         actions_title.setStyleSheet("font-weight: 600;")
         self.preview_proxy_button = QPushButton("Preview Proxy Mesh", actions_card)
         self.preview_proxy_button.clicked.connect(self._on_preview_proxy_requested)
+        self.preview_proxy_button.setToolTip(
+            "Opens proxy settings and preview. Lower proxy values make cheaper meshes; higher values preserve more shape."
+        )
         self.preview_fracture_button = QPushButton("Preview Fracturing", actions_card)
         self.preview_fracture_button.clicked.connect(self._on_preview_fracture_requested)
+        self.preview_fracture_button.setToolTip(
+            "Opens fracture settings and preview. Lower counts make fewer pieces; higher counts split the tree more."
+        )
         actions_layout.addWidget(actions_title, 0, 0)
         actions_layout.addWidget(self.preview_proxy_button, 1, 0)
         actions_layout.addWidget(self.preview_fracture_button, 1, 1)
@@ -516,18 +565,36 @@ class GeometryTabPanel(QWidget):
             mode_combo.addItem("Use FBX File", PrototypeSourceMode.FBX_FILE.value)
             mode_combo.setObjectName("InteractiveCombo")
             set_combo_value(mode_combo, spec.source_mode.value)
+            set_tooltip(
+                "Chooses the prototype source. XML keeps source mesh; Unreal reuses an asset; FBX replaces local geometry.",
+                mode_combo,
+            )
 
             asset_edit = _make_path_edit(spec.unreal_asset_path, card, placeholder="/Game/Path/Asset.Asset")
             asset_label = QLabel("Unreal Path", card)
+            set_tooltip(
+                "Existing Unreal asset for this prototype. Empty disables reuse; filled exports an external reference.",
+                asset_label,
+                asset_edit,
+            )
 
             fbx_edit = _make_path_edit(spec.fbx_path, card, placeholder="Choose an FBX replacement file")
             fbx_label = QLabel("FBX File", card)
+            set_tooltip(
+                "FBX mesh replacing this prototype. Empty keeps XML mesh; filled uses the FBX geometry at source instances.",
+                fbx_label,
+                fbx_edit,
+            )
 
             browse_button = QPushButton("Browse...", card)
             browse_button.clicked.connect(lambda _checked=False, edit=fbx_edit: self._browse_fbx(edit))
             preview_button = QPushButton("Preview/Edit", card)
+            browse_button.setToolTip("Pick an FBX replacement file for this prototype.")
+            preview_button.setToolTip("Preview and edit this prototype. Lower simplification exports less detail; higher keeps more.")
 
-            card_layout.addWidget(QLabel("Source Mode", card), 2, 0)
+            source_mode_label = QLabel("Source Mode", card)
+            set_tooltip(mode_combo.toolTip(), source_mode_label)
+            card_layout.addWidget(source_mode_label, 2, 0)
             card_layout.addWidget(mode_combo, 2, 1)
             card_layout.addWidget(asset_label, 3, 0)
             card_layout.addWidget(asset_edit, 3, 1, 1, 3)
@@ -1214,6 +1281,53 @@ class MaterialsTabPanel(QWidget):
             white_udim_label = QLabel("UDIM", row_card)
             white_udim_id_label = QLabel("ID", row_card)
             white_udim_id_cell = make_udim_id_cell(row_card, white_udim_id_label, white_udim_id_spin)
+            set_tooltip(
+                "Chooses how part materials are resolved. Split uses vertex colors; single forces one material; slots uses FBX slots.",
+                material_mode_label,
+                mode_combo,
+            )
+            set_tooltip(
+                "Material used when Single Material is active. Empty keeps generated material; filled forces one asset.",
+                single_label,
+                single_edit,
+            )
+            set_tooltip(
+                "UDIM mode for the single material. Off keeps UVs; higher modes shift or write UV1 offsets.",
+                single_udim_label,
+                single_udim_mode_combo,
+            )
+            set_tooltip(
+                "UDIM tile for the single material. Lower uses earlier tiles; higher uses later tiles.",
+                single_udim_id_cell,
+            )
+            set_tooltip(
+                "Material for black vertex-color faces. Empty keeps generated material; filled forces that bucket.",
+                black_label,
+                black_edit,
+            )
+            set_tooltip(
+                "UDIM mode for black faces. Off keeps UVs; higher modes shift or write UV1 offsets.",
+                black_udim_label,
+                black_udim_mode_combo,
+            )
+            set_tooltip(
+                "UDIM tile for black faces. Lower uses earlier tiles; higher uses later tiles.",
+                black_udim_id_cell,
+            )
+            set_tooltip(
+                "Material for white vertex-color faces. Empty keeps generated material; filled forces that bucket.",
+                white_label,
+                white_edit,
+            )
+            set_tooltip(
+                "UDIM mode for white faces. Off keeps UVs; higher modes shift or write UV1 offsets.",
+                white_udim_label,
+                white_udim_mode_combo,
+            )
+            set_tooltip(
+                "UDIM tile for white faces. Lower uses earlier tiles; higher uses later tiles.",
+                white_udim_id_cell,
+            )
 
             form.addWidget(material_mode_label, 0, 0)
             form.addWidget(mode_combo, 0, 1)
@@ -1384,6 +1498,19 @@ class MaterialsTabPanel(QWidget):
             max_width=190,
         )
         udim_mode_combo, udim_id_spin = make_udim_controls(widget, mode=slot_spec.udim_mode, udim_id=slot_spec.udim_id)
+        set_tooltip(
+            "Material override for this FBX slot. Empty may reuse another filled slot; filled forces this slot.",
+            label,
+            edit,
+        )
+        set_tooltip(
+            "UDIM handling for this FBX slot. Off keeps UVs; higher modes shift or write UV1 offsets.",
+            udim_mode_combo,
+        )
+        set_tooltip(
+            "UDIM tile for this FBX slot. Lower uses earlier tiles; higher uses later tiles.",
+            udim_id_spin,
+        )
         edit.textChanged.connect(lambda _text: self._on_change())
         udim_mode_combo.currentIndexChanged.connect(lambda _index: self._on_change())
         udim_id_spin.valueChanged.connect(lambda _value: self._on_change())

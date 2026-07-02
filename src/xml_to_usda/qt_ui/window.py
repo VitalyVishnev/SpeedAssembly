@@ -137,6 +137,15 @@ CONVERSION_MODES: tuple[tuple[str, str, bool], ...] = (
 )
 
 
+def _conversion_mode_tooltip(mode_key: str) -> str:
+    return {
+        "skeletal_assembly": "Full skeletal Nanite Assembly. Keeps skeletons and repeated parts for the main UE path.",
+        "skeletal_parts": "Writes reusable skeletal prototype files. Fewer assembly fields; more useful for part libraries.",
+        "static_assembly": "Writes a rigid static Nanite Assembly. No skeleton; simpler output for non-skinned vegetation.",
+        "static_parts": "Reserved static part-library mode. Disabled until the importer contract is validated.",
+    }.get(mode_key, "Conversion output shape. Lower complexity omits contracts; higher fidelity keeps assembly structure.")
+
+
 def _format_bytes(value: int) -> str:
     amount = float(max(0, value))
     for unit in ("B", "KB", "MB", "GB", "TB"):
@@ -883,21 +892,26 @@ class MainWindow(QWidget):
         self.source_button = QPushButton("Input XML", self)
         self.source_button.setObjectName("FileButton")
         self.source_button.clicked.connect(self.browse_input)
+        self.source_button.setToolTip("Choose the SpeedTree Raw XML source. Empty cannot convert; filled loads tree parameters.")
         self.output_button = QPushButton("Output USDA", self)
         self.output_button.setObjectName("FileButton")
         self.output_button.clicked.connect(self.browse_output)
+        self.output_button.setToolTip("Choose the main USDA output path. Empty auto-fills from input; filled controls asset naming.")
 
         self.source_input = PathLineEdit(self)
         self.source_input.setPlaceholderText("Source XML path")
         self.source_input.pathChanged.connect(self._handle_source_text_changed)
+        self.source_input.setToolTip("SpeedTree Raw XML source path. Changing it reloads wind, geometry, and material rows.")
 
         self.output_input = PathLineEdit(self)
         self.output_input.setPlaceholderText("Output USDA path")
         self.output_input.pathChanged.connect(self._handle_output_text_changed)
+        self.output_input.setToolTip("USDA output path. The filename stem becomes the authored base asset name.")
 
         self.preset_combo = QComboBox(self.title_bar.preset_host)
         self.preset_combo.setObjectName("TitlePresetCombo")
         self.preset_combo.currentIndexChanged.connect(self._handle_preset_selected)
+        self.preset_combo.setToolTip("Saved operator preset. Choosing one restores export settings; defaults keep current factory values.")
         self.preset_menu_button = QToolButton(self.title_bar.preset_host)
         self.preset_menu_button.setObjectName("TitlePresetMenuButton")
         self.preset_menu_button.setText("...")
@@ -918,6 +932,7 @@ class MainWindow(QWidget):
         self.convert_mode_button.setText("⚙")
         self.convert_mode_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.convert_mode_button.setMenu(self._build_conversion_mode_menu())
+        self.convert_mode_button.setToolTip("Conversion mode. Skeletal is primary; static removes skeleton output; parts writes prototypes only.")
         self.convert_action_divider = QFrame(self)
         self.convert_action_divider.setObjectName("SplitActionDivider")
         self.convert_action_frame = QFrame(self)
@@ -931,9 +946,11 @@ class MainWindow(QWidget):
         self.generate_button = QPushButton("Generate\nWind JSON", self)
         self.generate_button.setObjectName("GenerateWindButton")
         self.generate_button.clicked.connect(self.run_generate_wind_json)
+        self.generate_button.setToolTip("Writes Dynamic Wind JSON. Lower wind values calm motion; higher values bend groups more.")
         self.generate_proxy_button = QPushButton("Generate\nProxy Mesh", self)
         self.generate_proxy_button.setObjectName("GenerateProxyButton")
         self.generate_proxy_button.clicked.connect(self.run_generate_proxy_mesh)
+        self.generate_proxy_button.setToolTip("Writes the proxy companion USDA. Lower proxy settings are cheaper; higher settings keep more shape.")
         self._action_buttons = [
             self.generate_button,
             self.generate_proxy_button,
@@ -1063,6 +1080,7 @@ class MainWindow(QWidget):
             action.setCheckable(True)
             action.setData(mode_key)
             action.setEnabled(supported)
+            action.setToolTip(_conversion_mode_tooltip(mode_key))
             action.setChecked(mode_key == self._conversion_mode)
             if supported:
                 action.triggered.connect(lambda _checked=False, selected=mode_key: self._set_conversion_mode(selected))

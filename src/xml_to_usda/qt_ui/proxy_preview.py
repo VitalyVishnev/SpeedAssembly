@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QComboBox,
     QDoubleSpinBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QSlider,
@@ -31,6 +32,7 @@ from ..proxy_mesh_service import (
     ProxyMeshSettings,
 )
 from .preview_shell import PreviewShellDialog
+from .material_controls import set_tooltip
 from .viewport import ProxyViewport
 
 
@@ -68,12 +70,20 @@ class ProxyPreviewDialog(PreviewShellDialog):
         title.setStyleSheet("font-weight: 700;")
         settings_layout.addWidget(title)
 
+        _add_group_header(settings_layout, settings_panel, "Method")
         self.method_combo = QComboBox(settings_panel)
         self.method_combo.addItem("Density Field", PROXY_METHOD_DENSITY_FIELD)
         self.method_combo.setCurrentIndex(self.method_combo.findData(settings.method))
-        settings_layout.addWidget(QLabel("Method", settings_panel))
+        method_label = QLabel("Method", settings_panel)
+        set_tooltip(
+            "Proxy generation algorithm. Density Field builds a compact shell from source geometry.",
+            method_label,
+            self.method_combo,
+        )
+        settings_layout.addWidget(method_label)
         settings_layout.addWidget(self.method_combo)
 
+        _add_group_header(settings_layout, settings_panel, "Simplification")
         self.polycount_slider, self.polycount_spin = _build_int_slider_row(
             settings_panel,
             minimum=6,
@@ -82,9 +92,17 @@ class ProxyPreviewDialog(PreviewShellDialog):
             step=100,
         )
         self.polycount_spin.setValue(min(PROXY_PREVIEW_MAX_POLYCOUNT, int(settings.final_polycount or DEFAULT_PROXY_POLYCOUNT)))
-        settings_layout.addWidget(QLabel("Final Polycount", settings_panel))
+        polycount_label = QLabel("Final Polycount", settings_panel)
+        set_tooltip(
+            "Target proxy triangle budget. Lower is cheaper and rougher; higher preserves more shape.",
+            polycount_label,
+            self.polycount_slider,
+            self.polycount_spin,
+        )
+        settings_layout.addWidget(polycount_label)
         settings_layout.addLayout(_slider_row(self.polycount_slider, self.polycount_spin))
 
+        _add_group_header(settings_layout, settings_panel, "Extraction")
         self.inflation_slider, self.inflation_spin = _build_float_slider_row(
             settings_panel,
             minimum=0.1,
@@ -93,7 +111,14 @@ class ProxyPreviewDialog(PreviewShellDialog):
             step=0.01,
             scale=100,
         )
-        settings_layout.addWidget(QLabel("Bounds Inflation", settings_panel))
+        inflation_label = QLabel("Bounds Inflation", settings_panel)
+        set_tooltip(
+            "Expands the density volume around the tree. Lower fits tighter; higher leaves more outside margin.",
+            inflation_label,
+            self.inflation_slider,
+            self.inflation_spin,
+        )
+        settings_layout.addWidget(inflation_label)
         settings_layout.addLayout(_slider_row(self.inflation_slider, self.inflation_spin))
 
         self.density_resolution_slider, self.density_resolution_spin = _build_int_slider_row(
@@ -103,9 +128,17 @@ class ProxyPreviewDialog(PreviewShellDialog):
             value=int(settings.density_resolution),
             step=1,
         )
-        settings_layout.addWidget(QLabel("Density Resolution", settings_panel))
+        density_label = QLabel("Density Resolution", settings_panel)
+        set_tooltip(
+            "Voxel resolution for proxy extraction. Lower is faster and softer; higher captures finer structure.",
+            density_label,
+            self.density_resolution_slider,
+            self.density_resolution_spin,
+        )
+        settings_layout.addWidget(density_label)
         settings_layout.addLayout(_slider_row(self.density_resolution_slider, self.density_resolution_spin))
 
+        _add_group_header(settings_layout, settings_panel, "Source Priority")
         self.base_priority_slider, self.base_priority_spin = _build_float_slider_row(
             settings_panel,
             minimum=0.0,
@@ -114,14 +147,28 @@ class ProxyPreviewDialog(PreviewShellDialog):
             step=0.01,
             scale=100,
         )
-        settings_layout.addWidget(QLabel("Base Mesh Priority", settings_panel))
+        base_priority_label = QLabel("Base Mesh Priority", settings_panel)
+        set_tooltip(
+            "Reserves proxy budget for trunk/base geometry. Lower favors foliage volume; higher preserves base mesh.",
+            base_priority_label,
+            self.base_priority_slider,
+            self.base_priority_spin,
+        )
+        settings_layout.addWidget(base_priority_label)
         settings_layout.addLayout(_slider_row(self.base_priority_slider, self.base_priority_spin))
 
         self.branch_prune_slider, self.branch_prune_spin = _build_branch_prune_slider_row(
             settings_panel,
             value=float(settings.branch_prune_aggression),
         )
-        settings_layout.addWidget(QLabel("Remove Small Branches", settings_panel))
+        branch_prune_label = QLabel("Remove Small Branches", settings_panel)
+        set_tooltip(
+            "Removes the smallest disconnected base-mesh islands first. Lower keeps twigs; higher leaves larger branches only.",
+            branch_prune_label,
+            self.branch_prune_slider,
+            self.branch_prune_spin,
+        )
+        settings_layout.addWidget(branch_prune_label)
         settings_layout.addLayout(_slider_row(self.branch_prune_slider, self.branch_prune_spin))
 
         self.status_label = QLabel("", settings_panel)
@@ -225,6 +272,19 @@ def _build_int_slider_row(
     slider.valueChanged.connect(lambda raw: _sync_int_spin(spin, raw, step))
     spin.editingFinished.connect(lambda: _sync_int_slider(slider, spin.value()))
     return slider, spin
+
+
+def _add_group_header(layout, parent, title: str) -> None:
+    line = QFrame(parent)
+    line.setFrameShape(QFrame.Shape.HLine)
+    line.setFrameShadow(QFrame.Shadow.Plain)
+    label = QLabel(title, parent)
+    label.setObjectName("MutedLabel")
+    label.setStyleSheet("font-weight: 700;")
+    layout.addSpacing(6)
+    layout.addWidget(line)
+    layout.addSpacing(4)
+    layout.addWidget(label)
 
 
 def _build_float_slider_row(

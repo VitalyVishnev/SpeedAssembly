@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 
 from ..models import FbxMaterialMode, FbxMaterialSlotOverride, PrototypeSourceConfig, PrototypeSourceMode, UdimMode
 from ..part_preview_service import PartPreviewDisplayMode
-from .material_controls import MaterialUdimRow, MaterialUdimValue, NoWheelComboBox, make_path_edit, set_combo_value
+from .material_controls import MaterialUdimRow, MaterialUdimValue, NoWheelComboBox, make_path_edit, set_combo_value, set_tooltip
 
 
 @dataclass(frozen=True)
@@ -105,6 +105,10 @@ class PartSourceMaterialEditor(QWidget):
         self.source_mode_combo.addItem("FBX", PrototypeSourceMode.FBX_FILE.value)
         self.source_mode_combo.addItem("Unreal Path", PrototypeSourceMode.UNREAL_ASSET.value)
         set_combo_value(self.source_mode_combo, value.source_mode.value)
+        set_tooltip(
+            "Chooses the prototype source. XML keeps source mesh; FBX replaces geometry; Unreal uses an external asset.",
+            self.source_mode_combo,
+        )
 
         self.unreal_path_edit = make_path_edit(
             value.unreal_asset_path,
@@ -118,15 +122,28 @@ class PartSourceMaterialEditor(QWidget):
         )
         self.fbx_browse_button = QPushButton("Browse...", self)
         self.fbx_browse_button.clicked.connect(lambda _checked=False: self._browse_fbx(self.fbx_path_edit))
-        source_grid.addWidget(QLabel("Source", self), 0, 0)
+        source_label = QLabel("Source", self)
+        set_tooltip(self.source_mode_combo.toolTip(), source_label)
+        source_grid.addWidget(source_label, 0, 0)
         source_grid.addWidget(self.source_mode_combo, 0, 1, 1, 2)
         self.unreal_path_label = QLabel("Unreal Path", self)
+        set_tooltip(
+            "Existing Unreal asset for this prototype. Empty disables reuse; filled exports an external reference.",
+            self.unreal_path_label,
+            self.unreal_path_edit,
+        )
         source_grid.addWidget(self.unreal_path_label, 1, 0)
         source_grid.addWidget(self.unreal_path_edit, 1, 1, 1, 2)
         self.fbx_path_label = QLabel("FBX", self)
+        set_tooltip(
+            "FBX mesh replacing this prototype. Empty keeps XML mesh; filled uses the FBX geometry at source instances.",
+            self.fbx_path_label,
+            self.fbx_path_edit,
+        )
         source_grid.addWidget(self.fbx_path_label, 2, 0)
         source_grid.addWidget(self.fbx_path_edit, 2, 1)
         source_grid.addWidget(self.fbx_browse_button, 2, 2)
+        self.fbx_browse_button.setToolTip("Pick an FBX replacement file for this prototype.")
         layout.addLayout(source_grid)
 
         self.material_frame = QFrame(self)
@@ -134,8 +151,14 @@ class PartSourceMaterialEditor(QWidget):
         material_layout.setContentsMargins(0, 0, 0, 0)
         material_layout.setSpacing(8)
         mode_row = QHBoxLayout()
-        mode_row.addWidget(QLabel("Material Mode", self.material_frame))
+        material_mode_label = QLabel("Material Mode", self.material_frame)
+        mode_row.addWidget(material_mode_label)
         self.material_mode_combo = NoWheelComboBox(self.material_frame)
+        set_tooltip(
+            "Chooses how materials are resolved. Split uses vertex colors; single forces one material; slots uses FBX slots.",
+            material_mode_label,
+            self.material_mode_combo,
+        )
         mode_row.addWidget(self.material_mode_combo, 1)
         material_layout.addLayout(mode_row)
 
@@ -168,12 +191,18 @@ class PartSourceMaterialEditor(QWidget):
         layout.addWidget(self.material_frame)
 
         display_row = QHBoxLayout()
-        display_row.addWidget(QLabel("Display", self))
+        display_label = QLabel("Display", self)
+        display_row.addWidget(display_label)
         self.display_mode_combo = NoWheelComboBox(self)
         self.display_mode_combo.addItem("Default", PartPreviewDisplayMode.DEFAULT.value)
         self.display_mode_combo.addItem("Vertex Colors", PartPreviewDisplayMode.VERTEX_COLORS.value)
         self.display_mode_combo.addItem("Material Colors", PartPreviewDisplayMode.MATERIAL_COLORS.value)
         set_combo_value(self.display_mode_combo, value.display_mode.value)
+        set_tooltip(
+            "Preview coloring mode only. Default shows shaded mesh; higher debug modes reveal vertex/material buckets.",
+            display_label,
+            self.display_mode_combo,
+        )
         display_row.addWidget(self.display_mode_combo, 1)
         layout.addLayout(display_row)
 
@@ -186,7 +215,14 @@ class PartSourceMaterialEditor(QWidget):
         self.simplification_spin.setSuffix("%")
         self.simplification_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         simplify_row = QHBoxLayout()
-        simplify_row.addWidget(QLabel("Simplification", self))
+        simplify_label = QLabel("Simplification", self)
+        set_tooltip(
+            "Percent of prototype triangles kept for export. Lower is lighter and rougher; higher keeps more detail.",
+            simplify_label,
+            self.simplification_slider,
+            self.simplification_spin,
+        )
+        simplify_row.addWidget(simplify_label)
         simplify_row.addWidget(self.simplification_slider, 1)
         simplify_row.addWidget(self.simplification_spin)
         layout.addLayout(simplify_row)

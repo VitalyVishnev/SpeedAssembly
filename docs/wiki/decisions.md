@@ -424,3 +424,24 @@ Proxy preview/export no longer builds a full `CanonicalTreeModel` through author
 Related files:
 - `src/xml_to_usda/proxy_source_projection.py`
 - `src/xml_to_usda/proxy_mesh_service.py`
+
+## Decision: Main UI export parameters are grouped and tooltip-backed
+
+Status: Active
+
+Context:
+The main PySide6 UI exposes export-tree parameters for wind, prototype source assignment, material overrides, Proxy Mesh, and Fracture Preview. Dense ungrouped lists made it hard to tell whether a value affected source loading, preview mesh quality, fracture planning, viewport-only display, or collision output.
+
+Decision:
+Every operator-facing export parameter in the main UI should have a short English tooltip. Sliders and numeric fields should state what the value controls and what lower versus higher values do. Dense parameter panels should use functional groups with a subtle divider and compact group label.
+
+Reasoning:
+The operator should not need code knowledge to distinguish preview-only controls from exported geometry contracts.
+
+Consequences:
+Do not add new main-UI export sliders, checkboxes, combos, path fields, or material/UDIM controls without a concise tooltip. Keep UI-settings controls separate from this rule unless they affect exported tree data.
+
+Related files:
+- `src/xml_to_usda/qt_ui/panels.py`
+- `src/xml_to_usda/qt_ui/proxy_preview.py`
+- `src/xml_to_usda/qt_ui/fracture_preview.py`

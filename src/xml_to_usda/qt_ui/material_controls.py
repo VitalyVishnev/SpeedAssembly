@@ -44,6 +44,14 @@ class NoWheelComboBox(QComboBox):
         event.ignore()
 
 
+def set_tooltip(text: str, *widgets: QWidget) -> None:
+    for widget in widgets:
+        widget.setToolTip(text)
+        for child in widget.findChildren(QWidget):
+            if not child.toolTip():
+                child.setToolTip(text)
+
+
 def set_combo_value(combo: QComboBox, value: str) -> None:
     index = combo.findData(value)
     if index >= 0:
@@ -64,6 +72,7 @@ def make_path_edit(
     edit = QLineEdit(text, parent)
     edit.setObjectName("PathInput")
     edit.setPlaceholderText(placeholder)
+    edit.setToolTip("Unreal asset path assigned to this slot. Empty keeps the source/default; filled forces that asset.")
     if max_width is not None:
         edit.setMaximumWidth(int(max_width))
     return edit
@@ -78,6 +87,7 @@ def make_udim_controls(parent: QWidget, *, mode: UdimMode, udim_id: int) -> tupl
         ("Write UV1 Offset", UdimMode.WRITE_SECONDARY_UV_OFFSET.value),
     ):
         mode_combo.addItem(label, value)
+    mode_combo.setToolTip("Controls UDIM handling for this material. Off keeps UVs; stronger modes shift or write a second UV channel.")
     set_combo_value(mode_combo, mode.value)
     mode_combo.setFixedWidth(UDIM_MODE_COMBO_WIDTH)
     udim_id_spin = QSpinBox(parent)
@@ -86,6 +96,7 @@ def make_udim_controls(parent: QWidget, *, mode: UdimMode, udim_id: int) -> tupl
     udim_id_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
     udim_id_spin.setAlignment(Qt.AlignmentFlag.AlignRight)
     udim_id_spin.setFixedWidth(UDIM_ID_SPIN_WIDTH)
+    udim_id_spin.setToolTip("Target UDIM tile number. Lower uses earlier tiles; higher moves this material to later tiles.")
     return mode_combo, udim_id_spin
 
 
@@ -146,6 +157,12 @@ class MaterialUdimRow(QWidget):
         )
         make_udims = make_compact_udim_controls if self._stacked_udim else make_udim_controls
         self.udim_mode_combo, self.udim_id_spin = make_udims(self, mode=resolved.udim_mode, udim_id=resolved.udim_id)
+        set_tooltip(
+            f"Material override for {label}. Empty keeps generated/source material; filled forces this Unreal material.",
+            label_cell,
+            self.label,
+            self.path_edit,
+        )
         layout.addWidget(label_cell, 0, 0)
         if self._stacked_udim:
             layout.addWidget(self.path_edit, 0, 1, 1, 2)

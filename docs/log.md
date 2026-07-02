@@ -94,3 +94,8 @@ Major moves:
 - Bypassed the generic Fracture Preview source-model JSON cache after profiling showed it was slower than direct reload on both BigSpruce and the temporary Birch sample.
 - Cached worker-payload class and dataclass metadata lookups so existing JSON worker payloads do less repeated Python/import work.
 - Measured BigSpruce Fracture Preview at about 1.0s without the generic cache versus about 2.5s cached, and temporary Birch at about 6.8s without the generic cache versus about 9.0s cached warm.
+
+## 2026-07-02 - Main UI parameter guidance
+
+- Added the maintained rule that main export-tree UI parameters need concise English tooltips and functional grouping.
+- Covered Wind, Geometry, Materials, Proxy Mesh, Fracture Preview, and prototype preview controls with short parameter tooltips.

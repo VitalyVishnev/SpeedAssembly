@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -45,7 +46,7 @@ from ..fracture_service import FractureSettings
 from ..fracture_viewport_scene import build_fracture_viewport_scene
 from ..models import Color4, GeometryBuffer, Quaternion, UdimMode, Vector3
 from ..viewport_scene import ViewportScene
-from .material_controls import MaterialUdimRow, MaterialUdimValue
+from .material_controls import MaterialUdimRow, MaterialUdimValue, set_tooltip
 from .preview_shell import PreviewShellDialog
 from .viewport import MATCAP_VERTEX_STRIDE, MatcapViewport
 
@@ -157,6 +158,7 @@ class FracturePreviewDialog(PreviewShellDialog):
         mode_label.setStyleSheet("font-weight: 700; color: #2b3032;")
         settings_layout.addWidget(mode_label)
 
+        _add_group_header(settings_layout, settings_panel, "Fracture Plan")
         self.piece_count_slider, self.piece_count_spin = _build_int_slider_row(
             settings_panel,
             minimum=1,
@@ -164,9 +166,17 @@ class FracturePreviewDialog(PreviewShellDialog):
             value=int(self._settings.fracture.target_piece_count),
             step=1,
         )
-        settings_layout.addWidget(QLabel("Target Pieces", settings_panel))
+        target_pieces_label = QLabel("Target Pieces", settings_panel)
+        set_tooltip(
+            "Target number of fracture pieces. Lower makes larger chunks; higher splits the tree into more pieces.",
+            target_pieces_label,
+            self.piece_count_slider,
+            self.piece_count_spin,
+        )
+        settings_layout.addWidget(target_pieces_label)
         settings_layout.addLayout(_slider_row(self.piece_count_slider, self.piece_count_spin))
 
+        _add_group_header(settings_layout, settings_panel, "Preview Mesh")
         self.polycount_slider, self.polycount_spin = _build_int_slider_row(
             settings_panel,
             minimum=1,
@@ -174,14 +184,28 @@ class FracturePreviewDialog(PreviewShellDialog):
             value=int(self._settings.final_polycount),
             step=50_000,
         )
-        settings_layout.addWidget(QLabel("Preview Polycount", settings_panel))
+        preview_polycount_label = QLabel("Preview Polycount", settings_panel)
+        set_tooltip(
+            "Triangle budget for the preview mesh. Lower previews faster and rougher; higher keeps more detail.",
+            preview_polycount_label,
+            self.polycount_slider,
+            self.polycount_spin,
+        )
+        settings_layout.addWidget(preview_polycount_label)
         settings_layout.addLayout(_slider_row(self.polycount_slider, self.polycount_spin))
 
         self.branch_prune_slider, self.branch_prune_spin = _build_branch_prune_slider_row(
             settings_panel,
             value=float(self._settings.branch_prune_aggression),
         )
-        settings_layout.addWidget(QLabel("Remove Small Branches", settings_panel))
+        branch_prune_label = QLabel("Remove Small Branches", settings_panel)
+        set_tooltip(
+            "Removes the smallest disconnected base-mesh islands first. Lower keeps twigs; higher leaves larger branches only.",
+            branch_prune_label,
+            self.branch_prune_slider,
+            self.branch_prune_spin,
+        )
+        settings_layout.addWidget(branch_prune_label)
         settings_layout.addLayout(_slider_row(self.branch_prune_slider, self.branch_prune_spin))
 
         self.base_priority_slider, self.base_priority_spin = _build_float_slider_row(
@@ -192,7 +216,14 @@ class FracturePreviewDialog(PreviewShellDialog):
             step=0.01,
             scale=100,
         )
-        settings_layout.addWidget(QLabel("Base Priority", settings_panel))
+        base_priority_label = QLabel("Base Priority", settings_panel)
+        set_tooltip(
+            "Reserves preview budget for base/trunk geometry. Lower favors repeated parts; higher preserves the base mesh.",
+            base_priority_label,
+            self.base_priority_slider,
+            self.base_priority_spin,
+        )
+        settings_layout.addWidget(base_priority_label)
         settings_layout.addLayout(_slider_row(self.base_priority_slider, self.base_priority_spin))
 
         self.preserve_trunk_slider, self.preserve_trunk_spin = _build_float_slider_row(
@@ -203,9 +234,17 @@ class FracturePreviewDialog(PreviewShellDialog):
             step=0.01,
             scale=100,
         )
-        settings_layout.addWidget(QLabel("Preserve Trunk", settings_panel))
+        preserve_trunk_label = QLabel("Preserve Trunk", settings_panel)
+        set_tooltip(
+            "Biases automatic cuts away from the trunk. Lower allows trunk splits; higher keeps the trunk more intact.",
+            preserve_trunk_label,
+            self.preserve_trunk_slider,
+            self.preserve_trunk_spin,
+        )
+        settings_layout.addWidget(preserve_trunk_label)
         settings_layout.addLayout(_slider_row(self.preserve_trunk_slider, self.preserve_trunk_spin))
 
+        _add_group_header(settings_layout, settings_panel, "Viewport")
         self.exploded_view_slider, self.exploded_view_spin = _build_float_slider_row(
             settings_panel,
             minimum=0.0,
@@ -214,7 +253,14 @@ class FracturePreviewDialog(PreviewShellDialog):
             step=0.01,
             scale=100,
         )
-        settings_layout.addWidget(QLabel("Exploded View", settings_panel))
+        exploded_view_label = QLabel("Exploded View", settings_panel)
+        set_tooltip(
+            "Visual spacing between pieces only. Lower shows intact placement; higher pulls pieces apart.",
+            exploded_view_label,
+            self.exploded_view_slider,
+            self.exploded_view_spin,
+        )
+        settings_layout.addWidget(exploded_view_label)
         settings_layout.addLayout(_slider_row(self.exploded_view_slider, self.exploded_view_spin))
 
         self.color_strength_slider, self.color_strength_spin = _build_float_slider_row(
@@ -225,7 +271,14 @@ class FracturePreviewDialog(PreviewShellDialog):
             step=0.01,
             scale=100,
         )
-        settings_layout.addWidget(QLabel("Piece Color", settings_panel))
+        piece_color_label = QLabel("Piece Color", settings_panel)
+        set_tooltip(
+            "Piece color tint strength in the viewport. Lower looks more neutral; higher separates pieces more clearly.",
+            piece_color_label,
+            self.color_strength_slider,
+            self.color_strength_spin,
+        )
+        settings_layout.addWidget(piece_color_label)
         settings_layout.addLayout(_slider_row(self.color_strength_slider, self.color_strength_spin))
 
         self.show_bones_check = QCheckBox("Show Bones", settings_panel)
@@ -233,6 +286,16 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.hide_repeated_parts_check.setChecked(True)
         self.generate_caps_check = QCheckBox("Generate Caps", settings_panel)
         self.override_caps_material_check = QCheckBox("Override Caps Material", settings_panel)
+        set_tooltip("Shows selectable skeleton cut segments. Off hides guides; on shows bones for manual cuts.", self.show_bones_check)
+        set_tooltip(
+            "Hides instanced repeated parts in preview. Off shows foliage/parts; on focuses on base fracture geometry.",
+            self.hide_repeated_parts_check,
+        )
+        set_tooltip("Writes cap faces on cut surfaces. Off leaves open cuts; on closes piece interiors.", self.generate_caps_check)
+        set_tooltip(
+            "Uses a separate material for cap faces. Off reuses defaults; on assigns the Caps Material row.",
+            self.override_caps_material_check,
+        )
         self.caps_material_row = MaterialUdimRow(
             label="Caps Material",
             value=MaterialUdimValue(udim_mode=UdimMode.OFF, udim_id=1001),
@@ -243,6 +306,8 @@ class FracturePreviewDialog(PreviewShellDialog):
         )
         self.stump_piece_check = QCheckBox("Stump Piece", settings_panel)
         self.collision_check = QCheckBox("Generate Collision", settings_panel)
+        set_tooltip("Forces a ground stump piece. Off follows normal cuts; on keeps a dedicated stump chunk.", self.stump_piece_check)
+        set_tooltip("Exports simple collision for pieces. Off exports visuals only; on adds collision companion meshes.", self.collision_check)
         self.collision_mode_combo = QComboBox(settings_panel)
         self.collision_mode_combo.addItem("Convex Hull", FractureCollisionMode.CONVEX.value)
         self.collision_mode_combo.addItem("Capsules", FractureCollisionMode.CAPSULE.value)
@@ -262,9 +327,16 @@ class FracturePreviewDialog(PreviewShellDialog):
             button.setCheckable(True)
             button.setObjectName("CollisionModeButton")
             button.clicked.connect(lambda _checked, selected=mode: self._select_collision_mode(selected))
+            button.setToolTip(
+                "Collision shape mode. Convex is fitted hulls; Capsule follows skeleton segments; Sphere uses one bound."
+            )
             collision_mode_button_layout.addWidget(button)
             self.collision_mode_buttons[mode] = button
         self.collision_include_parts_check = QCheckBox("Collision Includes Parts", settings_panel)
+        set_tooltip(
+            "Includes repeated parts when fitting collision. Off fits base mesh only; on grows collision around parts too.",
+            self.collision_include_parts_check,
+        )
         self.convex_vertices_slider, self.convex_vertices_spin = _build_int_slider_row(
             settings_panel,
             minimum=4,
@@ -313,12 +385,15 @@ class FracturePreviewDialog(PreviewShellDialog):
         )
         self.reset_cuts_button = QPushButton("Reset Cuts", settings_panel)
         self.reset_cuts_button.clicked.connect(self._reset_manual_cuts)
+        self.reset_cuts_button.setToolTip("Clears manual cuts. Fewer cuts lets auto-fill decide; more manual cuts pins split sites.")
         settings_layout.addWidget(self.show_bones_check)
         settings_layout.addWidget(self.hide_repeated_parts_check)
+        _add_group_header(settings_layout, settings_panel, "Output Pieces")
         settings_layout.addWidget(self.generate_caps_check)
         settings_layout.addWidget(self.override_caps_material_check)
         settings_layout.addWidget(self.caps_material_row)
         settings_layout.addWidget(self.stump_piece_check)
+        _add_group_header(settings_layout, settings_panel, "Collision")
         settings_layout.addWidget(self.collision_check)
         self.collision_mode_label = QLabel("Collision Mode", settings_panel)
         self.convex_vertices_label = QLabel("Convex Vertices", settings_panel)
@@ -327,6 +402,47 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.capsule_scale_label = QLabel("Capsule Scale", settings_panel)
         self.capsule_scale_by_length_label = QLabel("Capsule Scale By Length", settings_panel)
         self.collision_opacity_label = QLabel("Collision Opacity", settings_panel)
+        set_tooltip(
+            "Collision shape mode. Convex is fitted hulls; Capsule follows skeleton segments; Sphere uses one bound.",
+            self.collision_mode_label,
+            self.collision_mode_button_row,
+        )
+        set_tooltip(
+            "Maximum vertices in a convex collision hull. Lower is simpler; higher follows the piece outline better.",
+            self.convex_vertices_label,
+            self.convex_vertices_slider,
+            self.convex_vertices_spin,
+        )
+        set_tooltip(
+            "Scale for sphere collision radius. Lower tightens the sphere; higher gives more coverage.",
+            self.sphere_scale_label,
+            self.sphere_scale_slider,
+            self.sphere_scale_spin,
+        )
+        set_tooltip(
+            "Simplifies capsule chains. Lower keeps more segments; higher merges into fewer capsules.",
+            self.capsule_simplify_label,
+            self.capsule_simplify_slider,
+            self.capsule_simplify_spin,
+        )
+        set_tooltip(
+            "Scales capsule radius. Lower tightens capsules; higher covers more nearby geometry.",
+            self.capsule_scale_label,
+            self.capsule_scale_slider,
+            self.capsule_scale_spin,
+        )
+        set_tooltip(
+            "Adds radius from segment length. Lower keeps thin capsules; higher fattens long segments.",
+            self.capsule_scale_by_length_label,
+            self.capsule_scale_by_length_slider,
+            self.capsule_scale_by_length_spin,
+        )
+        set_tooltip(
+            "Collision preview opacity only. Lower is more transparent; higher makes collision shapes easier to see.",
+            self.collision_opacity_label,
+            self.collision_opacity_slider,
+            self.collision_opacity_spin,
+        )
         settings_layout.addWidget(self.collision_mode_label)
         settings_layout.addWidget(self.collision_mode_button_row)
         settings_layout.addWidget(self.collision_include_parts_check)
@@ -797,6 +913,19 @@ def _build_int_slider_row(
     slider.valueChanged.connect(lambda raw: _sync_int_spin(spin, raw, step))
     spin.editingFinished.connect(lambda: _sync_int_slider(slider, spin.value()))
     return slider, spin
+
+
+def _add_group_header(layout, parent, title: str) -> None:
+    line = QFrame(parent)
+    line.setFrameShape(QFrame.Shape.HLine)
+    line.setFrameShadow(QFrame.Shadow.Plain)
+    label = QLabel(title, parent)
+    label.setObjectName("MutedLabel")
+    label.setStyleSheet("font-weight: 700;")
+    layout.addSpacing(6)
+    layout.addWidget(line)
+    layout.addSpacing(4)
+    layout.addWidget(label)
 
 
 def _build_float_slider_row(
