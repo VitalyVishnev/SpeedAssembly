@@ -384,22 +384,43 @@ Related files:
 - `docs/raw/ARCHITECTURE.md`
 - `docs/raw/ui_next_architecture.md`
 
+## Decision: Interactive workflows optimize for low latency by default
+
+Status: Active
+
+Context:
+The operator repeatedly previews Proxy Mesh, Fracture Preview, materials, and export-adjacent settings while judging visual quality.
+
+Decision:
+Treat avoidable UI pauses as product defects. Preview and setup paths should prefer narrow projections, typed caches, incremental reuse, and measured hot-path simplification over broad object reconstruction.
+
+Reasoning:
+The converter is an operator tool, not only a batch exporter. A technically correct result that repeatedly blocks the workflow for several seconds still damages the pipeline.
+
+Consequences:
+Before adding a broad cache or full-model reload to an interactive path, measure it against a narrow workflow-specific payload. Generic worker-payload JSON remains acceptable for IPC, but not as the default persistent cache for large preview/source models. Keep importer-facing correctness first, but make the default UX target as close to real-time as the workflow safely allows.
+
+Related files:
+- `src/xml_to_usda/proxy_source_projection.py`
+- `src/xml_to_usda/mesh_pruning.py`
+- `src/xml_to_usda/fracture_preview_service.py`
+
 ## Decision: Proxy source loading bypasses the generic source-model cache
 
 Status: Active
 
 Context:
-Proxy Mesh generation on large SpeedTree XML files only needs the current source facts once per worker job. The generic JSON source-model cache can cost more to read or write than reparsing and normalizing the XML, especially on branch-heavy real samples.
+Proxy Mesh generation on large SpeedTree XML files needs only base geometry, repeated-part transforms, and source prototype geometry. The generic JSON source-model cache can cost more to read or write than reparsing and normalizing the XML, especially on branch-heavy real samples.
 
 Decision:
-Keep the generic cache for normal conversion callers, but disable it for the Proxy Mesh source request path.
+Keep the generic cache for normal conversion callers, but use a dedicated Proxy Source Projection and typed `.npz` cache for the Proxy Mesh source request path.
 
 Reasoning:
-Measured Proxy Mesh timings on `SK_BirchAltai_Assembly_13.xml` improved from about 17.1s to about 5.2s without changing QEM simplification, pruning policy, output geometry settings, or importer-facing contracts.
+Measured Proxy Mesh timings on `SK_BirchAltai_Assembly_13.xml` improved from about 17.1s before the speed work to about 3.5s cold and about 1.85s warm after Proxy Source Projection cache and local hot-path polish, without changing QEM simplification, pruning policy, output geometry settings, or importer-facing contracts. Projection output matched canonical-derived proxy output on the temporary Birch sample and repo samples.
 
 Consequences:
-Proxy preview/export reparses XML instead of using the generic cache. Revisit only if a faster typed cache replaces the generic JSON worker-payload cache.
+Proxy preview/export no longer builds a full `CanonicalTreeModel` through authoring resolution. The Projection cache must stay typed and loaded with pickle disabled. Do not put material, skeleton, or authoring-resolution fields into it unless Proxy Mesh starts using them directly.
 
 Related files:
-- `src/xml_to_usda/canonical_loader.py`
+- `src/xml_to_usda/proxy_source_projection.py`
 - `src/xml_to_usda/proxy_mesh_service.py`

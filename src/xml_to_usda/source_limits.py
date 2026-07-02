@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 import xml.etree.ElementTree as ET
 
 
@@ -52,6 +53,8 @@ PACKED_VALUE_TAGS = {
 }
 
 FACE_VERTEX_ENTRY_TAGS = {"PointIndices", "TriangleIndices", "QuadIndices", "VertexIndices"}
+_PACKED_VALUE_STREAMING_PATTERN = re.compile(r"[^,\s]+")
+_PACKED_VALUE_FAST_SPLIT_MAX_CHARS = 1_000_000
 
 
 @dataclass(slots=True)
@@ -130,13 +133,6 @@ def enforce_source_tree_budgets(
 def count_packed_values(raw: str | None) -> int:
     if not raw:
         return 0
-    count = 0
-    in_token = False
-    for character in raw:
-        if character.isspace() or character == ",":
-            in_token = False
-            continue
-        if not in_token:
-            count += 1
-            in_token = True
-    return count
+    if len(raw) <= _PACKED_VALUE_FAST_SPLIT_MAX_CHARS:
+        return len(raw.replace(",", " ").split())
+    return sum(1 for _match in _PACKED_VALUE_STREAMING_PATTERN.finditer(raw))

@@ -4,21 +4,20 @@ import pickle
 import sys
 from array import array
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from xml_to_usda.canonical_loader import load_canonical_model
 from xml_to_usda.models import (
     ConversionRequest,
     ExportMetadata,
-    FbxMaterialMode,
     GeometryBuffer,
     InstanceBinding,
     MeshData,
     Prototype,
     PrototypeIdentity,
-    PrototypeSourceConfig,
-    PrototypeSourceMode,
     Quaternion,
     RepeatedPartInstance,
     TreeAsset,
@@ -35,6 +34,30 @@ from xml_to_usda.proxy_mesh_service import (
     generate_proxy_mesh_from_source_request,
     generate_proxy_mesh,
     render_proxy_usda,
+)
+from xml_to_usda.proxy_source_projection import (
+    ProxySourceProjection,
+    _proxy_projection_cache_path,
+    _read_proxy_projection_cache,
+    load_proxy_source_projection,
+    projection_to_tree_asset,
+)
+
+
+SIMPLE_TREE_01 = (
+    Path(__file__).resolve().parents[1]
+    / "samples"
+    / "speedtree"
+    / "simple_tree"
+    / "variants"
+    / "SimpleTree_01.xml"
+)
+BIG_SPRUCE = (
+    Path(__file__).resolve().parents[1]
+    / "samples"
+    / "speedtree"
+    / "BigSpruce"
+    / "SkeletalAssemblyTest_Spruce_Big_low.xml"
 )
 
 
@@ -456,67 +479,107 @@ def test_proxy_export_writes_the_same_generated_mesh_it_returns(tmp_path) -> Non
     assert (tmp_path / "exports" / "HeroTree_proxy.usda").read_text(encoding="utf-8") == expected_usda
 
 
-def test_proxy_request_generation_ignores_operator_fbx_replacement(monkeypatch) -> None:
+def test_proxy_request_generation_uses_proxy_source_projection(monkeypatch) -> None:
     calls: dict[str, object] = {}
 
-    def fake_load_canonical_model(input_path, output_mode, **kwargs):
+    def fake_load_proxy_source_projection(input_path):
         calls["input_path"] = input_path
-        calls["kwargs"] = kwargs
-        return object(), _model(repeated_count=1), ()
+        return ProxySourceProjection(
+            source_path=input_path,
+            base_mesh=_triangle_mesh("Base"),
+            prototypes=_model(repeated_count=1).prototypes,
+            repeated_parts=_model(repeated_count=1).repeated_parts,
+        )
 
-    monkeypatch.setattr("xml_to_usda.proxy_mesh_service.load_canonical_model", fake_load_canonical_model)
-    request = ConversionRequest(
-        input_paths=("tree.xml",),
-        output_path="tree.usda",
-        use_explicit_material_contract=True,
-        prototype_source_configs=(
-            PrototypeSourceConfig(
-                source_key="Mesh_7",
-                mode=PrototypeSourceMode.FBX_FILE,
-                fbx_path="heavy_replacement.fbx",
-                fbx_material_mode=FbxMaterialMode.VERTEX_COLOR_SPLIT,
-            ),
-        ),
-    )
+    monkeypatch.setattr("xml_to_usda.proxy_mesh_service.load_proxy_source_projection", fake_load_proxy_source_projection)
+    request = ConversionRequest(input_paths=("tree.xml",), output_path="tree.usda")
 
     source_request = ProxyMeshSourceRequest.from_conversion_request(request)
     result = generate_proxy_mesh_from_source_request(source_request, ProxyMeshSettings(final_polycount=5000))
 
     assert result.mesh.face_count > 0
     assert calls["input_path"] == "tree.xml"
-    assert calls["kwargs"]["source_cache_enabled"] is False
-    assert "prototype_source_configs" not in calls["kwargs"]
-    assert "use_explicit_material_contract" not in calls["kwargs"]
 
 
-def test_proxy_request_export_ignores_operator_fbx_replacement(monkeypatch, tmp_path) -> None:
+def test_proxy_request_export_uses_proxy_source_projection(monkeypatch, tmp_path) -> None:
     calls: dict[str, object] = {}
 
-    def fake_load_canonical_model(input_path, output_mode, **kwargs):
-        calls["kwargs"] = kwargs
-        return object(), _model(repeated_count=1), ()
+    def fake_load_proxy_source_projection(input_path):
+        calls["input_path"] = input_path
+        return ProxySourceProjection(
+            source_path=input_path,
+            base_mesh=_triangle_mesh("Base"),
+            prototypes=_model(repeated_count=1).prototypes,
+            repeated_parts=_model(repeated_count=1).repeated_parts,
+        )
 
-    monkeypatch.setattr("xml_to_usda.proxy_mesh_service.load_canonical_model", fake_load_canonical_model)
-    request = ConversionRequest(
-        input_paths=("tree.xml",),
-        output_path=str(tmp_path / "tree.usda"),
-        use_explicit_material_contract=True,
-        prototype_source_configs=(
-            PrototypeSourceConfig(
-                source_key="Mesh_7",
-                mode=PrototypeSourceMode.FBX_FILE,
-                fbx_path="heavy_replacement.fbx",
-            ),
-        ),
-    )
+    monkeypatch.setattr("xml_to_usda.proxy_mesh_service.load_proxy_source_projection", fake_load_proxy_source_projection)
+    request = ConversionRequest(input_paths=("tree.xml",), output_path=str(tmp_path / "tree.usda"))
 
     source_request = ProxyMeshSourceRequest.from_conversion_request(request)
     result = export_proxy_usda_from_source_request(source_request, ProxyMeshSettings(final_polycount=5000))
 
     assert result.output_path == str(tmp_path / "tree_proxy.usda")
-    assert calls["kwargs"]["source_cache_enabled"] is False
-    assert "prototype_source_configs" not in calls["kwargs"]
-    assert "use_explicit_material_contract" not in calls["kwargs"]
+    assert calls["input_path"] == "tree.xml"
+
+
+@pytest.mark.parametrize("source_path", (SIMPLE_TREE_01, BIG_SPRUCE))
+def test_proxy_source_projection_matches_canonical_proxy_inputs(source_path: Path) -> None:
+    settings = ProxyMeshSettings(final_polycount=5000, density_resolution=64, branch_prune_aggression=0.98)
+    _report, canonical_model, diagnostics = load_canonical_model(str(source_path), source_cache_enabled=False)
+    assert not [issue for issue in diagnostics if issue.severity == "error"]
+
+    projection_model = projection_to_tree_asset(load_proxy_source_projection(str(source_path)))
+
+    canonical = generate_proxy_mesh(canonical_model, settings)
+    projected = generate_proxy_mesh(projection_model, settings)
+
+    assert _mesh_signature(projected.mesh) == _mesh_signature(canonical.mesh)
+    assert projected.source_instance_count == canonical.source_instance_count
+
+
+def test_proxy_source_projection_reuses_typed_cache(monkeypatch, tmp_path: Path) -> None:
+    from xml_to_usda import proxy_source_projection
+
+    cache_root = tmp_path / "cache" / "proxy_source_projections"
+    monkeypatch.setattr(proxy_source_projection, "_proxy_projection_cache_root", lambda: cache_root)
+
+    first = load_proxy_source_projection(str(BIG_SPRUCE))
+    cache_files = list(cache_root.glob("*.npz"))
+    assert len(cache_files) == 1
+    assert cache_files[0].stat().st_size > 0
+
+    def fail_read_source_xml(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("source XML should not be reread when the Proxy Source Projection cache is warm")
+
+    monkeypatch.setattr(proxy_source_projection, "read_source_xml", fail_read_source_xml)
+
+    second = load_proxy_source_projection(str(BIG_SPRUCE))
+
+    settings = ProxyMeshSettings(final_polycount=5000, density_resolution=64, branch_prune_aggression=0.98)
+    assert _mesh_signature(generate_proxy_mesh(projection_to_tree_asset(second), settings).mesh) == _mesh_signature(
+        generate_proxy_mesh(projection_to_tree_asset(first), settings).mesh
+    )
+
+
+def test_proxy_source_projection_cache_ignores_legacy_pickle_without_unpickling(monkeypatch, tmp_path: Path) -> None:
+    from xml_to_usda import proxy_source_projection
+
+    cache_root = tmp_path / "cache" / "proxy_source_projections"
+    cache_root.mkdir(parents=True)
+    monkeypatch.setattr(proxy_source_projection, "_proxy_projection_cache_root", lambda: cache_root)
+    cache_path = _proxy_projection_cache_path(str(BIG_SPRUCE))
+    called: list[str] = []
+
+    class _Exploit:
+        def __reduce__(self):
+            return (called.append, ("executed",))
+
+    cache_path.write_bytes(pickle.dumps(_Exploit()))
+
+    assert _read_proxy_projection_cache(cache_path) is None
+    assert not cache_path.exists()
+    assert called == []
 
 
 def test_proxy_source_request_rejects_batch_conversion_request() -> None:

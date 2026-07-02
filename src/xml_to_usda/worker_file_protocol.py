@@ -17,6 +17,7 @@ from array import array
 from base64 import b64decode, b64encode
 from dataclasses import fields, is_dataclass
 from enum import Enum
+from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,7 @@ _WORKER_PAYLOAD_MODULES = (
     "xml_to_usda.part_preview_service",
     "xml_to_usda.part_preview_worker_subprocess",
 )
+_ALLOWED_CLASS_CACHE: dict[str, tuple[object, type]] = {}
 
 
 def write_worker_payload_atomic(path: str | Path, payload: object) -> None:
@@ -175,8 +177,8 @@ def _encode_worker_value(value: object) -> object:
             _TYPE_KEY: "object",
             _CLASS_KEY: _allowed_worker_class_key(type(value)),
             "fields": {
-                field.name: _encode_worker_value(getattr(value, field.name))
-                for field in fields(value)
+                field_name: _encode_worker_value(getattr(value, field_name))
+                for field_name in _dataclass_field_names(type(value))
             },
         }
     slot_names = _slot_names(type(value))
@@ -231,6 +233,7 @@ def _decode_worker_value(value: object) -> object:
     raise TypeError(f"Unsupported worker payload marker: {payload_type}.")
 
 
+@lru_cache(maxsize=None)
 def _allowed_worker_class_key(cls: type) -> str:
     key = f"{cls.__module__}.{cls.__qualname__}"
     if cls.__module__ not in _WORKER_PAYLOAD_MODULES or not _is_allowed_worker_payload_class(cls):
@@ -242,18 +245,31 @@ def _allowed_worker_class(key: str) -> type:
     module_name, _, qualname = key.rpartition(".")
     if module_name not in _WORKER_PAYLOAD_MODULES or not qualname:
         raise TypeError(f"Unsupported worker payload class: {key}.")
+    cached = _ALLOWED_CLASS_CACHE.get(key)
+    current_module = sys.modules.get(module_name)
+    if cached is not None and current_module is cached[0]:
+        return cached[1]
     obj: object = import_module(module_name)
+    module = obj
     for part in qualname.split("."):
         obj = getattr(obj, part)
     if not isinstance(obj, type) or obj.__module__ != module_name or not _is_allowed_worker_payload_class(obj):
         raise TypeError(f"Unsupported worker payload class: {key}.")
+    _ALLOWED_CLASS_CACHE[key] = (module, obj)
     return obj
 
 
+@lru_cache(maxsize=None)
 def _is_allowed_worker_payload_class(cls: type) -> bool:
     return is_dataclass(cls) or issubclass(cls, Enum) or bool(_slot_names(cls))
 
 
+@lru_cache(maxsize=None)
+def _dataclass_field_names(cls: type) -> tuple[str, ...]:
+    return tuple(field.name for field in fields(cls))
+
+
+@lru_cache(maxsize=None)
 def _slot_names(cls: type) -> tuple[str, ...]:
     names: list[str] = []
     for owner in reversed(cls.__mro__):

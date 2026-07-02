@@ -243,7 +243,7 @@ def test_fracture_preview_reuses_base_cap_source_context_for_all_pieces(monkeypa
     assert calls == 1
 
 
-def test_fracture_preview_source_request_reuses_on_disk_preview_cache(monkeypatch, tmp_path) -> None:
+def test_fracture_preview_source_request_bypasses_generic_preview_cache(monkeypatch, tmp_path) -> None:
     from xml_to_usda import fracture_preview_service
 
     cache_root = tmp_path / "cache" / "fracture_preview_source_models"
@@ -261,13 +261,13 @@ def test_fracture_preview_source_request_reuses_on_disk_preview_cache(monkeypatc
         settings,
         include_viewport_scene=False,
     )
-    assert list(cache_root.glob("*.json"))
+    assert list(cache_root.glob("*.json")) == []
 
-    def fail_load_source_tree_model(*args, **kwargs):  # type: ignore[no-untyped-def]
-        raise AssertionError("source XML should not be reloaded when the fracture preview cache is warm")
+    def fail_cache_access(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("Fracture Preview should not use the generic preview JSON cache")
 
-    monkeypatch.setattr(fracture_preview_service, "load_source_tree_model", fail_load_source_tree_model)
-
+    monkeypatch.setattr(fracture_preview_service, "_read_preview_source_model_cache", fail_cache_access)
+    monkeypatch.setattr(fracture_preview_service, "_write_preview_source_model_cache", fail_cache_access)
     second = generate_fracture_preview_from_source_request(
         request,
         settings,
@@ -456,8 +456,9 @@ def test_fracture_preview_from_conversion_request_uses_source_xml_geometry_not_o
     cache_root = tmp_path / "cache" / "fracture_preview_source_models"
     monkeypatch.setattr(fracture_preview_service, "_preview_source_model_cache_root", lambda: cache_root)
 
-    def fake_load_source_tree_model(input_path, *, telemetry_callback=None, cancel_event=None):
+    def fake_load_source_tree_model(input_path, *, source_cache_enabled=True, telemetry_callback=None, cancel_event=None):
         observed["input_path"] = input_path
+        observed["source_cache_enabled"] = source_cache_enabled
         observed["telemetry_callback"] = telemetry_callback
         observed["cancel_event"] = cancel_event
         return object(), _tree(), ()
@@ -489,5 +490,6 @@ def test_fracture_preview_from_conversion_request_uses_source_xml_geometry_not_o
     )
 
     assert observed["input_path"] == "tree.xml"
+    assert observed["source_cache_enabled"] is False
     assert result.plan.output_stem == "Oak"
     assert tuple(piece.piece.name for piece in result.pieces) == ("Oak_fracture_00", "Oak_fracture_01")

@@ -74,3 +74,23 @@ Major moves:
 - Disabled the generic source-model JSON cache for Proxy Mesh source loading after profiling showed cache serialization dominating large-tree jobs.
 - Trimmed proxy hot-path overhead in base-mesh budget counting, connected-component pruning, foliage bounds preparation, and XML source-limit traversal.
 - Measured `SK_BirchAltai_Assembly_13.xml` at about 5.2s after the pass versus about 17.1s before, without adding the temporary tree to the repository.
+
+## 2026-07-01 - Proxy Source Projection cache
+
+- Added `src/xml_to_usda/proxy_source_projection.py` so Proxy Mesh source requests load only base geometry, repeated-part transforms, and source prototype geometry.
+- Added a typed `.npz` Proxy Source Projection cache with `allow_pickle=False` reads and file-signature invalidation.
+- Validated projection output against canonical-derived proxy output on repo samples and the temporary `SK_BirchAltai_Assembly_13.xml`.
+- Measured the temporary Birch proxy path at about 4.0s cold and about 2.0s warm with the projection cache.
+
+## 2026-07-01 - Proxy Mesh polish latency pass
+
+- Reduced Proxy Mesh cold latency by speeding source-limit packed value counting without disabling XML safety budgets.
+- Trimmed connected-component pruning allocations in `src/xml_to_usda/mesh_pruning.py`.
+- Recorded the default low-latency policy for interactive preview/setup workflows.
+- Measured the temporary Birch proxy path at about 3.5s cold and about 1.85s warm after the polish pass.
+
+## 2026-07-01 - Fracture Preview generic-cache bypass
+
+- Bypassed the generic Fracture Preview source-model JSON cache after profiling showed it was slower than direct reload on both BigSpruce and the temporary Birch sample.
+- Cached worker-payload class and dataclass metadata lookups so existing JSON worker payloads do less repeated Python/import work.
+- Measured BigSpruce Fracture Preview at about 1.0s without the generic cache versus about 2.5s cached, and temporary Birch at about 6.8s without the generic cache versus about 9.0s cached warm.

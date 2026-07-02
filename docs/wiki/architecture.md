@@ -21,6 +21,7 @@ Main systems:
 - `src/xml_to_usda/qt_ui/` - supported PySide6 shell and preview adapters.
 - `src/xml_to_usda/fbx_adapter.py` and `src/xml_to_usda/fbx_import_supervisor.py` - Autodesk FBX integration and helper process control.
 - `src/xml_to_usda/proxy_mesh_service.py`, `src/xml_to_usda/fracture_service.py`, and related workers - companion workflows.
+- `src/xml_to_usda/proxy_source_projection.py` - typed Proxy Source Projection loading/cache for Proxy Mesh jobs that need only base geometry, repeated-part transforms, and source prototype geometry.
 - `src/xml_to_usda/mesh_pruning.py` - shared deterministic percentage-based face pruning for preview/proxy workflows that need to drop the smallest disconnected base-mesh islands before their own simplification pass.
 
 Important data flow:
@@ -53,3 +54,4 @@ Current technical assumptions:
 - raw XML traversal must not write USDA directly
 - static and skeletal export modes share normalized source facts but not the same importer contract
 - runtime strategy may change, but conversion semantics must not
+- interactive preview/setup paths should minimize avoidable pauses and use narrow measured payloads before broad model reconstruction

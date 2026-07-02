@@ -75,30 +75,35 @@ def _face_point_indices(
     mesh: MeshData,
     face_ranges: tuple[tuple[int, int], ...],
     candidate_face_indices: tuple[int, ...] | None,
-) -> tuple[tuple[int, ...], ...] | None:
+) -> list[tuple[int, ...]] | None:
     source_face_indices = (
         candidate_face_indices
         if candidate_face_indices is not None
-        else tuple(range(len(face_ranges)))
+        else range(len(face_ranges))
     )
     faces: list[tuple[int, ...]] = []
+    point_count = len(mesh.points)
+    face_vertex_indices = mesh.face_vertex_indices
     for face_index in source_face_indices:
         if face_index < 0 or face_index >= len(face_ranges):
             return None
         start, end = face_ranges[face_index]
-        face = tuple(int(index) for index in mesh.face_vertex_indices[start:end])
-        if any(index < 0 or index >= len(mesh.points) for index in face):
+        face = tuple(int(face_vertex_indices[index]) for index in range(start, end))
+        for point_index in face:
+            if point_index < 0 or point_index >= point_count:
+                return None
+        if not face:
             return None
         faces.append((face_index, *face))
-    return tuple(faces)
+    return faces
 
 
-def _connected_face_components(face_points: tuple[tuple[int, ...], ...]) -> tuple[tuple[int, ...], ...]:
+def _connected_face_components(face_points: list[tuple[int, ...]]) -> list[list[int]]:
     faces_by_point: dict[int, list[int]] = {}
     for local_face_index, point_indices in enumerate(face_points):
         for point_index in point_indices[1:]:
             faces_by_point.setdefault(point_index, []).append(local_face_index)
-    components: list[tuple[int, ...]] = []
+    components: list[list[int]] = []
     seen: set[int] = set()
     for face_index in range(len(face_points)):
         if face_index in seen:
@@ -114,14 +119,14 @@ def _connected_face_components(face_points: tuple[tuple[int, ...], ...]) -> tupl
                     if neighbor not in seen:
                         seen.add(neighbor)
                         stack.append(neighbor)
-        components.append(tuple(sorted(component)))
-    return tuple(components)
+        components.append(component)
+    return components
 
 
 def _ranked_component_scores(
     mesh: MeshData,
-    face_points: tuple[tuple[int, ...], ...],
-    components: tuple[tuple[int, ...], ...],
+    face_points: list[tuple[int, ...]],
+    components: list[list[int]],
 ) -> list[tuple[float, float, int, tuple[int, ...]]]:
     scores: list[tuple[float, float, int, tuple[int, ...]]] = []
     for component in components:

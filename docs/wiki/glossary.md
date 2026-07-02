@@ -41,6 +41,7 @@
 - `Conversion Worker` - the subprocess that owns a large conversion outside the UI process.
 - `FBX Helper` - the isolated native Autodesk FBX import helper process.
 - `Proxy Mesh` - a companion USDA asset for a compact static preview/export mesh.
+- `Proxy Source Projection` - the narrow source-facts model used by Proxy Mesh loading: base geometry, repeated-part transforms, and source prototype geometry without full material, skeleton, or authoring resolution state.
 - `Fracturing` - a companion destructibility workflow that outputs root-pivoted static pieces.
 - `Fracture Piece` - one planned destructible tree piece in the fracture workflow.
 - `Dynamic Wind` - the separate Unreal JSON wind output generated from the normalized skeleton.

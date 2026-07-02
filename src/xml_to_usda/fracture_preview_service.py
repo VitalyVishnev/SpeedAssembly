@@ -193,22 +193,14 @@ def generate_fracture_preview_from_source_request(
         raise FractureError("Fracture preview requires a source XML path.")
     preview_settings = _preview_settings(settings, _preview_output_stem(request, input_path))
     throw_if_cancelled(cancel_event)
-    cached_preview_model = _read_preview_source_model_cache(input_path)
-    if cached_preview_model is None:
-        report, source_model, source_diagnostics = load_source_tree_model(
-            input_path,
-            telemetry_callback=telemetry_callback,
-            cancel_event=cancel_event,
-        )
-        analysis_cache = _build_fracture_plan_cache(source_model)
-        cached_preview_model = (
-            report,
-            _slim_preview_source_model(source_model),
-            source_diagnostics,
-            analysis_cache,
-        )
-        _write_preview_source_model_cache(input_path, cached_preview_model)
-    _report, source_model, source_diagnostics, analysis_cache = cached_preview_model
+    _report, source_model, source_diagnostics = load_source_tree_model(
+        input_path,
+        source_cache_enabled=False,
+        telemetry_callback=telemetry_callback,
+        cancel_event=cancel_event,
+    )
+    analysis_cache = _build_fracture_plan_cache(source_model)
+    source_model = _slim_preview_source_model(source_model)
     result = generate_fracture_preview(
         source_model,
         preview_settings,

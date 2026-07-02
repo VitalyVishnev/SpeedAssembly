@@ -13,12 +13,12 @@ from array import array
 from dataclasses import dataclass
 from pathlib import Path
 
-from .canonical_loader import load_canonical_model
 from .mesh_pruning import DEFAULT_BRANCH_PRUNE_AGGRESSION, select_large_connected_face_indices
 from .models import CanonicalTreeModel, GeometryBuffer, MeshData, Prototype, Quaternion, Vector3
-from .models import ConversionMode, ConversionRequest, CpuProfile, OutputMode
+from .models import ConversionRequest, CpuProfile, OutputMode
 from .naming import make_stable_prim_name
 from .output_resolution import ensure_output_path_allowed
+from .proxy_source_projection import load_proxy_source_projection, projection_to_tree_asset
 
 
 DEFAULT_PROXY_POLYCOUNT = 5000
@@ -580,7 +580,7 @@ def generate_proxy_mesh_from_source_request(
     settings: ProxyMeshSettings | None = None,
 ) -> ProxyMeshResult:
     """Generate a proxy from source-normalized XML facts, without operator FBX replacement."""
-    _input_path, model = _load_proxy_source_model(request)
+    _input_path, model = _load_proxy_source_projection(request)
     return generate_proxy_mesh(model, settings)
 
 
@@ -589,7 +589,7 @@ def export_proxy_usda_from_source_request(
     settings: ProxyMeshSettings | None = None,
 ) -> ProxyMeshExportResult:
     """Generate and write the proxy companion from source-normalized XML facts."""
-    input_path, model = _load_proxy_source_model(request)
+    input_path, model = _load_proxy_source_projection(request)
     return export_proxy_usda(
         model,
         input_path=input_path,
@@ -1170,26 +1170,8 @@ def _single_input_path(request: ConversionRequest) -> str:
     return input_path
 
 
-def _load_proxy_source_model(request: ProxyMeshSourceRequest) -> tuple[str, CanonicalTreeModel]:
+def _load_proxy_source_projection(request: ProxyMeshSourceRequest) -> tuple[str, CanonicalTreeModel]:
     input_path = request.input_path.strip()
     if not input_path:
         raise ProxyMeshError("Proxy mesh generation requires a source XML path.")
-    _, model, diagnostics = load_canonical_model(
-        input_path,
-        request.output_mode,
-        cpu_profile=request.cpu_profile,
-        conversion_mode=ConversionMode.STATIC_ASSEMBLY,
-        fbx_cache_max_bytes=request.fbx_cache_max_bytes,
-        fbx_cache_max_age_seconds=request.fbx_cache_max_age_seconds,
-        source_cache_enabled=False,
-    )
-    _raise_for_proxy_blocking_diagnostics(diagnostics)
-    return input_path, model
-
-
-def _raise_for_proxy_blocking_diagnostics(diagnostics) -> None:
-    errors = [issue for issue in diagnostics if issue.severity == "error"]
-    if not errors:
-        return
-    first = errors[0]
-    raise ProxyMeshError(f"Proxy source resolution failed: {first.code}: {first.message}")
+    return input_path, projection_to_tree_asset(load_proxy_source_projection(input_path))
