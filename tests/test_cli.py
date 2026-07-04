@@ -28,9 +28,17 @@ def _runtime_paths(tmp_path: Path):
 
 def _install_runtime_paths(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("xml_to_usda.cli.resolve_runtime_paths", lambda: _runtime_paths(tmp_path))
+    runtime_summary = SimpleNamespace(has_activity=False, failed_paths=(), to_message=lambda: "")
+    fbx_summary = SimpleNamespace(removed_entries=0, removed_bytes=0, failed_paths=())
     monkeypatch.setattr(
-        "xml_to_usda.cli.sweep_stale_job_workspaces",
-        lambda _runtime_paths: SimpleNamespace(has_activity=False, failed_paths=(), to_message=lambda: ""),
+        "xml_to_usda.cli.sweep_application_cache",
+        lambda _runtime_paths: SimpleNamespace(
+            runtime=runtime_summary,
+            fbx=fbx_summary,
+            source_facts=(),
+            temp_files=None,
+            failed_paths=(),
+        ),
     )
 
 

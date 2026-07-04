@@ -45,6 +45,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..cache_maintenance import (
+    CacheMaintenanceSummary,
+    clear_application_cache,
+    summarize_application_cache,
+    sweep_application_cache,
+)
 from ..diagnostics_bundle import build_diagnostics_bundle_request, export_diagnostics_bundle
 from ..fbx_payload_cache import (
     FbxPayloadCacheSummary,
@@ -67,7 +73,7 @@ from ..fracture_preview_service import (
     prepare_fracture_preview_source_request,
 )
 from ..fracture_viewport_scene import build_fracture_viewport_scene
-from ..runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
+from ..runtime_paths import resolve_runtime_paths
 from ..settings_service import (
     FACTORY_DEFAULT_PRESET_NAME,
     factory_default_preset,
@@ -515,7 +521,7 @@ class GlobalSettingsDialog(QDialog):
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(10)
 
-        title = QLabel("FBX Cache", self)
+        title = QLabel("Cache", self)
         title.setStyleSheet("font-weight: 700;")
         layout.addWidget(title)
 
@@ -524,11 +530,15 @@ class GlobalSettingsDialog(QDialog):
         form.setSpacing(8)
         self.path_label = QLabel("", self)
         self.path_label.setWordWrap(True)
+        self.total_size_label = QLabel("", self)
+        self.total_entry_label = QLabel("", self)
         self.size_label = QLabel("", self)
         self.entry_label = QLabel("", self)
-        form.addRow("Path", self.path_label)
-        form.addRow("Size", self.size_label)
-        form.addRow("Entries", self.entry_label)
+        form.addRow("Root", self.path_label)
+        form.addRow("Total size", self.total_size_label)
+        form.addRow("Total entries", self.total_entry_label)
+        form.addRow("FBX size", self.size_label)
+        form.addRow("FBX entries", self.entry_label)
         layout.addLayout(form)
 
         controls = QFormLayout()
@@ -560,12 +570,15 @@ class GlobalSettingsDialog(QDialog):
         self.apply_button = QPushButton("Apply", self)
         self.refresh_button = QPushButton("Refresh", self)
         self.clear_button = QPushButton("Clear FBX cache", self)
+        self.clear_all_button = QPushButton("Clear all cache", self)
         self.apply_button.clicked.connect(self._apply_clicked)
         self.refresh_button.clicked.connect(self._refresh_clicked)
         self.clear_button.clicked.connect(self._clear_clicked)
+        self.clear_all_button.clicked.connect(self._clear_all_clicked)
         button_row.addWidget(self.apply_button)
         button_row.addWidget(self.refresh_button)
         button_row.addWidget(self.clear_button)
+        button_row.addWidget(self.clear_all_button)
         layout.addLayout(button_row)
 
         self.sync_from_settings()
@@ -575,7 +588,7 @@ class GlobalSettingsDialog(QDialog):
         self.max_size_spin.setValue(snapshot.fbx_cache_max_size_gb)
         self.max_age_spin.setValue(snapshot.fbx_cache_max_age_days)
         self.debug_trace_checkbox.setChecked(bool(snapshot.debug_trace_enabled))
-        self.path_label.setText(str(self._window._fbx_payload_cache_root()))
+        self.path_label.setText(str(self._window._runtime_paths.cache_root))
 
     def set_controls_enabled(self, enabled: bool) -> None:
         for widget in (
@@ -585,23 +598,24 @@ class GlobalSettingsDialog(QDialog):
             self.apply_button,
             self.refresh_button,
             self.clear_button,
+            self.clear_all_button,
         ):
             widget.setEnabled(enabled)
 
     def refresh_cache_summary(self) -> None:
-        summary = self._window._summarize_fbx_cache()
+        summary = self._window._summarize_application_cache()
         self._set_cache_summary(summary)
 
     def _apply_clicked(self) -> None:
-        summary = self._window._apply_fbx_cache_settings(
+        self._window._apply_fbx_cache_settings(
             max_size_gb=self.max_size_spin.value(),
             max_age_days=self.max_age_spin.value(),
             debug_trace_enabled=self.debug_trace_checkbox.isChecked(),
         )
-        self._set_cache_summary(summary)
+        self.refresh_cache_summary()
 
     def _refresh_clicked(self) -> None:
-        self._set_cache_summary(self._window._sweep_fbx_cache())
+        self._set_cache_summary(self._window._sweep_application_cache())
 
     def _clear_clicked(self) -> None:
         before = self._window._summarize_fbx_cache()
@@ -618,11 +632,31 @@ class GlobalSettingsDialog(QDialog):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self._set_cache_summary(self._window._clear_fbx_cache())
+        self._window._clear_fbx_cache()
+        self.refresh_cache_summary()
 
-    def _set_cache_summary(self, summary: FbxPayloadCacheSummary) -> None:
-        self.size_label.setText(_format_bytes(summary.total_bytes))
-        self.entry_label.setText(str(summary.entry_count))
+    def _clear_all_clicked(self) -> None:
+        before = self._window._summarize_application_cache()
+        answer = QMessageBox.question(
+            self,
+            "Clear all cache",
+            (
+                "Delete all managed cache entries?\n\n"
+                f"Entries: {before.entry_count}\n"
+                f"Size: {_format_bytes(before.total_bytes)}"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._set_cache_summary(self._window._clear_application_cache())
+
+    def _set_cache_summary(self, summary: CacheMaintenanceSummary) -> None:
+        self.total_size_label.setText(_format_bytes(summary.total_bytes))
+        self.total_entry_label.setText(str(summary.entry_count))
+        self.size_label.setText(_format_bytes(summary.fbx.total_bytes))
+        self.entry_label.setText(str(summary.fbx.entry_count))
         if summary.failed_paths:
             self.warning_label.setText(
                 "Warning: some cache files could not be updated. Details were written to the log."
@@ -726,8 +760,9 @@ class MainWindow(QWidget):
                 "runtime_cache_root": str(self._runtime_paths.cache_root),
             },
         )
-        self._runtime_cleanup_summary = sweep_stale_job_workspaces(self._runtime_paths)
-        self._fbx_cache_startup_summary = self._sweep_fbx_cache()
+        self._cache_startup_summary = self._sweep_application_cache()
+        self._runtime_cleanup_summary = self._cache_startup_summary.runtime
+        self._fbx_cache_startup_summary = self._cache_startup_summary.fbx
 
         self._settings_save_timer = QTimer(self)
         self._settings_save_timer.setSingleShot(True)
@@ -765,6 +800,7 @@ class MainWindow(QWidget):
         self._set_log(self._startup_log_text())
         self._apply_runtime_cleanup_summary()
         self._apply_fbx_cache_startup_summary()
+        self._apply_cache_maintenance_startup_summary()
         self._reload_input_dependent_tabs()
         self._refresh_state_cards()
         self._update_action_state()
@@ -1497,6 +1533,23 @@ class MainWindow(QWidget):
         )
         self._append_fbx_cache_failures_to_log(summary)
 
+    def _apply_cache_maintenance_startup_summary(self) -> None:
+        summary = self._cache_startup_summary
+        source_removed = sum(bucket.removed_entries for bucket in summary.source_facts)
+        source_removed_bytes = sum(bucket.removed_bytes for bucket in summary.source_facts)
+        temp_removed = summary.temp_files.removed_entries if summary.temp_files else 0
+        temp_removed_bytes = summary.temp_files.removed_bytes if summary.temp_files else 0
+        source_failed = any(bucket.failed_paths for bucket in summary.source_facts)
+        temp_failed = bool(summary.temp_files and summary.temp_files.failed_paths)
+        if not source_removed and not temp_removed and not source_failed and not temp_failed:
+            return
+        self._append_log(
+            "Cache maintenance startup sweep: "
+            f"source facts removed {source_removed} entrie(s) / {_format_bytes(source_removed_bytes)}, "
+            f"temp files removed {temp_removed} entrie(s) / {_format_bytes(temp_removed_bytes)}."
+        )
+        self._append_application_cache_failures_to_log(summary)
+
     def _fbx_payload_cache_root(self) -> Path:
         return self._runtime_paths.cache_root / "fbx-payloads"
 
@@ -1518,6 +1571,18 @@ class MainWindow(QWidget):
         self._append_fbx_cache_failures_to_log(summary)
         return summary
 
+    def _summarize_application_cache(self) -> CacheMaintenanceSummary:
+        return summarize_application_cache(self._runtime_paths)
+
+    def _sweep_application_cache(self) -> CacheMaintenanceSummary:
+        summary = sweep_application_cache(
+            self._runtime_paths,
+            fbx_max_bytes=self._fbx_cache_max_bytes(),
+            fbx_max_age_seconds=self._fbx_cache_max_age_seconds(),
+        )
+        self._append_application_cache_failures_to_log(summary)
+        return summary
+
     def _clear_fbx_cache(self) -> FbxPayloadCacheSummary:
         summary = clear_fbx_payload_cache(cache_root=self._fbx_payload_cache_root())
         self._append_log(
@@ -1525,6 +1590,15 @@ class MainWindow(QWidget):
             f"removed {summary.removed_entries} entrie(s) / {_format_bytes(summary.removed_bytes)}."
         )
         self._append_fbx_cache_failures_to_log(summary)
+        return summary
+
+    def _clear_application_cache(self) -> CacheMaintenanceSummary:
+        summary = clear_application_cache(self._runtime_paths)
+        self._append_log(
+            "Cache clear: "
+            f"removed {summary.removed_entries} entrie(s) / {_format_bytes(summary.removed_bytes)}."
+        )
+        self._append_application_cache_failures_to_log(summary)
         return summary
 
     def _apply_fbx_cache_settings(
@@ -1561,6 +1635,15 @@ class MainWindow(QWidget):
             return
         failed_paths = "\n".join(f"  - {failed_path}" for failed_path in summary.failed_paths)
         self._append_log(f"FBX cache warning: failed path(s)\n{failed_paths}")
+
+    def _append_application_cache_failures_to_log(self, summary: CacheMaintenanceSummary) -> None:
+        runtime_summary = getattr(self, "_runtime_cleanup_summary", None)
+        runtime_failed_paths = tuple(getattr(runtime_summary, "failed_paths", ()))
+        failed_paths = [path for path in summary.failed_paths if path not in runtime_failed_paths]
+        if not failed_paths:
+            return
+        formatted = "\n".join(f"  - {failed_path}" for failed_path in failed_paths)
+        self._append_log(f"Cache maintenance warning: failed path(s)\n{formatted}")
 
     def _refresh_state_cards(self) -> None:
         policy = self._operator_state.material_policy.value

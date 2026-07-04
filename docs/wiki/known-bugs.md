@@ -268,15 +268,20 @@ Proxy Mesh source loading uses a dedicated typed Proxy Source Projection cache.
 Fracture Preview uses a dedicated typed `.npz` source-facts cache for the slim
 preview model instead of the former generic worker-payload JSON cache. Normal
 conversion callers still use the existing generic cache until a faster typed
-cache is justified for the full source model.
+cache is justified for the full source model. Runtime cache maintenance now
+bounds generic source-model, Proxy Source Projection, and Fracture Preview
+source-facts cache growth by age and shared source-facts budget.
 
 Do not repeat:
 Do not re-enable generic worker-payload JSON caches for Proxy Mesh or Fracture
 Preview source models. Keep workflow caches narrow unless that workflow starts
 using additional source facts directly.
+Do not add another persistent source-facts cache without registering it in
+`cache_maintenance.py`.
 
 Related files:
 - `src/xml_to_usda/canonical_loader.py`
+- `src/xml_to_usda/cache_maintenance.py`
 - `src/xml_to_usda/fracture_preview_service.py`
 - `src/xml_to_usda/worker_file_protocol.py`
 - `src/xml_to_usda/proxy_source_projection.py`

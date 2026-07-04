@@ -7,6 +7,7 @@ import sys
 import time
 
 from .fbx_adapter import load_fbx_geometry
+from .cache_maintenance import sweep_application_cache
 from .fbx_payload_cache import FbxPayloadCacheOptions, load_fbx_payload_from_cache, store_fbx_payload_in_cache
 from .fbx_worker_subprocess import FBX_WORKER_COMMAND, run_fbx_worker_request_file
 from .conversion_worker_subprocess import CONVERSION_WORKER_COMMAND, run_conversion_worker_request_file
@@ -19,7 +20,7 @@ from .part_preview_worker_subprocess import PART_PREVIEW_WORKER_COMMAND, run_par
 from .pipeline import generate_wind_json, inspect_source
 from .prototype_sources import fbx_import_read_options_for_material_mode, load_prototype_source_configs_from_json
 from .proxy_mesh_worker_subprocess import PROXY_MESH_WORKER_COMMAND, run_proxy_mesh_worker_request_file
-from .runtime_paths import resolve_runtime_paths, sweep_stale_job_workspaces
+from .runtime_paths import resolve_runtime_paths
 from .udim_settings import load_udim_material_settings_from_json
 from .xml_reader import render_inspect_report
 from .xml_reader import analyze_xml, read_source_xml
@@ -110,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if raw_argv[:1] == ["gui"]:
         runtime_paths = resolve_runtime_paths()
-        _report_runtime_cleanup_summary(sweep_stale_job_workspaces(runtime_paths))
+        _report_cache_maintenance_summary(sweep_application_cache(runtime_paths))
         from .qt_ui.entry import main as gui_main
 
         return gui_main(raw_argv[1:])
@@ -128,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == PART_PREVIEW_WORKER_COMMAND:
         return run_part_preview_worker_request_file(args.request)
     runtime_paths = resolve_runtime_paths()
-    _report_runtime_cleanup_summary(sweep_stale_job_workspaces(runtime_paths))
+    _report_cache_maintenance_summary(sweep_application_cache(runtime_paths))
 
     try:
         if args.command == "inspect":
@@ -351,6 +352,26 @@ def _report_runtime_cleanup_summary(summary) -> None:
     sys.stderr.write(f"[info] runtime_cleanup: {summary.to_message()}\n")
     for failed_path in summary.failed_paths:
         sys.stderr.write(f"[warning] runtime_cleanup: stale job workspace not removed: {failed_path}\n")
+
+
+def _report_cache_maintenance_summary(summary) -> None:
+    _report_runtime_cleanup_summary(summary.runtime)
+    if summary.fbx.removed_entries:
+        sys.stderr.write(
+            "[info] fbx_cache_cleanup: "
+            f"removed {summary.fbx.removed_entries} entrie(s) / {summary.fbx.removed_bytes} byte(s)\n"
+        )
+    source_removed = sum(bucket.removed_entries for bucket in summary.source_facts)
+    temp_removed = summary.temp_files.removed_entries if summary.temp_files else 0
+    if source_removed or temp_removed:
+        sys.stderr.write(
+            "[info] cache_cleanup: "
+            f"removed {source_removed} source-fact entrie(s), {temp_removed} temp file(s)\n"
+        )
+    for failed_path in summary.failed_paths:
+        if failed_path in summary.runtime.failed_paths:
+            continue
+        sys.stderr.write(f"[warning] cache_cleanup: cache path not updated: {failed_path}\n")
 
 
 if __name__ == "__main__":

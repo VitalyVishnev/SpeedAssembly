@@ -585,3 +585,38 @@ JSON cache.
 Related files:
 - `src/xml_to_usda/fracture_preview_service.py`
 - `tests/test_fracture_preview_service.py`
+
+## Decision: Runtime caches are centrally bounded
+
+Status: Active
+
+Context:
+The converter now has several useful persistent caches: FBX payloads, generic
+source models, Proxy Source Projections, and Fracture Preview source facts. The
+file-signature keys keep them correct, but old entries from changed XML files
+would otherwise accumulate indefinitely.
+
+Decision:
+Keep disk-retention policy in `cache_maintenance.py`. GUI and CLI startup sweep
+runtime/job leftovers, bounded FBX payload cache, source-facts caches, and stale
+cache temp files through that module. FBX keeps its operator-configurable size
+and age limits. Source-facts caches use a shared default budget of `2 GB` and
+`14 days`; stale `.tmp`/`.partial` cache files follow the runtime stale-job TTL.
+The Global Settings dialog can clear all managed cache entries.
+
+Reasoning:
+Cache producers should own payload shape, but not separate unbounded retention
+rules. One runtime-facing maintenance module prevents source/proxy/fracture
+caches from becoming invisible disk growth while preserving low-latency warm
+preview paths.
+
+Consequences:
+New persistent cache directories must be registered with cache maintenance or
+explicitly documented as non-user cache. Do not add a workflow cache that only
+invalidates by source signature without also giving it age and size cleanup.
+
+Related files:
+- `src/xml_to_usda/cache_maintenance.py`
+- `src/xml_to_usda/qt_ui/window.py`
+- `src/xml_to_usda/cli.py`
+- `tests/test_cache_maintenance.py`

@@ -24,7 +24,9 @@ from xml_to_usda.qt_ui.persistence import UiShellState
 from xml_to_usda.qt_ui.window import MainWindow
 from xml_to_usda.qt_ui.theme import ThemeOverrides, load_bundled_theme, load_theme
 from xml_to_usda.settings_service import GuiSettingsSnapshot, load_gui_settings
+from xml_to_usda.cache_maintenance import CacheMaintenanceSummary
 from xml_to_usda.fbx_payload_cache import FbxPayloadCacheSummary
+from xml_to_usda.runtime_paths import RuntimeCleanupSummary
 
 
 def test_qt_shell_window_creation(qtbot, tmp_path) -> None:
@@ -504,6 +506,41 @@ def test_qt_global_settings_clear_cache_requires_confirmation(monkeypatch, qtbot
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Yes))
     qtbot.mouseClick(dialog.clear_button, Qt.MouseButton.LeftButton)
+    assert len(clear_calls) == 1
+
+
+def test_qt_global_settings_clear_all_cache_requires_confirmation(monkeypatch, qtbot, tmp_path) -> None:
+    clear_calls = []
+    empty_summary = CacheMaintenanceSummary(
+        runtime=RuntimeCleanupSummary(),
+        fbx=FbxPayloadCacheSummary(entry_count=3, total_bytes=8192),
+    )
+    monkeypatch.setattr("xml_to_usda.qt_ui.window.summarize_application_cache", lambda *_args: empty_summary)
+    monkeypatch.setattr("xml_to_usda.qt_ui.window.sweep_application_cache", lambda *_args, **_kwargs: empty_summary)
+    monkeypatch.setattr(
+        "xml_to_usda.qt_ui.window.clear_application_cache",
+        lambda *_args: clear_calls.append(True) or empty_summary,
+    )
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.No))
+    theme = load_theme()
+    window = MainWindow(
+        theme,
+        UiShellState(),
+        dependencies=build_default_dependencies(),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.mouseClick(window.title_bar.settings_button, Qt.MouseButton.LeftButton)
+    dialog = window._global_settings_dialog
+    assert dialog is not None
+    qtbot.mouseClick(dialog.clear_all_button, Qt.MouseButton.LeftButton)
+    assert clear_calls == []
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Yes))
+    qtbot.mouseClick(dialog.clear_all_button, Qt.MouseButton.LeftButton)
     assert len(clear_calls) == 1
 
 

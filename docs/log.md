@@ -132,3 +132,9 @@ Major moves:
 
 - Added a separate wind preview plan next to the Fracturing V1 working plan.
 - Fixed the first wind viewport scope to XML-only read-only inspection with subtree selection, group colors, and no editor/import/export in V1.
+
+## 2026-07-05 - Central cache maintenance
+
+- Added `cache_maintenance.py` as the runtime owner for bounded cache retention.
+- GUI and CLI startup now sweep runtime leftovers, FBX payload cache, source-facts caches, and stale cache temp files through one policy.
+- Added Global Settings support for total cache summary and clearing all managed cache entries.
