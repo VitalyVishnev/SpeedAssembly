@@ -245,18 +245,18 @@ def _run_fracture_preview_interactive_smoke(context: SmokeContext) -> dict[str, 
         dialog.piece_count_spin.setValue(26)
         dialog.piece_count_spin.editingFinished.emit()
         _wait_until(
-            lambda: dialog.current_preview is not None and dialog.current_preview.plan.actual_piece_count == 26,
+            lambda: dialog.current_preview is not None and dialog.current_preview.plan.requested_piece_count == 26,
             timeout_ms=context.timeout_ms,
-            label="fracture preview target pieces update",
+            label="fracture preview branch count update",
         )
-        dialog.preserve_trunk_spin.setValue(1.0)
-        dialog.preserve_trunk_spin.editingFinished.emit()
+        dialog.branch_height_bias_spin.setValue(1.0)
+        dialog.branch_height_bias_spin.editingFinished.emit()
         _wait_until(
             lambda: dialog.current_preview is not None
             and dialog.current_preview.plan.method == "manual_fracturing"
-            and dialog.settings().fracture.preserve_trunk_bias == 1.0,
+            and dialog.settings().fracture.branch_height_bias == 1.0,
             timeout_ms=context.timeout_ms,
-            label="fracture preview preserve trunk update",
+            label="fracture preview branch height bias update",
         )
         previous_caps_preview = dialog.current_preview
         dialog.generate_caps_check.setChecked(True)
@@ -308,8 +308,8 @@ def _run_fracture_preview_interactive_smoke(context: SmokeContext) -> dict[str, 
                 "initial.result",
                 "dialog.non_modal",
                 "window.visible",
-                "target.update",
-                "method.update",
+                "branch_count.update",
+                "height_bias.update",
                 "caps.update",
                 "manual.bones",
                 "piece_color.visual",
@@ -350,12 +350,13 @@ def _run_fracture_preview_rapid_settings_smoke(context: SmokeContext) -> dict[st
             dialog.generate_caps_check.setChecked(index % 3 != 0)
             dialog.piece_count_spin.setValue((5, 14, 26, 5)[index % 4])
             dialog.piece_count_spin.editingFinished.emit()
-            dialog.preserve_trunk_spin.setValue((0.0, 0.5, 1.0)[index % 3])
-            dialog.preserve_trunk_spin.editingFinished.emit()
+            dialog.branch_height_bias_spin.setValue((-1.0, 0.0, 1.0)[index % 3])
+            dialog.branch_height_bias_spin.editingFinished.emit()
             dialog.base_priority_spin.setValue((0.33, 0.74, 0.51)[index % 3])
             dialog.base_priority_spin.editingFinished.emit()
             dialog.color_strength_slider.setValue((0, 78, 35, 92)[index % 4])
             dialog.exploded_view_slider.setValue((0, 20, 70, 0)[index % 4])
+            dialog.hide_repeated_parts_check.setChecked(index % 2 == 0)
             _pump_events(10)
 
         dialog.piece_count_spin.setValue(5)
@@ -364,7 +365,7 @@ def _run_fracture_preview_rapid_settings_smoke(context: SmokeContext) -> dict[st
         dialog.generate_caps_check.setChecked(True)
         _wait_until(
             lambda: dialog.current_preview is not None
-            and dialog.current_preview.plan.actual_piece_count == 5
+            and dialog.current_preview.plan.requested_piece_count == 5
             and dialog.settings().fracture.force_stump_piece
             and dialog.settings().fracture.generate_caps,
             timeout_ms=context.timeout_ms,

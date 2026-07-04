@@ -104,3 +104,31 @@ Major moves:
 
 - Recorded that FBX Prototype Preview loads the selected FBX payload directly instead of resolving the full assembly model.
 - Noted the UI/runtime boundary for the fixed Prototype Preview path.
+
+## 2026-07-04 - Fracturing V1 natural detach planner
+
+- Implemented V1 automatic fracturing as length-ranked branch-base detachment plus optional stump and independent stem separation.
+- Removed automatic trunk-chain refinement and synthetic face median splitting from auto-fill; candidate exhaustion now clamps with a diagnostic.
+- Added Branch Height Bias, Separate Stems, Auto Branches UI semantics, and realtime exploded skeleton offsets.
+- Measured preview planning at about 0.07s on `SimpleTree_01`, 0.18s on `SimpleTree_02_three_trunks`, and 1.7s on repo `BigSpruce`.
+
+## 2026-07-05 - Fracture Preview small-branch default
+
+- Set Fracture Preview `Remove Small Branches` default to `0.0` and stopped restoring/saving that field through GUI settings.
+- Kept manual small-branch removal available for the current preview session while preventing stale high values from hiding child branch geometry by default.
+
+## 2026-07-05 - Fracture Preview repeated-part visibility stability
+
+- Changed `Hide Repeated Parts` from a Fracture Preview mesh rebuild into a viewport-only visible vertex range toggle.
+- Added UI and packaged-smoke coverage so repeated-part visibility toggles no longer re-upload OpenGL buffers.
+
+## 2026-07-05 - Fracture Preview typed source cache
+
+- Added a typed `.npz` Fracture Preview source-facts cache for the slim preview model.
+- Rejected the trial generic JSON cache path after timings showed it was slower than direct reload.
+- Local timings: BigSpruce direct median about `3.35s`; generic JSON warm about `4.10s`; typed `.npz` warm about `3.02s`.
+
+## 2026-07-05 - Wind viewport planning
+
+- Added a separate wind preview plan next to the Fracturing V1 working plan.
+- Fixed the first wind viewport scope to XML-only read-only inspection with subtree selection, group colors, and no editor/import/export in V1.

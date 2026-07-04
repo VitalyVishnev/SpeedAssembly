@@ -103,6 +103,7 @@ class MatcapViewport(QOpenGLWidget):
         self._grid_buffer: QOpenGLBuffer | None = None
         self._grid_vao: QOpenGLVertexArrayObject | None = None
         self._vertex_count = 0
+        self._visible_vertex_count_override: int | None = None
         self._collision_vertex_count = 0
         self._grid_vertex_count = 0
         self._mesh_dirty = False
@@ -218,6 +219,7 @@ class MatcapViewport(QOpenGLWidget):
         self.update()
 
     def set_scene(self, scene: ViewportScene | None, *, frame_camera: bool = True) -> None:
+        self._visible_vertex_count_override = None
         self._scene = scene
         self._mesh = None
         self._precomputed_matcap_vertices = None
@@ -246,6 +248,7 @@ class MatcapViewport(QOpenGLWidget):
         frame_camera: bool = True,
         tint_alpha: float = DEFAULT_MATCAP_TINT_ALPHA,
     ) -> None:
+        self._visible_vertex_count_override = None
         self._scene = None
         self._mesh = mesh
         self._precomputed_matcap_vertices = None
@@ -266,6 +269,7 @@ class MatcapViewport(QOpenGLWidget):
         max_point: Vector3,
         frame_camera: bool = True,
     ) -> None:
+        self._visible_vertex_count_override = None
         self._scene = scene
         self._mesh = None
         self._precomputed_matcap_vertices = (
@@ -283,6 +287,13 @@ class MatcapViewport(QOpenGLWidget):
         self._mesh_dirty = True
         self._grid_dirty = True
         self._upload_if_valid()
+
+    def set_visible_vertex_count_override(self, vertex_count: int | None) -> None:
+        resolved = None if vertex_count is None else max(0, int(vertex_count))
+        if resolved == self._visible_vertex_count_override:
+            return
+        self._visible_vertex_count_override = resolved
+        self.update()
 
     def _upload_if_valid(self) -> None:
         if self.isValid():
@@ -339,7 +350,8 @@ class MatcapViewport(QOpenGLWidget):
         view = self._view_matrix()
         projection = self._projection_matrix()
         self._draw_grid(functions, projection * view)
-        if self._program is not None and self._vao is not None and self._vertex_count > 0:
+        visible_vertex_count = self._visible_vertex_count()
+        if self._program is not None and self._vao is not None and visible_vertex_count > 0:
             _prepare_opaque_mesh_draw(functions)
             if self._program.bind():
                 _set_matcap_program_uniforms(
@@ -351,7 +363,7 @@ class MatcapViewport(QOpenGLWidget):
                     exploded_view_strength=self._matcap_exploded_view_strength(),
                 )
                 self._vao.bind()
-                functions.glDrawArrays(GL_TRIANGLES, 0, self._vertex_count)
+                functions.glDrawArrays(GL_TRIANGLES, 0, visible_vertex_count)
                 self._vao.release()
                 self._program.release()
         if self._program is not None and self._collision_vao is not None and self._collision_vertex_count > 0:
@@ -378,6 +390,11 @@ class MatcapViewport(QOpenGLWidget):
 
     def _matcap_exploded_view_strength(self) -> float:
         return self._exploded_view_strength
+
+    def _visible_vertex_count(self) -> int:
+        if self._visible_vertex_count_override is None:
+            return self._vertex_count
+        return max(0, min(self._vertex_count, self._visible_vertex_count_override))
 
     def mousePressEvent(self, event) -> None:  # type: ignore[override]
         if (
@@ -446,8 +463,9 @@ class MatcapViewport(QOpenGLWidget):
             return None
         best: tuple[float, str, str] | None = None
         for segment in bone_segments:
-            parent = self._project_point_to_screen(segment.start)
-            child = self._project_point_to_screen(segment.end)
+            segment_start, segment_end = self._exploded_bone_segment_points(segment)
+            parent = self._project_point_to_screen(segment_start)
+            child = self._project_point_to_screen(segment_end)
             if parent is None or child is None:
                 continue
             distance, segment_t = _distance_to_screen_segment(float(x), float(y), parent, child)
@@ -689,11 +707,13 @@ class MatcapViewport(QOpenGLWidget):
             segment = self._bone_segment_by_edge(parent_token, child_token)
             if segment is None:
                 return None
-            return self._project_point_to_screen(_lerp_vector3(segment.start, segment.end, segment_t))
+            segment_start, segment_end = self._exploded_bone_segment_points(segment)
+            return self._project_point_to_screen(_lerp_vector3(segment_start, segment_end, segment_t))
         segment = self._bone_segment_by_child_token(cut_token)
         if segment is None:
             return None
-        return self._project_point_to_screen(segment.start)
+        segment_start, _segment_end = self._exploded_bone_segment_points(segment)
+        return self._project_point_to_screen(segment_start)
 
     def _paint_bone_overlay(self) -> None:
         bone_segments = self._bone_segments_for_overlay()
@@ -703,8 +723,9 @@ class MatcapViewport(QOpenGLWidget):
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             for segment in bone_segments:
-                parent = self._project_point_to_screen(segment.start)
-                child = self._project_point_to_screen(segment.end)
+                segment_start, segment_end = self._exploded_bone_segment_points(segment)
+                parent = self._project_point_to_screen(segment_start)
+                child = self._project_point_to_screen(segment_end)
                 if parent is None or child is None:
                     continue
                 selected = segment.selected or self._selected_cut_on_segment(segment)
@@ -729,6 +750,10 @@ class MatcapViewport(QOpenGLWidget):
                     _paint_cut_marker(painter, hover_point, QColor(155, 235, 255, 245), radius=8.5, width=2.2)
         finally:
             painter.end()
+
+    def _exploded_bone_segment_points(self, segment: ViewportBoneSegment) -> tuple[Vector3, Vector3]:
+        offset = _scale_vector3(segment.explode_direction, self._exploded_view_strength)
+        return _add_vector3(segment.start, offset), _add_vector3(segment.end, offset)
 
     def _release_gl_resources(self) -> None:
         has_resources = any(
@@ -777,6 +802,7 @@ class MatcapViewport(QOpenGLWidget):
             self._grid_buffer = None
             self._grid_vao = None
             self._vertex_count = 0
+            self._visible_vertex_count_override = None
             self._grid_vertex_count = 0
             self._mesh_dirty = bool(self._mesh or self._scene)
             self._grid_dirty = True
@@ -1288,6 +1314,14 @@ def _lerp_vector3(start: Vector3, end: Vector3, t: float) -> Vector3:
         start.y + (end.y - start.y) * t,
         start.z + (end.z - start.z) * t,
     )
+
+
+def _add_vector3(left: Vector3, right: Vector3) -> Vector3:
+    return Vector3(left.x + right.x, left.y + right.y, left.z + right.z)
+
+
+def _scale_vector3(vector: Vector3, scale: float) -> Vector3:
+    return Vector3(vector.x * scale, vector.y * scale, vector.z * scale)
 
 
 def _qcolor_from_color4(color: Color4, *, alpha: int) -> QColor:

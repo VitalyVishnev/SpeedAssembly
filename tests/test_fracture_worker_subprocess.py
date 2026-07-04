@@ -84,7 +84,7 @@ def test_fracture_preview_worker_does_not_depend_on_export_service(monkeypatch, 
 
     result = read_fracture_worker_result(result_path)
     assert result is not None
-    assert result.plan.actual_piece_count == 2
+    assert result.plan.actual_piece_count == 3
     assert error_path.exists() is False
 
 

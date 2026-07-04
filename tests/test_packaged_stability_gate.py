@@ -108,7 +108,8 @@ def test_worker_stability_matrix_repeats_default_fracture_preview_path() -> None
 
     for settings in (matrix[0], matrix[2], matrix[4]):
         assert settings.target_piece_count == 5
-        assert settings.preserve_trunk_bias == 0.5
+        assert settings.separate_stems is False
+        assert settings.branch_height_bias == 0.0
         assert settings.force_stump_piece is False
         assert settings.generate_caps is False
 

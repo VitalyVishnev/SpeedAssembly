@@ -990,9 +990,10 @@ class QtBackgroundJobsController:
             fracture = settings.fracture
             lines.extend(
                 (
-                    f"  target_piece_count={fracture.target_piece_count}",
-                    f"  preserve_trunk_bias={fracture.preserve_trunk_bias}",
+                    f"  target_branch_count={fracture.target_piece_count}",
                     f"  force_stump_piece={fracture.force_stump_piece}",
+                    f"  separate_stems={fracture.separate_stems}",
+                    f"  branch_height_bias={fracture.branch_height_bias}",
                     f"  generate_caps={fracture.generate_caps}",
                     f"  preview_polycount={settings.final_polycount}",
                     f"  remove_small_branches={settings.branch_prune_aggression}",
@@ -1003,9 +1004,10 @@ class QtBackgroundJobsController:
         else:
             lines.extend(
                 (
-                    f"  target_piece_count={settings.target_piece_count}",
-                    f"  preserve_trunk_bias={settings.preserve_trunk_bias}",
+                    f"  target_branch_count={settings.target_piece_count}",
                     f"  force_stump_piece={settings.force_stump_piece}",
+                    f"  separate_stems={settings.separate_stems}",
+                    f"  branch_height_bias={settings.branch_height_bias}",
                     f"  generate_caps={settings.generate_caps}",
                 )
             )
@@ -1200,9 +1202,10 @@ class QtBackgroundJobsController:
             collision = getattr(settings, "collision", None)
             payload.update(
                 {
-                    "target_piece_count": fracture.target_piece_count,
-                    "preserve_trunk_bias": fracture.preserve_trunk_bias,
+                    "target_branch_count": fracture.target_piece_count,
                     "force_stump_piece": fracture.force_stump_piece,
+                    "separate_stems": fracture.separate_stems,
+                    "branch_height_bias": fracture.branch_height_bias,
                     "generate_caps": fracture.generate_caps,
                     "pinned_cut_joint_tokens": fracture.pinned_cut_joint_tokens,
                     "preview_polycount": settings.final_polycount,

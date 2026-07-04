@@ -517,7 +517,7 @@ class GeometryTabPanel(QWidget):
         self.preview_fracture_button = QPushButton("Preview Fracturing", actions_card)
         self.preview_fracture_button.clicked.connect(self._on_preview_fracture_requested)
         self.preview_fracture_button.setToolTip(
-            "Opens fracture settings and preview. Lower counts make fewer pieces; higher counts split the tree more."
+            "Opens fracture settings and preview. Auto Branches detaches natural branch bases; stump and stems are separate."
         )
         actions_layout.addWidget(actions_title, 0, 0)
         actions_layout.addWidget(self.preview_proxy_button, 1, 0)

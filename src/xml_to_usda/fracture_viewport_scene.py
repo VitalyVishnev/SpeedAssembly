@@ -44,6 +44,11 @@ def build_fracture_viewport_scene(
         piece_index: _explode_direction(center, global_center)
         for piece_index, center in piece_centers.items()
     }
+    piece_index_by_joint = {
+        joint_token: piece.piece.index
+        for piece in preview.pieces
+        for joint_token in piece.piece.joint_tokens
+    }
 
     for piece in sorted(preview.pieces, key=lambda item: item.piece.index):
         triangle_count = geometry_triangle_count(piece.base_mesh)
@@ -121,6 +126,10 @@ def build_fracture_viewport_scene(
             color=segment.color,
             selected=segment.is_selected_cut,
             selectable_id=f"bone:{segment.parent_joint_token}->{segment.child_joint_token}" if segment.selectable else None,
+            explode_direction=explode_directions.get(
+                piece_index_by_joint.get(segment.child_joint_token, 0),
+                Vector3(0.0, 0.0, 0.0),
+            ),
         )
         for segment in preview.bone_segments
     )

@@ -396,23 +396,26 @@ def _worker_settings_matrix(iterations: int):
         target_piece_count=5,
         generate_caps=False,
         force_stump_piece=False,
-        preserve_trunk_bias=0.5,
+        separate_stems=False,
+        branch_height_bias=0.0,
     )
     targets = (5, 14, 26, 48)
-    biases = (0.0, 0.5, 1.0)
+    height_biases = (-1.0, 0.0, 1.0)
     items: list[FractureSettings] = []
     for target in targets:
         for generate_caps in (False, True):
             for force_stump_piece in (False, True):
-                for bias in biases:
-                    items.append(
-                        FractureSettings(
-                            target_piece_count=target,
-                            generate_caps=generate_caps,
-                            force_stump_piece=force_stump_piece,
-                            preserve_trunk_bias=bias,
+                for separate_stems in (False, True):
+                    for bias in height_biases:
+                        items.append(
+                            FractureSettings(
+                                target_piece_count=target,
+                                generate_caps=generate_caps,
+                                force_stump_piece=force_stump_piece,
+                                separate_stems=separate_stems,
+                                branch_height_bias=bias,
+                            )
                         )
-                    )
     matrix: list[FractureSettings] = []
     scenario_index = 0
     while len(matrix) < max(1, iterations):
@@ -426,10 +429,11 @@ def _worker_settings_matrix(iterations: int):
 
 def _fracture_settings_payload(settings) -> dict[str, object]:
     return {
-        "target_piece_count": settings.target_piece_count,
+        "target_branch_count": settings.target_piece_count,
         "generate_caps": settings.generate_caps,
         "force_stump_piece": settings.force_stump_piece,
-        "preserve_trunk_bias": settings.preserve_trunk_bias,
+        "separate_stems": settings.separate_stems,
+        "branch_height_bias": settings.branch_height_bias,
     }
 
 

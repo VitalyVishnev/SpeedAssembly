@@ -344,6 +344,28 @@ Related files:
 - `docs/raw/DECISIONS.md`
 - `docs/raw/ARCHITECTURE.md`
 
+## Decision: V1 automatic fracturing detaches natural weak points only
+
+Status: Active
+
+Context:
+The old automatic fill could refine trunk chains and synthetic face regions, producing visibly unnatural trunk shredding on simple trees.
+
+Decision:
+Treat `target_piece_count` as operator-facing Auto Branches / Branch Count. Automatic V1 cuts may add a stump piece, separate independent root-level stems, and detach branch bases ranked by skeleton path length with optional height bias. Stump and separated stems are counted outside Branch Count. Manual pinned cuts still run first and may cut trunks explicitly. If safe branch candidates run out, clamp with a diagnostic instead of cutting trunk geometry or doing synthetic face median splits.
+
+Reasoning:
+Length-first branch detachment better matches the perceived weak points of vehicle impact and nearby blast workflows while preserving manual control for exceptional cuts.
+
+Consequences:
+`preserve_trunk_bias` remains settings-compatible but is no longer an operator-facing V1 control. Preview skeleton segments must use the same realtime exploded offset as their owning pieces.
+
+Related files:
+- `src/xml_to_usda/fracture_service.py`
+- `src/xml_to_usda/fracture_preview_service.py`
+- `src/xml_to_usda/qt_ui/fracture_preview.py`
+- `docs/fracturing_v1_working_plan.md`
+
 ## Decision: Packaged workers use the self executable
 
 Status: Active
@@ -476,3 +498,90 @@ or skeletal binding.
 Related files:
 - `src/xml_to_usda/part_preview_service.py`
 - `src/xml_to_usda/qt_ui/part_preview.py`
+
+## Decision: Fracture Preview does not remove small branches by default
+
+Status: Active
+
+Context:
+`Remove Small Branches` is useful as a manual preview simplification control,
+but a persisted high value made Fracture Preview hide child branch geometry on
+the three-trunk sample and made separated stems look branchless.
+
+Decision:
+Fracture Preview defaults `Remove Small Branches` to `0.0` and does not restore
+that field from persisted GUI settings. The operator can still raise it during
+the current session when intentionally inspecting a simplified base mesh.
+
+Reasoning:
+Fracture Preview is primarily a fracture-plan diagnostic. Its default must show
+the complete source base geometry for every piece, otherwise missing branches
+look like planner or ownership bugs.
+
+Consequences:
+Keep Proxy Mesh pruning defaults separate from Fracture Preview. Do not make
+Fracture Preview inherit the shared mesh-pruning default again.
+
+Related files:
+- `src/xml_to_usda/fracture_preview_service.py`
+- `src/xml_to_usda/settings_service.py`
+
+## Decision: Fracture Preview repeated-part visibility is viewport-only
+
+Status: Active
+
+Context:
+Rapid or unlucky `Hide Repeated Parts` toggles could crash the packaged Qt
+process with a native `0xc0000005` fault while rebuilding and re-uploading the
+Fracture Preview OpenGL payload.
+
+Decision:
+Keep the full Fracture Preview render payload loaded and implement repeated-part
+visibility by changing the visible vertex range in the viewport. Do not rebuild
+the fracture plan, preview scene, or OpenGL buffers for this checkbox.
+
+Reasoning:
+The checkbox is a visual inspection filter, not an operator setting that changes
+fracture ownership. Avoiding buffer re-upload removes the native crash surface
+and keeps the interaction realtime.
+
+Consequences:
+Future visual-only Fracture Preview controls should update viewport state or
+shader uniforms whenever possible. Rebuild only when source geometry or planner
+settings actually change.
+
+Related files:
+- `src/xml_to_usda/qt_ui/fracture_preview.py`
+- `src/xml_to_usda/qt_ui/viewport.py`
+
+## Decision: Fracture Preview source facts use a typed cache
+
+Status: Active
+
+Context:
+Fracture Preview settings changes restart the isolated preview worker. Re-reading
+and re-normalizing the same SpeedTree XML for every branch-count, stem, height,
+caps, or preview-quality change was both slower and a larger native-crash
+surface in the packaged worker path.
+
+Decision:
+Cache the slim Fracture Preview source facts as a typed `.npz` payload keyed by
+source path, file size, mtime, cache schema, and parser mode. The cache stores
+only the preview source model facts needed by fracture planning and preview
+generation: metadata, base mesh, skeleton, repeated parts, prototypes, and
+diagnostics. It does not use pickle and loads with `allow_pickle=False`.
+
+Reasoning:
+The earlier generic worker-payload JSON cache serialized full dataclass graphs
+and was slower than direct reload on large trees. The typed cache avoids per-
+`Vector3` object metadata and keeps the cache narrow to this workflow.
+
+Consequences:
+Fracture Preview warm runs should reuse source facts and recompute only the
+settings-dependent fracture preview. Corrupt or stale cache files are deleted
+and fall back to XML reload. Do not replace this with the generic source-model
+JSON cache.
+
+Related files:
+- `src/xml_to_usda/fracture_preview_service.py`
+- `tests/test_fracture_preview_service.py`

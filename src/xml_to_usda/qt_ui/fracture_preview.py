@@ -85,6 +85,9 @@ class FractureViewportMesh:
     draw_sources: tuple[FractureDrawSource, ...]
     draw_calls: tuple[FractureDrawCall, ...]
     bone_segments: tuple[FracturePreviewBoneSegment, ...] = ()
+    base_vertex_count: int = 0
+    base_triangle_count: int = 0
+    base_uploaded_triangle_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -116,6 +119,7 @@ class FracturePreviewDialog(PreviewShellDialog):
         self._collision_visual_base_length_scale = self._collision_length_setting(self._settings.collision)
         self.current_preview: FracturePreviewResult | None = None
         self.viewport_mesh: FractureViewportMesh | None = None
+        self._full_viewport_mesh: FractureViewportMesh | None = None
 
         viewport_host = QWidget(self)
         viewport_layout = QGridLayout(viewport_host)
@@ -161,19 +165,19 @@ class FracturePreviewDialog(PreviewShellDialog):
         _add_group_header(settings_layout, settings_panel, "Fracture Plan")
         self.piece_count_slider, self.piece_count_spin = _build_int_slider_row(
             settings_panel,
-            minimum=1,
+            minimum=0,
             maximum=64,
             value=int(self._settings.fracture.target_piece_count),
             step=1,
         )
-        target_pieces_label = QLabel("Target Pieces", settings_panel)
+        self.branch_count_label = QLabel("Auto Branches", settings_panel)
         set_tooltip(
-            "Target number of fracture pieces. Lower makes larger chunks; higher splits the tree into more pieces.",
-            target_pieces_label,
+            "Automatic branch detach count. Stump and separated stems are counted separately.",
+            self.branch_count_label,
             self.piece_count_slider,
             self.piece_count_spin,
         )
-        settings_layout.addWidget(target_pieces_label)
+        settings_layout.addWidget(self.branch_count_label)
         settings_layout.addLayout(_slider_row(self.piece_count_slider, self.piece_count_spin))
 
         _add_group_header(settings_layout, settings_panel, "Preview Mesh")
@@ -226,23 +230,26 @@ class FracturePreviewDialog(PreviewShellDialog):
         settings_layout.addWidget(base_priority_label)
         settings_layout.addLayout(_slider_row(self.base_priority_slider, self.base_priority_spin))
 
-        self.preserve_trunk_slider, self.preserve_trunk_spin = _build_float_slider_row(
+        self.branch_height_bias_slider, self.branch_height_bias_spin = _build_float_slider_row(
             settings_panel,
-            minimum=0.0,
+            minimum=-1.0,
             maximum=1.0,
-            value=float(self._settings.fracture.preserve_trunk_bias),
+            value=float(self._settings.fracture.branch_height_bias),
             step=0.01,
             scale=100,
         )
-        preserve_trunk_label = QLabel("Preserve Trunk", settings_panel)
+        branch_height_bias_label = QLabel("Branch Height Bias", settings_panel)
         set_tooltip(
-            "Biases automatic cuts away from the trunk. Lower allows trunk splits; higher keeps the trunk more intact.",
-            preserve_trunk_label,
-            self.preserve_trunk_slider,
-            self.preserve_trunk_spin,
+            "Biases automatic branch ranking by height. Negative favors lower branches; positive favors upper branches.",
+            branch_height_bias_label,
+            self.branch_height_bias_slider,
+            self.branch_height_bias_spin,
         )
-        settings_layout.addWidget(preserve_trunk_label)
-        settings_layout.addLayout(_slider_row(self.preserve_trunk_slider, self.preserve_trunk_spin))
+        branch_height_bias_hint = QLabel("Lower    Even    Upper", settings_panel)
+        branch_height_bias_hint.setObjectName("MutedLabel")
+        settings_layout.addWidget(branch_height_bias_label)
+        settings_layout.addLayout(_slider_row(self.branch_height_bias_slider, self.branch_height_bias_spin))
+        settings_layout.addWidget(branch_height_bias_hint)
 
         _add_group_header(settings_layout, settings_panel, "Viewport")
         self.exploded_view_slider, self.exploded_view_spin = _build_float_slider_row(
@@ -305,8 +312,13 @@ class FracturePreviewDialog(PreviewShellDialog):
             parent=settings_panel,
         )
         self.stump_piece_check = QCheckBox("Stump Piece", settings_panel)
+        self.separate_stems_check = QCheckBox("Separate Stems", settings_panel)
         self.collision_check = QCheckBox("Generate Collision", settings_panel)
         set_tooltip("Forces a ground stump piece. Off follows normal cuts; on keeps a dedicated stump chunk.", self.stump_piece_check)
+        set_tooltip(
+            "Separates independent root-level stems before automatic branch detachment.",
+            self.separate_stems_check,
+        )
         set_tooltip("Exports simple collision for pieces. Off exports visuals only; on adds collision companion meshes.", self.collision_check)
         self.collision_mode_combo = QComboBox(settings_panel)
         self.collision_mode_combo.addItem("Convex Hull", FractureCollisionMode.CONVEX.value)
@@ -393,6 +405,7 @@ class FracturePreviewDialog(PreviewShellDialog):
         settings_layout.addWidget(self.override_caps_material_check)
         settings_layout.addWidget(self.caps_material_row)
         settings_layout.addWidget(self.stump_piece_check)
+        settings_layout.addWidget(self.separate_stems_check)
         _add_group_header(settings_layout, settings_panel, "Collision")
         settings_layout.addWidget(self.collision_check)
         self.collision_mode_label = QLabel("Collision Mode", settings_panel)
@@ -498,8 +511,8 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.branch_prune_spin.editingFinished.connect(self._emit_settings_changed)
         self.base_priority_slider.sliderReleased.connect(self._emit_settings_changed)
         self.base_priority_spin.editingFinished.connect(self._emit_settings_changed)
-        self.preserve_trunk_slider.sliderReleased.connect(self._emit_settings_changed)
-        self.preserve_trunk_spin.editingFinished.connect(self._emit_settings_changed)
+        self.branch_height_bias_slider.sliderReleased.connect(self._emit_settings_changed)
+        self.branch_height_bias_spin.editingFinished.connect(self._emit_settings_changed)
         self.exploded_view_spin.valueChanged.connect(self._handle_exploded_view_changed)
         self.exploded_view_slider.valueChanged.connect(
             lambda raw: self._handle_exploded_view_changed(float(raw) / 100.0)
@@ -511,6 +524,7 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.generate_caps_check.toggled.connect(self._handle_generate_caps_changed)
         self.override_caps_material_check.toggled.connect(lambda _checked: self._sync_caps_material_controls())
         self.stump_piece_check.toggled.connect(lambda _checked: self._emit_settings_changed())
+        self.separate_stems_check.toggled.connect(lambda _checked: self._emit_settings_changed())
         self.collision_check.toggled.connect(lambda _checked: self._handle_collision_controls_changed())
         self.collision_mode_combo.currentIndexChanged.connect(lambda _index: self._handle_collision_controls_changed())
         self.collision_include_parts_check.toggled.connect(lambda _checked: self._emit_settings_changed())
@@ -535,8 +549,10 @@ class FracturePreviewDialog(PreviewShellDialog):
                 target_piece_count=int(self.piece_count_spin.value()),
                 pinned_cut_joint_tokens=self._manual_cut_tokens,
                 generate_caps=self.generate_caps_check.isChecked(),
-                preserve_trunk_bias=float(self.preserve_trunk_spin.value()),
+                preserve_trunk_bias=float(self._settings.fracture.preserve_trunk_bias),
                 force_stump_piece=self.stump_piece_check.isChecked(),
+                separate_stems=self.separate_stems_check.isChecked(),
+                branch_height_bias=float(self.branch_height_bias_spin.value()),
             ),
             collision=FractureCollisionSettings(
                 enabled=self.collision_check.isChecked(),
@@ -578,31 +594,19 @@ class FracturePreviewDialog(PreviewShellDialog):
         self._collision_visual_base_scale = self._collision_geometry_setting(self._settings.collision)
         self._collision_visual_base_length_scale = self._collision_length_setting(self._settings.collision)
         self.current_preview = preview
-        viewport_scene = _filtered_repeated_parts_scene(
-            preview.viewport_scene,
-            include_repeated_parts=not self.hide_repeated_parts_check.isChecked(),
-        )
-        self.viewport_mesh = build_fracture_viewport_mesh_from_scene(
-            viewport_scene,
-        )
+        viewport_scene = preview.viewport_scene
+        self._full_viewport_mesh = build_fracture_viewport_mesh_from_scene(viewport_scene)
         apply_fracture_viewport_mesh(
             self.viewport,
-            self.viewport_mesh,
+            self._full_viewport_mesh,
             scene=viewport_scene,
             frame_camera=frame_camera,
         )
+        self._sync_repeated_parts_visibility()
         self._apply_collision_visual_settings()
         self.viewport.set_selected_cut_tokens(self._manual_cut_tokens)
         self.viewport.set_show_bones(self.show_bones_check.isChecked())
         self.loading_label.hide()
-        self.summary_label.setText(
-            (
-                f"{self.viewport_mesh.piece_count} pieces\n"
-                f"{self.viewport_mesh.triangle_count} preview triangles\n"
-                f"{self.viewport_mesh.uploaded_triangle_count} uploaded triangles\n"
-                f"{self.viewport_mesh.instance_count} repeated instances"
-            )
-        )
 
     def set_error(self, message: str) -> None:
         self.loading_label.setText(message)
@@ -619,12 +623,13 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.branch_prune_spin,
             self.base_priority_slider,
             self.base_priority_spin,
-            self.preserve_trunk_slider,
-            self.preserve_trunk_spin,
+            self.branch_height_bias_slider,
+            self.branch_height_bias_spin,
             self.show_bones_check,
             self.generate_caps_check,
             self.override_caps_material_check,
             self.stump_piece_check,
+            self.separate_stems_check,
             self.collision_check,
             self.collision_mode_label,
             self.collision_mode_combo,
@@ -661,10 +666,11 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.branch_prune_spin.setValue(float(settings.branch_prune_aggression))
             self.base_priority_slider.setValue(int(round(float(settings.base_mesh_priority) * 100)))
             self.base_priority_spin.setValue(float(settings.base_mesh_priority))
-            self.preserve_trunk_slider.setValue(int(round(float(settings.fracture.preserve_trunk_bias) * 100)))
-            self.preserve_trunk_spin.setValue(float(settings.fracture.preserve_trunk_bias))
+            self.branch_height_bias_slider.setValue(int(round(float(settings.fracture.branch_height_bias) * 100)))
+            self.branch_height_bias_spin.setValue(float(settings.fracture.branch_height_bias))
             self.generate_caps_check.setChecked(settings.fracture.generate_caps)
             self.stump_piece_check.setChecked(settings.fracture.force_stump_piece)
+            self.separate_stems_check.setChecked(settings.fracture.separate_stems)
             self.collision_check.setChecked(settings.collision.enabled)
             _set_combo_data(self.collision_mode_combo, settings.collision.mode.value)
             self._sync_collision_mode_buttons()
@@ -819,8 +825,31 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.viewport.set_show_bones(checked)
 
     def _handle_hide_repeated_parts_changed(self, _checked: bool) -> None:
-        if self.current_preview is not None:
-            self.set_preview(self.current_preview)
+        self._sync_repeated_parts_visibility()
+
+    def _sync_repeated_parts_visibility(self) -> None:
+        if self._full_viewport_mesh is None:
+            return
+        hide_repeated = self.hide_repeated_parts_check.isChecked()
+        if hide_repeated:
+            self.viewport.set_visible_vertex_count_override(self._full_viewport_mesh.base_vertex_count)
+            self.viewport_mesh = replace(
+                self._full_viewport_mesh,
+                triangle_count=self._full_viewport_mesh.base_triangle_count,
+                uploaded_triangle_count=self._full_viewport_mesh.base_uploaded_triangle_count,
+                instance_count=0,
+            )
+        else:
+            self.viewport.set_visible_vertex_count_override(None)
+            self.viewport_mesh = self._full_viewport_mesh
+        self.summary_label.setText(
+            (
+                f"{self.viewport_mesh.piece_count} pieces\n"
+                f"{self.viewport_mesh.triangle_count} preview triangles\n"
+                f"{self.viewport_mesh.uploaded_triangle_count} uploaded triangles\n"
+                f"{self.viewport_mesh.instance_count} repeated instances"
+            )
+        )
 
     def _toggle_manual_cut_token(self, joint_token: str) -> None:
         tokens = list(self._manual_cut_tokens)
@@ -1093,6 +1122,10 @@ def build_fracture_viewport_mesh_from_scene(
     draw_calls: list[FractureDrawCall] = []
     logical_triangle_count = 0
     uploaded_triangle_count = 0
+    base_vertex_count = 0
+    base_triangle_count = 0
+    base_uploaded_triangle_count = 0
+    base_source_indices: set[int] = set()
     source_by_key: dict[tuple[str, tuple[float, float, float, float]], int] = {}
     batch_by_id = {batch.batch_id: batch for batch in scene.mesh_batches}
     included_draw_calls = tuple(
@@ -1142,6 +1175,12 @@ def build_fracture_viewport_mesh_from_scene(
             )
         )
         logical_triangle_count += source.triangle_count
+        if scene_draw_call.visibility_group == "base_mesh":
+            base_vertex_count += source.vertex_count
+            base_triangle_count += source.triangle_count
+            if source_index not in base_source_indices:
+                base_source_indices.add(source_index)
+                base_uploaded_triangle_count += source.triangle_count
     bone_segments = tuple(
         FracturePreviewBoneSegment(
             parent_joint_token=segment.parent_token,
@@ -1164,6 +1203,9 @@ def build_fracture_viewport_mesh_from_scene(
         draw_sources=tuple(draw_sources),
         draw_calls=tuple(draw_calls),
         bone_segments=bone_segments,
+        base_vertex_count=base_vertex_count,
+        base_triangle_count=base_triangle_count,
+        base_uploaded_triangle_count=base_uploaded_triangle_count,
     )
 
 

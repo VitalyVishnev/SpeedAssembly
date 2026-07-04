@@ -159,9 +159,10 @@ def _fracture_preview_trace_payload(settings: FracturePreviewSettings) -> dict[s
     fracture = settings.fracture
     collision = settings.collision
     return {
-        "target_piece_count": fracture.target_piece_count,
-        "preserve_trunk_bias": fracture.preserve_trunk_bias,
+        "target_branch_count": fracture.target_piece_count,
         "force_stump_piece": fracture.force_stump_piece,
+        "separate_stems": fracture.separate_stems,
+        "branch_height_bias": fracture.branch_height_bias,
         "generate_caps": fracture.generate_caps,
         "pinned_cut_joint_tokens": fracture.pinned_cut_joint_tokens,
         "collision_enabled": collision.enabled,
@@ -2294,9 +2295,10 @@ class MainWindow(QWidget):
                 (
                     f"input_path={request.input_path}",
                     f"output_path={request.output_path}",
-                    f"target_piece_count={settings.fracture.target_piece_count}",
-                    f"preserve_trunk_bias={settings.fracture.preserve_trunk_bias}",
+                    f"target_branch_count={settings.fracture.target_piece_count}",
                     f"force_stump_piece={settings.fracture.force_stump_piece}",
+                    f"separate_stems={settings.fracture.separate_stems}",
+                    f"branch_height_bias={settings.fracture.branch_height_bias}",
                     f"generate_caps={settings.fracture.generate_caps}",
                     f"preview_polycount={settings.final_polycount}",
                     f"remove_small_branches={settings.branch_prune_aggression}",
@@ -2312,9 +2314,10 @@ class MainWindow(QWidget):
             data={
                 "input_path": request.input_path,
                 "output_path": request.output_path,
-                "target_piece_count": settings.fracture.target_piece_count,
-                "preserve_trunk_bias": settings.fracture.preserve_trunk_bias,
+                "target_branch_count": settings.fracture.target_piece_count,
                 "force_stump_piece": settings.fracture.force_stump_piece,
+                "separate_stems": settings.fracture.separate_stems,
+                "branch_height_bias": settings.fracture.branch_height_bias,
                 "generate_caps": settings.fracture.generate_caps,
                 "preview_polycount": settings.final_polycount,
                 "remove_small_branches": settings.branch_prune_aggression,
@@ -2471,9 +2474,10 @@ class MainWindow(QWidget):
             "INFO Fracture Preview settings changed",
             "\n".join(
                 (
-                    f"target_piece_count={settings.fracture.target_piece_count}",
-                    f"preserve_trunk_bias={settings.fracture.preserve_trunk_bias}",
+                    f"target_branch_count={settings.fracture.target_piece_count}",
                     f"force_stump_piece={settings.fracture.force_stump_piece}",
+                    f"separate_stems={settings.fracture.separate_stems}",
+                    f"branch_height_bias={settings.fracture.branch_height_bias}",
                     f"generate_caps={settings.fracture.generate_caps}",
                     f"preview_polycount={settings.final_polycount}",
                     f"remove_small_branches={settings.branch_prune_aggression}",

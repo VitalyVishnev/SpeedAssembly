@@ -186,7 +186,7 @@ def test_fracture_preview_uses_plan_membership_stable_colors_and_simplified_geom
     assert tuple(piece.base_mesh.face_count for piece in first.pieces) == (1, 1, 1)
     assert tuple(piece.color for piece in first.pieces) == tuple(piece.color for piece in second.pieces)
     assert tuple(instance.name for instance in first.instances) == ("TopLeaves", "BranchLeaves")
-    assert tuple(instance.piece_index for instance in first.instances) == (1, 2)
+    assert tuple(instance.piece_index for instance in first.instances) == (0, 2)
     assert tuple(first.prototypes) == ("Mesh_1",)
     assert first.prototypes["Mesh_1"].mesh.face_count == 1
     assert first.plan.actual_piece_count == 3
@@ -243,11 +243,20 @@ def test_fracture_preview_reuses_base_cap_source_context_for_all_pieces(monkeypa
     assert calls == 1
 
 
-def test_fracture_preview_source_request_bypasses_generic_preview_cache(monkeypatch, tmp_path) -> None:
+def test_fracture_preview_source_request_reuses_typed_source_cache(monkeypatch, tmp_path) -> None:
     from xml_to_usda import fracture_preview_service
 
     cache_root = tmp_path / "cache" / "fracture_preview_source_models"
     monkeypatch.setattr(fracture_preview_service, "_preview_source_model_cache_root", lambda: cache_root)
+    original_load_source_tree_model = fracture_preview_service.load_source_tree_model
+    load_count = 0
+
+    def count_source_load(*args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal load_count
+        load_count += 1
+        return original_load_source_tree_model(*args, **kwargs)
+
+    monkeypatch.setattr(fracture_preview_service, "load_source_tree_model", count_source_load)
 
     request = FracturePreviewSourceRequest(input_path=str(BIG_SPRUCE))
     settings = FracturePreviewSettings(
@@ -261,13 +270,13 @@ def test_fracture_preview_source_request_bypasses_generic_preview_cache(monkeypa
         settings,
         include_viewport_scene=False,
     )
-    assert list(cache_root.glob("*.json")) == []
+    assert len(list(cache_root.glob("*.npz"))) == 1
+    assert load_count == 1
 
-    def fail_cache_access(*args, **kwargs):  # type: ignore[no-untyped-def]
-        raise AssertionError("Fracture Preview should not use the generic preview JSON cache")
+    def fail_source_load(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("Fracture Preview should reuse the typed source cache")
 
-    monkeypatch.setattr(fracture_preview_service, "_read_preview_source_model_cache", fail_cache_access)
-    monkeypatch.setattr(fracture_preview_service, "_write_preview_source_model_cache", fail_cache_access)
+    monkeypatch.setattr(fracture_preview_service, "load_source_tree_model", fail_source_load)
     second = generate_fracture_preview_from_source_request(
         request,
         settings,
@@ -325,7 +334,7 @@ def test_fracture_preview_includes_bone_overlay_segments_and_selected_manual_cut
         ("bone_003", "bone_004"),
     )
     assert tuple(segment.child_joint_token for segment in result.bone_segments if segment.is_selected_cut) == ("bone_003",)
-    assert tuple(cut.joint_token for cut in result.plan.selected_cut_sites) == ("bone_002", "bone_003")
+    assert tuple(cut.joint_token for cut in result.plan.selected_cut_sites) == ("bone_003",)
     bone_002_segment = next(segment for segment in result.bone_segments if segment.child_joint_token == "bone_002")
     assert (bone_002_segment.parent_position.x, bone_002_segment.parent_position.y, bone_002_segment.parent_position.z) == pytest.approx(
         (0.0, 1.0, 0.0)
@@ -492,4 +501,8 @@ def test_fracture_preview_from_conversion_request_uses_source_xml_geometry_not_o
     assert observed["input_path"] == "tree.xml"
     assert observed["source_cache_enabled"] is False
     assert result.plan.output_stem == "Oak"
-    assert tuple(piece.piece.name for piece in result.pieces) == ("Oak_fracture_00", "Oak_fracture_01")
+    assert tuple(piece.piece.name for piece in result.pieces) == (
+        "Oak_fracture_00",
+        "Oak_fracture_01",
+        "Oak_fracture_02",
+    )

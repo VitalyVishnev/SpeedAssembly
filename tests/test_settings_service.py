@@ -114,7 +114,13 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
             branch_prune_aggression=0.61,
         ),
         fracture_preview_settings=FracturePreviewSettings(
-            fracture=FractureSettings(target_piece_count=8, generate_caps=True, preserve_trunk_bias=0.25),
+            fracture=FractureSettings(
+                target_piece_count=0,
+                generate_caps=True,
+                preserve_trunk_bias=0.25,
+                separate_stems=True,
+                branch_height_bias=-0.5,
+            ),
             collision=FractureCollisionSettings(
                 enabled=True,
                 mode=FractureCollisionMode.SPHERE,
@@ -151,12 +157,14 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert payload["proxy_mesh_settings"]["density_resolution"] == 96
     assert payload["proxy_mesh_settings"]["base_mesh_priority"] == 0.22
     assert payload["proxy_mesh_settings"]["branch_prune_aggression"] == 0.61
-    assert payload["fracture_preview_settings"]["fracture"]["target_piece_count"] == 8
+    assert payload["fracture_preview_settings"]["fracture"]["target_piece_count"] == 0
+    assert payload["fracture_preview_settings"]["fracture"]["separate_stems"] is True
+    assert payload["fracture_preview_settings"]["fracture"]["branch_height_bias"] == -0.5
     assert payload["fracture_preview_settings"]["collision"]["mode"] == "sphere"
     assert payload["fracture_preview_settings"]["collision"]["enabled"] is True
     assert payload["fracture_preview_settings"]["collision"]["include_instance_parts"] is False
     assert payload["fracture_preview_settings"]["collision"]["capsule_scale_by_length"] == 0.8
-    assert payload["fracture_preview_settings"]["branch_prune_aggression"] == 0.72
+    assert "branch_prune_aggression" not in payload["fracture_preview_settings"]
     assert "capsule_max_count" not in payload["fracture_preview_settings"]["collision"]
     assert "capsule_min_radius_ratio" not in payload["fracture_preview_settings"]["collision"]
     assert "capsule_radius_padding" not in payload["fracture_preview_settings"]["collision"]
@@ -192,7 +200,12 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert restored.wind_group_settings == snapshot.wind_group_settings
     assert restored.base_material_settings == snapshot.base_material_settings
     assert restored.proxy_mesh_settings == snapshot.proxy_mesh_settings
-    assert restored.fracture_preview_settings == snapshot.fracture_preview_settings
+    assert restored.fracture_preview_settings == FracturePreviewSettings(
+        fracture=snapshot.fracture_preview_settings.fracture,
+        collision=snapshot.fracture_preview_settings.collision,
+        final_polycount=snapshot.fracture_preview_settings.final_polycount,
+        base_mesh_priority=snapshot.fracture_preview_settings.base_mesh_priority,
+    )
     assert len(restored.part_mesh_settings) == 1
     restored_part = restored.part_mesh_settings[0]
     assert restored_part.source_name == "Twig_01"
@@ -251,13 +264,13 @@ def test_load_gui_settings_clamps_imported_proxy_branch_prune_aggression(tmp_pat
     assert restored.proxy_mesh_settings.branch_prune_aggression == 1.0
 
 
-def test_load_gui_settings_clamps_imported_fracture_branch_prune_aggression(tmp_path: Path) -> None:
+def test_load_gui_settings_ignores_imported_fracture_branch_prune_aggression(tmp_path: Path) -> None:
     settings_path = tmp_path / "gui_settings.json"
     settings_path.write_text(
         json.dumps(
             {
                 "schema_version": GUI_SETTINGS_SCHEMA_VERSION,
-                "fracture_preview_settings": {"branch_prune_aggression": -5.0},
+                "fracture_preview_settings": {"branch_prune_aggression": 0.97},
             }
         ),
         encoding="utf-8",

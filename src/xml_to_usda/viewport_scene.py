@@ -64,6 +64,7 @@ class ViewportBoneSegment:
     color: Color4
     selected: bool = False
     selectable_id: str | None = None
+    explode_direction: Vector3 = ZERO_VECTOR
 
 
 @dataclass(frozen=True)

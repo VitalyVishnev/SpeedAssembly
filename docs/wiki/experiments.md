@@ -88,3 +88,20 @@ Prefer changes that remove duplicate XML work over clever local rewrites.
 Related files:
 - `docs/raw/REFRACTOR_LOG.md`
 - `docs/wiki/known-bugs.md`
+
+## Experiment: Automatic trunk-chain and synthetic fracture fill
+
+Status: Superseded
+
+Context:
+Earlier automatic fracturing tried to reach the requested piece count by refining hierarchy joints and, when needed, splitting base faces spatially.
+
+Outcome:
+On simple trees this could shred one trunk section while leaving the upper tree intact. V1 replaces this with natural weak-point detachment only: stump, independent stems, and branch bases ranked by skeleton length plus optional height bias.
+
+Keep:
+Manual cuts remain the explicit escape hatch for trunk or mid-segment cuts. Automatic fill clamps with a diagnostic when safe branch candidates run out.
+
+Related files:
+- `src/xml_to_usda/fracture_service.py`
+- `docs/wiki/decisions.md`

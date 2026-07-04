@@ -109,26 +109,6 @@ Related files:
 - `src/xml_to_usda/fracture_export_service.py`
 - `src/xml_to_usda/fracture_preview_service.py`
 
-## Bug: Automatic fracture priority still needs trunk-first ordering
-
-Status: Open
-
-Symptoms:
-Automatic Fracture can still split simple trunks unevenly.
-
-Likely cause:
-Cut priority is not yet based on skeleton path trunk/branch structure.
-
-Current workaround:
-Use the current planner and avoid treating the automatic split order as final.
-
-Do not repeat:
-Do not assume trunk-first ordering falls out of hierarchy shape on its own.
-
-Related files:
-- `docs/raw/KNOWN_PROBLEMS.md`
-- `src/xml_to_usda/fracture_service.py`
-
 ## Bug: Fracture collision import still lacks UE 5.7.x confirmation
 
 Status: Unverified
@@ -258,13 +238,13 @@ Related files:
 Status: Open
 
 Symptoms:
-The base-mesh Proxy Mesh and Fracture Preview paths now prune tiny disconnected terminal components before simplification, but foliage/interior/shell zone policy is still not broadly tuned across real vegetation.
+The base-mesh Proxy Mesh path and manually raised Fracture Preview `Remove Small Branches` control can prune tiny disconnected terminal components before simplification, but foliage/interior/shell zone policy is still not broadly tuned across real vegetation.
 
 Likely cause:
 The current fix targets branchy base meshes specifically and does not replace the need for real-sample proxy quality comparison.
 
 Current workaround:
-Keep QEM as the Proxy Mesh backend. Treat shared percentage-based base-mesh connected-component pruning as a targeted priority rule, not full vegetation-aware proxy zoning.
+Keep QEM as the Proxy Mesh backend. Treat percentage-based base-mesh connected-component pruning as a targeted priority rule, not full vegetation-aware proxy zoning. Fracture Preview defaults this control to zero so fracture diagnostics keep complete branch geometry unless the operator intentionally raises it.
 
 Do not repeat:
 Do not treat shell/interior/outside importance, foliage coverage, or lighting usefulness as fully validated.
@@ -284,10 +264,16 @@ Likely cause:
 The generic cache recursively encodes full dataclass graphs into JSON. That format is useful for safe worker exchange, but inefficient as a large source-model cache.
 
 Current workaround:
-Proxy Mesh source loading uses a dedicated typed Proxy Source Projection cache. Fracture Preview bypasses its former generic preview-source JSON cache and reloads source facts directly until a typed Fracture Preview projection cache is justified. Normal conversion callers still use the existing generic cache until a faster typed cache is justified for the full source model.
+Proxy Mesh source loading uses a dedicated typed Proxy Source Projection cache.
+Fracture Preview uses a dedicated typed `.npz` source-facts cache for the slim
+preview model instead of the former generic worker-payload JSON cache. Normal
+conversion callers still use the existing generic cache until a faster typed
+cache is justified for the full source model.
 
 Do not repeat:
-Do not re-enable generic worker-payload JSON caches for Proxy Mesh or Fracture Preview source models. Keep workflow caches narrow unless that workflow starts using additional source facts directly.
+Do not re-enable generic worker-payload JSON caches for Proxy Mesh or Fracture
+Preview source models. Keep workflow caches narrow unless that workflow starts
+using additional source facts directly.
 
 Related files:
 - `src/xml_to_usda/canonical_loader.py`

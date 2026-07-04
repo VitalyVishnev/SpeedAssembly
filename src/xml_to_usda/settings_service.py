@@ -441,10 +441,23 @@ def _parse_fracture_preview_settings(raw_value) -> FracturePreviewSettings:
     fracture = defaults.fracture
     if isinstance(fracture_payload, dict):
         fracture = FractureSettings(
-            target_piece_count=max(1, min(64, _coerce_positive_int(fracture_payload.get("target_piece_count"), fracture.target_piece_count))),
+            target_piece_count=_coerce_bounded_int(
+                fracture_payload.get("target_piece_count"),
+                fracture.target_piece_count,
+                0,
+                64,
+            ),
             generate_caps=_coerce_bool(fracture_payload.get("generate_caps"), fracture.generate_caps),
             preserve_trunk_bias=max(0.0, min(1.0, _coerce_float(fracture_payload.get("preserve_trunk_bias"), fracture.preserve_trunk_bias))),
             force_stump_piece=_coerce_bool(fracture_payload.get("force_stump_piece"), fracture.force_stump_piece),
+            separate_stems=_coerce_bool(fracture_payload.get("separate_stems"), fracture.separate_stems),
+            branch_height_bias=max(
+                -1.0,
+                min(
+                    1.0,
+                    _coerce_float(fracture_payload.get("branch_height_bias"), fracture.branch_height_bias),
+                ),
+            ),
         )
     collision = defaults.collision
     if isinstance(collision_payload, dict):
@@ -485,13 +498,7 @@ def _parse_fracture_preview_settings(raw_value) -> FracturePreviewSettings:
         collision=collision,
         final_polycount=_coerce_positive_int(raw_value.get("final_polycount"), defaults.final_polycount),
         base_mesh_priority=max(0.0, min(1.0, _coerce_float(raw_value.get("base_mesh_priority"), defaults.base_mesh_priority))),
-        branch_prune_aggression=max(
-            0.0,
-            min(
-                1.0,
-                _coerce_float(raw_value.get("branch_prune_aggression"), defaults.branch_prune_aggression),
-            ),
-        ),
+        branch_prune_aggression=defaults.branch_prune_aggression,
         max_base_faces_per_piece=_coerce_positive_int(raw_value.get("max_base_faces_per_piece"), defaults.max_base_faces_per_piece),
         max_prototype_faces=_coerce_positive_int(raw_value.get("max_prototype_faces"), defaults.max_prototype_faces),
     )
@@ -660,6 +667,8 @@ def _serialize_fracture_preview_settings(settings: FracturePreviewSettings) -> d
             "generate_caps": bool(settings.fracture.generate_caps),
             "preserve_trunk_bias": round(float(settings.fracture.preserve_trunk_bias), 4),
             "force_stump_piece": bool(settings.fracture.force_stump_piece),
+            "separate_stems": bool(settings.fracture.separate_stems),
+            "branch_height_bias": round(float(settings.fracture.branch_height_bias), 4),
         },
         "collision": {
             "enabled": bool(settings.collision.enabled),
@@ -674,7 +683,6 @@ def _serialize_fracture_preview_settings(settings: FracturePreviewSettings) -> d
         },
         "final_polycount": int(settings.final_polycount),
         "base_mesh_priority": round(float(settings.base_mesh_priority), 4),
-        "branch_prune_aggression": round(float(settings.branch_prune_aggression), 4),
         "max_base_faces_per_piece": int(settings.max_base_faces_per_piece),
         "max_prototype_faces": int(settings.max_prototype_faces),
     }

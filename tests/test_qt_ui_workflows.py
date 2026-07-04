@@ -1857,8 +1857,8 @@ def test_qt_window_reports_fracture_preview_error_with_request_context(monkeypat
     assert str(tree_xml) in window._log_text
     assert "output_path=" in window._log_text
     assert str(output_path) in window._log_text
-    assert "target_piece_count=7" in window._log_text
-    assert "preserve_trunk_bias=0.5" in window._log_text
+    assert "target_branch_count=7" in window._log_text
+    assert "branch_height_bias=0.0" in window._log_text
     assert "preview_polycount=123400" in window._log_text
     assert "preview_base_priority=0.27" in window._log_text
 

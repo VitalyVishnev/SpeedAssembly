@@ -22,6 +22,7 @@ _LEGACY_METHODS = {
     "manual_pinned_bones",
 }
 _MIN_MANUAL_SEGMENT_CUT_SEPARATION = 0.02
+_MIN_AUTO_BRANCH_LENGTH = 0.05
 
 
 class FractureError(ValueError):
@@ -36,6 +37,8 @@ class FractureSettings:
     generate_caps: bool = False
     preserve_trunk_bias: float = 0.5
     force_stump_piece: bool = False
+    separate_stems: bool = False
+    branch_height_bias: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -89,6 +92,10 @@ class _FracturePlanCache:
     base_face_owner_by_index: tuple[str | None, ...]
     subtree_base_face_counts: dict[str, int]
     main_axis: tuple[str, ...]
+    stem_axes: tuple[tuple[str, ...], ...]
+    subtree_max_path_lengths: dict[str, float]
+    skeleton_min_y: float
+    skeleton_max_y: float
 
 
 def format_manual_segment_cut_token(parent_joint_token: str, child_joint_token: str, segment_t: float) -> str:
@@ -121,11 +128,16 @@ def plan_fracture(
     base_face_owner_by_index = analysis_cache.base_face_owner_by_index
     subtree_base_face_counts = analysis_cache.subtree_base_face_counts
     main_axis = analysis_cache.main_axis
-    candidate_cut_sites, candidate_diagnostics = _candidate_cut_sites(
+    stem_cut_sites, branch_cut_sites, candidate_diagnostics = _candidate_cut_sites(
         graph,
         subtree_base_face_counts,
         main_axis=main_axis,
-        preserve_trunk_bias=resolved_settings.preserve_trunk_bias,
+        stem_axes=analysis_cache.stem_axes,
+        subtree_max_path_lengths=analysis_cache.subtree_max_path_lengths,
+        skeleton_min_y=analysis_cache.skeleton_min_y,
+        skeleton_max_y=analysis_cache.skeleton_max_y,
+        separate_stems=resolved_settings.separate_stems,
+        branch_height_bias=resolved_settings.branch_height_bias,
     )
 
     selected: list[FractureCutSite] = _manual_cut_sites(resolved_settings, graph, subtree_base_face_counts)
@@ -147,11 +159,10 @@ def plan_fracture(
         output_stem=resolved_settings.output_stem,
     )
     _raise_for_empty_manual_cut_pieces(selected, pieces)
-    for cut_site in candidate_cut_sites:
+
+    for cut_site in stem_cut_sites:
         if any(existing.joint_token == cut_site.joint_token for existing in selected):
             continue
-        if len(pieces) >= resolved_settings.target_piece_count:
-            break
         trial_selected = _ordered_cut_sites_for_settings(selected + [cut_site], graph)
         trial_pieces = _build_pieces(
             model,
@@ -166,26 +177,37 @@ def plan_fracture(
         else:
             rejected.append(cut_site)
 
-    if len(pieces) < resolved_settings.target_piece_count:
-        pieces, synthetic_cut_sites = _refine_with_synthetic_face_splits(
+    automatic_branch_count = 0
+    for cut_site in branch_cut_sites:
+        if any(existing.joint_token == cut_site.joint_token for existing in selected):
+            continue
+        if automatic_branch_count >= resolved_settings.target_piece_count:
+            break
+        trial_selected = _ordered_cut_sites_for_settings(selected + [cut_site], graph)
+        trial_pieces = _build_pieces(
             model,
-            pieces,
-            target_piece_count=resolved_settings.target_piece_count,
+            graph,
+            base_face_owner_by_index,
+            trial_selected,
             output_stem=resolved_settings.output_stem,
         )
-        selected.extend(synthetic_cut_sites)
-        _raise_for_empty_manual_cut_pieces(selected, pieces)
+        if len(trial_pieces) == len(selected) + 2 and all(piece.base_face_indices for piece in trial_pieces):
+            selected = trial_selected
+            pieces = trial_pieces
+            automatic_branch_count += 1
+        else:
+            rejected.append(cut_site)
 
     diagnostics = candidate_diagnostics + _manual_piece_count_diagnostics(resolved_settings, pieces)
-    if len(pieces) < resolved_settings.target_piece_count:
+    if automatic_branch_count < resolved_settings.target_piece_count:
         diagnostics += (
             ValidationIssue(
                 severity="warning",
-                code="fracture_piece_count_clamped",
+                code="fracture_branch_count_clamped",
                 message=(
-                    "Fracture target piece count was clamped because no remaining joint cut site "
-                    f"could produce a piece with base mesh faces: requested {resolved_settings.target_piece_count}, "
-                    f"actual {len(pieces)}."
+                    "Fracture branch count was clamped because no remaining safe branch base "
+                    "could produce a piece with base mesh faces: "
+                    f"requested {resolved_settings.target_piece_count}, actual {automatic_branch_count}."
                 ),
             ),
         )
@@ -206,11 +228,18 @@ def plan_fracture(
 def _build_fracture_plan_cache(model: CanonicalTreeModel) -> _FracturePlanCache:
     graph = _build_skeleton_graph(model.skeleton)
     base_face_owner_by_index = _base_face_owner_by_index(model, graph)
+    subtree_base_face_counts = _subtree_base_face_counts(graph, base_face_owner_by_index)
+    main_axis = _select_main_axis(graph)
+    ys = tuple(joint.rest_translate.y for joint in graph.joints)
     return _FracturePlanCache(
         graph=graph,
         base_face_owner_by_index=base_face_owner_by_index,
-        subtree_base_face_counts=_subtree_base_face_counts(graph, base_face_owner_by_index),
-        main_axis=_select_main_axis(graph),
+        subtree_base_face_counts=subtree_base_face_counts,
+        main_axis=main_axis,
+        stem_axes=_select_stem_axes(graph, subtree_base_face_counts),
+        subtree_max_path_lengths=_subtree_max_path_lengths(graph),
+        skeleton_min_y=min(ys) if ys else 0.0,
+        skeleton_max_y=max(ys) if ys else 0.0,
     )
 
 
@@ -218,18 +247,7 @@ def _manual_piece_count_diagnostics(
     settings: FractureSettings,
     pieces: tuple[FracturePiece, ...],
 ) -> tuple[ValidationIssue, ...]:
-    if len(pieces) <= settings.target_piece_count:
-        return ()
-    return (
-        ValidationIssue(
-            severity="warning",
-            code="fracture_manual_piece_count_exceeds_target",
-            message=(
-                "Manual fracture cut sites produced more pieces than the target; "
-                f"requested {settings.target_piece_count}, actual {len(pieces)}."
-            ),
-        ),
-    )
+    return ()
 
 
 def _validate_settings(settings: FractureSettings) -> None:
@@ -243,11 +261,11 @@ def _validate_settings(settings: FractureSettings) -> None:
         raise FractureError("Legacy manual fracture auto-fill methods are no longer supported.")
     if not isinstance(settings.target_piece_count, int):
         raise FractureError(
-            "Fracture target piece count must be an integer, "
+            "Fracture branch count must be an integer, "
             f"got {type(settings.target_piece_count).__name__}."
         )
-    if settings.target_piece_count <= 0:
-        raise FractureError("Fracture target piece count must be greater than zero.")
+    if settings.target_piece_count < 0:
+        raise FractureError("Fracture branch count must be zero or greater.")
     if not isinstance(settings.output_stem, str):
         raise FractureError(f"Fracture output stem must be a string, got {type(settings.output_stem).__name__}.")
     if not settings.output_stem.strip():
@@ -271,6 +289,10 @@ def _validate_settings(settings: FractureSettings) -> None:
         raise FractureError(
             f"Fracture force_stump_piece must be a bool, got {type(settings.force_stump_piece).__name__}."
         )
+    if not isinstance(settings.separate_stems, bool):
+        raise FractureError(f"Fracture separate_stems must be a bool, got {type(settings.separate_stems).__name__}.")
+    if not -1.0 <= float(settings.branch_height_bias) <= 1.0:
+        raise FractureError("Fracture branch_height_bias must be between -1 and 1.")
 
 
 def _manual_cut_sites(
@@ -435,23 +457,180 @@ def _select_main_axis(graph: _SkeletonGraph) -> tuple[str, ...]:
     return max(paths, key=lambda path: (_path_length(graph, path), len(path), tuple(reversed(path))))
 
 
+def _select_stem_axes(
+    graph: _SkeletonGraph,
+    subtree_base_face_counts: dict[str, int],
+) -> tuple[tuple[str, ...], ...]:
+    roots_with_faces = tuple(root for root in graph.roots if subtree_base_face_counts.get(root, 0) > 0)
+    if len(roots_with_faces) > 1:
+        return tuple(_select_axis_from(graph, root) for root in roots_with_faces)
+    if len(roots_with_faces) == 1:
+        root = roots_with_faces[0]
+        root_level = graph.joint_by_name[root].generator_level
+        stem_children = tuple(
+            child
+            for child in graph.children_by_name[root]
+            if subtree_base_face_counts.get(child, 0) > 0
+            and graph.joint_by_name[child].generator_level == root_level
+        )
+        if len(stem_children) > 1:
+            return tuple(_select_axis_from(graph, child) for child in stem_children)
+        return (_select_axis_from(graph, root),)
+    return ()
+
+
+def _select_axis_from(graph: _SkeletonGraph, root_token: str) -> tuple[str, ...]:
+    paths = _root_to_leaf_paths_from(graph, root_token)
+    if not paths:
+        return (root_token,)
+    return max(paths, key=lambda path: (_path_length(graph, path), len(path), tuple(reversed(path))))
+
+
 def _candidate_cut_sites(
     graph: _SkeletonGraph,
     subtree_base_face_counts: dict[str, int],
     *,
     main_axis: tuple[str, ...],
-    preserve_trunk_bias: float,
-) -> tuple[tuple[FractureCutSite, ...], tuple[ValidationIssue, ...]]:
-    candidates: list[FractureCutSite] = []
-    midpoint = _main_axis_midpoint(graph, main_axis, subtree_base_face_counts)
-    branch_candidates = list(_branch_base_candidates(graph, subtree_base_face_counts, main_axis))
-    if midpoint is not None and preserve_trunk_bias < 0.5:
-        candidates.append(FractureCutSite(joint_token=midpoint, kind="joint", reason="main_axis_midpoint"))
-    candidates.extend(branch_candidates)
-    if midpoint is not None and preserve_trunk_bias >= 0.5:
-        candidates.append(FractureCutSite(joint_token=midpoint, kind="joint", reason="main_axis_midpoint"))
-    candidates.extend(_remaining_hierarchy_candidates(graph, subtree_base_face_counts, candidates))
-    return tuple(_dedupe_cut_sites(candidates)), ()
+    stem_axes: tuple[tuple[str, ...], ...],
+    subtree_max_path_lengths: dict[str, float],
+    skeleton_min_y: float,
+    skeleton_max_y: float,
+    separate_stems: bool,
+    branch_height_bias: float,
+) -> tuple[tuple[FractureCutSite, ...], tuple[FractureCutSite, ...], tuple[ValidationIssue, ...]]:
+    stem_cut_sites = _stem_cut_sites(
+        graph,
+        subtree_base_face_counts,
+        stem_axes,
+        enabled=separate_stems,
+    )
+    branch_cut_sites = _length_ranked_branch_base_candidates(
+        graph,
+        subtree_base_face_counts,
+        stem_axes,
+        subtree_max_path_lengths,
+        skeleton_min_y=skeleton_min_y,
+        skeleton_max_y=skeleton_max_y,
+        branch_height_bias=branch_height_bias,
+    )
+    return stem_cut_sites, branch_cut_sites, ()
+
+
+def _stem_cut_sites(
+    graph: _SkeletonGraph,
+    subtree_base_face_counts: dict[str, int],
+    stem_axes: tuple[tuple[str, ...], ...],
+    *,
+    enabled: bool,
+) -> tuple[FractureCutSite, ...]:
+    if not enabled:
+        return ()
+    stems = tuple(axis[0] for axis in stem_axes if axis and subtree_base_face_counts.get(axis[0], 0) > 0)
+    if len(stems) <= 1:
+        return ()
+    primary_stem = max(
+        stems,
+        key=lambda token: (_path_length(graph, _select_axis_from(graph, token)), subtree_base_face_counts[token], token),
+    )
+    return tuple(
+        FractureCutSite(joint_token=token, kind="joint", reason="auto_stem_length")
+        for token in sorted(
+            (token for token in stems if token != primary_stem),
+            key=lambda token: (-_path_length(graph, _select_axis_from(graph, token)), token),
+        )
+    )
+
+
+def _length_ranked_branch_base_candidates(
+    graph: _SkeletonGraph,
+    subtree_base_face_counts: dict[str, int],
+    stem_axes: tuple[tuple[str, ...], ...],
+    subtree_max_path_lengths: dict[str, float],
+    *,
+    skeleton_min_y: float,
+    skeleton_max_y: float,
+    branch_height_bias: float,
+) -> tuple[FractureCutSite, ...]:
+    stem_axis_tokens = {token for axis in stem_axes for token in axis}
+    candidates = [
+        token
+        for token in graph.joint_by_name
+        if token not in graph.roots
+        and token not in stem_axis_tokens
+        and subtree_base_face_counts.get(token, 0) > 0
+        and _branch_physical_length(graph, token, subtree_max_path_lengths) >= _MIN_AUTO_BRANCH_LENGTH
+        and _is_branch_base_candidate(graph, token, stem_axis_tokens)
+    ]
+    candidates.sort(
+        key=lambda token: (
+            -_branch_priority_score(
+                graph,
+                token,
+                subtree_max_path_lengths,
+                skeleton_min_y=skeleton_min_y,
+                skeleton_max_y=skeleton_max_y,
+                branch_height_bias=branch_height_bias,
+            ),
+            token,
+        )
+    )
+    return tuple(FractureCutSite(joint_token=token, kind="joint", reason="auto_branch_length") for token in candidates)
+
+
+def _is_branch_base_candidate(graph: _SkeletonGraph, token: str, stem_axis_tokens: set[str]) -> bool:
+    parent = graph.joint_by_name[token].parent
+    if parent is None:
+        return False
+    if parent in stem_axis_tokens:
+        return True
+    parent_level = graph.joint_by_name[parent].generator_level
+    token_level = graph.joint_by_name[token].generator_level
+    return parent_level is not None and token_level is not None and token_level > parent_level
+
+
+def _branch_priority_score(
+    graph: _SkeletonGraph,
+    token: str,
+    subtree_max_path_lengths: dict[str, float],
+    *,
+    skeleton_min_y: float,
+    skeleton_max_y: float,
+    branch_height_bias: float,
+) -> float:
+    length = _branch_physical_length(graph, token, subtree_max_path_lengths)
+    height_factor = _height_bias_factor(
+        graph.joint_by_name[token].rest_translate.y,
+        skeleton_min_y=skeleton_min_y,
+        skeleton_max_y=skeleton_max_y,
+        branch_height_bias=branch_height_bias,
+    )
+    return length * height_factor
+
+
+def _branch_physical_length(
+    graph: _SkeletonGraph,
+    token: str,
+    subtree_max_path_lengths: dict[str, float],
+) -> float:
+    parent = graph.joint_by_name[token].parent
+    base_edge = _edge_length(graph, parent, token) if parent is not None else 0.0
+    return base_edge + subtree_max_path_lengths.get(token, 0.0)
+
+
+def _height_bias_factor(
+    y: float,
+    *,
+    skeleton_min_y: float,
+    skeleton_max_y: float,
+    branch_height_bias: float,
+) -> float:
+    bias = max(-1.0, min(1.0, float(branch_height_bias)))
+    if abs(bias) <= 0.0001:
+        return 1.0
+    span = skeleton_max_y - skeleton_min_y
+    normalized = 0.5 if span <= 0.0 else max(0.0, min(1.0, (float(y) - skeleton_min_y) / span))
+    direction = normalized if bias > 0.0 else 1.0 - normalized
+    return 1.0 + abs(bias) * direction
 
 
 def _stump_cut_site(
@@ -478,80 +657,6 @@ def _stump_cut_site(
         parent_joint_token=root_token,
         child_joint_token=child_token,
     )
-
-
-def _branch_base_candidates(
-    graph: _SkeletonGraph,
-    subtree_base_face_counts: dict[str, int],
-    main_axis: tuple[str, ...],
-) -> tuple[FractureCutSite, ...]:
-    main_axis_set = set(main_axis)
-    candidates = [
-        token
-        for token in graph.joint_by_name
-        if token not in graph.roots
-        and token not in main_axis_set
-        and graph.joint_by_name[token].parent in main_axis_set
-        and subtree_base_face_counts.get(token, 0) > 0
-    ]
-    candidates.sort(
-        key=lambda token: (
-            _generator_level_sort_key(graph.joint_by_name[token]),
-            -subtree_base_face_counts[token],
-            graph.depth_by_name[token],
-            token,
-        )
-    )
-    return tuple(FractureCutSite(joint_token=token, kind="joint", reason="branch_base") for token in candidates)
-
-
-def _remaining_hierarchy_candidates(
-    graph: _SkeletonGraph,
-    subtree_base_face_counts: dict[str, int],
-    existing: list[FractureCutSite],
-) -> tuple[FractureCutSite, ...]:
-    existing_tokens = {cut_site.joint_token for cut_site in existing}
-    candidates = [
-        token
-        for token in graph.joint_by_name
-        if token not in graph.roots
-        and token not in existing_tokens
-        and subtree_base_face_counts.get(token, 0) > 0
-    ]
-    candidates.sort(
-        key=lambda token: (
-            -subtree_base_face_counts[token],
-            graph.depth_by_name[token],
-            token,
-        )
-    )
-    return tuple(FractureCutSite(joint_token=token, kind="joint", reason="hierarchy_refinement") for token in candidates)
-
-
-def _main_axis_midpoint(
-    graph: _SkeletonGraph,
-    main_axis: tuple[str, ...],
-    subtree_base_face_counts: dict[str, int],
-) -> str | None:
-    candidates = [
-        token
-        for token in main_axis[1:]
-        if subtree_base_face_counts.get(token, 0) > 0
-    ]
-    if not candidates:
-        return None
-    return candidates[(len(candidates) - 1) // 2]
-
-
-def _dedupe_cut_sites(cut_sites: list[FractureCutSite]) -> tuple[FractureCutSite, ...]:
-    seen: set[str] = set()
-    deduped: list[FractureCutSite] = []
-    for cut_site in cut_sites:
-        if cut_site.joint_token in seen:
-            continue
-        seen.add(cut_site.joint_token)
-        deduped.append(cut_site)
-    return tuple(deduped)
 
 
 def _build_pieces(
@@ -761,211 +866,6 @@ def _raise_for_empty_manual_cut_pieces(
             )
 
 
-def _refine_with_synthetic_face_splits(
-    model: CanonicalTreeModel,
-    pieces: tuple[FracturePiece, ...],
-    *,
-    target_piece_count: int,
-    output_stem: str,
-) -> tuple[tuple[FracturePiece, ...], tuple[FractureCutSite, ...]]:
-    refined = list(pieces)
-    synthetic_cut_sites: list[FractureCutSite] = []
-    face_centroids = _base_face_centroids(model)
-    prototype_bounds_by_key = _prototype_bounds_by_key(model)
-    while len(refined) < target_piece_count:
-        split_index = _synthetic_split_piece_index(refined)
-        if split_index is None:
-            break
-        piece = refined[split_index]
-        split = _split_piece_spatially(piece, face_centroids, model, prototype_bounds_by_key)
-        if split is None:
-            break
-        left_faces, right_faces, left_repeated, right_repeated = split
-        if not left_faces or not right_faces:
-            break
-        left_repeated_names = tuple(model.repeated_parts[index].name for index in left_repeated)
-        right_repeated_names = tuple(model.repeated_parts[index].name for index in right_repeated)
-        cut_token = f"{piece.cut_joint_token or 'root'}#face_split_{len(synthetic_cut_sites) + 1:02d}"
-        refined[split_index] = FracturePiece(
-            index=piece.index,
-            name=piece.name,
-            is_root_piece=piece.is_root_piece,
-            cut_joint_token=piece.cut_joint_token,
-            joint_tokens=piece.joint_tokens,
-            base_face_indices=left_faces,
-            repeated_part_indices=left_repeated,
-            repeated_part_names=left_repeated_names,
-        )
-        refined.insert(
-            split_index + 1,
-            FracturePiece(
-                index=0,
-                name="",
-                is_root_piece=False,
-                cut_joint_token=cut_token,
-                joint_tokens=piece.joint_tokens,
-                base_face_indices=right_faces,
-                repeated_part_indices=right_repeated,
-                repeated_part_names=right_repeated_names,
-            ),
-        )
-        synthetic_cut_sites.append(
-            FractureCutSite(
-                joint_token=cut_token,
-                kind="synthetic_mid_segment",
-                reason="base_face_midpoint",
-            )
-        )
-        refined = list(_renumber_pieces(tuple(refined), output_stem=output_stem))
-    return tuple(refined), tuple(synthetic_cut_sites)
-
-
-def _synthetic_split_piece_index(pieces: list[FracturePiece]) -> int | None:
-    candidates = [
-        (len(piece.base_face_indices), index)
-        for index, piece in enumerate(pieces)
-        if len(piece.base_face_indices) > 1
-    ]
-    if not candidates:
-        return None
-    _face_count, index = max(candidates, key=lambda item: (item[0], item[1]))
-    return index
-
-
-def _split_piece_spatially(
-    piece: FracturePiece,
-    face_centroids: tuple[Vector3 | None, ...],
-    model: CanonicalTreeModel,
-    prototype_bounds_by_key: dict[str, tuple[Vector3, Vector3]],
-) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]] | None:
-    centroids = [(face_index, face_centroids[face_index]) for face_index in piece.base_face_indices]
-    if any(centroid is None for _face_index, centroid in centroids):
-        return None
-    points = tuple(centroid for _face_index, centroid in centroids if centroid is not None)
-    axis = _widest_axis(points)
-    projections = sorted(_axis_value(point, axis) for point in points)
-    threshold = projections[len(projections) // 2]
-    left_faces = tuple(face_index for face_index, centroid in centroids if _axis_value(centroid, axis) < threshold)
-    right_faces = tuple(face_index for face_index, centroid in centroids if _axis_value(centroid, axis) >= threshold)
-    if not left_faces or not right_faces:
-        return None
-
-    left_repeated: list[int] = []
-    right_repeated: list[int] = []
-    for part_index in piece.repeated_part_indices:
-        side = _repeated_part_split_side(model.repeated_parts[part_index], prototype_bounds_by_key, axis, threshold)
-        if side == "left":
-            left_repeated.append(part_index)
-        else:
-            right_repeated.append(part_index)
-    return left_faces, right_faces, tuple(left_repeated), tuple(right_repeated)
-
-
-def _widest_axis(points: tuple[Vector3, ...]) -> str:
-    spans = {
-        "x": max(point.x for point in points) - min(point.x for point in points),
-        "y": max(point.y for point in points) - min(point.y for point in points),
-        "z": max(point.z for point in points) - min(point.z for point in points),
-    }
-    return max(("x", "y", "z"), key=lambda axis: (spans[axis], axis))
-
-
-def _axis_value(point: Vector3, axis: str) -> float:
-    return getattr(point, axis)
-
-
-def _prototype_bounds_by_key(model: CanonicalTreeModel) -> dict[str, tuple[Vector3, Vector3]]:
-    bounds: dict[str, tuple[Vector3, Vector3]] = {}
-    for prototype in model.prototypes:
-        points = _prototype_points(prototype)
-        if points:
-            bounds[prototype.source_key] = _points_bounds(points)
-    return bounds
-
-
-def _prototype_points(prototype) -> tuple[Vector3, ...]:
-    if prototype.mesh is not None:
-        return prototype.mesh.points
-    payload = prototype.geometry_payload
-    if payload is None:
-        return ()
-    components = payload.point_components
-    return tuple(
-        Vector3(float(components[index]), float(components[index + 1]), float(components[index + 2]))
-        for index in range(0, len(components), 3)
-    )
-
-
-def _points_bounds(points: tuple[Vector3, ...]) -> tuple[Vector3, Vector3]:
-    return (
-        Vector3(min(point.x for point in points), min(point.y for point in points), min(point.z for point in points)),
-        Vector3(max(point.x for point in points), max(point.y for point in points), max(point.z for point in points)),
-    )
-
-
-def _repeated_part_split_side(
-    part: RepeatedPartInstance,
-    prototype_bounds_by_key: dict[str, tuple[Vector3, Vector3]],
-    axis: str,
-    threshold: float,
-) -> str:
-    bounds = prototype_bounds_by_key.get(part.prototype_key)
-    if bounds is None:
-        raise FractureError(
-            f"Synthetic fracture split cannot classify repeated part {part.name}: "
-            f"prototype {part.prototype_key} has no mesh bounds."
-        )
-    projections = tuple(
-        _axis_value(_transform_point(corner, part.position, part.orientation, part.scale), axis)
-        for corner in _bounds_corners(bounds)
-    )
-    if max(projections) < threshold:
-        return "left"
-    if min(projections) >= threshold:
-        return "right"
-    raise FractureError(
-        f"Synthetic fracture split plane crosses repeated part {part.name}; "
-        "author a manual cut or provide a different target piece count."
-    )
-
-
-def _bounds_corners(bounds: tuple[Vector3, Vector3]) -> tuple[Vector3, ...]:
-    minimum, maximum = bounds
-    return (
-        Vector3(minimum.x, minimum.y, minimum.z),
-        Vector3(minimum.x, minimum.y, maximum.z),
-        Vector3(minimum.x, maximum.y, minimum.z),
-        Vector3(minimum.x, maximum.y, maximum.z),
-        Vector3(maximum.x, minimum.y, minimum.z),
-        Vector3(maximum.x, minimum.y, maximum.z),
-        Vector3(maximum.x, maximum.y, minimum.z),
-        Vector3(maximum.x, maximum.y, maximum.z),
-    )
-
-
-def _transform_point(point: Vector3, translate: Vector3, orientation, scale: Vector3) -> Vector3:
-    scaled = Vector3(point.x * scale.x, point.y * scale.y, point.z * scale.z)
-    rotated = _rotate_vector(scaled, orientation)
-    return Vector3(rotated.x + translate.x, rotated.y + translate.y, rotated.z + translate.z)
-
-
-def _rotate_vector(vector: Vector3, q) -> Vector3:
-    w, x, y, z = float(q.real), float(q.i), float(q.j), float(q.k)
-    length = sqrt(w * w + x * x + y * y + z * z)
-    if length <= 0.0:
-        raise FractureError("Synthetic fracture split encountered a zero-length repeated part orientation quaternion.")
-    w, x, y, z = w / length, x / length, y / length, z / length
-    vx, vy, vz = vector.x, vector.y, vector.z
-    tx = 2.0 * (y * vz - z * vy)
-    ty = 2.0 * (z * vx - x * vz)
-    tz = 2.0 * (x * vy - y * vx)
-    return Vector3(
-        vx + w * tx + (y * tz - z * ty),
-        vy + w * ty + (z * tx - x * tz),
-        vz + w * tz + (x * ty - y * tx),
-    )
-
-
 def _renumber_pieces(pieces: tuple[FracturePiece, ...], *, output_stem: str) -> tuple[FracturePiece, ...]:
     return tuple(
         FracturePiece(
@@ -1084,20 +984,55 @@ def _root_to_leaf_paths(graph: _SkeletonGraph) -> tuple[tuple[str, ...], ...]:
     return tuple(paths)
 
 
+def _root_to_leaf_paths_from(graph: _SkeletonGraph, root_token: str) -> tuple[tuple[str, ...], ...]:
+    paths: list[tuple[str, ...]] = []
+
+    def visit(token: str, path: tuple[str, ...]) -> None:
+        next_path = path + (token,)
+        children = graph.children_by_name[token]
+        if not children:
+            paths.append(next_path)
+            return
+        for child in children:
+            visit(child, next_path)
+
+    visit(root_token, ())
+    return tuple(paths)
+
+
 def _path_length(graph: _SkeletonGraph, path: tuple[str, ...]) -> float:
     total = 0.0
     for child_token in path[1:]:
         parent_token = graph.joint_by_name[child_token].parent
         if parent_token is None:
             continue
-        child = graph.joint_by_name[child_token].rest_translate
-        parent = graph.joint_by_name[parent_token].rest_translate
-        total += sqrt((child.x - parent.x) ** 2 + (child.y - parent.y) ** 2 + (child.z - parent.z) ** 2)
+        total += _edge_length(graph, parent_token, child_token)
     return total
 
 
-def _generator_level_sort_key(joint: Joint) -> int:
-    return joint.generator_level if joint.generator_level is not None else 999_999
+def _subtree_max_path_lengths(graph: _SkeletonGraph) -> dict[str, float]:
+    lengths: dict[str, float] = {}
+
+    def resolve(token: str) -> float:
+        if token in lengths:
+            return lengths[token]
+        children = graph.children_by_name[token]
+        if not children:
+            lengths[token] = 0.0
+            return 0.0
+        length = max(_edge_length(graph, token, child) + resolve(child) for child in children)
+        lengths[token] = length
+        return length
+
+    for joint in graph.joints:
+        resolve(joint.name)
+    return lengths
+
+
+def _edge_length(graph: _SkeletonGraph, parent_token: str, child_token: str) -> float:
+    child = graph.joint_by_name[child_token].rest_translate
+    parent = graph.joint_by_name[parent_token].rest_translate
+    return sqrt((child.x - parent.x) ** 2 + (child.y - parent.y) ** 2 + (child.z - parent.z) ** 2)
 
 
 def _subtree_base_face_counts(

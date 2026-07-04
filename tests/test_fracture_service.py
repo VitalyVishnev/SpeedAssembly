@@ -194,7 +194,7 @@ def test_manual_fracturing_auto_fill_keeps_root_first_and_assigns_repeated_parts
     plan = plan_fracture(
         _tree(),
         FractureSettings(
-            target_piece_count=3,
+            target_piece_count=2,
             output_stem="Oak",
         ),
     )
@@ -203,31 +203,27 @@ def test_manual_fracturing_auto_fill_keeps_root_first_and_assigns_repeated_parts
     assert tuple(piece.name for piece in plan.pieces) == ("Oak_fracture_00", "Oak_fracture_01", "Oak_fracture_02")
     assert plan.pieces[0].is_root_piece is True
     assert plan.pieces[0].base_face_indices
-    assert plan.pieces[1].cut_joint_token == "bone_001"
-    assert plan.pieces[2].cut_joint_token == "bone_003"
-    assert plan.pieces[1].repeated_part_names == ("TopLeaves",)
+    assert plan.pieces[1].cut_joint_token == "bone_003"
+    assert plan.pieces[2].cut_joint_token == "bone_004"
+    assert plan.pieces[0].repeated_part_names == ("TopLeaves",)
     assert plan.pieces[2].repeated_part_names == ("BranchLeaves",)
     assert all(piece.base_face_indices for piece in plan.pieces)
     assert plan.actual_piece_count == 3
 
 
-def test_fracture_uses_synthetic_mid_segment_face_split_when_hierarchy_has_no_safe_cut_site() -> None:
+def test_fracture_clamps_branch_count_when_hierarchy_has_no_safe_branch_base() -> None:
     plan = plan_fracture(
         _single_root_trunk(10),
         FractureSettings(target_piece_count=2, output_stem="Trunk"),
     )
 
-    assert plan.actual_piece_count == 2
-    assert tuple(piece.base_face_indices for piece in plan.pieces) == (
-        (0, 1, 2, 3, 4),
-        (5, 6, 7, 8, 9),
-    )
-    assert plan.selected_cut_sites[-1].kind == "synthetic_mid_segment"
-    assert plan.selected_cut_sites[-1].reason == "base_face_midpoint"
-    assert not any(issue.code == "fracture_piece_count_clamped" for issue in plan.diagnostics)
+    assert plan.actual_piece_count == 1
+    assert tuple(piece.base_face_indices for piece in plan.pieces) == (tuple(range(10)),)
+    assert not plan.selected_cut_sites
+    assert any(issue.code == "fracture_branch_count_clamped" for issue in plan.diagnostics)
 
 
-def test_synthetic_face_split_assigns_repeated_parts_by_transformed_bounds() -> None:
+def test_fracture_does_not_synthetic_split_repeated_parts_without_safe_branch_base() -> None:
     tree = replace(
         _single_root_trunk(4),
         assembly_parts=(
@@ -239,39 +235,18 @@ def test_synthetic_face_split_assigns_repeated_parts_by_transformed_bounds() -> 
 
     plan = plan_fracture(tree, FractureSettings(target_piece_count=2, output_stem="Trunk"))
 
-    assert tuple(piece.base_face_indices for piece in plan.pieces) == ((0, 1), (2, 3))
-    assert tuple(piece.repeated_part_names for piece in plan.pieces) == (("LeftLeaves",), ("RightLeaves",))
-
-
-def test_synthetic_face_split_rejects_repeated_part_bounds_crossing_split_plane() -> None:
-    tree = replace(
-        _single_root_trunk(4),
-        assembly_parts=(_repeated_part_at("CrossingLeaves", "root", 2.0),),
-        prototypes=(_box_prototype(half_extent=0.5),),
-    )
-
-    with pytest.raises(FractureError, match="split plane crosses repeated part CrossingLeaves"):
-        plan_fracture(tree, FractureSettings(target_piece_count=2, output_stem="Trunk"))
-
-
-def test_synthetic_face_split_rejects_repeated_part_without_prototype_bounds() -> None:
-    tree = replace(
-        _single_root_trunk(4),
-        assembly_parts=(_repeated_part_at("UnknownLeaves", "root", 0.5),),
-        prototypes=(),
-    )
-
-    with pytest.raises(FractureError, match="prototype Mesh_1 has no mesh bounds"):
-        plan_fracture(tree, FractureSettings(target_piece_count=2, output_stem="Trunk"))
+    assert tuple(piece.base_face_indices for piece in plan.pieces) == ((0, 1, 2, 3),)
+    assert tuple(piece.repeated_part_names for piece in plan.pieces) == (("LeftLeaves", "RightLeaves"),)
+    assert any(issue.code == "fracture_branch_count_clamped" for issue in plan.diagnostics)
 
 
 def test_fracture_refines_existing_cut_order_when_target_count_grows() -> None:
-    two_piece_plan = plan_fracture(_tree(), FractureSettings(target_piece_count=2, output_stem="Oak"))
-    three_piece_plan = plan_fracture(_tree(), FractureSettings(target_piece_count=3, output_stem="Oak"))
+    one_branch_plan = plan_fracture(_tree(), FractureSettings(target_piece_count=1, output_stem="Oak"))
+    two_branch_plan = plan_fracture(_tree(), FractureSettings(target_piece_count=2, output_stem="Oak"))
 
-    assert tuple(cut.joint_token for cut in two_piece_plan.selected_cut_sites) == ("bone_003",)
-    assert "bone_003" in tuple(cut.joint_token for cut in three_piece_plan.selected_cut_sites)
-    assert "bone_003" in tuple(piece.cut_joint_token for piece in three_piece_plan.pieces)
+    assert tuple(cut.joint_token for cut in one_branch_plan.selected_cut_sites) == ("bone_003",)
+    assert tuple(cut.joint_token for cut in two_branch_plan.selected_cut_sites) == ("bone_003", "bone_004")
+    assert "bone_003" in tuple(piece.cut_joint_token for piece in two_branch_plan.pieces)
 
 
 def test_legacy_fracture_method_ids_fail_loudly() -> None:
@@ -293,9 +268,9 @@ def test_legacy_fracture_method_ids_fail_loudly() -> None:
 def test_fracture_clamps_down_instead_of_emitting_pieces_without_base_faces() -> None:
     plan = plan_fracture(_tree(), FractureSettings(target_piece_count=20, output_stem="Oak"))
 
-    assert plan.actual_piece_count == 5
+    assert plan.actual_piece_count == 3
     assert all(piece.base_face_indices for piece in plan.pieces)
-    assert any(issue.code == "fracture_piece_count_clamped" for issue in plan.diagnostics)
+    assert any(issue.code == "fracture_branch_count_clamped" for issue in plan.diagnostics)
 
 
 def test_fracture_skips_empty_source_faces_before_piece_planning() -> None:
@@ -339,26 +314,26 @@ def test_fracture_fails_loudly_when_base_mesh_topology_is_not_materialized() -> 
         plan_fracture(replace(tree, base_mesh=broken_base_mesh), FractureSettings(target_piece_count=2))
 
 
-def test_preserve_trunk_bias_prefers_branch_bases_before_main_axis_midpoint() -> None:
+def test_auto_fracture_prefers_branch_bases_without_trunk_midpoint() -> None:
     plan = plan_fracture(
         _tree(),
         FractureSettings(target_piece_count=2, output_stem="Oak", preserve_trunk_bias=1.0),
     )
 
-    assert plan.actual_piece_count == 2
-    assert tuple(cut.reason for cut in plan.selected_cut_sites) == ("branch_base",)
-    assert tuple(piece.cut_joint_token for piece in plan.pieces[1:]) == ("bone_003",)
+    assert plan.actual_piece_count == 3
+    assert tuple(cut.reason for cut in plan.selected_cut_sites) == ("auto_branch_length", "auto_branch_length")
+    assert tuple(piece.cut_joint_token for piece in plan.pieces[1:]) == ("bone_003", "bone_004")
 
 
-def test_balanced_fracturing_can_still_start_at_main_axis_midpoint() -> None:
+def test_preserve_trunk_bias_no_longer_enables_main_axis_auto_cuts() -> None:
     plan = plan_fracture(
         _tree(),
         FractureSettings(target_piece_count=2, output_stem="Oak", preserve_trunk_bias=0.0),
     )
 
-    assert plan.actual_piece_count == 2
-    assert tuple(cut.reason for cut in plan.selected_cut_sites) == ("main_axis_midpoint",)
-    assert tuple(piece.cut_joint_token for piece in plan.pieces[1:]) == ("bone_001",)
+    assert plan.actual_piece_count == 3
+    assert tuple(cut.reason for cut in plan.selected_cut_sites) == ("auto_branch_length", "auto_branch_length")
+    assert "bone_001" not in tuple(piece.cut_joint_token for piece in plan.pieces)
 
 
 def test_manual_pinned_cuts_apply_first_and_allow_nested_fracture_pieces() -> None:
@@ -371,12 +346,17 @@ def test_manual_pinned_cuts_apply_first_and_allow_nested_fracture_pieces() -> No
         ),
     )
 
-    assert plan.actual_piece_count == 3
-    assert tuple(cut.joint_token for cut in plan.selected_cut_sites) == ("bone_001", "bone_003")
-    assert tuple(cut.reason for cut in plan.selected_cut_sites) == ("manual_pinned", "manual_pinned")
-    assert tuple(piece.cut_joint_token for piece in plan.pieces[1:]) == ("bone_001", "bone_003")
+    assert plan.actual_piece_count == 4
+    assert tuple(cut.joint_token for cut in plan.selected_cut_sites) == ("bone_001", "bone_003", "bone_004")
+    assert tuple(cut.reason for cut in plan.selected_cut_sites) == (
+        "manual_pinned",
+        "manual_pinned",
+        "auto_branch_length",
+    )
+    assert tuple(piece.cut_joint_token for piece in plan.pieces[1:]) == ("bone_001", "bone_003", "bone_004")
     assert plan.pieces[1].joint_tokens == ("bone_001", "bone_002")
-    assert plan.pieces[2].joint_tokens == ("bone_003", "bone_004")
+    assert plan.pieces[2].joint_tokens == ("bone_003",)
+    assert plan.pieces[3].joint_tokens == ("bone_004",)
 
 
 def test_manual_segment_cut_splits_base_faces_between_joints_by_cut_position() -> None:
@@ -474,7 +454,7 @@ def test_joint_only_fracturing_does_not_compute_face_centroids(monkeypatch) -> N
         ),
     )
 
-    assert plan.actual_piece_count == 3
+    assert plan.actual_piece_count == 4
     assert plan.selected_cut_sites[0].joint_token == "bone_001"
 
 
@@ -504,7 +484,7 @@ def test_manual_pinned_cuts_use_skeleton_order_and_auto_fill_after_pins() -> Non
         ),
     )
 
-    assert tuple(piece.cut_joint_token for piece in first.pieces) == (None, "bone_001", "bone_003")
+    assert tuple(piece.cut_joint_token for piece in first.pieces) == (None, "bone_003", "bone_004")
     assert tuple(piece.cut_joint_token for piece in second.pieces) == tuple(piece.cut_joint_token for piece in third.pieces)
 
 
@@ -519,9 +499,9 @@ def test_manual_pinned_cuts_preserve_manual_pieces_when_target_is_lower() -> Non
     )
 
     assert plan.requested_piece_count == 2
-    assert plan.actual_piece_count == 3
-    assert tuple(piece.cut_joint_token for piece in plan.pieces) == (None, "bone_001", "bone_003")
-    assert any(issue.code == "fracture_manual_piece_count_exceeds_target" for issue in plan.diagnostics)
+    assert plan.actual_piece_count == 4
+    assert tuple(piece.cut_joint_token for piece in plan.pieces) == (None, "bone_001", "bone_003", "bone_004")
+    assert not any(issue.code == "fracture_manual_piece_count_exceeds_target" for issue in plan.diagnostics)
 
 
 def test_manual_pinned_cuts_fail_loudly_for_missing_or_empty_cut_sites() -> None:

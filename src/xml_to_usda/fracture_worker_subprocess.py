@@ -100,9 +100,10 @@ def run_fracture_worker_request_file(path: str | Path) -> int:
             _worker_stage(
                 "preview.generate.start",
                 generate_caps=request.settings.fracture.generate_caps,
-                target_piece_count=request.settings.fracture.target_piece_count,
-                preserve_trunk_bias=request.settings.fracture.preserve_trunk_bias,
+                target_branch_count=request.settings.fracture.target_piece_count,
                 force_stump_piece=request.settings.fracture.force_stump_piece,
+                separate_stems=request.settings.fracture.separate_stems,
+                branch_height_bias=request.settings.fracture.branch_height_bias,
             )
             result = generate_fracture_preview_from_source_request(
                 request.request,

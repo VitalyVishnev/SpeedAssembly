@@ -203,12 +203,14 @@ def test_fracture_viewport_payload_triangulates_base_and_instanced_preview_geome
         mesh.vertex_components[instance_vertex_offset:instance_vertex_offset + FRACTURE_SOURCE_VERTEX_STRIDE]
     )
     assert first_instance_vertex[0] < 10.0
+    piece_color_by_index = {piece.piece.index: piece.color for piece in preview.pieces}
+    first_instance_color = piece_color_by_index[preview.instances[0].piece_index]
     assert first_instance_vertex[6:10] == pytest.approx(
         (
-            preview.pieces[1].color.r,
-            preview.pieces[1].color.g,
-            preview.pieces[1].color.b,
-            preview.pieces[1].color.a,
+            first_instance_color.r,
+            first_instance_color.g,
+            first_instance_color.b,
+            first_instance_color.a,
         )
     )
     assert mesh.draw_calls[3].translate.x == pytest.approx(10.0)
@@ -218,12 +220,13 @@ def test_fracture_viewport_payload_triangulates_base_and_instanced_preview_geome
     second_instance_vertex = tuple(
         mesh.vertex_components[second_instance_vertex_offset:second_instance_vertex_offset + FRACTURE_SOURCE_VERTEX_STRIDE]
     )
+    second_instance_color = piece_color_by_index[preview.instances[1].piece_index]
     assert second_instance_vertex[6:10] == pytest.approx(
         (
-            preview.pieces[2].color.r,
-            preview.pieces[2].color.g,
-            preview.pieces[2].color.b,
-            preview.pieces[2].color.a,
+            second_instance_color.r,
+            second_instance_color.g,
+            second_instance_color.b,
+            second_instance_color.a,
         )
     )
     assert mesh.draw_calls[4].translate.x == pytest.approx(20.0)
@@ -250,11 +253,11 @@ def test_fracture_viewport_payload_reuses_repeated_prototype_source_for_same_pie
     mesh = build_fracture_viewport_mesh(preview)
 
     assert mesh.instance_count == 3
-    assert mesh.triangle_count == 5
-    assert mesh.uploaded_triangle_count == 3
-    assert len(mesh.draw_sources) == 3
-    assert len(mesh.draw_calls) == 5
-    assert tuple(call.source_index for call in mesh.draw_calls[-3:]) == (2, 2, 2)
+    assert mesh.triangle_count == 6
+    assert mesh.uploaded_triangle_count == 4
+    assert len(mesh.draw_sources) == 4
+    assert len(mesh.draw_calls) == 6
+    assert tuple(call.source_index for call in mesh.draw_calls[-3:]) == (3, 3, 3)
     assert tuple(call.translate.x for call in mesh.draw_calls[-3:]) == pytest.approx((10.0, 12.0, 14.0))
 
 
@@ -467,14 +470,16 @@ def test_fracture_viewport_accepts_colored_triangle_payload_and_frames_camera(qt
         )
     )
     first_instance_offset = 3 * 3 * FRACTURE_VERTEX_STRIDE
+    piece_color_by_index = {piece.piece.index: piece.color for piece in preview.pieces}
+    first_instance_color = piece_color_by_index[preview.instances[0].piece_index]
     assert tuple(
         payload.vertex_components[first_instance_offset + 6:first_instance_offset + 10]
     ) == pytest.approx(
         (
-            preview.pieces[1].color.r,
-            preview.pieces[1].color.g,
-            preview.pieces[1].color.b,
-            preview.pieces[1].color.a,
+            first_instance_color.r,
+            first_instance_color.g,
+            first_instance_color.b,
+            first_instance_color.a,
         )
     )
     assert viewport.grid_vertex_count > 0
@@ -566,6 +571,33 @@ def test_fracture_preview_dialog_enables_manual_bones_visibility_and_hides_repea
     assert preview.instances
 
 
+def test_fracture_preview_hide_repeated_parts_toggles_without_reuploading_mesh(qtbot) -> None:
+    preview = generate_fracture_preview(
+        _tree(),
+        FracturePreviewSettings(
+            fracture=FractureSettings(target_piece_count=3, output_stem="Oak"),
+            max_base_faces_per_piece=1,
+            max_prototype_faces=1,
+        ),
+    )
+    dialog = FracturePreviewDialog(settings=FracturePreviewSettings(), preview=preview)
+    qtbot.addWidget(dialog)
+    upload_calls = 0
+
+    def count_upload() -> None:
+        nonlocal upload_calls
+        upload_calls += 1
+
+    dialog.viewport._upload_mesh = count_upload  # type: ignore[method-assign]
+
+    dialog.hide_repeated_parts_check.setChecked(False)
+    dialog.hide_repeated_parts_check.setChecked(True)
+
+    assert upload_calls == 0
+    assert dialog.viewport_mesh is not None
+    assert dialog.viewport_mesh.instance_count == 0
+
+
 def test_fracture_preview_dialog_reset_cuts_clears_manual_session_tokens(qtbot) -> None:
     emitted: list[FracturePreviewSettings] = []
     settings = FracturePreviewSettings(
@@ -627,6 +659,62 @@ def test_fracture_preview_dialog_visual_sliders_do_not_emit_preview_settings(qtb
     assert dialog.viewport.matcap_tint_strength == pytest.approx(0.24)
     assert dialog.exploded_view_spin.value() == pytest.approx(2.0)
     assert dialog.viewport.exploded_view_strength == pytest.approx(2.0)
+
+
+def test_fracture_preview_dialog_round_trips_v1_auto_controls(qtbot) -> None:
+    dialog = FracturePreviewDialog(
+        settings=FracturePreviewSettings(
+            fracture=FractureSettings(
+                target_piece_count=0,
+                separate_stems=True,
+                branch_height_bias=-0.5,
+            )
+        )
+    )
+    qtbot.addWidget(dialog)
+
+    assert dialog.branch_count_label.text() == "Auto Branches"
+    assert dialog.piece_count_spin.minimum() == 0
+    assert dialog.piece_count_spin.value() == 0
+    assert dialog.separate_stems_check.isChecked()
+    assert dialog.branch_height_bias_spin.value() == pytest.approx(-0.5)
+
+    dialog.piece_count_spin.setValue(7)
+    dialog.separate_stems_check.setChecked(False)
+    dialog.branch_height_bias_spin.setValue(0.75)
+
+    settings = dialog.settings().fracture
+    assert settings.target_piece_count == 7
+    assert settings.separate_stems is False
+    assert settings.branch_height_bias == pytest.approx(0.75)
+
+
+def test_fracture_viewport_exploded_view_offsets_bone_overlay_without_reuploading_mesh(qtbot) -> None:
+    viewport = MatcapViewport()
+    qtbot.addWidget(viewport)
+    segment = FracturePreviewBoneSegment(
+        parent_joint_token="root",
+        child_joint_token="branch",
+        parent_position=Vector3(1.0, 2.0, 3.0),
+        child_position=Vector3(2.0, 3.0, 4.0),
+    )
+    scene = _bone_only_scene((segment,))
+    scene_segment = replace(scene.bone_segments[0], explode_direction=Vector3(0.5, 0.0, -1.0))
+    scene = replace(scene, bone_segments=(scene_segment,))
+    viewport.set_scene(scene)
+    upload_calls = 0
+
+    def count_upload() -> None:
+        nonlocal upload_calls
+        upload_calls += 1
+
+    viewport._upload_mesh = count_upload  # type: ignore[method-assign]
+    viewport.set_exploded_view_strength(2.0)
+
+    start, end = viewport._exploded_bone_segment_points(scene_segment)
+    assert upload_calls == 0
+    assert (start.x, start.y, start.z) == pytest.approx((2.0, 2.0, 1.0))
+    assert (end.x, end.y, end.z) == pytest.approx((3.0, 3.0, 2.0))
 
 
 def test_fracture_preview_dialog_collision_visual_sliders_update_existing_preview(qtbot) -> None:

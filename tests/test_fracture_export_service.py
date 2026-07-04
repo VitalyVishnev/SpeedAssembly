@@ -202,7 +202,7 @@ def test_fracture_export_writes_flat_static_assembly_siblings_that_reassemble_at
         "Oak_fracture_01.usda",
         "Oak_fracture_02.usda",
     )
-    assert tuple(piece.base_face_indices for piece in result.plan.pieces) == ((0,), (1, 2), (3, 4))
+    assert tuple(piece.base_face_indices for piece in result.plan.pieces) == ((0, 1, 2), (3,), (4,))
     assert result.outputs[0].piece.is_root_piece is True
 
     for output in result.outputs:
@@ -216,8 +216,8 @@ def test_fracture_export_writes_flat_static_assembly_siblings_that_reassemble_at
         assert not inventory.contains(root_path, "rel unreal:naniteAssembly:skeleton")
         assert not inventory.contains(root_path, "primvars:skel:")
 
-    assert "LeafCluster" not in Path(result.outputs[0].output_path).read_text(encoding="utf-8")
-    assert "LeafCluster" in Path(result.outputs[1].output_path).read_text(encoding="utf-8")
+    assert "LeafCluster" in Path(result.outputs[0].output_path).read_text(encoding="utf-8")
+    assert "LeafCluster" not in Path(result.outputs[1].output_path).read_text(encoding="utf-8")
     assert "LeafCluster" in Path(result.outputs[2].output_path).read_text(encoding="utf-8")
 
 
@@ -377,7 +377,7 @@ def test_fracture_export_from_conversion_request_resolves_current_operator_inten
     assert observed["base_material_overrides"] == request.base_material_overrides
     assert observed["udim_material_settings"] == request.udim_material_settings
     assert observed["prototype_source_configs"] == request.prototype_source_configs
-    assert len(result.outputs) == 2
+    assert len(result.outputs) == 3
 
 
 def test_fracture_piece_model_authors_sphere_collision_as_base_mesh_sibling() -> None:
