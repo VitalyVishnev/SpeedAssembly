@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QSlider,
     QSpinBox,
     QVBoxLayout,
@@ -121,6 +122,9 @@ class PartSourceMaterialEditor(QWidget):
             placeholder="Choose an FBX replacement file",
         )
         self.fbx_browse_button = QPushButton("Browse...", self)
+        self.fbx_browse_button.setObjectName("PreviewActionButton")
+        self.fbx_browse_button.setFixedWidth(108)
+        self.fbx_browse_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.fbx_browse_button.clicked.connect(lambda _checked=False: self._browse_fbx(self.fbx_path_edit))
         source_label = QLabel("Source", self)
         set_tooltip(self.source_mode_combo.toolTip(), source_label)

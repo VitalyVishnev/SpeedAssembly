@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QLabel, QPushButton, QHBoxLayout
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from ..models import CpuProfile, PrototypeSourceMode
 from ..part_preview_service import PartPreviewDisplayMode, PartPrototypePreviewRequest, PartPrototypePreviewSettings
@@ -39,7 +39,20 @@ class PartPrototypePreviewDialog(PreviewShellDialog):
         self.viewport = MatcapViewport(self)
         self.set_viewport_widget(self.viewport)
 
-        settings_panel, settings_layout = self.create_settings_panel()
+        settings_panel, settings_shell_layout = self.create_settings_panel(width=340)
+        settings_shell_layout.setContentsMargins(0, 0, 0, 0)
+        settings_shell_layout.setSpacing(0)
+        settings_scroll = QScrollArea(settings_panel)
+        settings_scroll.setWidgetResizable(True)
+        settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        settings_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        settings_content = QWidget(settings_scroll)
+        settings_layout = QVBoxLayout(settings_content)
+        settings_layout.setContentsMargins(14, 14, 14, 14)
+        settings_layout.setSpacing(8)
+        settings_scroll.setWidget(settings_content)
+        settings_shell_layout.addWidget(settings_scroll, 1)
+
         title = QLabel(value.source_name or value.source_key, settings_panel)
         title.setStyleSheet("font-weight: 700;")
         settings_layout.addWidget(title)
@@ -55,11 +68,17 @@ class PartPrototypePreviewDialog(PreviewShellDialog):
         settings_layout.addWidget(self.status_label)
 
         actions = QHBoxLayout()
+        actions.setContentsMargins(14, 10, 14, 14)
+        actions.addStretch(1)
         self.apply_button = QPushButton("Apply", settings_panel)
         self.close_button = QPushButton("Close", settings_panel)
+        for button in (self.apply_button, self.close_button):
+            button.setObjectName("PreviewActionButton")
+            button.setFixedWidth(108)
+            button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         actions.addWidget(self.apply_button)
         actions.addWidget(self.close_button)
-        settings_layout.addLayout(actions)
+        settings_shell_layout.addLayout(actions)
         settings_layout.addStretch(1)
 
         self.editor.previewAffectingChanged.connect(self.schedule_preview)

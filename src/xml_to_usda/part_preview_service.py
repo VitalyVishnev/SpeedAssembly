@@ -15,6 +15,8 @@ from dataclasses import dataclass, replace
 from enum import Enum
 
 from .canonical_loader import load_resolved_assembly_model
+from .fbx_adapter import load_fbx_geometry
+from .fbx_payload_cache import FbxPayloadCacheOptions, load_fbx_payload_from_cache, store_fbx_payload_in_cache
 from .geometry_buffers import geometry_buffer_from_mesh
 from .models import (
     Color4,
@@ -27,6 +29,7 @@ from .models import (
     PrototypeSourceConfig,
     PrototypeSourceMode,
 )
+from .prototype_sources import fbx_import_read_options_for_material_mode
 from .prototype_simplification import predicted_simplified_triangle_count, simplify_geometry_buffer
 from .viewport_scene import geometry_triangle_count
 
@@ -88,6 +91,8 @@ def build_part_prototype_preview(
             source_mode=config.mode,
             mesh=None,
         )
+    if config.mode == PrototypeSourceMode.FBX_FILE:
+        return _build_fbx_part_preview(request, settings, cancel_event=cancel_event)
 
     load_config = replace(config, simplification_percent=100)
     _report, resolved = load_resolved_assembly_model(
@@ -114,7 +119,71 @@ def build_part_prototype_preview(
             source_mode=prototype.source_mode,
             mesh=None,
         )
+    return _preview_result_from_payload(
+        request,
+        settings,
+        source_mode=prototype.source_mode,
+        source_payload=source_payload,
+        material_specs=getattr(resolved.authoring_model, "materials", ()),
+        cancel_event=cancel_event,
+    )
 
+
+def _build_fbx_part_preview(
+    request: PartPrototypePreviewRequest,
+    settings: PartPrototypePreviewSettings,
+    *,
+    cancel_event=None,
+) -> PartPrototypePreviewResult:
+    config = request.prototype_source_config
+    if not config.fbx_path:
+        raise ValueError("Choose an FBX file before previewing an FBX prototype.")
+    read_options = fbx_import_read_options_for_material_mode(config.fbx_material_mode)
+    cache_options = FbxPayloadCacheOptions(
+        read_vertex_colors=read_options.read_vertex_colors,
+        read_material_slots=read_options.read_material_slots,
+        strict_vertex_colors=read_options.strict_vertex_colors,
+    )
+    cached = load_fbx_payload_from_cache(config.fbx_path, cache_options)
+    source_payload = cached.payload
+    if source_payload is None:
+        source_payload = load_fbx_geometry(
+            config.fbx_path,
+            request.source_name or request.source_key,
+            cpu_profile=request.cpu_profile,
+            strict_vertex_colors=read_options.strict_vertex_colors,
+            read_vertex_colors=read_options.read_vertex_colors,
+            read_material_slots=read_options.read_material_slots,
+        )
+        store_fbx_payload_in_cache(
+            config.fbx_path,
+            cache_options,
+            source_payload,
+            max_bytes=request.fbx_cache_max_bytes,
+            max_age_seconds=request.fbx_cache_max_age_seconds,
+        )
+    else:
+        source_payload = replace(source_payload, name=request.source_name or request.source_key)
+    return _preview_result_from_payload(
+        request,
+        settings,
+        source_mode=config.mode,
+        source_payload=source_payload,
+        material_specs=(),
+        cancel_event=cancel_event,
+    )
+
+
+def _preview_result_from_payload(
+    request: PartPrototypePreviewRequest,
+    settings: PartPrototypePreviewSettings,
+    *,
+    source_mode: PrototypeSourceMode,
+    source_payload: GeometryBuffer,
+    material_specs: tuple[MaterialSpec, ...],
+    cancel_event=None,
+) -> PartPrototypePreviewResult:
+    config = request.prototype_source_config
     source_triangle_count = geometry_triangle_count(source_payload)
     source_section_triangle_counts = _section_triangle_counts(source_payload)
     payload = (
@@ -122,7 +191,7 @@ def build_part_prototype_preview(
         if config.simplification_percent < 100
         else source_payload
     )
-    material_colors = _material_color_legend(payload, getattr(resolved.authoring_model, "materials", ()))
+    material_colors = _material_color_legend(payload, material_specs)
     display_mode = PartPreviewDisplayMode(settings.display_mode)
     if display_mode == PartPreviewDisplayMode.MATERIAL_COLORS:
         display_mesh = _material_color_display_mesh(payload, material_colors)
@@ -133,7 +202,7 @@ def build_part_prototype_preview(
     return PartPrototypePreviewResult(
         source_key=request.source_key,
         source_name=request.source_name,
-        source_mode=prototype.source_mode,
+        source_mode=source_mode,
         mesh=display_mesh,
         source_triangle_count=source_triangle_count,
         displayed_triangle_count=geometry_triangle_count(display_mesh),

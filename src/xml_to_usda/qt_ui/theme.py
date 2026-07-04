@@ -649,6 +649,11 @@ QFrame#GenerateActionDivider {{
 QPushButton#EditorActionButton {{
     min-width: 108px;
 }}
+QPushButton#PreviewActionButton {{
+    min-width: 92px;
+    min-height: 30px;
+    padding: 4px 12px;
+}}
 QComboBox,
 QSpinBox,
 QDoubleSpinBox {{

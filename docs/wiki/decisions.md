@@ -445,3 +445,34 @@ Related files:
 - `src/xml_to_usda/qt_ui/panels.py`
 - `src/xml_to_usda/qt_ui/proxy_preview.py`
 - `src/xml_to_usda/qt_ui/fracture_preview.py`
+
+## Decision: FBX Prototype Preview loads the selected payload directly
+
+Status: Active
+
+Context:
+Prototype Preview is an interactive inspection workflow for one repeated-part
+prototype. The FBX mode previously resolved the full assembly model before
+showing one selected FBX replacement, which widened native failure surface and
+added avoidable latency.
+
+Decision:
+For `FBX file` Prototype Preview, load the chosen FBX payload directly through
+the same FBX read options and payload cache used by export. Keep the full
+resolved assembly path for XML mesh preview, where source prototypes and
+source material metadata come from the normalized XML model.
+
+Reasoning:
+The operator needs a responsive local preview of the selected replacement
+payload and material split. Full assembly resolution is unnecessary for that
+case and can make a preview crash look like an export-contract failure.
+
+Consequences:
+FBX Prototype Preview stays isolated from the UI process, keeps strict
+vertex-color validation for `vertex_color_split`, and reuses the bounded FBX
+payload cache. It does not redefine exported instance transforms, attachment,
+or skeletal binding.
+
+Related files:
+- `src/xml_to_usda/part_preview_service.py`
+- `src/xml_to_usda/qt_ui/part_preview.py`

@@ -99,3 +99,8 @@ Major moves:
 
 - Added the maintained rule that main export-tree UI parameters need concise English tooltips and functional grouping.
 - Covered Wind, Geometry, Materials, Proxy Mesh, Fracture Preview, and prototype preview controls with short parameter tooltips.
+
+## 2026-07-04 - Prototype Preview FBX and panel fix
+
+- Recorded that FBX Prototype Preview loads the selected FBX payload directly instead of resolving the full assembly model.
+- Noted the UI/runtime boundary for the fixed Prototype Preview path.

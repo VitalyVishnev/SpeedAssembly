@@ -23,6 +23,8 @@ def test_part_source_material_editor_switches_source_mode_visibility(qtbot) -> N
     editor.source_mode_combo.setCurrentIndex(editor.source_mode_combo.findData(PrototypeSourceMode.FBX_FILE.value))
     assert editor.fbx_path_edit.isVisible()
     assert editor.material_frame.isVisible()
+    assert editor.fbx_browse_button.objectName() == "PreviewActionButton"
+    assert editor.fbx_browse_button.maximumWidth() <= 108
 
     editor.source_mode_combo.setCurrentIndex(editor.source_mode_combo.findData(PrototypeSourceMode.UNREAL_ASSET.value))
     assert editor.unreal_path_edit.isVisible()

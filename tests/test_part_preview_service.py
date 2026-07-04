@@ -3,7 +3,15 @@ from __future__ import annotations
 from array import array
 from types import SimpleNamespace
 
-from xml_to_usda.models import CompactMeshSection, GeometryBuffer, Prototype, PrototypeIdentity, PrototypeSourceConfig
+from xml_to_usda.models import (
+    CompactMeshSection,
+    FbxMaterialMode,
+    GeometryBuffer,
+    Prototype,
+    PrototypeIdentity,
+    PrototypeSourceConfig,
+    PrototypeSourceMode,
+)
 from xml_to_usda.part_preview_service import (
     PartPreviewDisplayMode,
     PartPrototypePreviewRequest,
@@ -94,3 +102,46 @@ def test_part_preview_loads_source_geometry_without_export_simplification(monkey
     assert result.source_triangle_count == 2
     assert result.source_section_triangle_counts == (1, 1)
     assert result.predicted_export_triangle_count == 2
+
+
+def test_part_preview_fbx_mode_loads_payload_without_resolving_full_assembly(monkeypatch) -> None:
+    calls: dict[str, object] = {}
+
+    def fail_resolved_load(*_args, **_kwargs):
+        raise AssertionError("FBX part preview should not resolve the full assembly model")
+
+    def fake_load_fbx_geometry(*_args, **kwargs):
+        calls["strict_vertex_colors"] = kwargs["strict_vertex_colors"]
+        calls["read_vertex_colors"] = kwargs["read_vertex_colors"]
+        calls["read_material_slots"] = kwargs["read_material_slots"]
+        return _preview_mesh()
+
+    monkeypatch.setattr("xml_to_usda.part_preview_service.load_resolved_assembly_model", fail_resolved_load)
+    monkeypatch.setattr("xml_to_usda.part_preview_service.load_fbx_payload_from_cache", lambda *_args, **_kwargs: SimpleNamespace(payload=None))
+    monkeypatch.setattr("xml_to_usda.part_preview_service.store_fbx_payload_in_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("xml_to_usda.part_preview_service.load_fbx_geometry", fake_load_fbx_geometry)
+
+    result = build_part_prototype_preview(
+        PartPrototypePreviewRequest(
+            input_path="tree.xml",
+            source_key="Mesh_1",
+            source_name="Twig",
+            prototype_source_config=PrototypeSourceConfig(
+                source_key="Mesh_1",
+                source_name="Twig",
+                mode=PrototypeSourceMode.FBX_FILE,
+                fbx_path="twig.fbx",
+                fbx_material_mode=FbxMaterialMode.VERTEX_COLOR_SPLIT,
+            ),
+        ),
+        PartPrototypePreviewSettings(display_mode=PartPreviewDisplayMode.MATERIAL_COLORS),
+    )
+
+    assert result.source_mode == PrototypeSourceMode.FBX_FILE
+    assert result.source_triangle_count == 2
+    assert result.source_section_triangle_counts == (1, 1)
+    assert calls == {
+        "strict_vertex_colors": True,
+        "read_vertex_colors": True,
+        "read_material_slots": False,
+    }
