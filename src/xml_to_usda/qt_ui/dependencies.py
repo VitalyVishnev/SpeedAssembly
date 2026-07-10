@@ -19,6 +19,7 @@ class QtUiDependencies:
     start_fracture_export_process: object
     start_fracture_preview_process: object
     start_part_preview_process: object
+    start_wind_preview_process: object
     close_process_queue: object
     drain_process_queue: object
     convert_request: object
@@ -29,6 +30,7 @@ class QtUiDependencies:
     save_gui_settings: object
     prepare_wind_inspection_plan: object
     inspect_wind_groups: object
+    prepare_wind_preview_request: object
     WindGenerationRequest: object
     generate_wind_json_from_request: object
     derive_wind_json_output_path: object
@@ -54,6 +56,7 @@ def build_default_dependencies() -> QtUiDependencies:
         start_fracture_preview_process,
         start_part_preview_process,
         start_proxy_mesh_process,
+        start_wind_preview_process,
     )
     from ..conversion_service import prepare_conversion_plan
     from ..discovery_service import (
@@ -72,6 +75,7 @@ def build_default_dependencies() -> QtUiDependencies:
         prepare_wind_inspection_plan,
         should_retry_wind_error,
     )
+    from ..wind_preview_service import prepare_wind_preview_request
     from ..proxy_mesh_service import (
         export_generated_proxy_usda_from_source_request,
         export_proxy_usda_from_source_request,
@@ -87,6 +91,7 @@ def build_default_dependencies() -> QtUiDependencies:
         start_fracture_export_process=start_fracture_export_process,
         start_fracture_preview_process=start_fracture_preview_process,
         start_part_preview_process=start_part_preview_process,
+        start_wind_preview_process=start_wind_preview_process,
         close_process_queue=close_process_queue,
         drain_process_queue=drain_process_queue,
         convert_request=convert_request,
@@ -97,6 +102,7 @@ def build_default_dependencies() -> QtUiDependencies:
         save_gui_settings=save_gui_settings,
         prepare_wind_inspection_plan=prepare_wind_inspection_plan,
         inspect_wind_groups=inspect_wind_groups,
+        prepare_wind_preview_request=prepare_wind_preview_request,
         WindGenerationRequest=WindGenerationRequest,
         generate_wind_json_from_request=generate_wind_json_from_request,
         derive_wind_json_output_path=derive_wind_json_output_path,

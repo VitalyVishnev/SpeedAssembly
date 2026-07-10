@@ -18,6 +18,7 @@ from ..worker_commands import (
     FRACTURE_WORKER_COMMAND,
     PART_PREVIEW_WORKER_COMMAND,
     PROXY_MESH_WORKER_COMMAND,
+    WIND_PREVIEW_WORKER_COMMAND,
 )
 from .smoke import SMOKE_COMMAND
 
@@ -69,6 +70,11 @@ def main(argv: list[str] | None = None) -> int:
 
         request_path = argv[argv.index("--request") + 1] if "--request" in argv else ""
         return run_part_preview_worker_request_file(request_path)
+    if argv and argv[0] == WIND_PREVIEW_WORKER_COMMAND:
+        from ..wind_preview_worker_subprocess import run_wind_preview_worker_request_file
+
+        request_path = argv[argv.index("--request") + 1] if "--request" in argv else ""
+        return run_wind_preview_worker_request_file(request_path)
     if argv and argv[0] == SMOKE_COMMAND:
         from .smoke import run_smoke_cli
 

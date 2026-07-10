@@ -20,6 +20,7 @@ from typing import Callable, Any
 
 SMOKE_COMMAND = "smoke"
 SMOKE_SCENARIO_STARTUP = "startup"
+SMOKE_SCENARIO_WIND_PREVIEW = "wind-preview"
 SMOKE_SCENARIO_FRACTURE_PREVIEW = "fracture-preview"
 SMOKE_SCENARIO_FRACTURE_PREVIEW_INTERACTIVE = "fracture-preview-interactive"
 SMOKE_SCENARIO_FRACTURE_PREVIEW_RAPID_SETTINGS = "fracture-preview-rapid-settings"
@@ -31,6 +32,7 @@ SMOKE_SCENARIO_PACKAGED_STABILITY = "packaged-stability"
 
 HIGH_RISK_SCENARIOS: tuple[str, ...] = (
     SMOKE_SCENARIO_STARTUP,
+    SMOKE_SCENARIO_WIND_PREVIEW,
     SMOKE_SCENARIO_FRACTURE_PREVIEW,
     SMOKE_SCENARIO_FRACTURE_PREVIEW_INTERACTIVE,
     SMOKE_SCENARIO_FRACTURE_PREVIEW_RAPID_SETTINGS,
@@ -138,6 +140,8 @@ def run_smoke_cli(argv: list[str] | None = None, *, scenario_runner: ScenarioRun
 def run_real_smoke_scenario(name: str, context: SmokeContext) -> dict[str, Any]:
     if name == SMOKE_SCENARIO_STARTUP:
         return _run_startup_smoke(context)
+    if name == SMOKE_SCENARIO_WIND_PREVIEW:
+        return _run_wind_preview_smoke(context)
     if name == SMOKE_SCENARIO_FRACTURE_PREVIEW:
         return _run_fracture_preview_smoke(context)
     if name == SMOKE_SCENARIO_FRACTURE_PREVIEW_INTERACTIVE:
@@ -171,6 +175,76 @@ def _run_startup_smoke(context: SmokeContext) -> dict[str, Any]:
         _pump_events(150)
         _assert(window.isVisible(), "startup window is visible")
         return _passed(name=SMOKE_SCENARIO_STARTUP, checks=("window.visible",))
+    finally:
+        _close_window(window)
+
+
+def _run_wind_preview_smoke(context: SmokeContext) -> dict[str, Any]:
+    window = _create_smoke_window(context)
+    try:
+        input_path, output_path = _resolve_input_output(context, suffix=".usda")
+        window.source_input.setText(str(input_path))
+        window.output_input.setText(str(output_path))
+        window.open_wind_preview_dialog()
+        _wait_until(
+            lambda: window._wind_preview_dialog is not None
+            and window._wind_preview_dialog.current_preview is not None,
+            timeout_ms=context.timeout_ms,
+            label="wind preview result",
+        )
+        dialog = window._wind_preview_dialog
+        _assert(dialog is not None, "wind dialog exists")
+        _assert(not dialog.isModal(), "wind dialog is non-modal")
+        _assert(window.isVisible(), "main window remains visible")
+        _assert(dialog.viewport.has_mesh(), "wind viewport has mesh")
+        _assert(dialog.viewport.show_bones, "wind viewport bone overlay is visible")
+        _assert(dialog.viewport.bone_vertex_count > 0, "wind viewport bone overlay vertices exist")
+        _assert(dialog.viewport._precomputed_matcap_vertices is not None, "wind viewport uses static precomputed scene")
+        if dialog.current_preview.groups:
+            initial_vertices = dialog.viewport._precomputed_matcap_vertices
+            for group in dialog.current_preview.groups:
+                dialog.select_group(group.group_index)
+                _pump_events(25)
+                _assert(
+                    dialog.viewport._precomputed_matcap_vertices is initial_vertices,
+                    "wind layer selection does not reupload mesh",
+                )
+            _assert(not hasattr(dialog, "clear_button"), "wind preview removed Clear Selection button")
+        auto_index = dialog.grouping_mode_combo.findData("auto")
+        _assert(auto_index >= 0, "wind auto hierarchy mode exists")
+        dialog.grouping_mode_combo.setCurrentIndex(auto_index)
+        dialog.group_count_slider.setValue(2)
+        _pump_events(25)
+        _assert(dialog.viewport.has_mesh(), "wind auto hierarchy keeps viewport mesh")
+        _assert(len(dialog._group_buttons) == 2, "wind auto hierarchy uses integer group count")
+        trace_text = _trace_text(context)
+        for milestone in (
+            '"job":"wind_preview"',
+            '"kind":"scene.request"',
+            '"kind":"viewport.set_scene"',
+            '"kind":"viewport.upload_end"',
+        ):
+            _assert(milestone in trace_text, f"trace contains {milestone}")
+        return _passed(
+            name=SMOKE_SCENARIO_WIND_PREVIEW,
+            checks=(
+                "dialog.result",
+                "dialog.non_modal",
+                "window.visible",
+                "viewport.mesh",
+                "viewport.bones",
+                "viewport.precomputed",
+                "selection.clear",
+                "auto.grouping",
+                "trace.milestones",
+            ),
+            data={
+                "group_count": len(dialog.current_preview.groups),
+                "auto_group_count": len(dialog._group_buttons),
+                "bone_vertices": dialog.viewport.bone_vertex_count,
+                "vertex_count": dialog.viewport.vertex_count,
+            },
+        )
     finally:
         _close_window(window)
 

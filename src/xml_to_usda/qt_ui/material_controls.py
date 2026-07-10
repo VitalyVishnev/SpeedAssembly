@@ -95,6 +95,7 @@ def make_udim_controls(parent: QWidget, *, mode: UdimMode, udim_id: int) -> tupl
     udim_id_spin.setValue(int(udim_id))
     udim_id_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
     udim_id_spin.setAlignment(Qt.AlignmentFlag.AlignRight)
+    udim_id_spin.setObjectName("UdimIdSpin")
     udim_id_spin.setFixedWidth(UDIM_ID_SPIN_WIDTH)
     udim_id_spin.setToolTip("Target UDIM tile number. Lower uses earlier tiles; higher moves this material to later tiles.")
     return mode_combo, udim_id_spin

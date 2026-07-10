@@ -63,6 +63,22 @@ def test_qt_entry_routes_smoke_mode_before_gui_import(monkeypatch) -> None:
     assert observed == [["--scenario", "startup"]]
 
 
+def test_qt_entry_routes_wind_preview_worker_mode_before_gui_import(monkeypatch) -> None:
+    observed: list[str] = []
+
+    monkeypatch.setattr(
+        "xml_to_usda.wind_preview_worker_subprocess.run_wind_preview_worker_request_file",
+        lambda request_path: observed.append(request_path) or 11,
+    )
+
+    from xml_to_usda.qt_ui.entry import main as qt_entry_main
+
+    exit_code = qt_entry_main(["wind-preview-worker", "--request", "payload.json"])
+
+    assert exit_code == 11
+    assert observed == ["payload.json"]
+
+
 def test_frozen_fbx_helper_uses_self_executable_worker_mode(
     tmp_path,
     monkeypatch,

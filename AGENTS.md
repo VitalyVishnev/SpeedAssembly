@@ -90,7 +90,7 @@ Rules:
 - Don't use unnecessary words, talk short and professional.
 - Не делай костыли, сделай сразу систему так, чтобы работала. Чтобы не пришлось переделывать.
 - Переиспользуй готовые решения, которые есть в проекте, не изобретай велосипед.
-- For subagents use GPT-5.4 mini (medium).
+- For subagents use faster, cheaper models.
 - Use ponytail skill by default.
 
 ## Simplicity and Architecture Requirements

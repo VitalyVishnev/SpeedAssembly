@@ -32,6 +32,7 @@ def test_viewport_scene_modules_do_not_import_qt() -> None:
         Path("src/xml_to_usda/viewport_scene.py"),
         Path("src/xml_to_usda/proxy_viewport_scene.py"),
         Path("src/xml_to_usda/fracture_viewport_scene.py"),
+        Path("src/xml_to_usda/wind_viewport_scene.py"),
     ):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         imported_roots: list[str] = []

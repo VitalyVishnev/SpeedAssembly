@@ -8,6 +8,7 @@ from xml_to_usda.qt_ui.smoke import (
     SMOKE_SCENARIO_FRACTURE_PREVIEW_INTERACTIVE,
     SMOKE_SCENARIO_FRACTURE_PREVIEW_RAPID_SETTINGS,
     SMOKE_SCENARIO_PACKAGED_STABILITY,
+    SMOKE_SCENARIO_WIND_PREVIEW,
     build_smoke_parser,
     run_smoke_cli,
 )
@@ -71,6 +72,7 @@ def test_high_risk_smoke_runs_scenarios_in_deterministic_order(tmp_path: Path) -
 
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert exit_code == 0
+    assert SMOKE_SCENARIO_WIND_PREVIEW in HIGH_RISK_SCENARIOS
     assert SMOKE_SCENARIO_FRACTURE_PREVIEW_INTERACTIVE in HIGH_RISK_SCENARIOS
     assert SMOKE_SCENARIO_FRACTURE_PREVIEW_RAPID_SETTINGS in HIGH_RISK_SCENARIOS
     assert seen == list(HIGH_RISK_SCENARIOS)

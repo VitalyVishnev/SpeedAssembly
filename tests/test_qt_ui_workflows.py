@@ -64,6 +64,8 @@ from xml_to_usda.settings_service import (
     save_gui_preset,
     save_gui_settings,
 )
+from xml_to_usda.wind_preview_service import WindPreviewRequest, WindPreviewResult
+from xml_to_usda.wind_viewport_scene import build_wind_viewport_groups, build_wind_viewport_scene
 from xml_to_usda.wind_service import WindGenerationRequest, WindInspectionPlan, WindInspectionRequest
 
 
@@ -405,6 +407,33 @@ def _build_fake_deps(calls: dict[str, object]) -> QtUiDependencies:
             object(),
         )
 
+    def start_wind_preview_process(request, settings=None):
+        from test_wind_viewport_scene import _tree_model
+
+        calls["start_wind_preview_process"] = {"request": request, "settings": settings}
+        model = _tree_model()
+        dynamic_wind = DynamicWindData(
+            joint_assignments=(
+                DynamicWindJointAssignment(joint_name="root", simulation_group_index=0, branch_order=0),
+                DynamicWindJointAssignment(joint_name="bone_001", simulation_group_index=1, branch_order=1),
+                DynamicWindJointAssignment(joint_name="bone_002", simulation_group_index=2, branch_order=2),
+            ),
+            simulation_groups=(
+                DynamicWindSimulationGroup(group_index=0, branch_order=0, is_trunk_group=True),
+                DynamicWindSimulationGroup(group_index=1, branch_order=1),
+                DynamicWindSimulationGroup(group_index=2, branch_order=2),
+            ),
+        )
+        result = WindPreviewResult(
+            input_path=request.input_path,
+            source_model=model,
+            dynamic_wind=dynamic_wind,
+            groups=build_wind_viewport_groups(dynamic_wind),
+            diagnostics=(),
+            viewport_scene=build_wind_viewport_scene(model, dynamic_wind),
+        )
+        return _FinishedProcess(), [("result", result)], _CancelFlag()
+
     def drain_process_queue(queue):
         if isinstance(queue, list):
             events = list(queue)
@@ -462,6 +491,7 @@ def _build_fake_deps(calls: dict[str, object]) -> QtUiDependencies:
         start_fracture_export_process=start_fracture_export_process,
         start_fracture_preview_process=start_fracture_preview_process,
         start_part_preview_process=start_part_preview_process,
+        start_wind_preview_process=start_wind_preview_process,
         close_process_queue=lambda queue: None,
         drain_process_queue=drain_process_queue,
         convert_request=convert_request,
@@ -472,6 +502,7 @@ def _build_fake_deps(calls: dict[str, object]) -> QtUiDependencies:
         save_gui_settings=save_gui_settings,
         prepare_wind_inspection_plan=prepare_wind_inspection_plan,
         inspect_wind_groups=inspect_wind_groups,
+        prepare_wind_preview_request=lambda input_path: WindPreviewRequest(input_path=input_path),
         WindGenerationRequest=WindGenerationRequest,
         generate_wind_json_from_request=generate_wind_json_from_request,
         derive_wind_json_output_path=derive_wind_json_output_path,
@@ -1110,6 +1141,37 @@ def test_qt_window_refreshes_wind_and_generates_json(monkeypatch, qtbot, tmp_pat
     assert "Wind groups: 1" in window._log_text
 
 
+def test_qt_window_opens_read_only_wind_preview_from_xml(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+
+    calls: dict[str, object] = {}
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps(calls),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+
+    qtbot.waitUntil(lambda: window.wind_panel.preview_button.isEnabled(), timeout=3000)
+    qtbot.mouseClick(window.wind_panel.preview_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: "Wind Preview ready: 3 group(s)." in window.status_label.text(), timeout=3000)
+
+    request = calls["start_wind_preview_process"]["request"]
+    assert request == WindPreviewRequest(input_path=str(tree_xml))
+    assert window._wind_preview_dialog is not None
+    assert window._wind_preview_dialog.current_preview is not None
+    assert len(window._wind_preview_dialog._group_buttons) == 3
+    assert window._wind_preview_dialog.viewport.show_bones is True
+
+
 def test_proxy_preview_can_show_diagnostic_cube_without_generating_proxy(qtbot) -> None:
     calls: dict[str, object] = {}
     dialog = ProxyPreviewDialog(
@@ -1122,6 +1184,9 @@ def test_proxy_preview_can_show_diagnostic_cube_without_generating_proxy(qtbot) 
 
     qtbot.waitUntil(lambda: dialog.current_proxy is not None, timeout=3000)
 
+    assert dialog.global_scroll.widgetResizable()
+    assert dialog.settings_panel_default_width == 480
+    assert "QComboBox::drop-down" in dialog.settings_panel.styleSheet()
     assert dialog.current_proxy.mesh.name == "ViewportCubePreview"
     assert dialog.status_label.text() == "Viewport cube preview: 6 polygons / 8 points"
     assert "settings_changed" not in calls
@@ -2534,6 +2599,26 @@ def test_qt_window_restores_last_xml_and_derives_output_when_only_input_was_reme
     assert window.source_input.text() == str(remembered_xml)
     assert window.output_input.text() == str(remembered_xml.with_suffix(".usda"))
     assert window.convert_button.isEnabled()
+
+
+def test_wind_preview_session_autosave_failure_does_not_escape(qtbot, tmp_path: Path) -> None:
+    deps = replace(
+        _build_fake_deps({}),
+        save_gui_settings=lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("settings locked")),
+    )
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=deps,
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+
+    window._save_wind_preview_session({"schema_version": 1, "input_path": "tree.xml"})
+
+    assert window._operator_snapshot.wind_preview_session["input_path"] == "tree.xml"
+    assert "autosave failed" in window.status_label.text()
 
 
 def test_qt_window_persists_wind_settings_for_next_session(monkeypatch, qtbot, tmp_path) -> None:

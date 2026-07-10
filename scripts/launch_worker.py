@@ -18,6 +18,7 @@ from xml_to_usda.worker_commands import (
     FRACTURE_WORKER_COMMAND,
     PART_PREVIEW_WORKER_COMMAND,
     PROXY_MESH_WORKER_COMMAND,
+    WIND_PREVIEW_WORKER_COMMAND,
 )
 
 
@@ -30,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
         PROXY_MESH_WORKER_COMMAND,
         FRACTURE_WORKER_COMMAND,
         PART_PREVIEW_WORKER_COMMAND,
+        WIND_PREVIEW_WORKER_COMMAND,
     ):
         command_parser = subparsers.add_parser(command)
         command_parser.add_argument("--request", required=True)
@@ -60,6 +62,10 @@ def main(argv: list[str] | None = None) -> int:
         from xml_to_usda.part_preview_worker_subprocess import run_part_preview_worker_request_file
 
         return run_part_preview_worker_request_file(args.request)
+    if args.command == WIND_PREVIEW_WORKER_COMMAND:
+        from xml_to_usda.wind_preview_worker_subprocess import run_wind_preview_worker_request_file
+
+        return run_wind_preview_worker_request_file(args.request)
     return 2
 
 

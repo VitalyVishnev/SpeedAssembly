@@ -136,6 +136,11 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
         fbx_cache_max_size_gb=42,
         fbx_cache_max_age_days=7,
         debug_trace_enabled=True,
+        wind_preview_session={
+            "schema_version": 1,
+            "fingerprint": [["root", None], ["branch", "root"]],
+            "manual_groups": [{"layer_id": 0, "joint_tokens": ["branch"]}],
+        },
     )
 
     save_gui_settings(settings_path, snapshot)
@@ -171,6 +176,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert payload["fbx_cache_max_size_gb"] == 42
     assert payload["fbx_cache_max_age_days"] == 7
     assert payload["debug_trace_enabled"] is True
+    assert payload["wind_preview_session"]["fingerprint"] == [["root", None], ["branch", "root"]]
     assert payload["part_mesh_settings"][0]["fbx_material_slot_overrides"] == [
         {
             "slot_name": "Bark",
@@ -196,6 +202,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert restored.fbx_cache_max_size_gb == 42
     assert restored.fbx_cache_max_age_days == 7
     assert restored.debug_trace_enabled is True
+    assert restored.wind_preview_session == snapshot.wind_preview_session
     assert restored.single_material_path == snapshot.single_material_path
     assert restored.wind_group_settings == snapshot.wind_group_settings
     assert restored.base_material_settings == snapshot.base_material_settings

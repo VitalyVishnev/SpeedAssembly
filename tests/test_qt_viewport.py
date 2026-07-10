@@ -180,6 +180,51 @@ def test_matcap_viewport_accepts_viewport_scene_without_mode_specific_dialog(qtb
     assert viewport.camera_distance == pytest.approx(viewport.camera_radius * 3.0)
 
 
+def test_matcap_viewport_updates_bone_overlay_without_reuploading_mesh(qtbot) -> None:
+    batch = ViewportMeshBatch(
+        batch_id="triangle",
+        name="Triangle",
+        mesh=_triangle_mesh(),
+        color=Color4(0.25, 0.5, 0.75, 1.0),
+    )
+    scene = ViewportScene(
+        scene_id="bone_overlay",
+        mesh_batches=(batch,),
+        draw_calls=(ViewportDrawCall(draw_id="triangle:0", batch_id=batch.batch_id),),
+        bounds=ViewportBounds(min_point=Vector3(0.0, 0.0, 0.0), max_point=Vector3(1.0, 1.0, 0.0)),
+        stats=ViewportStats(uploaded_triangles=1, logical_triangles=1, batch_count=1, draw_call_count=1),
+    )
+    viewport = MatcapViewport()
+    qtbot.addWidget(viewport)
+    viewport.set_scene(scene, precompute_static=True)
+    vertices = viewport._precomputed_matcap_vertices
+
+    viewport.set_bone_segments(
+        (
+            ViewportBoneSegment(
+                segment_id="bone:root->tip",
+                parent_token="root",
+                child_token="tip",
+                start=Vector3(0.0, 0.0, 0.0),
+                end=Vector3(0.0, 1.0, 0.0),
+                color=Color4(1.0, 0.0, 0.0, 1.0),
+            ),
+        )
+    )
+
+    assert viewport._precomputed_matcap_vertices is vertices
+    assert [segment.child_token for segment in viewport._scene.bone_segments] == ["tip"]
+
+
+def test_matcap_viewport_stores_contextual_shortcut_hints(qtbot) -> None:
+    viewport = MatcapViewport()
+    qtbot.addWidget(viewport)
+
+    viewport.set_shortcut_hints((" LMB add bone ", "", "Alt+LMB remove"))
+
+    assert viewport._shortcut_hints == ("LMB add bone", "Alt+LMB remove")
+
+
 def test_matcap_viewport_reports_set_scene_trace_event(qtbot) -> None:
     batch = ViewportMeshBatch(
         batch_id="triangle",
@@ -272,6 +317,25 @@ def test_matcap_viewport_accepts_precomputed_matcap_scene_payload(qtbot) -> None
             },
         )
     ]
+
+
+def test_matcap_viewport_can_precompute_static_scene_from_shared_interface(qtbot) -> None:
+    batch = ViewportMeshBatch(batch_id="triangle", name="Triangle", mesh=_triangle_mesh())
+    scene = ViewportScene(
+        scene_id="precomputed_static_scene",
+        mesh_batches=(batch,),
+        draw_calls=(ViewportDrawCall(draw_id="triangle:0", batch_id=batch.batch_id),),
+        bounds=ViewportBounds(min_point=Vector3(0.0, 0.0, 0.0), max_point=Vector3(1.0, 1.0, 0.0)),
+        stats=ViewportStats(uploaded_triangles=1, logical_triangles=1, batch_count=1, draw_call_count=1),
+    )
+    viewport = MatcapViewport()
+    qtbot.addWidget(viewport)
+
+    viewport.set_scene(scene, precompute_static=True)
+
+    assert viewport._scene is scene
+    assert viewport._precomputed_matcap_vertices is not None
+    assert viewport.vertex_count == 3
 
 
 def test_matcap_viewport_reports_context_lost_when_gl_resources_are_released(qtbot) -> None:

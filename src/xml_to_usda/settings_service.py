@@ -111,6 +111,7 @@ class GuiSettingsSnapshot:
     debug_trace_enabled: bool = False
     active_preset_name: str = FACTORY_DEFAULT_PRESET_NAME
     presets: dict[str, GuiPresetRecord] = field(default_factory=dict)
+    wind_preview_session: dict[str, object] = field(default_factory=dict)
 
 
 def resolve_input_settings_key(input_path: str) -> str:
@@ -164,6 +165,7 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
         debug_trace_enabled=bool(payload.get("debug_trace_enabled", False)),
         active_preset_name=active_preset_name,
         presets=presets,
+        wind_preview_session=_parse_wind_preview_session(payload.get("wind_preview_session")),
     )
 
 
@@ -199,6 +201,8 @@ def save_gui_settings(settings_path: str | Path, snapshot: GuiSettingsSnapshot) 
     payload["active_preset_name"] = _coerce_preset_name(snapshot.active_preset_name, FACTORY_DEFAULT_PRESET_NAME)
     if snapshot.presets:
         payload["presets"] = _serialize_presets(snapshot.presets)
+    if snapshot.wind_preview_session:
+        payload["wind_preview_session"] = _serialize_wind_preview_session(snapshot.wind_preview_session)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
@@ -335,6 +339,16 @@ def _parse_wind_group_settings(raw_value) -> dict[str, WindGroupSettingRecord]:
             shift_top=_coerce_float(value.get("shift_top", 0.5), 0.5),
         )
     return settings
+
+
+def _parse_wind_preview_session(raw_value) -> dict[str, object]:
+    if not isinstance(raw_value, dict):
+        return {}
+    try:
+        safe_payload = json.loads(json.dumps(raw_value))
+    except (TypeError, ValueError):
+        return {}
+    return safe_payload if isinstance(safe_payload, dict) else {}
 
 
 def _parse_base_material_settings(raw_value) -> tuple[BaseMaterialSettingRecord, ...]:
@@ -647,6 +661,10 @@ def _serialize_wind_group_settings(
         }
         for key, record in settings.items()
     }
+
+
+def _serialize_wind_preview_session(session: dict[str, object]) -> dict[str, object]:
+    return _parse_wind_preview_session(session)
 
 
 def _serialize_proxy_mesh_settings(settings: ProxyMeshSettings) -> dict[str, object]:

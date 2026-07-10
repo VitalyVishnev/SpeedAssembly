@@ -63,6 +63,8 @@ def test_part_preview_settings_panel_scrolls_and_keeps_compact_actions(qtbot) ->
     qtbot.addWidget(dialog)
 
     assert dialog.findChild(QScrollArea) is not None
+    assert dialog.settings_panel_default_width == 480
+    assert "QComboBox::drop-down" in dialog.settings_panel.styleSheet()
     assert dialog.apply_button.objectName() == "PreviewActionButton"
     assert dialog.close_button.objectName() == "PreviewActionButton"
     assert dialog.apply_button.maximumWidth() <= 108

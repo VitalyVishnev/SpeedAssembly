@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .job_control import apply_process_profile, emit_telemetry, throw_if_cancelled
-from .models import CompactMeshSection, ConversionPhase, CpuProfile, FbxMaterialSlotSpec, GeometryBuffer
+from .models import CompactMeshSection, ConversionPhase, CpuProfile, FbxMaterialSlotSpec, GeometryBuffer, Joint, Matrix4d, Vector3
 
 
 class FbxImportError(ValueError):
@@ -419,6 +419,31 @@ def inspect_fbx_material_slots(
     )
 
 
+def load_fbx_skeleton(fbx_path: str) -> tuple[Joint, ...]:
+    try:
+        import fbx  # type: ignore
+    except ImportError as exc:
+        raise FbxBackendUnavailableError(
+            "Autodesk FBX SDK Python bindings are required for FBX skeleton import. "
+            "Install the official SDK bindings so the 'fbx' module is available."
+        ) from exc
+
+    sdk_manager, scene = _initialize_sdk_objects(fbx)
+    try:
+        if not _load_scene(fbx, sdk_manager, scene, str(fbx_path)):
+            raise FbxImportError(f"Failed to load FBX scene: {fbx_path}")
+        joints: list[Joint] = []
+        seen_names: set[str] = set()
+        _collect_skeleton_joints(scene.GetRootNode(), fbx, joints, seen_names, parent_token=None)
+        if not joints:
+            raise FbxImportError(f"FBX file does not contain a skeleton: {fbx_path}")
+        return tuple(joints)
+    finally:
+        destroy = getattr(sdk_manager, "Destroy", None)
+        if callable(destroy):
+            destroy()
+
+
 def _emit_fbx_stage(telemetry_callback, message: str, started_at: float) -> None:
     emit_telemetry(
         telemetry_callback,
@@ -436,6 +461,42 @@ def _collect_mesh_nodes(node, mesh_nodes: list, fbx_module) -> None:
         mesh_nodes.append(node)
     for child_index in range(node.GetChildCount()):
         _collect_mesh_nodes(node.GetChild(child_index), mesh_nodes, fbx_module)
+
+
+def _collect_skeleton_joints(node, fbx_module, joints: list[Joint], seen_names: set[str], *, parent_token: str | None) -> None:
+    if node is None:
+        return
+    current_parent = parent_token
+    attribute = node.GetNodeAttribute()
+    if attribute is not None and isinstance(attribute, fbx_module.FbxSkeleton):
+        name = str(node.GetName()).strip()
+        if not name:
+            name = f"joint_{len(joints):03d}"
+        if name in seen_names:
+            raise FbxImportError(f"fbx_skeleton_duplicate_joint_name: {name}")
+        seen_names.add(name)
+        translation = _fbx_node_global_translation(node)
+        joints.append(
+            Joint(
+                name=name,
+                source_id=len(joints),
+                parent=parent_token,
+                bind_transform=Matrix4d.from_translation(translation),
+                rest_transform=Matrix4d.from_translation(translation),
+            )
+        )
+        current_parent = name
+    for child_index in range(node.GetChildCount()):
+        _collect_skeleton_joints(node.GetChild(child_index), fbx_module, joints, seen_names, parent_token=current_parent)
+
+
+def _fbx_node_global_translation(node) -> Vector3:
+    matrix = node.EvaluateGlobalTransform()
+    try:
+        translate = matrix.GetT()
+        return Vector3(float(translate[0]), float(translate[1]), float(translate[2]))
+    except Exception as exc:
+        raise FbxImportError(f"Failed to read global transform for FBX skeleton node {node.GetName()}.") from exc
 
 
 def _read_vertex_color(mesh, polygon_index: int, vertex_order: int) -> tuple[float, float, float, float] | None:

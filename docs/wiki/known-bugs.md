@@ -308,4 +308,3 @@ Related files:
 - `src/xml_to_usda/udim_resolver.py`
 - `src/xml_to_usda/material_resolver.py`
 - `src/xml_to_usda/assembly_resolution.py`
-

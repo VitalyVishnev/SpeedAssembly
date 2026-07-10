@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "last_input_path": "samples\\speedtree\\simple_tree\\variants\\SimpleTree_02_three_trunks.xml",
+  "last_output_path": "tmp\\wind_native_fix.usda",
+  "conversion_mode": "skeletal_assembly",
+  "material_policy": "source_materials",
+  "bark_material_path": "",
+  "leaves_material_path": "",
+  "single_material_path": "",
+  "gust_attenuation": 0.0,
+  "is_ground_cover": false,
+  "wind_group_settings": {},
+  "base_material_settings": [],
+  "part_mesh_settings": [],
+  "proxy_mesh_settings": {
+    "method": "density_field",
+    "final_polycount": 5000,
+    "bounds_inflation": 1.0,
+    "density_resolution": 64,
+    "base_mesh_priority": 0.33,
+    "branch_prune_aggression": 0.25
+  },
+  "fracture_preview_settings": {
+    "fracture": {
+      "target_piece_count": 5,
+      "generate_caps": false,
+      "preserve_trunk_bias": 0.5,
+      "force_stump_piece": false,
+      "separate_stems": false,
+      "branch_height_bias": 0.0
+    },
+    "collision": {
+      "enabled": false,
+      "mode": "convex",
+      "include_instance_parts": false,
+      "convex_max_vertices": 12,
+      "sphere_radius_scale": 1.0,
+      "capsule_simplify": 70,
+      "capsule_scale": 0.75,
+      "capsule_scale_by_length": 0.5,
+      "ghost_opacity": 0.25
+    },
+    "final_polycount": 1000000,
+    "base_mesh_priority": 0.33,
+    "max_base_faces_per_piece": 50000,
+    "max_prototype_faces": 2000
+  },
+  "fbx_cache_max_size_gb": 20,
+  "fbx_cache_max_age_days": 14,
+  "debug_trace_enabled": true,
+  "active_preset_name": "Factory Defaults"
+}

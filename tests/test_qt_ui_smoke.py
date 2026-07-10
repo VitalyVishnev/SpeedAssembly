@@ -245,6 +245,7 @@ def test_udim_id_spin_has_room_for_four_digit_id(qtbot) -> None:
     _mode_combo, spin = _make_udim_controls(host, mode=UdimMode.OFF, udim_id=1001)
 
     assert spin.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.NoButtons
+    assert spin.objectName() == "UdimIdSpin"
     assert spin.minimumWidth() >= spin.fontMetrics().horizontalAdvance("1999") + 32
     assert spin.maximumWidth() == spin.minimumWidth()
 

@@ -74,6 +74,7 @@ from ..fracture_preview_service import (
 )
 from ..fracture_viewport_scene import build_fracture_viewport_scene
 from ..runtime_paths import resolve_runtime_paths
+from ..wind_external_skeleton import ExternalSkeletonChoicesResult
 from ..settings_service import (
     FACTORY_DEFAULT_PRESET_NAME,
     factory_default_preset,
@@ -108,6 +109,7 @@ from .fracture_preview import FracturePreviewDialog
 from .part_preview import PartPrototypePreviewDialog
 from .preview_shell import configure_preview_dialog, focus_preview_dialog
 from .proxy_preview import ProxyPreviewDialog
+from .wind_preview import WindPreviewDialog
 from .theme import (
     ResolvedTheme,
     ThemeOverrides,
@@ -722,6 +724,7 @@ class MainWindow(QWidget):
         self._fracture_preview_dialog: FracturePreviewDialog | None = None
         self._part_preview_dialog: PartPrototypePreviewDialog | None = None
         self._proxy_preview_dialog: ProxyPreviewDialog | None = None
+        self._wind_preview_dialog: WindPreviewDialog | None = None
         self._proxy_mesh_settings = ProxyMeshSettings()
         self._fracture_preview_settings = FracturePreviewSettings()
         self._proxy_mesh_preview_result: ProxyMeshResult | None = None
@@ -1082,6 +1085,7 @@ class MainWindow(QWidget):
         self.wind_panel = WindTabPanel(
             on_change=self._handle_tab_state_changed,
             on_refresh_requested=self.refresh_wind_groups,
+            on_preview_requested=self.open_wind_preview_dialog,
         )
         self.geometry_panel = GeometryTabPanel(
             browse_fbx=self._browse_part_fbx,
@@ -1687,7 +1691,9 @@ class MainWindow(QWidget):
             self.import_preset_action.setEnabled(not self._conversion_running)
             self.export_preset_action.setEnabled(not self._conversion_running and not selected_is_factory)
             self.reset_preset_action.setEnabled(not self._conversion_running)
+        wind_preview_running = self._background_jobs.wind_preview_running
         self.wind_panel.refresh_button.setEnabled(has_input and not self._conversion_running and not self._wind_refresh_running)
+        self.wind_panel.preview_button.setEnabled(has_input and not self._conversion_running and not wind_preview_running)
         self.generate_button.setEnabled(
             has_input and not self._conversion_running and not self._wind_refresh_running and not self._wind_json_running
         )
@@ -2236,6 +2242,38 @@ class MainWindow(QWidget):
             is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
         )
         self._background_jobs.start_wind_json_generation(request)
+
+    def open_wind_preview_dialog(self) -> None:
+        self._source_refresh_timer.stop()
+        input_path = self.source_input.text().strip()
+        if not input_path:
+            self._report_error("Missing input", "Select a source XML file before previewing wind groups.")
+            return
+        if self._wind_preview_dialog is not None and self._wind_preview_dialog.isVisible():
+            focus_preview_dialog(self._wind_preview_dialog)
+            return
+        try:
+            request = self._deps.prepare_wind_preview_request(input_path=input_path)
+        except ValueError as exc:
+            self._report_error("Missing input", str(exc))
+            return
+        dialog = WindPreviewDialog(
+            parent=None,
+            external_preview_requested=self._background_jobs.start_wind_preview,
+            wind_session_snapshot=self._operator_snapshot.wind_preview_session,
+            wind_session_changed=self._save_wind_preview_session,
+        )
+        configure_preview_dialog(dialog, owner=self, stylesheet=self.styleSheet())
+        self._attach_preview_viewport_trace(dialog.viewport, job="wind_preview")
+        self._wind_preview_dialog = dialog
+        focus_preview_dialog(dialog)
+        self._trace(
+            "scene.request",
+            job="wind_preview",
+            message="Wind Preview scene requested",
+            data={"input_path": request.input_path},
+        )
+        self._background_jobs.start_wind_preview(request)
 
     def open_proxy_preview_dialog(self) -> None:
         self._source_refresh_timer.stop()
@@ -2869,6 +2907,78 @@ class MainWindow(QWidget):
         self._set_log(format_wind_json_result(result))
         self._append_log(f"Wind JSON complete\nWrote Dynamic Wind JSON to {result.output_path}")
 
+    def _handle_wind_preview_loading(self, message: str) -> None:
+        if self._wind_preview_dialog is not None:
+            self._wind_preview_dialog.set_loading(message)
+
+    def _handle_wind_preview_result(self, result) -> None:
+        if isinstance(result, ExternalSkeletonChoicesResult):
+            dialog = self._wind_preview_dialog
+            if dialog is None:
+                return
+            load_request = dialog.set_external_skeleton_choices(result)
+            if load_request is not None:
+                self._background_jobs.start_wind_preview(load_request)
+            else:
+                self._set_status(f"Wind Preview found {len(result.choices)} skeleton(s).")
+            return
+        dialog = self._wind_preview_dialog
+        if dialog is not None and not dialog.isVisible():
+            self._set_status(f"Wind Preview ready: {len(result.groups)} group(s).")
+            return
+        if dialog is None:
+            dialog = WindPreviewDialog(
+                parent=None,
+                external_preview_requested=self._background_jobs.start_wind_preview,
+                wind_session_snapshot=self._operator_snapshot.wind_preview_session,
+                wind_session_changed=self._save_wind_preview_session,
+            )
+            configure_preview_dialog(dialog, owner=self, stylesheet=self.styleSheet())
+            self._attach_preview_viewport_trace(dialog.viewport, job="wind_preview")
+            self._wind_preview_dialog = dialog
+        try:
+            dialog.set_preview(result)
+        except Exception as exc:
+            detail = traceback.format_exc()
+            message = f"Wind Preview viewport failed: {exc}"
+            self._trace("viewport.error", job="wind_preview", message=message, data={"traceback": detail})
+            dialog.set_error(message)
+            self._report_error("Wind Preview failed", message, status="Wind Preview failed.")
+            return
+        self._set_status(f"Wind Preview ready: {len(result.groups)} group(s).")
+        self._trace(
+            "scene.ready",
+            job="wind_preview",
+            message="Wind Preview scene ready",
+            data={
+                "group_count": len(result.groups),
+                "batch_count": len(result.viewport_scene.mesh_batches),
+                "draw_call_count": len(result.viewport_scene.draw_calls),
+                "bone_segment_count": len(result.viewport_scene.bone_segments),
+                "logical_triangles": result.viewport_scene.stats.logical_triangles,
+                "instance_count": result.viewport_scene.stats.instance_count,
+            },
+        )
+        focus_preview_dialog(dialog)
+
+    def _save_wind_preview_session(self, session: dict[str, object]) -> None:
+        self._operator_snapshot = replace(self._operator_snapshot, wind_preview_session=dict(session))
+        try:
+            self._deps.save_gui_settings(self._operator_settings_path, self._operator_snapshot)
+        except OSError as exc:
+            self._trace(
+                "settings.warning",
+                job="wind_preview",
+                message="Wind Preview session autosave failed",
+                data={"settings_path": str(self._operator_settings_path), "error": str(exc)},
+            )
+            self._set_status("Wind Preview opened. Session autosave failed.")
+
+    def _handle_wind_preview_error_message(self, message: str) -> None:
+        self._trace("scene.error", job="wind_preview", message=message)
+        if self._wind_preview_dialog is not None:
+            self._wind_preview_dialog.set_error(message)
+
     def toggle_maximized(self) -> None:
         if self.isMaximized():
             self.showNormal()
@@ -2955,6 +3065,8 @@ class MainWindow(QWidget):
             self._proxy_preview_dialog.close()
         if self._part_preview_dialog is not None:
             self._part_preview_dialog.close()
+        if self._wind_preview_dialog is not None:
+            self._wind_preview_dialog.close()
         self._save_operator_state()
         self._background_jobs.shutdown()
         geometry = self.normalGeometry() if self.isMaximized() else self.geometry()

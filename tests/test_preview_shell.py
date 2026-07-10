@@ -9,9 +9,14 @@ pytest.importorskip("pytestqt")
 pytestmark = pytest.mark.qt
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel
+from PySide6.QtWidgets import QLabel, QWidget
 
-from xml_to_usda.qt_ui.preview_shell import PreviewShellDialog, configure_preview_dialog, focus_preview_dialog
+from xml_to_usda.qt_ui.preview_shell import (
+    PreviewShellDialog,
+    apply_compact_preview_panel_style,
+    configure_preview_dialog,
+    focus_preview_dialog,
+)
 
 
 def test_preview_shell_owns_viewport_and_settings_slots(qtbot) -> None:
@@ -47,3 +52,13 @@ def test_preview_shell_configures_non_modal_owned_focus_contract(qtbot) -> None:
     assert dialog.isVisible()
     assert dialog.windowModality() == Qt.WindowModality.NonModal
     assert not dialog.isModal()
+
+
+def test_compact_preview_style_can_be_shared_by_main_settings_surfaces(qtbot) -> None:
+    panel = QWidget()
+    qtbot.addWidget(panel)
+
+    apply_compact_preview_panel_style(panel)
+
+    assert "QComboBox::drop-down" in panel.styleSheet()
+    assert "QComboBox QAbstractItemView" in panel.styleSheet()

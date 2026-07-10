@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from queue import Empty
+import subprocess
+import sys
 import threading
 
 from xml_to_usda.conversion_process import (
@@ -13,6 +15,7 @@ from xml_to_usda.conversion_process import (
     start_fracture_preview_process,
     start_conversion_process,
     start_proxy_mesh_process,
+    start_wind_preview_process,
 )
 from xml_to_usda.conversion_worker_subprocess import (
     ConversionWorkerRequest,
@@ -30,9 +33,27 @@ from xml_to_usda.pipeline import convert_request
 from xml_to_usda.proxy_mesh_service import ProxyMeshJobResult, ProxyMeshSettings, ProxyMeshSourceRequest
 from xml_to_usda.runtime_paths import resolve_runtime_paths
 from xml_to_usda.worker_file_protocol import WORKER_TOKEN_ENV, read_worker_payload
+from xml_to_usda.wind_preview_service import WindPreviewRequest
+from xml_to_usda.wind_external_skeleton import ExternalSkeletonChoicesRequest, ExternalSkeletonPreviewRequest
+from xml_to_usda.wind_preview_worker_subprocess import read_wind_preview_worker_request
 
 
 SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "samples" / "speedtree" / "simple_tree" / "variants" / "SimpleTree_01.xml"
+
+
+def test_wind_preview_xml_worker_keeps_external_backend_lazy() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import xml_to_usda.wind_preview_worker_subprocess; "
+            "assert 'xml_to_usda.wind_external_skeleton' not in sys.modules",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 class _DummyProcess:
@@ -287,6 +308,113 @@ def test_start_fracture_preview_process_uses_file_based_worker(monkeypatch) -> N
     assert process.is_alive() is False
     close_process_queue(queue)
     assert stderr_path.exists() is False
+
+
+def test_start_wind_preview_process_uses_file_based_worker(monkeypatch) -> None:
+    class _DummyPopen:
+        def __init__(self, args, **kwargs) -> None:
+            self.args = args
+            self.kwargs = kwargs
+            self.terminated = False
+
+        def poll(self):
+            return None if not self.terminated else 1
+
+        def wait(self, timeout=None):
+            self.terminated = True
+            return 0
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    popen_calls: list[_DummyPopen] = []
+
+    def fake_popen(args, **kwargs):
+        process = _DummyPopen(args, **kwargs)
+        popen_calls.append(process)
+        return process
+
+    monkeypatch.setattr("xml_to_usda.conversion_process.subprocess.Popen", fake_popen)
+
+    process, queue, cancel_event = start_wind_preview_process(WindPreviewRequest(input_path="input.xml"))
+
+    assert popen_calls
+    assert process.is_alive() is True
+    assert "--request" in popen_calls[0].args
+    request_path = Path(popen_calls[0].args[popen_calls[0].args.index("--request") + 1])
+    payload = read_wind_preview_worker_request(request_path)
+    assert payload.worker_token == popen_calls[0].kwargs["env"][WORKER_TOKEN_ENV]
+    assert payload.request.input_path == "input.xml"
+    assert queue.stderr_path.name.endswith(".stderr.log")
+    assert popen_calls[0].kwargs["stdout"] is not None
+    assert popen_calls[0].kwargs["stderr"] is not None
+    cancel_event.set()
+    assert process.is_alive() is False
+    close_process_queue(queue)
+    assert queue.stderr_path.exists() is False
+
+
+def test_start_wind_preview_process_accepts_external_skeleton_request(monkeypatch) -> None:
+    class _DummyPopen:
+        def __init__(self, args, **kwargs) -> None:
+            self.args = args
+            self.kwargs = kwargs
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def terminate(self) -> None:
+            return None
+
+    popen_calls: list[_DummyPopen] = []
+    monkeypatch.setattr(
+        "xml_to_usda.conversion_process.subprocess.Popen",
+        lambda args, **kwargs: popen_calls.append(_DummyPopen(args, **kwargs)) or popen_calls[-1],
+    )
+
+    process, queue, cancel_event = start_wind_preview_process(
+        ExternalSkeletonPreviewRequest(input_path="tree.fbx", group_count=4)
+    )
+
+    request_path = Path(popen_calls[0].args[popen_calls[0].args.index("--request") + 1])
+    payload = read_wind_preview_worker_request(request_path)
+    assert payload.request.input_path == "tree.fbx"
+    assert payload.request.group_count == 4
+    cancel_event.set()
+    close_process_queue(queue)
+
+
+def test_start_wind_preview_process_accepts_external_skeleton_choices_request(monkeypatch) -> None:
+    class _DummyPopen:
+        def __init__(self, args, **kwargs) -> None:
+            self.args = args
+            self.kwargs = kwargs
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def terminate(self) -> None:
+            return None
+
+    popen_calls: list[_DummyPopen] = []
+    monkeypatch.setattr(
+        "xml_to_usda.conversion_process.subprocess.Popen",
+        lambda args, **kwargs: popen_calls.append(_DummyPopen(args, **kwargs)) or popen_calls[-1],
+    )
+
+    process, queue, cancel_event = start_wind_preview_process(ExternalSkeletonChoicesRequest(input_path="tree.usda"))
+
+    request_path = Path(popen_calls[0].args[popen_calls[0].args.index("--request") + 1])
+    payload = read_wind_preview_worker_request(request_path)
+    assert payload.request.input_path == "tree.usda"
+    cancel_event.set()
+    close_process_queue(queue)
 
 
 def test_fracture_worker_crash_context_can_include_stderr_tail(tmp_path: Path) -> None:

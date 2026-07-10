@@ -56,6 +56,14 @@ class QtBackgroundJobsController:
 
         self._wind_refresh_thread: threading.Thread | None = None
         self._wind_json_thread: threading.Thread | None = None
+        self._wind_preview_job = PreviewProcessJob(
+            name="wind_preview",
+            start_process=self._deps.start_wind_preview_process,
+            drain_queue=self._deps.drain_process_queue,
+            close_queue=self._deps.close_process_queue,
+            trace_payload=self._wind_preview_trace_payload,
+            trace=self._trace_worker,
+        )
         self._proxy_mesh_process = None
         self._proxy_mesh_queue = None
         self._proxy_mesh_cancel_event = None
@@ -120,6 +128,10 @@ class QtBackgroundJobsController:
     @property
     def wind_json_running(self) -> bool:
         return self._wind_json_thread is not None and self._wind_json_thread.is_alive()
+
+    @property
+    def wind_preview_running(self) -> bool:
+        return self._wind_preview_job.running
 
     @property
     def proxy_mesh_running(self) -> bool:
@@ -286,6 +298,22 @@ class QtBackgroundJobsController:
                     },
                 )
             )
+
+    def start_wind_preview(self, request) -> None:
+        if self.wind_preview_running:
+            self._window._set_status("Wind Preview generation already running...")
+            return
+        self._window._set_status("Preparing Wind Preview...")
+        if hasattr(self._window, "_handle_wind_preview_loading"):
+            self._window._handle_wind_preview_loading("Preparing wind preview...")
+        try:
+            self._wind_preview_job.start_latest(request, None)
+        except Exception as exc:
+            self._wind_preview_job.close()
+            self._handle_wind_preview_error(str(exc))
+            return
+        self._window._update_action_state()
+        self._ensure_polling()
 
     def start_proxy_mesh_export(self, request, settings) -> None:
         if self.proxy_mesh_running:
@@ -465,12 +493,15 @@ class QtBackgroundJobsController:
             self._fracture_preview_job.cancel_running(clear_pending=True)
         if self._part_preview_job.has_process:
             self._part_preview_job.cancel_running(clear_pending=True)
+        if self._wind_preview_job.has_process:
+            self._wind_preview_job.cancel_running(clear_pending=True)
         self.close_conversion_process()
         self.close_proxy_mesh_process()
         self.close_proxy_preview_process()
         self.close_fracture_export_process()
         self.close_fracture_preview_process()
         self.close_part_preview_process()
+        self.close_wind_preview_process()
 
     def _ensure_polling(self) -> None:
         if not self._poll_timer.isActive():
@@ -552,6 +583,17 @@ class QtBackgroundJobsController:
         elif self._proxy_mesh_thread is not None and self._proxy_mesh_thread.is_alive():
             keep_polling = True
 
+        if self._drain_wind_preview_queue():
+            keep_polling = True
+
+        if self._wind_preview_job.running:
+            keep_polling = True
+        elif self._wind_preview_job.has_process and not self._wind_preview_job.result_received:
+            if self._drain_wind_preview_queue():
+                keep_polling = True
+            if self._wind_preview_job.has_process and not self._wind_preview_job.result_received:
+                self._handle_wind_preview_process_crash()
+
         if self._drain_proxy_preview_queue():
             keep_polling = True
 
@@ -623,6 +665,7 @@ class QtBackgroundJobsController:
         if (
             self.wind_refresh_running
             or self.wind_json_running
+            or self.wind_preview_running
             or self.proxy_mesh_running
             or self.proxy_preview_running
             or self.fracture_export_running
@@ -634,6 +677,21 @@ class QtBackgroundJobsController:
         if keep_polling:
             return
         self._poll_timer.stop()
+
+    def _drain_wind_preview_queue(self) -> bool:
+        received_event = False
+        for event_name, payload in self._wind_preview_job.drain():
+            received_event = True
+            if event_name == "error_traceback":
+                continue
+            if event_name == "error":
+                message = str(payload)
+                if self._wind_preview_job.error_traceback:
+                    message = f"{message}\n\n{self._wind_preview_job.error_traceback}"
+                self._handle_wind_preview_error(message)
+            elif event_name == "result":
+                self._handle_wind_preview_result(payload)
+        return received_event
 
     def _drain_fracture_preview_queue(self) -> bool:
         received_event = False
@@ -823,6 +881,38 @@ class QtBackgroundJobsController:
             )
             return
         self._window._handle_proxy_mesh_export_result(job_result.export)
+
+    def _handle_wind_preview_process_crash(self) -> None:
+        crash = self._wind_preview_job.crash()
+        message = f"Wind Preview worker process crashed unexpectedly (exit code {crash.exit_code})"
+        message = f"{message}\n{self._format_worker_file_context(crash.queue)}"
+        message = f"{message}\n{self._format_runtime_crash_context()}"
+        if crash.error_traceback:
+            message = f"{message}\n\n{crash.error_traceback}"
+        self._handle_wind_preview_error(message)
+
+    def _handle_wind_preview_result(self, result) -> None:
+        self._trace_worker("worker.result", "wind_preview", {"result": result is not None})
+        if result is None:
+            self._handle_wind_preview_error("Wind Preview worker finished without a preview result.")
+            return
+        if self._wind_preview_job.finish_current():
+            return
+        self._window._update_action_state()
+        self._window._handle_wind_preview_result(result)
+
+    def _handle_wind_preview_error(self, message: str) -> None:
+        self._trace_worker("worker.error", "wind_preview", {"message": message})
+        if self._wind_preview_job.finish_current():
+            return
+        self._window._update_action_state()
+        if hasattr(self._window, "_handle_wind_preview_error_message"):
+            self._window._handle_wind_preview_error_message(message)
+        self._window._report_error(
+            "Wind Preview failed",
+            message,
+            status="Wind Preview failed.",
+        )
 
     def _handle_proxy_preview_process_crash(self) -> None:
         crash = self._proxy_preview_job.crash()
@@ -1148,6 +1238,9 @@ class QtBackgroundJobsController:
     def close_part_preview_process(self) -> None:
         self._part_preview_job.close()
 
+    def close_wind_preview_process(self) -> None:
+        self._wind_preview_job.close()
+
     def _trace_worker(self, kind: str, worker: str, data: dict[str, object] | None = None) -> None:
         if hasattr(self._window, "_trace"):
             self._window._trace(kind, worker=worker, data=data or {})
@@ -1183,6 +1276,12 @@ class QtBackgroundJobsController:
         except OSError:
             return ""
         return data.decode("utf-8", errors="replace").strip()
+
+    def _wind_preview_trace_payload(self, request, settings, job_id: int) -> dict[str, object]:
+        payload: dict[str, object] = {"preview_job_id": job_id}
+        if request is not None:
+            payload["input_path"] = getattr(request, "input_path", "")
+        return payload
 
     def _fracture_preview_trace_payload(self, request, settings, job_id: int) -> dict[str, object]:
         payload: dict[str, object] = {

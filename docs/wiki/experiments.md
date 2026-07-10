@@ -105,3 +105,26 @@ Manual cuts remain the explicit escape hatch for trunk or mid-segment cuts. Auto
 Related files:
 - `src/xml_to_usda/fracture_service.py`
 - `docs/wiki/decisions.md`
+
+## Experiment: Wind Preview USD largest-skeleton autoselection
+
+Status: Rejected
+
+Context:
+External Skeleton loading for converter-authored USDA files first used the
+largest Skeleton prim by joint count so the main tree skeleton would win over
+small repeated-part skeletons.
+
+Outcome:
+This was a hidden heuristic. Multi-skeleton USD files must show an explicit
+Skeleton choice instead.
+
+Keep:
+Enumerate Skeleton prims in the Wind Preview worker and load only the operator-
+selected index. Text USDA fallback may parse Skeleton blocks without `pxr`, but
+it must not choose a skeleton by size.
+
+Related files:
+- `src/xml_to_usda/wind_external_skeleton.py`
+- `src/xml_to_usda/qt_ui/wind_preview.py`
+- `docs/wind_viewport_working_plan.md`

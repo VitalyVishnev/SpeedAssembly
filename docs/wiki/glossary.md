@@ -45,5 +45,6 @@
 - `Fracturing` - a companion destructibility workflow that outputs root-pivoted static pieces.
 - `Fracture Piece` - one planned destructible tree piece in the fracture workflow.
 - `Dynamic Wind` - the separate Unreal JSON wind output generated from the normalized skeleton.
+- `Wind Preview` - the Dynamic Wind inspection and planned authoring window. V1 is an XML source inspector; V2 adds Auto Hierarchy, manual override layers, external skeleton loading, and Dynamic Wind JSON export from the final group stack.
 - `Source Name` - any name observed in XML, FBX, or source filenames.
 - `Instance` - shorthand for a placed occurrence of a prototype when the stage is already obvious.

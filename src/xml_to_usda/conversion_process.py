@@ -58,6 +58,14 @@ from .worker_file_protocol import (
     resolve_worker_command,
     worker_env,
 )
+from .wind_preview_service import WindPreviewRequest
+from .wind_preview_worker_subprocess import (
+    WIND_PREVIEW_WORKER_COMMAND,
+    WindPreviewWorkerRequest,
+    read_wind_preview_worker_error,
+    read_wind_preview_worker_result,
+    write_wind_preview_worker_request,
+)
 
 
 def get_spawn_context() -> multiprocessing.context.BaseContext:
@@ -199,6 +207,43 @@ def start_part_preview_process(
     return (
         _SubprocessWorkerProcess(process),
         _PartPreviewWorkerQueue(
+            request_path=request_path,
+            result_path=result_path,
+            error_path=error_path,
+            stderr_path=stderr_path,
+        ),
+        _SubprocessCancelEvent(process),
+    )
+
+
+def start_wind_preview_process(request: object, settings=None):
+    suppress_windows_native_error_dialogs()
+    request_path = _create_wind_preview_temp_path(".request.json")
+    result_path = _create_wind_preview_temp_path(".result.json")
+    error_path = _create_wind_preview_temp_path(".error.json")
+    stderr_path = _create_wind_preview_temp_path(".stderr.log")
+    worker_token = new_worker_token()
+    write_wind_preview_worker_request(
+        request_path,
+        WindPreviewWorkerRequest(
+            request=request,
+            result_path=str(result_path),
+            error_path=str(error_path),
+            worker_token=worker_token,
+        ),
+    )
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    with stderr_path.open("wb") as stderr_handle:
+        process = subprocess.Popen(
+            _resolve_wind_preview_worker_command(request_path),
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_handle,
+            creationflags=creation_flags,
+            env=worker_env(worker_token),
+        )
+    return (
+        _SubprocessWorkerProcess(process),
+        _WindPreviewWorkerQueue(
             request_path=request_path,
             result_path=result_path,
             error_path=error_path,
@@ -522,6 +567,37 @@ class _PartPreviewWorkerQueue:
                 pass
 
 
+@dataclass
+class _WindPreviewWorkerQueue:
+    request_path: Path
+    result_path: Path
+    error_path: Path
+    stderr_path: Path
+    delivered: bool = False
+
+    def drain(self) -> list[tuple[str, object]]:
+        if self.delivered:
+            return []
+        if self.error_path.exists():
+            self.delivered = True
+            message, formatted_traceback = read_wind_preview_worker_error(self.error_path)
+            return [
+                ("error_traceback", formatted_traceback),
+                ("error", message),
+            ]
+        if not self.result_path.exists():
+            return []
+        self.delivered = True
+        return [("result", read_wind_preview_worker_result(self.result_path))]
+
+    def close(self) -> None:
+        for path in (self.request_path, self.result_path, self.error_path, self.stderr_path):
+            try:
+                cleanup_file(path)
+            except Exception:
+                pass
+
+
 def _create_proxy_temp_path(suffix: str) -> Path:
     return _create_temp_path("xml_to_usda_proxy_", suffix)
 
@@ -536,6 +612,10 @@ def _create_fracture_temp_path(suffix: str) -> Path:
 
 def _create_part_preview_temp_path(suffix: str) -> Path:
     return _create_temp_path("xml_to_usda_part_preview_", suffix)
+
+
+def _create_wind_preview_temp_path(suffix: str) -> Path:
+    return _create_temp_path("xml_to_usda_wind_preview_", suffix)
 
 
 def _create_temp_path(prefix: str, suffix: str) -> Path:
@@ -567,3 +647,7 @@ def _resolve_fracture_worker_command(request_path: Path) -> list[str]:
 
 def _resolve_part_preview_worker_command(request_path: Path) -> list[str]:
     return resolve_worker_command(PART_PREVIEW_WORKER_COMMAND, request_path)
+
+
+def _resolve_wind_preview_worker_command(request_path: Path) -> list[str]:
+    return resolve_worker_command(WIND_PREVIEW_WORKER_COMMAND, request_path)

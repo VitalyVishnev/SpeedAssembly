@@ -47,7 +47,7 @@ from ..fracture_viewport_scene import build_fracture_viewport_scene
 from ..models import Color4, GeometryBuffer, Quaternion, UdimMode, Vector3
 from ..viewport_scene import ViewportScene
 from .material_controls import MaterialUdimRow, MaterialUdimValue, set_tooltip
-from .preview_shell import PreviewShellDialog
+from .preview_shell import PreviewShellDialog, apply_compact_preview_panel_style
 from .viewport import MATCAP_VERTEX_STRIDE, MatcapViewport
 
 
@@ -141,7 +141,8 @@ class FracturePreviewDialog(PreviewShellDialog):
         viewport_layout.addWidget(self.loading_label, 0, 0, alignment=Qt.AlignmentFlag.AlignCenter)
         self.set_viewport_widget(viewport_host)
 
-        settings_panel, settings_shell_layout = self.create_settings_panel()
+        settings_panel, settings_shell_layout = self.create_settings_panel(width=320, default_width=480)
+        apply_compact_preview_panel_style(settings_panel)
         settings_shell_layout.setContentsMargins(0, 0, 0, 0)
         settings_shell_layout.setSpacing(0)
         settings_scroll = QScrollArea(settings_panel)

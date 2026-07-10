@@ -352,6 +352,8 @@ def test_fracture_preview_dialog_settings_panel_scrolls(qtbot) -> None:
     assert len(scrolls) == 1
     assert scrolls[0].widgetResizable()
     assert scrolls[0].horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert dialog.settings_panel_default_width == 480
+    assert "QComboBox::drop-down" in dialog.settings_panel.styleSheet()
 
 
 def test_fracture_preview_dialog_hides_collision_controls_for_other_modes(qtbot) -> None:

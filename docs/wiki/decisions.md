@@ -620,3 +620,135 @@ Related files:
 - `src/xml_to_usda/qt_ui/window.py`
 - `src/xml_to_usda/cli.py`
 - `tests/test_cache_maintenance.py`
+
+## Decision: Wind Preview uses base groups plus manual override layers
+
+Status: Active
+
+Context:
+Wind Preview started as a read-only XML inspector with explicit Auto Hierarchy
+preview grouping. The current workflow uses the same window to author Dynamic
+Wind JSON for both SpeedTree XML skeletons and external FBX/USD skeletons
+without creating a separate viewport system.
+
+Decision:
+Keep Wind Preview as a separate PySide6 dialog on the shared viewport path, but
+move the product contract toward a stack model: XML Generator Groups or Auto
+Hierarchy provide the base groups, and manual override layers sit above them.
+Higher layers win, empty manual groups are ignored, and final non-empty visible
+groups are compacted bottom-up before Dynamic Wind JSON export. Manual edits are
+stored as explicit child-joint token assignments, so visual colors and exported
+JSON describe the same final result.
+
+Reasoning:
+This keeps the XML-derived path, the independent skeleton analyzer, and manual
+operator correction in one deterministic model. It also supports non-SpeedTree
+trees from Houdini, Blender, or other DCC tools by loading external skeletons
+without mesh geometry and running Auto Hierarchy before optional manual fixes.
+
+Consequences:
+Group order is bottom-up like layer stacks: group 0/trunks are the bottom layer
+and `+` inserts new manual groups above all existing layers. Auto Hierarchy must
+not read XML generator labels; it uses SpeedTree/file joint ordering plus the
+explicit `Continue line` policy visible only in Auto mode. Missing coverage,
+duplicate external joint names, missing skeletons, and unavailable import
+backends fail loudly. Wind Preview JSON export uses the existing Dynamic Wind
+JSON schema and output-path derivation rather than introducing a new schema.
+The right panel uses one global settings scroll; Layers is the only nested
+scroll, resizes vertically through a local handle even when the global scrollbar
+is visible, and owns compact `+`/`-` manual-layer actions. Wind Preview opens
+taller than the shared preview default and defaults the right panel to the
+midpoint between its minimum and maximum width. Undo/redo remain shortcut-only
+and are surfaced through viewport shortcut hints instead of visible panel
+buttons. Text `.usda` and ASCII `.usd` external skeleton loading must not depend
+on `pxr`; when OpenUSD Python is unavailable, Wind Preview reads text Skeleton
+blocks directly. Multiple USD Skeleton prims require an explicit operator
+choice through the Skeleton dropdown. The loader must not choose by largest
+joint count, prim order, or name. Binary `.usd`/`.usdc` stay behind the `pxr`
+requirement.
+Detailed V2 behavior lives in `docs/wind_viewport_working_plan.md`.
+
+Related files:
+- `src/xml_to_usda/wind_preview_service.py`
+- `src/xml_to_usda/wind_viewport_scene.py`
+- `src/xml_to_usda/qt_ui/wind_preview.py`
+- `tests/test_wind_viewport_scene.py`
+
+## Decision: Preview dialogs share one viewport system
+
+Status: Active
+
+Context:
+Proxy Preview, Fracture Preview, Part Prototype Preview, and Wind Preview all
+render inspection geometry through the Qt/OpenGL viewport. A crash in one
+preview is often a viewport lifecycle, upload, camera, or overlay problem that
+can affect other previews later.
+
+Decision:
+Keep `MatcapViewport` and `ViewportScene` as the shared viewport seam. Preview
+mode dialogs may differ in controls, source requests, worker strategy, and
+Qt-free scene adapters, but they should not invent separate viewport behavior
+for rendering, OpenGL upload, camera fit, bone overlay, picking, static-scene
+precompute, or trace milestones. When a viewport fix is generally useful, add a
+public `MatcapViewport` interface and route the mode dialog through it.
+
+Reasoning:
+The working previews are evidence that the shared viewport system is the safer
+contract. A mode-specific rendering path hides native crash fixes in one dialog
+and makes future previews drift. A shared interface keeps leverage high: one
+fix improves every preview that uses the same upload and overlay path.
+
+Consequences:
+Do not import private viewport helpers from mode dialogs to solve a rendering
+or upload problem. Do not add a second OpenGL widget for a new preview unless
+the existing viewport cannot represent the required primitive after a measured
+attempt to extend it. Heavy static scenes should use the shared
+`MatcapViewport.set_scene(..., precompute_static=True)` path or a documented
+public equivalent. Visual-only selection, highlight, or visibility changes
+should not rebuild or re-upload static mesh buffers; add a small public
+viewport update method instead. Every viewport window should show active
+shortcuts briefly in the bottom-right corner as small translucent text, so
+mode-specific interactions remain discoverable without adding instructional UI
+blocks. Packaged smoke should cover any new high-risk viewport path.
+
+Related files:
+- `src/xml_to_usda/qt_ui/viewport.py`
+- `src/xml_to_usda/viewport_scene.py`
+- `src/xml_to_usda/qt_ui/wind_preview.py`
+- `src/xml_to_usda/qt_ui/fracture_preview.py`
+- `src/xml_to_usda/qt_ui/proxy_preview.py`
+- `src/xml_to_usda/qt_ui/part_preview.py`
+- `src/xml_to_usda/qt_ui/smoke.py`
+
+## Decision: Qt UI polish uses direct widget screenshots before packaging
+
+Status: Active
+
+Context:
+Small visual changes in PySide6 dialogs were previously validated mostly by
+building the packaged app, then having the operator open the UI manually. That
+loop is slow and misses obvious layout issues until late.
+
+Decision:
+For UI layout/style work, first render the target Qt widget or dialog directly
+from `.venv310`, call `show()`, `QApplication.processEvents()`, then save a
+PNG with `widget.grab().save(...)`. Inspect that image before running the
+slower packaged gate. Use this especially for right panels, preview dialogs,
+button density, scroll behavior, dropdown styling, and text overlap.
+
+Reasoning:
+This is the shortest reliable feedback loop for visual regressions. It keeps
+design iteration local to the changed widget and lets the agent see the same
+layout problems the operator would see, without waiting for PyInstaller.
+
+Consequences:
+Direct screenshots do not replace tests or packaged high-risk smoke. They are
+a preflight visual check before final validation. Prefer grabbing the smallest
+useful widget, for example `dialog.settings_panel.grab()`, so the screenshot is
+easy to inspect. Delete temporary screenshots after use unless the user asks to
+keep them.
+
+Related files:
+- `src/xml_to_usda/qt_ui/`
+- `tests/test_qt_wind_preview_dialog.py`
+- `docs/wiki/architecture.md`

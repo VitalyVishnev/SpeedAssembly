@@ -9,6 +9,7 @@ Proxy Meshes, plan Fracture Pieces, or interpret source XML.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import math
 from typing import Callable
 
@@ -122,6 +123,9 @@ class MatcapViewport(QOpenGLWidget):
         self._hover_cut_token: str | None = None
         self._trace_callback: ViewportTraceCallback | None = None
         self.on_bone_cut_toggled = lambda _joint_token: None
+        self.on_bone_clicked = lambda _joint_token, _modifiers: None
+        self._bone_pick_requires_control = True
+        self._shortcut_hints: tuple[str, ...] = ()
         self.setMouseTracking(True)
 
     def has_mesh(self) -> bool:
@@ -218,7 +222,40 @@ class MatcapViewport(QOpenGLWidget):
             self._hover_cut_token = None
         self.update()
 
-    def set_scene(self, scene: ViewportScene | None, *, frame_camera: bool = True) -> None:
+    def set_bone_pick_requires_control(self, value: bool) -> None:
+        self._bone_pick_requires_control = bool(value)
+        if self._bone_pick_requires_control and self._hover_cut_token is not None:
+            self._hover_cut_token = None
+            self.update()
+
+    def set_shortcut_hints(self, hints: tuple[str, ...]) -> None:
+        self._shortcut_hints = tuple(str(hint).strip() for hint in hints if str(hint).strip())
+        self.update()
+
+    def set_bone_segments(self, bone_segments: tuple[ViewportBoneSegment, ...]) -> None:
+        if self._scene is None:
+            return
+        self._scene = replace(self._scene, bone_segments=tuple(bone_segments))
+        if self._hover_cut_token is not None and self._cut_marker_position(self._hover_cut_token) is None:
+            self._hover_cut_token = None
+        self.update()
+
+    def set_scene(
+        self,
+        scene: ViewportScene | None,
+        *,
+        frame_camera: bool = True,
+        precompute_static: bool = False,
+    ) -> None:
+        if precompute_static and scene is not None and not any(draw.visibility_group == "collision" for draw in scene.draw_calls):
+            self.set_precomputed_matcap_scene(
+                scene,
+                vertices=_build_scene_vertices(scene),
+                min_point=scene.bounds.min_point,
+                max_point=scene.bounds.max_point,
+                frame_camera=frame_camera,
+            )
+            return
         self._visible_vertex_count_override = None
         self._scene = scene
         self._mesh = None
@@ -387,6 +424,7 @@ class MatcapViewport(QOpenGLWidget):
             _finish_ghost_mesh_draw(functions)
         if self._show_bones:
             self._paint_bone_overlay()
+        self._paint_shortcut_hints()
 
     def _matcap_exploded_view_strength(self) -> float:
         return self._exploded_view_strength
@@ -399,11 +437,12 @@ class MatcapViewport(QOpenGLWidget):
     def mousePressEvent(self, event) -> None:  # type: ignore[override]
         if (
             event.button() == Qt.MouseButton.LeftButton
-            and event.modifiers() & Qt.KeyboardModifier.ControlModifier
             and self._show_bones
+            and (not self._bone_pick_requires_control or event.modifiers() & Qt.KeyboardModifier.ControlModifier)
         ):
             token = self._hover_cut_token or self.pick_bone_segment_child_token(event.position().x(), event.position().y())
             if token:
+                self.on_bone_clicked(token, event.modifiers())
                 self.on_bone_cut_toggled(token)
                 event.accept()
                 return
@@ -414,14 +453,22 @@ class MatcapViewport(QOpenGLWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
-        if self._show_bones and not event.buttons() and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+        if (
+            self._show_bones
+            and not event.buttons()
+            and (not self._bone_pick_requires_control or event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        ):
             token = self.pick_bone_segment_child_token(event.position().x(), event.position().y())
             if token != self._hover_cut_token:
                 self._hover_cut_token = token
                 self.update()
             event.accept()
             return
-        if self._hover_cut_token is not None and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+        if (
+            self._hover_cut_token is not None
+            and self._bone_pick_requires_control
+            and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        ):
             self._hover_cut_token = None
             self.update()
         if self._last_mouse is not None and event.buttons() & Qt.MouseButton.LeftButton:
@@ -748,6 +795,27 @@ class MatcapViewport(QOpenGLWidget):
                 hover_point = self._cut_marker_position(self._hover_cut_token)
                 if hover_point is not None:
                     _paint_cut_marker(painter, hover_point, QColor(155, 235, 255, 245), radius=8.5, width=2.2)
+        finally:
+            painter.end()
+
+    def _paint_shortcut_hints(self) -> None:
+        if not self._shortcut_hints:
+            return
+        painter = QPainter(self)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+            text = "   ".join(self._shortcut_hints)
+            font = painter.font()
+            font.setPointSize(max(8, font.pointSize() - 1))
+            painter.setFont(font)
+            metrics = painter.fontMetrics()
+            margin = 10
+            width = metrics.horizontalAdvance(text)
+            height = metrics.height()
+            x = max(margin, self.width() - width - margin)
+            y = max(margin + height, self.height() - margin)
+            painter.setPen(QPen(QColor(235, 240, 235, 145), 1.0))
+            painter.drawText(x, y, text)
         finally:
             painter.end()
 

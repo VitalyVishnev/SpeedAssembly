@@ -65,6 +65,7 @@ from .material_controls import (
     set_combo_value,
 )
 from .part_source_controls import PartSourceMaterialValue
+from .preview_shell import apply_compact_preview_panel_style
 
 
 def _make_scroll_host(parent: QWidget) -> tuple[QWidget, QVBoxLayout]:
@@ -217,10 +218,12 @@ class WindRowWidgets:
 
 
 class WindTabPanel(QWidget):
-    def __init__(self, *, on_change, on_refresh_requested) -> None:
+    def __init__(self, *, on_change, on_refresh_requested, on_preview_requested) -> None:
         super().__init__()
+        apply_compact_preview_panel_style(self)
         self._on_change = on_change
         self._on_refresh_requested = on_refresh_requested
+        self._on_preview_requested = on_preview_requested
         self._persisted_settings: dict[str, WindGroupSettingRecord] = {}
         self._rows: list[WindRowWidgets] = []
 
@@ -257,13 +260,18 @@ class WindTabPanel(QWidget):
         self.refresh_button = QPushButton("Refresh Wind Groups", controls)
         self.refresh_button.setObjectName("WindRefreshButton")
         self.refresh_button.clicked.connect(self._on_refresh_requested)
+        self.preview_button = QPushButton("Preview Wind", controls)
+        self.preview_button.setObjectName("WindPreviewButton")
+        self.preview_button.clicked.connect(self._on_preview_requested)
+        self.preview_button.setToolTip("Opens the read-only wind group viewport for the selected XML.")
 
         controls_layout.addWidget(self.ground_cover_checkbox, 0, 0, 1, 2)
         controls_layout.addWidget(self.refresh_button, 0, 2, 1, 1)
+        controls_layout.addWidget(self.preview_button, 0, 3, 1, 1)
         gust_label = QLabel("Gust Attenuation", controls)
         set_tooltip(self.gust_spin.toolTip(), gust_label)
         controls_layout.addWidget(gust_label, 1, 0)
-        controls_layout.addWidget(self.gust_spin, 1, 1, 1, 2)
+        controls_layout.addWidget(self.gust_spin, 1, 1, 1, 3)
         controls_layout.setColumnStretch(1, 1)
         controls_layout.setColumnStretch(3, 1)
         outer.addWidget(controls)
@@ -482,6 +490,7 @@ class GeometryTabPanel(QWidget):
         on_proxy_settings_changed,
     ) -> None:
         super().__init__()
+        apply_compact_preview_panel_style(self)
         self._browse_fbx = browse_fbx
         self._on_change = on_change
         self._on_preview_proxy_requested = on_preview_proxy_requested
@@ -762,6 +771,7 @@ class _PartMaterialValues:
 class MaterialsTabPanel(QWidget):
     def __init__(self, *, deps, on_change) -> None:
         super().__init__()
+        apply_compact_preview_panel_style(self)
         self._deps = deps
         self._on_change = on_change
         self._base_rows: list[BaseMaterialRowWidgets] = []

@@ -18,8 +18,10 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QScrollArea,
     QSlider,
     QSpinBox,
+    QVBoxLayout,
 )
 
 from ..models import GeometryBuffer
@@ -31,7 +33,7 @@ from ..proxy_mesh_service import (
     ProxyMeshResult,
     ProxyMeshSettings,
 )
-from .preview_shell import PreviewShellDialog
+from .preview_shell import PreviewShellDialog, apply_compact_preview_panel_style
 from .material_controls import set_tooltip
 from .viewport import ProxyViewport
 
@@ -64,7 +66,21 @@ class ProxyPreviewDialog(PreviewShellDialog):
         if initial_proxy is not None:
             self.viewport.set_scene(build_proxy_viewport_scene(initial_proxy))
 
-        settings_panel, settings_layout = self.create_settings_panel()
+        settings_panel, settings_shell_layout = self.create_settings_panel(width=320, default_width=480)
+        apply_compact_preview_panel_style(settings_panel)
+        settings_shell_layout.setContentsMargins(0, 0, 0, 0)
+        settings_shell_layout.setSpacing(0)
+        self.global_scroll = QScrollArea(settings_panel)
+        self.global_scroll.setWidgetResizable(True)
+        self.global_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.global_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.global_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.global_host = QFrame(self.global_scroll)
+        settings_layout = QVBoxLayout(self.global_host)
+        settings_layout.setContentsMargins(10, 10, 10, 10)
+        settings_layout.setSpacing(6)
+        self.global_scroll.setWidget(self.global_host)
+        settings_shell_layout.addWidget(self.global_scroll)
 
         title = QLabel("Proxy Mesh", settings_panel)
         title.setStyleSheet("font-weight: 700;")

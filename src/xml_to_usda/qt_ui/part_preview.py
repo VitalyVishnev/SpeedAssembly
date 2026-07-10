@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollA
 from ..models import CpuProfile, PrototypeSourceMode
 from ..part_preview_service import PartPreviewDisplayMode, PartPrototypePreviewRequest, PartPrototypePreviewSettings
 from .part_source_controls import PartSourceMaterialEditor, PartSourceMaterialValue
-from .preview_shell import PreviewShellDialog
+from .preview_shell import PreviewShellDialog, apply_compact_preview_panel_style
 from .viewport import MatcapViewport
 
 
@@ -39,7 +39,8 @@ class PartPrototypePreviewDialog(PreviewShellDialog):
         self.viewport = MatcapViewport(self)
         self.set_viewport_widget(self.viewport)
 
-        settings_panel, settings_shell_layout = self.create_settings_panel(width=340)
+        settings_panel, settings_shell_layout = self.create_settings_panel(width=320, default_width=480)
+        apply_compact_preview_panel_style(settings_panel)
         settings_shell_layout.setContentsMargins(0, 0, 0, 0)
         settings_shell_layout.setSpacing(0)
         settings_scroll = QScrollArea(settings_panel)

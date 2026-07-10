@@ -138,3 +138,133 @@ Major moves:
 - Added `cache_maintenance.py` as the runtime owner for bounded cache retention.
 - GUI and CLI startup now sweep runtime leftovers, FBX payload cache, source-facts caches, and stale cache temp files through one policy.
 - Added Global Settings support for total cache summary and clearing all managed cache entries.
+
+## 2026-07-05 - Wind Preview V1
+
+- Implemented the read-only XML Wind Preview dialog with group list, stable group colors, skeleton overlay, group highlighting, and `Ctrl+click` subtree highlighting.
+- Added a Qt-free wind viewport scene adapter and a source-facts preview service that fails on missing XML generator labels.
+- Recorded the Wind Preview V1 contract as an inspector only, with no group editing, persistence, external skeleton import, or wind JSON export.
+
+## 2026-07-05 - Wind Preview viewport crash fix
+
+- Moved static scene precompute behind the shared `MatcapViewport.set_scene(..., precompute_static=True)` interface instead of keeping a Wind-only viewport path.
+- Wired Wind Preview through the same shared viewport upload contract used by other preview dialogs.
+- Added `wind-preview` to packaged high-risk smoke so packaged GUI builds must open Wind Preview, upload the viewport scene, and keep bone overlay visible.
+- Recorded the broader viewport rule: previews may have different mode dialogs and adapters, but rendering/upload/camera/overlay behavior must stay in the shared viewport system.
+
+## 2026-07-05 - Wind Preview layer order and Auto Hierarchy
+
+- Fixed the Wind Preview group list contract to bottom-up layers: group 0/trunks are the bottom layer and higher branch groups appear above them.
+- Added preview-only Auto Hierarchy grouping with a 1..10 integer group-count slider; deeper descendants cap into the highest selected group.
+- Made Clear Selection idempotent and covered it in packaged Wind Preview smoke.
+- Recorded the future manual `+` rule: new layers are inserted at the top of the stack.
+
+## 2026-07-05 - Wind Preview Auto Hierarchy branch-order fix
+
+- Changed Auto Hierarchy from per-bone depth grouping to branch fork-order grouping.
+- Kept linear branch chains in the same group and advanced group level only for child branches splitting off at forks.
+- Tightened Wind layer buttons so long group labels no longer overflow the right panel.
+
+## 2026-07-05 - Wind Preview Auto Hierarchy generator-level attempt rejected
+
+- Rejected the trial where Auto Hierarchy used XML generator levels as the primary source; that did not satisfy the independent skeleton-analysis requirement.
+- Changed Auto Hierarchy to use SpeedTree skeleton ordering instead: contiguous child order continues the current branch path, non-contiguous child subtrees advance one group level.
+- Added regression coverage that strips generator labels and still matches the hand-authored XML group result on `SimpleTree_01` and `SimpleTree_02_three_trunks`.
+
+## 2026-07-05 - Wind Preview Auto Hierarchy per-layer continuation
+
+- Added preview-only per-layer `Continue line` checkboxes for Auto Hierarchy so selected levels can keep endpoint-continuous child chains in the same group even when the child joint is not adjacent in SpeedTree order.
+- Kept strict Auto Hierarchy as the default so stripped-label `SimpleTree_01` and `SimpleTree_02_three_trunks` still match the current XML generator grouping unless the operator opts into continuation.
+- Made the Wind Preview grouping dropdown visibly highlight on hover/focus.
+
+## 2026-07-05 - Wind Preview worker isolation
+
+- Moved Wind Preview source loading and viewport-scene construction from a GUI thread into a file-backed `wind-preview-worker`.
+- Kept the dialog and OpenGL upload in the Qt process while giving Wind Preview the same worker crash/error context pattern as the other heavy previews.
+
+## 2026-07-05 - Wind Preview layer selection stability
+
+- Changed Wind Preview layer selection to update only shared viewport bone overlay state instead of rebuilding and re-uploading the static matcap mesh.
+- Added shared `MatcapViewport.set_bone_segments(...)` and covered the bottom-layer selection path in packaged Wind Preview smoke.
+
+## 2026-07-09 - Wind Preview V2 working plan
+
+- Replaced the Wind Viewport working plan with the agreed V2 contract for manual override layers, External Skeleton Wind, preview-local Dynamic Wind JSON export, autosave, undo/redo, and fail-loud coverage rules.
+- Updated maintained wiki references so Wind Preview is no longer documented as permanently read-only while still marking V2 as planned rather than implemented.
+- Added the shared viewport rule that active shortcuts should appear as small translucent bottom-right hints in every viewport window.
+
+## 2026-07-09 - Wind Preview V2 partial implementation
+
+- Added a Qt-free Wind group stack for base XML/Auto groups plus manual override layers, with top-layer precedence and compact bottom-up JSON indices.
+- Wired Wind Preview manual groups, subtree/bone picking, Alt removal, Delete/Clear, undo/redo, contextual shortcut hints, and preview-local Dynamic Wind JSON export.
+- Added missing-label XML fallback to Auto Hierarchy and skeleton-only External FBX loading; verified the attached high-poly Black Alder FBX loads as 966 joints without mesh geometry.
+- Left autosave restore, External Skeleton worker isolation, and USD skeleton import as open V2 items.
+
+## 2026-07-09 - Wind Preview V2 autosave and external skeleton completion
+
+- Added Wind Preview session autosave in GUI settings with skeleton fingerprint restore/reset behavior and empty undo history after restore.
+- Routed External Skeleton loading through the Wind Preview worker process for FBX/USD requests and added single-skeleton USD/UsdSkel skeleton-only loading.
+- Kept multi-skeleton USD choice deferred and documented it as an explicit fail-loud limitation.
+
+## 2026-07-09 - Wind Preview autosave crash fix
+
+- Fixed Wind Preview opening after worker result when GUI settings autosave fails with `OSError`/`PermissionError`; the preview now stays open and reports autosave failure in status/trace.
+
+## 2026-07-09 - Wind Preview compact right panel
+
+- Reworked Wind Preview's right panel into compact controls with a scrollable settings pane and a separate resizable Layers pane.
+- Overrode Wind Preview's local button sizing so global action-button styling no longer makes layer/edit/export controls too tall or overlapping.
+- Moved Layers directly under Edit, kept Generate JSON as the bottom action block, and replaced heavy combo-box arrows with a compact local chevron asset.
+
+## 2026-07-09 - Qt direct screenshot workflow
+
+- Documented the direct PySide `widget.grab()` screenshot loop as the preferred fast preflight for UI layout/style work before packaged builds.
+
+## 2026-07-09 - Wind Preview right panel scroll contract
+
+- Replaced the split top-controls/Layers layout with one global settings scroll and a nested resizable Layers scroll above Generate JSON.
+- Moved manual-layer `+`/`-` actions into the Layers header, removed visible Undo/Redo buttons, and kept undo/redo discoverable through viewport shortcut hints.
+- Updated the Wind Viewport plan and wiki architecture/decisions with the compact right-panel contract.
+
+## 2026-07-10 - Wind Preview default geometry and Layers resize
+
+- Set Wind Preview to open taller and default its right panel to the midpoint between the panel's minimum and maximum width.
+- Replaced the nested Qt splitter with a local Layers resize handle so resizing remains stable when the global right-panel scrollbar is visible.
+- Lowered the Layers scroll minimum so the group stack can collapse to about two visible rows.
+
+## 2026-07-10 - Wind Preview text USDA skeleton loading
+
+- Added a `pxr`-free text USDA/ASCII USD skeleton fallback for External Skeleton Wind Preview.
+- The initial fallback chose the unique largest skeleton by joint count; this was later superseded by explicit Skeleton prim choice.
+- Recorded the current Wind Preview right-panel UI as the accepted compact vertical quality bar.
+
+## 2026-07-10 - Wind Preview USD skeleton chooser
+
+- Added `usd-core` as the normal OpenUSD/`pxr` dependency for USD External Skeleton loading.
+- Replaced largest-skeleton autoselection with explicit Skeleton prim enumeration and operator choice in Wind Preview.
+- Documented largest-skeleton autoselection as a rejected heuristic.
+
+## 2026-07-10 - Wind Preview USD skeleton choice path fix
+
+- Fixed the Skeleton dropdown losing the selected USD skeleton when the UI path and worker-returned path used different Windows separators.
+- Added regression coverage so the second `Load` sends the selected skeleton index instead of asking the operator to choose again.
+
+## 2026-07-10 - Wind Preview initial scene stall fix
+
+- Reused the worker-built initial viewport scene instead of rebuilding the same large SpeedTree scene on the GUI thread.
+- Added fail-loud GUI error handling so scene setup failures replace `Preparing wind preview...` and enter the runtime trace.
+
+## 2026-07-10 - Packaged Wind Preview native worker crash fix
+
+- Kept the SpeedTree XML worker path independent from External FBX/USD imports.
+- Narrowed the OpenUSD PyInstaller hook to the runtime `Usd`/`UsdSkel` dependency set and excluded unused debug/TBB binding binaries that produced native packaging instability.
+
+## 2026-07-11 - Viewport right-panel alignment
+
+- Moved Wind Preview's compact dropdown/popup treatment into the shared preview shell and applied it to Proxy Mesh, Fracture, and Prototype Preview.
+- Gave Proxy Mesh the same global settings scroll and aligned all viewport panels to the Wind Preview default width; Fracture keeps its wheel-to-scroll safety behavior.
+
+## 2026-07-11 - Main settings panel alignment
+
+- Applied the shared compact Wind Preview controls to the main Wind, Geometry, and Materials tabs without changing the title bar or primary actions.
+- Made UDIM tile IDs explicit bordered input fields across the main tabs and preview dialogs.
