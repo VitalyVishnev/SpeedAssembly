@@ -129,4 +129,5 @@ def test_worker_env_carries_token(monkeypatch) -> None:
     env = worker_env("request-token")
 
     assert env[WORKER_TOKEN_ENV] == "request-token"
+    assert env["PYTHONFAULTHANDLER"] == "1"
     assert env["XML_TO_USDA_TEST_KEEP"] == "yes"

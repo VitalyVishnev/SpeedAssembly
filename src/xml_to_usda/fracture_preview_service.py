@@ -17,8 +17,15 @@ import tempfile
 from typing import TYPE_CHECKING
 
 from .canonical_loader import load_source_tree_model
-from .fracture_collision import FractureCollisionSettings, build_fracture_collision_mesh_sets, validated_collision_settings
-from .fracture_geometry import build_cap_source_context, sample_face_indices, slice_mesh_faces
+from .fracture_collision import (
+    CollisionMeshSet,
+    FractureCollisionSettings,
+    build_fracture_collision_mesh_sets,
+    build_fracture_collision_meshes,
+    collision_render_mesh_name,
+    validated_collision_settings,
+)
+from .fracture_geometry import build_cap_source_context, prepare_fracture_geometry, slice_mesh_faces
 from .fracture_service import (
     FractureError,
     FracturePiece,
@@ -55,6 +62,7 @@ from .models import (
     Vector3,
 )
 from .output_resolution import render_output_file_name
+from .qem_simplification import QemSimplificationError, simplify_geometry_buffer_qem
 
 if TYPE_CHECKING:
     from .viewport_scene import ViewportScene
@@ -63,9 +71,13 @@ if TYPE_CHECKING:
 DEFAULT_FRACTURE_PREVIEW_POLYCOUNT = 1_000_000
 DEFAULT_FRACTURE_PREVIEW_BASE_PRIORITY = 0.33
 DEFAULT_FRACTURE_PREVIEW_BRANCH_PRUNE_AGGRESSION = 0.0
-DEFAULT_FRACTURE_PREVIEW_BASE_FACE_BUDGET = 50_000
+DEFAULT_FRACTURE_PREVIEW_BASE_FACE_BUDGET = 10_000_000
 DEFAULT_FRACTURE_PREVIEW_PROTOTYPE_FACE_BUDGET = 2_000
 FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION = 8
+_PREVIEW_SOURCE_MEMORY_CACHE: tuple[
+    Path,
+    tuple[object, CanonicalTreeModel, tuple[ValidationIssue, ...], _FracturePlanCache],
+] | None = None
 
 
 @dataclass(frozen=True)
@@ -199,7 +211,13 @@ def generate_fracture_preview_from_source_request(
         raise FractureError("Fracture preview requires a source XML path.")
     preview_settings = _preview_settings(settings, _preview_output_stem(request, input_path))
     throw_if_cancelled(cancel_event)
-    cached_source = _read_preview_source_model_cache(input_path)
+    global _PREVIEW_SOURCE_MEMORY_CACHE
+    source_cache_key = _preview_source_model_cache_path(input_path)
+    cached_source = (
+        _PREVIEW_SOURCE_MEMORY_CACHE[1]
+        if _PREVIEW_SOURCE_MEMORY_CACHE is not None and _PREVIEW_SOURCE_MEMORY_CACHE[0] == source_cache_key
+        else _read_preview_source_model_cache(input_path)
+    )
     if cached_source is None:
         _report, source_model, source_diagnostics = load_source_tree_model(
             input_path,
@@ -210,8 +228,10 @@ def generate_fracture_preview_from_source_request(
         source_model = _slim_preview_source_model(source_model)
         analysis_cache = _build_fracture_plan_cache(source_model)
         _write_preview_source_model_cache(input_path, (_report, source_model, source_diagnostics, analysis_cache))
+        cached_source = (_report, source_model, source_diagnostics, analysis_cache)
     else:
         _report, source_model, source_diagnostics, analysis_cache = cached_source
+    _PREVIEW_SOURCE_MEMORY_CACHE = (source_cache_key, cached_source)
     result = generate_fracture_preview(
         source_model,
         preview_settings,
@@ -231,26 +251,69 @@ def generate_fracture_preview(
     """Build lightweight diagnostic preview payloads from one tree model."""
     resolved_settings = settings or FracturePreviewSettings()
     _validate_preview_settings(resolved_settings)
-    plan = plan_fracture(model, resolved_settings.fracture, analysis_cache=analysis_cache)
-    base_face_budgets = _base_face_budgets(model, plan, resolved_settings)
-    prototype_budgets = _prototype_face_budgets(model, plan, resolved_settings, base_face_budgets)
-    cap_context = build_cap_source_context(model.base_mesh) if resolved_settings.fracture.generate_caps and model.base_mesh is not None else None
-    pieces = tuple(
-        _preview_piece(
+    geometry = None
+    if resolved_settings.fracture.noisy_cut_enabled:
+        geometry = prepare_fracture_geometry(
             model,
-            piece,
-            base_face_budgets[piece.index],
-            generate_caps=resolved_settings.fracture.generate_caps,
-            branch_prune_aggression=resolved_settings.branch_prune_aggression,
-            cap_context=cap_context,
+            resolved_settings.fracture,
+            analysis_cache=analysis_cache,
         )
-        for piece in plan.pieces
-    )
+        plan = geometry.plan
+        geometry_pieces = geometry.pieces
+    else:
+        plan = plan_fracture(model, resolved_settings.fracture, analysis_cache=analysis_cache)
+        geometry_pieces = None
+    base_face_budgets = _base_face_budgets(model, plan, resolved_settings, geometry_pieces)
+    prototype_budgets = _prototype_face_budgets(model, plan, resolved_settings, base_face_budgets)
+    if geometry_pieces is None:
+        cap_context = (
+            build_cap_source_context(model.base_mesh)
+            if resolved_settings.fracture.generate_caps and model.base_mesh is not None
+            else None
+        )
+        pieces = tuple(
+            _legacy_preview_piece(
+                model,
+                piece,
+                base_face_budgets[piece.index],
+                generate_caps=resolved_settings.fracture.generate_caps,
+                branch_prune_aggression=resolved_settings.branch_prune_aggression,
+                cap_context=cap_context,
+            )
+            for piece in plan.pieces
+        )
+    else:
+        pieces = tuple(
+            _preview_piece(
+                geometry_piece,
+                base_face_budgets[geometry_piece.piece.index],
+                branch_prune_aggression=resolved_settings.branch_prune_aggression,
+            )
+            for geometry_piece in geometry_pieces
+        )
     prototypes = _preview_prototypes(model, plan, prototype_budgets)
     instances = _preview_instances(model, pieces)
     bone_segments = _preview_bone_segments(model, resolved_settings.fracture, pieces)
     collision_settings = validated_collision_settings(resolved_settings.collision)
-    collision_sets = build_fracture_collision_mesh_sets(model, plan.pieces, collision_settings)
+    collision_sets = tuple(
+        CollisionMeshSet(
+            piece_index=geometry_piece.piece.index,
+            meshes=build_fracture_collision_meshes(
+                replace(model, base_mesh=geometry_piece.base_mesh),
+                replace(
+                    geometry_piece.piece,
+                    base_face_indices=tuple(range(len(geometry_piece.base_mesh.face_vertex_counts))),
+                ),
+                collision_settings,
+                render_mesh_name=collision_render_mesh_name(geometry_piece.piece),
+            ),
+        )
+        for geometry_piece in geometry_pieces
+    ) if collision_settings.enabled and geometry_pieces is not None else (
+        build_fracture_collision_mesh_sets(model, plan.pieces, collision_settings)
+        if collision_settings.enabled
+        else ()
+    )
     collision_meshes = tuple(geometry_buffer_from_mesh(mesh) for mesh_set in collision_sets for mesh in mesh_set.meshes)
     collision_piece_indices = tuple(mesh_set.piece_index for mesh_set in collision_sets for _mesh in mesh_set.meshes)
     result = FracturePreviewResult(
@@ -312,10 +375,18 @@ def _base_face_budgets(
     model: CanonicalTreeModel,
     plan: FracturePlan,
     settings: FracturePreviewSettings,
+    geometry_pieces,
 ) -> dict[int, int]:
     if model.base_mesh is None:
         raise FractureError("Fracture preview requires a base mesh.")
-    source_counts = {piece.index: len(piece.base_face_indices) for piece in plan.pieces}
+    source_counts = (
+        {
+            geometry_piece.piece.index: len(geometry_piece.base_mesh.face_vertex_counts)
+            for geometry_piece in geometry_pieces
+        }
+        if geometry_pieces is not None
+        else {piece.index: len(piece.base_face_indices) for piece in plan.pieces}
+    )
     if any(face_count <= 0 for face_count in source_counts.values()):
         raise FractureError("Fracture preview requires every fracture piece to keep base mesh faces.")
     has_repeated_parts = any(piece.repeated_part_indices for piece in plan.pieces)
@@ -332,6 +403,32 @@ def _base_face_budgets(
 
 
 def _preview_piece(
+    geometry_piece,
+    face_budget: int,
+    *,
+    branch_prune_aggression: float,
+) -> FracturePreviewPiece:
+    piece = geometry_piece.piece
+    source_mesh = geometry_piece.base_mesh
+    all_faces = tuple(range(len(source_mesh.face_vertex_counts)))
+    pruned_faces = select_large_connected_face_indices(
+        source_mesh,
+        aggression=branch_prune_aggression,
+        candidate_face_indices=all_faces,
+    )
+    mesh = slice_mesh_faces(
+        source_mesh,
+        pruned_faces or all_faces,
+        name=f"{piece.name}_PreviewBase",
+    )
+    return FracturePreviewPiece(
+        piece=piece,
+        color=_piece_color(piece.index),
+        base_mesh=_simplify_preview_mesh(mesh, face_budget, name=f"{piece.name}_PreviewBase"),
+    )
+
+
+def _legacy_preview_piece(
     model: CanonicalTreeModel,
     piece: FracturePiece,
     face_budget: int,
@@ -347,10 +444,9 @@ def _preview_piece(
         aggression=branch_prune_aggression,
         candidate_face_indices=piece.base_face_indices,
     )
-    sampled_faces = sample_face_indices(pruned_faces or piece.base_face_indices, face_budget)
     mesh = slice_mesh_faces(
         model.base_mesh,
-        sampled_faces,
+        pruned_faces or piece.base_face_indices,
         name=f"{piece.name}_PreviewBase",
         generate_caps=generate_caps,
         cap_context=cap_context,
@@ -358,7 +454,7 @@ def _preview_piece(
     return FracturePreviewPiece(
         piece=piece,
         color=_piece_color(piece.index),
-        base_mesh=geometry_buffer_from_mesh(mesh),
+        base_mesh=_simplify_preview_mesh(mesh, face_budget, name=f"{piece.name}_PreviewBase"),
     )
 
 
@@ -390,16 +486,16 @@ def _preview_prototype(
     return FracturePreviewPrototype(
         source_key=prototype.source_key,
         source_name=prototype.source_name,
-        mesh=geometry_buffer_from_mesh(preview_mesh),
+        mesh=preview_mesh,
     )
 
 
-def _simplify_preview_mesh(mesh: MeshData, target_face_count: int, *, name: str) -> MeshData:
-    source_face_count = len(mesh.face_vertex_counts)
-    if source_face_count <= target_face_count:
-        return slice_mesh_faces(mesh, tuple(range(source_face_count)), name=name)
-    sampled_faces = sample_face_indices(tuple(range(source_face_count)), target_face_count)
-    return slice_mesh_faces(mesh, sampled_faces, name=name)
+def _simplify_preview_mesh(mesh: MeshData, target_triangle_count: int, *, name: str) -> GeometryBuffer:
+    source = geometry_buffer_from_mesh(replace(mesh, name=name))
+    try:
+        return simplify_geometry_buffer_qem(source, target_triangle_count=target_triangle_count)
+    except QemSimplificationError as exc:
+        raise FractureError(f"Fracture Preview QEM simplification failed: {exc}") from exc
 
 
 def _prototype_face_budgets(

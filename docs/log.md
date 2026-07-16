@@ -268,3 +268,53 @@ Major moves:
 
 - Applied the shared compact Wind Preview controls to the main Wind, Geometry, and Materials tabs without changing the title bar or primary actions.
 - Made UDIM tile IDs explicit bordered input fields across the main tabs and preview dialogs.
+
+## 2026-07-11 - Exact noisy fracture geometry
+
+- Replaced centroid-only fracture slicing with subtree-local deterministic Cut Surfaces, polygon clipping, interpolated vertex attributes, and intersection-loop caps shared by preview and export.
+- Added Noisy Cuts, Cut Intensity, and Chip Scale operator settings with persistence, tracing, worker/cache participation, and Qt controls.
+- Added transformed Repeated Part bounds classification, cap/topology-safe automatic candidate preflight, final-mesh collision input, and a preserved legacy path when Noisy Cuts is disabled.
+- Profiled BigSpruce and moved preflight and cut-band filtering into NumPy-backed source facts so repeated parameter changes remain bounded and avoid full-tree Python clipping.
+- Isolated nonlinear noisy edge roots and reject multiple crossings instead of applying linear plane interpolation.
+- Fixed multi-stem stump planning: every stem receives a near-base segment cut, and Separate Stems produces one stump piece per stem on the real three-trunk sample.
+- Replaced one-shot Fracture Preview workers with a persistent crash-isolated preview server and bounded one-source memory cache; local BigSpruce worker timing improved to about 1.4s for a warm parameter update.
+- Vectorized Qt viewport triangle packing; the 50k-triangle BigSpruce adapter stage dropped from about 2s to about 0.08s locally.
+- Lowered the hidden interactive per-piece preview cap from 50k to 20k faces, including migration of the old persisted value; exact export geometry is unchanged.
+
+## 2026-07-11 - BigSpruce Wind Preview worker memory fix
+
+- Stopped serializing the full CanonicalTreeModel beside the worker-built Wind viewport scene; BigSpruce's result is now a compact 17 MB payload.
+- Reused one base-mesh face-range table for all joint batches instead of rebuilding the full table 1108 times on BigSpruce.
+- Together, the compact payload and shared range table remove the worker path that grew past 5 GB and ended with `0xC0000005`.
+- Bounded only the interactive repeated-part mesh payload before Qt flattening; BigSpruce keeps all 3613 placements and complete Wind data while avoiding a 26.5-million-triangle viewport bake.
+- Reused the existing mesh buffers for grouping edits and changed only draw-call colors and the bone overlay.
+- Added automatic Wind-group refresh when a valid persisted XML path is restored at startup; the manual Refresh button remains available.
+
+## 2026-07-12 - Wind Preview native crash recovery
+
+- Queued an immediate Preview request until startup Wind-group inspection finishes, avoiding concurrent large-source normalization.
+- Added one clean-process retry for unexpected Wind Preview worker exits such as `0xC0000005`; a repeated failure still surfaces normally.
+- Enabled Python faulthandler in every worker environment so future native crashes can leave a stack in captured stderr instead of an empty file.
+
+## 2026-07-16 - Wind Preview skeleton-only geometry
+
+- Removed Repeated Parts from Wind Preview entirely; the viewport now shows only Base Mesh ownership colors and the skeleton overlay.
+- Removed the superseded repeated-part sampling and transport path. BigSpruce now produces 1108 base draw calls, zero instances, and about 11 MB of viewport vertices.
+
+## 2026-07-16 - Fracture Preview topology and upload fix
+
+- Replaced Fracture Preview face sampling with the same topology-preserving QEM backend used by Proxy Mesh; exact clipping and caps now precede simplification.
+- Removed the hidden 20k per-piece ceiling that overrode the visible Preview Polycount; BigSpruce's 57k-triangle stump now stays exact at the saved 6.35M target.
+- Stopped expanding hidden Repeated Parts into the initial viewport payload. BigSpruce's reported 2.59 GB Qt upload path is no longer reached when the default hide filter is active.
+- Added pre-allocation OpenGL buffer-size validation and surfaced the concrete viewport exception plus debug-log path instead of an empty generic error.
+
+## 2026-07-17 - Stable Noisy Cut planning and manual cuts
+
+- Made Noisy Cuts reuse the exact flat-planner structure; BigSpruce now keeps its stump and the same 11 length-ranked branch cuts instead of falling through to micro-branches.
+- Kept Repeated Parts with their skeleton-attached piece instead of vetoing cuts with transformed prototype bounds.
+- Isolated automatic branch clipping to the child subtree and moved the surface 30% into the first child bone so a visible broken stub remains and SimpleTree junction caps stay closed.
+- Added deterministic manual-cut snapping to the nearest tested closed cross-section and clarified Cut Intensity versus Chip Scale tooltips.
+- Made automatic noise one-sided toward the detached child so it cannot carve backward into the parent/stump; manual noise remains centered on the selected position.
+- Added per-surface deterministic noise attenuation as a last-resort topology guard without replanning cuts; the 28M stability sample now keeps all five cuts at full intensity.
+- Made packaged smoke errors non-modal: GUI failures now abort the scenario, write the JSON report/stderr, and print the concrete failure back to the build terminal automatically.
+- Added same-bone automatic cut-position fallback from 30% to 80% in deterministic 5% steps for high-count cap scenarios; strict stability failures now print nested smoke errors directly to stderr.

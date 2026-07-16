@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+import xml_to_usda.qt_ui.smoke as smoke_module
 from xml_to_usda.qt_ui.smoke import (
     HIGH_RISK_SCENARIOS,
     SMOKE_SCENARIO_FRACTURE_PREVIEW_INTERACTIVE,
@@ -106,6 +109,13 @@ def test_smoke_runner_records_failed_assertion_and_returns_nonzero(tmp_path: Pat
     assert report["scenarios"][0]["name"] == "fracture-preview"
     assert report["scenarios"][0]["passed"] is False
     assert "viewport mesh was not uploaded" in report["scenarios"][0]["error"]
+
+
+def test_smoke_event_pump_surfaces_recorded_gui_errors_without_a_modal(monkeypatch) -> None:
+    monkeypatch.setattr(smoke_module, "_ACTIVE_SMOKE_ERRORS", ["Fracture Preview failed: broken cap"])
+
+    with pytest.raises(AssertionError, match="Fracture Preview failed: broken cap"):
+        smoke_module._raise_pending_smoke_error()
 
 
 def test_packaged_stability_smoke_scenario_runs_interactive_preview_repeatedly(tmp_path: Path) -> None:

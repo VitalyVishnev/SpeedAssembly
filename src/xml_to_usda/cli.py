@@ -13,7 +13,11 @@ from .fbx_worker_subprocess import FBX_WORKER_COMMAND, run_fbx_worker_request_fi
 from .conversion_worker_subprocess import CONVERSION_WORKER_COMMAND, run_conversion_worker_request_file
 from .conversion_orchestrator import convert_request
 from .conversion_service import prepare_conversion_plan
-from .fracture_worker_subprocess import FRACTURE_WORKER_COMMAND, run_fracture_worker_request_file
+from .fracture_worker_subprocess import (
+    FRACTURE_WORKER_COMMAND,
+    run_fracture_preview_worker_server,
+    run_fracture_worker_request_file,
+)
 from .models import CleanupPolicy, CpuProfile, FbxMaterialMode, GeometryBuffer, MaterialPolicy
 from .normalizer import normalize_to_canonical
 from .part_preview_worker_subprocess import PART_PREVIEW_WORKER_COMMAND, run_part_preview_worker_request_file
@@ -101,7 +105,8 @@ def build_parser() -> argparse.ArgumentParser:
     proxy_worker_parser = subparsers.add_parser(PROXY_MESH_WORKER_COMMAND, help=argparse.SUPPRESS)
     proxy_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
     fracture_worker_parser = subparsers.add_parser(FRACTURE_WORKER_COMMAND, help=argparse.SUPPRESS)
-    fracture_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
+    fracture_worker_parser.add_argument("--request", help=argparse.SUPPRESS)
+    fracture_worker_parser.add_argument("--server-dir", help=argparse.SUPPRESS)
     part_preview_worker_parser = subparsers.add_parser(PART_PREVIEW_WORKER_COMMAND, help=argparse.SUPPRESS)
     part_preview_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
     wind_preview_worker_parser = subparsers.add_parser(WIND_PREVIEW_WORKER_COMMAND, help=argparse.SUPPRESS)
@@ -128,6 +133,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == PROXY_MESH_WORKER_COMMAND:
         return run_proxy_mesh_worker_request_file(args.request)
     if args.command == FRACTURE_WORKER_COMMAND:
+        if args.server_dir:
+            return run_fracture_preview_worker_server(args.server_dir)
         return run_fracture_worker_request_file(args.request)
     if args.command == PART_PREVIEW_WORKER_COMMAND:
         return run_part_preview_worker_request_file(args.request)

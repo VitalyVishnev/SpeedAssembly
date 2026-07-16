@@ -130,46 +130,38 @@ Related files:
 - `src/xml_to_usda/fracture_collision.py`
 - `src/xml_to_usda/fracture_export_service.py`
 
-## Bug: Fracturing cut-plane geometry is still approximate
+## Limitation: Noisy fracture detail follows source tessellation
 
 Status: Open
 
 Symptoms:
-Boundary caps are deterministic, but triangles crossing the intended cut plane are not truly split.
+Noisy Cut produces deterministic displaced cut surfaces and exact clipped
+boundaries, but V1 does not add separate splinter extrusions or general-purpose
+remeshing. Sparse source meshes therefore produce broader, less detailed chips.
 
-Likely cause:
-The current path uses whole-face ownership and centroid side tests instead of cut-plane clipping.
-
-Current workaround:
-Use the current cap generation and do not treat it as boolean-accurate interior geometry.
+Current behavior:
+Preview and export share the same clipping and cap contract. Ambiguous Repeated
+Part bounds do not influence planning: Repeated Parts stay with their skeleton-
+attached Fracture Piece. Noisy Cut preserves the flat planner's selected bones.
+Manual segment cuts may snap to the nearest tested closed cross-section. A
+source whose nearby cut intersections are all genuinely open or non-manifold
+does not receive an approximate cap. The likely next step for such assets is
+source-topology repair or a separately specified remeshing stage, not a larger
+silent weld tolerance.
+Automatic noise displaces only toward the detached child piece. If full
+amplitude would create multiple roots on one source edge or an invalid cap, the
+geometry stage deterministically lowers only that cut's amplitude and reports a
+warning. If amplitude alone cannot make an automatic branch cross-section safe,
+the cut moves in deterministic 5% steps from 30% to at most 80% along the same
+first child bone. Neither fallback selects a replacement branch.
 
 Do not repeat:
-Do not imply cut-plane exactness where only whole-face partitioning exists.
+Do not add synthetic splinter geometry until it has a separate topology and
+performance contract.
 
 Related files:
-- `docs/raw/KNOWN_PROBLEMS.md`
 - `src/xml_to_usda/fracture_geometry.py`
-- `src/xml_to_usda/fracture_service.py`
-
-## Bug: Manual segment fracture cuts do not classify repeated-part bounds rigorously
-
-Status: Open
-
-Symptoms:
-Manual `parent->child@t` cuts assign repeated parts by existing skeleton binding instead of spatially classifying bounds across the cut.
-
-Likely cause:
-Repeated-part side assignment is separate from base-mesh cap generation and has not been given its own bounds test.
-
-Current workaround:
-Reject ambiguous cases loudly rather than guessing.
-
-Do not repeat:
-Do not classify repeated parts by eyeballing the segment.
-
-Related files:
-- `docs/raw/KNOWN_PROBLEMS.md`
-- `src/xml_to_usda/fracture_service.py`
+- `src/xml_to_usda/fracture_preview_service.py`
 - `src/xml_to_usda/fracture_export_service.py`
 
 ## Bug: UDIM real-sample coverage is incomplete

@@ -54,7 +54,7 @@ from ..wind_viewport_scene import (
     build_auto_wind_viewport_data,
     build_wind_viewport_bone_segments,
     build_wind_viewport_groups,
-    build_wind_viewport_scene,
+    recolor_wind_viewport_scene,
     subtree_root_from_pick_token,
 )
 from .material_controls import set_tooltip
@@ -591,7 +591,12 @@ class WindPreviewDialog(PreviewShellDialog):
         if dynamic_wind == preview.dynamic_wind and self._selection == WindViewportSelection():
             scene = preview.viewport_scene
         else:
-            scene = build_wind_viewport_scene(preview.source_model, dynamic_wind, selection=self._selection)
+            scene = recolor_wind_viewport_scene(
+                preview.viewport_scene,
+                preview.source_model,
+                dynamic_wind,
+                selection=self._selection,
+            )
         self._active_scene = scene
         self.viewport.set_scene(scene, frame_camera=frame_camera, precompute_static=True)
         self.viewport.set_show_bones(True)
@@ -624,8 +629,7 @@ class WindPreviewDialog(PreviewShellDialog):
         self.summary_label.setText(
             (
                 f"{len(groups)} groups ({mode_label})\n"
-                f"{scene.stats.logical_triangles} logical triangles\n"
-                f"{scene.stats.instance_count} repeated instances"
+                f"{scene.stats.logical_triangles} logical triangles"
                 f"{selected}"
             )
         )

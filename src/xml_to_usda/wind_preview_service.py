@@ -57,13 +57,22 @@ def generate_wind_preview_from_request(request: WindPreviewRequest) -> WindPrevi
         groups = build_wind_viewport_groups(dynamic_wind, label_kind="Hierarchy level")
         diagnostics = diagnostics + (warning,)
         preferred_grouping_mode = "auto"
+    viewport_scene = build_wind_viewport_scene(source_model, dynamic_wind)
+    preview_source_model = CanonicalTreeModel(
+        metadata=source_model.metadata,
+        materials=(),
+        source_objects=(),
+        base_mesh=None,
+        skeleton=source_model.skeleton,
+        assembly_parts=(),
+    )
     return WindPreviewResult(
         input_path=input_path,
-        source_model=source_model,
+        source_model=preview_source_model,
         dynamic_wind=dynamic_wind,
         groups=groups,
         diagnostics=diagnostics,
-        viewport_scene=build_wind_viewport_scene(source_model, dynamic_wind),
+        viewport_scene=viewport_scene,
         xml_groups_available=xml_groups_available,
         preferred_grouping_mode=preferred_grouping_mode,
     )

@@ -472,6 +472,24 @@ def _parse_fracture_preview_settings(raw_value) -> FracturePreviewSettings:
                     _coerce_float(fracture_payload.get("branch_height_bias"), fracture.branch_height_bias),
                 ),
             ),
+            noisy_cut_enabled=_coerce_bool(
+                fracture_payload.get("noisy_cut_enabled"),
+                fracture.noisy_cut_enabled,
+            ),
+            noisy_cut_intensity=max(
+                0.0,
+                min(
+                    1.0,
+                    _coerce_float(fracture_payload.get("noisy_cut_intensity"), fracture.noisy_cut_intensity),
+                ),
+            ),
+            noisy_cut_scale=max(
+                0.1,
+                min(
+                    2.0,
+                    _coerce_float(fracture_payload.get("noisy_cut_scale"), fracture.noisy_cut_scale),
+                ),
+            ),
         )
     collision = defaults.collision
     if isinstance(collision_payload, dict):
@@ -513,7 +531,7 @@ def _parse_fracture_preview_settings(raw_value) -> FracturePreviewSettings:
         final_polycount=_coerce_positive_int(raw_value.get("final_polycount"), defaults.final_polycount),
         base_mesh_priority=max(0.0, min(1.0, _coerce_float(raw_value.get("base_mesh_priority"), defaults.base_mesh_priority))),
         branch_prune_aggression=defaults.branch_prune_aggression,
-        max_base_faces_per_piece=_coerce_positive_int(raw_value.get("max_base_faces_per_piece"), defaults.max_base_faces_per_piece),
+        max_base_faces_per_piece=defaults.max_base_faces_per_piece,
         max_prototype_faces=_coerce_positive_int(raw_value.get("max_prototype_faces"), defaults.max_prototype_faces),
     )
 
@@ -687,6 +705,9 @@ def _serialize_fracture_preview_settings(settings: FracturePreviewSettings) -> d
             "force_stump_piece": bool(settings.fracture.force_stump_piece),
             "separate_stems": bool(settings.fracture.separate_stems),
             "branch_height_bias": round(float(settings.fracture.branch_height_bias), 4),
+            "noisy_cut_enabled": bool(settings.fracture.noisy_cut_enabled),
+            "noisy_cut_intensity": round(float(settings.fracture.noisy_cut_intensity), 4),
+            "noisy_cut_scale": round(float(settings.fracture.noisy_cut_scale), 4),
         },
         "collision": {
             "enabled": bool(settings.collision.enabled),

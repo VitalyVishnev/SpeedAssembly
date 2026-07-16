@@ -13,6 +13,7 @@ from xml_to_usda.fracture_worker_subprocess import (
     FRACTURE_WORKER_ACTION_PREVIEW,
     FractureWorkerRequest,
     read_fracture_worker_result,
+    run_fracture_preview_worker_server,
     run_fracture_worker_request_file,
     write_fracture_worker_request,
     write_fracture_worker_result,
@@ -88,6 +89,22 @@ def test_fracture_preview_worker_does_not_depend_on_export_service(monkeypatch, 
     assert error_path.exists() is False
 
 
+def test_fracture_preview_worker_server_processes_multiple_requests_without_restart(monkeypatch, tmp_path: Path) -> None:
+    first = tmp_path / "001.request.json"
+    second = tmp_path / "002.request.json"
+    first.write_text("{}", encoding="utf-8")
+    second.write_text("{}", encoding="utf-8")
+    processed = []
+
+    monkeypatch.setattr(
+        "xml_to_usda.fracture_worker_subprocess.run_fracture_worker_request_file",
+        lambda path: processed.append(Path(path).name) or 0,
+    )
+
+    assert run_fracture_preview_worker_server(tmp_path, idle_timeout_seconds=0.05) == 0
+    assert processed == ["001.request.json", "002.request.json"]
+
+
 def test_fracture_preview_worker_reports_caps_stage_breadcrumbs(monkeypatch, capsys, tmp_path: Path) -> None:
     request_path = tmp_path / "preview_caps.request.json"
     result_path = tmp_path / "preview_caps.result.json"
@@ -102,7 +119,13 @@ def test_fracture_preview_worker_reports_caps_stage_breadcrumbs(monkeypatch, cap
                 output_path=str(tmp_path / "SimpleTree_01.usda"),
             ),
             settings=FracturePreviewSettings(
-                fracture=FractureSettings(target_piece_count=2, generate_caps=True),
+                fracture=FractureSettings(
+                    target_piece_count=2,
+                    generate_caps=True,
+                    noisy_cut_enabled=True,
+                    noisy_cut_intensity=0.42,
+                    noisy_cut_scale=1.25,
+                ),
                 max_base_faces_per_piece=10,
                 max_prototype_faces=5,
             ),
@@ -119,6 +142,9 @@ def test_fracture_preview_worker_reports_caps_stage_breadcrumbs(monkeypatch, cap
     assert "fracture-worker stage=request.read.start" in stderr
     assert "fracture-worker stage=preview.generate.start" in stderr
     assert "generate_caps=True" in stderr
+    assert "noisy_cut_enabled=True" in stderr
+    assert "noisy_cut_intensity=0.42" in stderr
+    assert "noisy_cut_scale=1.25" in stderr
     assert "fracture-worker stage=preview.generate.end" in stderr
     assert "fracture-worker stage=result.write.end" in stderr
     result = read_fracture_worker_result(result_path)

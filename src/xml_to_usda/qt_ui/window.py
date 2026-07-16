@@ -172,6 +172,9 @@ def _fracture_preview_trace_payload(settings: FracturePreviewSettings) -> dict[s
         "separate_stems": fracture.separate_stems,
         "branch_height_bias": fracture.branch_height_bias,
         "generate_caps": fracture.generate_caps,
+        "noisy_cut_enabled": fracture.noisy_cut_enabled,
+        "noisy_cut_intensity": fracture.noisy_cut_intensity,
+        "noisy_cut_scale": fracture.noisy_cut_scale,
         "pinned_cut_joint_tokens": fracture.pinned_cut_joint_tokens,
         "collision_enabled": collision.enabled,
         "collision_mode": collision.mode.value,
@@ -711,6 +714,7 @@ class MainWindow(QWidget):
         self._persistence_suspended = False
         self._preset_selector_suspended = False
         self._pending_generate_after_refresh = False
+        self._pending_wind_preview_after_refresh = False
         self._current_dynamic_wind = None
         self._conversion_running = False
         self._wind_refresh_running = False
@@ -807,6 +811,7 @@ class MainWindow(QWidget):
         self._reload_input_dependent_tabs()
         self._refresh_state_cards()
         self._update_action_state()
+        self._maybe_auto_refresh_wind_groups()
         self._update_window_shape()
         self._position_help_callout()
 
@@ -1947,6 +1952,7 @@ class MainWindow(QWidget):
             self._proxy_mesh_preview_input_path = ""
             self._reset_fracture_manual_session_cuts()
             self._pending_generate_after_refresh = False
+            self._pending_wind_preview_after_refresh = False
             self._set_default_output_from_source(previous_input, previous_auto_output)
         if not self._persistence_suspended:
             self._reload_input_dependent_tabs()
@@ -2244,11 +2250,15 @@ class MainWindow(QWidget):
         self._background_jobs.start_wind_json_generation(request)
 
     def open_wind_preview_dialog(self) -> None:
-        self._source_refresh_timer.stop()
         input_path = self.source_input.text().strip()
         if not input_path:
             self._report_error("Missing input", "Select a source XML file before previewing wind groups.")
             return
+        if self._source_refresh_timer.isActive() or self._wind_refresh_running:
+            self._pending_wind_preview_after_refresh = True
+            self._set_status("Inspecting wind groups; Wind Preview will open when ready...")
+            return
+        self._source_refresh_timer.stop()
         if self._wind_preview_dialog is not None and self._wind_preview_dialog.isVisible():
             focus_preview_dialog(self._wind_preview_dialog)
             return
@@ -2421,6 +2431,9 @@ class MainWindow(QWidget):
                     f"separate_stems={settings.fracture.separate_stems}",
                     f"branch_height_bias={settings.fracture.branch_height_bias}",
                     f"generate_caps={settings.fracture.generate_caps}",
+                    f"noisy_cut_enabled={settings.fracture.noisy_cut_enabled}",
+                    f"noisy_cut_intensity={settings.fracture.noisy_cut_intensity}",
+                    f"noisy_cut_scale={settings.fracture.noisy_cut_scale}",
                     f"preview_polycount={settings.final_polycount}",
                     f"remove_small_branches={settings.branch_prune_aggression}",
                     f"preview_base_priority={settings.base_mesh_priority}",
@@ -2440,6 +2453,9 @@ class MainWindow(QWidget):
                 "separate_stems": settings.fracture.separate_stems,
                 "branch_height_bias": settings.fracture.branch_height_bias,
                 "generate_caps": settings.fracture.generate_caps,
+                "noisy_cut_enabled": settings.fracture.noisy_cut_enabled,
+                "noisy_cut_intensity": settings.fracture.noisy_cut_intensity,
+                "noisy_cut_scale": settings.fracture.noisy_cut_scale,
                 "preview_polycount": settings.final_polycount,
                 "remove_small_branches": settings.branch_prune_aggression,
             },
@@ -2474,6 +2490,27 @@ class MainWindow(QWidget):
     def _handle_fracture_preview_result(self, preview) -> None:
         if preview.viewport_scene is None:
             preview = replace(preview, viewport_scene=build_fracture_viewport_scene(preview))
+        resolved_manual_tokens = tuple(
+            cut.joint_token
+            for cut in preview.plan.selected_cut_sites
+            if cut.reason.startswith("manual_pinned")
+        )
+        if resolved_manual_tokens != self._fracture_preview_settings.fracture.pinned_cut_joint_tokens:
+            self._fracture_preview_settings = replace(
+                self._fracture_preview_settings,
+                fracture=replace(
+                    self._fracture_preview_settings.fracture,
+                    pinned_cut_joint_tokens=resolved_manual_tokens,
+                ),
+            )
+            self.geometry_panel.apply_fracture_preview_settings(self._fracture_preview_settings)
+            self._schedule_operator_state_save()
+            self._trace(
+                "settings.snap",
+                job="fracture_preview",
+                message="Manual cut snapped to a closed Base Mesh cross-section",
+                data={"manual_cut_tokens": resolved_manual_tokens},
+            )
         try:
             self._fracture_preview_cache_put(self._build_fracture_preview_request(), self._fracture_preview_settings, preview)
         except ValueError:
@@ -2531,7 +2568,9 @@ class MainWindow(QWidget):
             detail = traceback.format_exc()
             self._append_runtime_log("ERROR Fracture Preview viewport failed", detail)
             self._trace("viewport.error", job="fracture_preview", message=str(exc), data={"traceback": detail})
-            dialog.set_error("Preview viewport failed. See log for details.")
+            error_message = str(exc).strip() or type(exc).__name__
+            runtime_log_path = self._runtime_paths.settings_dir / "gui_runtime.log"
+            dialog.set_error(f"Preview viewport failed: {error_message}\nDebug log: {runtime_log_path}")
             self._set_status("Fracture Preview viewport failed.")
             focus_preview_dialog(dialog)
             return
@@ -2600,6 +2639,9 @@ class MainWindow(QWidget):
                     f"separate_stems={settings.fracture.separate_stems}",
                     f"branch_height_bias={settings.fracture.branch_height_bias}",
                     f"generate_caps={settings.fracture.generate_caps}",
+                    f"noisy_cut_enabled={settings.fracture.noisy_cut_enabled}",
+                    f"noisy_cut_intensity={settings.fracture.noisy_cut_intensity}",
+                    f"noisy_cut_scale={settings.fracture.noisy_cut_scale}",
                     f"preview_polycount={settings.final_polycount}",
                     f"remove_small_branches={settings.branch_prune_aggression}",
                     f"preview_base_priority={settings.base_mesh_priority}",
@@ -2887,6 +2929,9 @@ class MainWindow(QWidget):
     def _clear_pending_generate_after_refresh(self) -> None:
         self._pending_generate_after_refresh = False
 
+    def _clear_pending_wind_preview_after_refresh(self) -> None:
+        self._pending_wind_preview_after_refresh = False
+
     def _handle_wind_data_loaded(self, dynamic_wind, *, used_retry: bool) -> None:
         self._current_dynamic_wind = dynamic_wind
         self.wind_panel.rebuild(dynamic_wind.simulation_groups)
@@ -2901,6 +2946,9 @@ class MainWindow(QWidget):
         if self._pending_generate_after_refresh:
             self._pending_generate_after_refresh = False
             self.run_generate_wind_json()
+        if self._pending_wind_preview_after_refresh:
+            self._pending_wind_preview_after_refresh = False
+            self.open_wind_preview_dialog()
 
     def _handle_wind_json_result(self, result) -> None:
         self._set_status(f"Wrote Dynamic Wind JSON to {result.output_path}")

@@ -61,8 +61,10 @@ def main(argv: list[str] | None = None) -> int:
         request_path = argv[argv.index("--request") + 1] if "--request" in argv else ""
         return run_proxy_mesh_worker_request_file(request_path)
     if argv and argv[0] == FRACTURE_WORKER_COMMAND:
-        from ..fracture_worker_subprocess import run_fracture_worker_request_file
+        from ..fracture_worker_subprocess import run_fracture_preview_worker_server, run_fracture_worker_request_file
 
+        if "--server-dir" in argv:
+            return run_fracture_preview_worker_server(argv[argv.index("--server-dir") + 1])
         request_path = argv[argv.index("--request") + 1] if "--request" in argv else ""
         return run_fracture_worker_request_file(request_path)
     if argv and argv[0] == PART_PREVIEW_WORKER_COMMAND:

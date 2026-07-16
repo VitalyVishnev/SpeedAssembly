@@ -38,6 +38,7 @@ GL_SRC_ALPHA = 0x0302
 GL_TRIANGLES = 0x0004
 DEFAULT_MATCAP_TINT_ALPHA = 0.0
 MATCAP_VERTEX_STRIDE = 17
+MAX_QT_OPENGL_BUFFER_BYTES = (1 << 31) - 1
 ViewportTraceCallback = Callable[[str, dict[str, object]], None]
 _MATCAP_ATTRIBUTE_LAYOUT = (
     ("position", 0, 3),
@@ -57,6 +58,11 @@ def _upload_matcap_vertices(
     vertices: np.ndarray,
 ) -> bool:
     """Upload the shared matcap vertex layout and bind its shader attributes."""
+    if vertices.nbytes > MAX_QT_OPENGL_BUFFER_BYTES:
+        raise ValueError(
+            f"OpenGL vertex buffer requires {vertices.nbytes} bytes; Qt supports at most "
+            f"{MAX_QT_OPENGL_BUFFER_BYTES} bytes per upload."
+        )
     vao.bind()
     vertex_buffer.bind()
     vertex_buffer.allocate(vertices.tobytes(), vertices.nbytes)

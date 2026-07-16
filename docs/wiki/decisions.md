@@ -272,13 +272,13 @@ Context:
 Proxy Mesh and Fracture Preview needed crash containment without changing the meaning of the exported geometry.
 
 Decision:
-Keep QEM-based proxy simplification and file-first worker completion rules intact.
+Keep QEM-based Proxy Mesh and Fracture Preview simplification and file-first worker completion rules intact.
 
 Reasoning:
 Cheaper diagnostic paths are acceptable only when they do not weaken the exported topology contract.
 
 Consequences:
-Face sampling stays rejected for proxy simplification. Preview/proxy base-mesh paths may apply deterministic connected-component pruning before their own simplification pass to discard tiny disconnected terminal details: `Remove Small Branches` is a percentage of smallest connected islands to remove, not a relative size cutoff. QEM remains the Proxy Mesh topology simplification backend. Worker polling must drain result/error files before treating a stopped worker as a crash.
+Face sampling stays rejected for Proxy Mesh and Fracture Preview because it creates disconnected triangle holes. Preview/proxy base-mesh paths may apply deterministic connected-component pruning before their own simplification pass to discard tiny disconnected terminal details: `Remove Small Branches` is a percentage of smallest connected islands to remove, not a relative size cutoff. Both workflows use the shared QEM topology simplification backend. Fracture Preview must not apply a hidden per-piece ceiling below the visible Preview Polycount range. Worker polling must drain result/error files before treating a stopped worker as a crash.
 
 Related files:
 - `docs/raw/DECISIONS.md`
@@ -352,7 +352,7 @@ Context:
 The old automatic fill could refine trunk chains and synthetic face regions, producing visibly unnatural trunk shredding on simple trees.
 
 Decision:
-Treat `target_piece_count` as operator-facing Auto Branches / Branch Count. Automatic V1 cuts may add a stump piece, separate independent root-level stems, and detach branch bases ranked by skeleton path length with optional height bias. Stump and separated stems are counted outside Branch Count. Manual pinned cuts still run first and may cut trunks explicitly. If safe branch candidates run out, clamp with a diagnostic instead of cutting trunk geometry or doing synthetic face median splits.
+Treat `target_piece_count` as operator-facing Auto Branches / Branch Count. Automatic V1 cuts may add a stump piece, separate independent root-level stems, and detach branch bases ranked by skeleton path length with optional height bias. Stump and separated stems are counted outside Branch Count. Manual pinned cuts still run first and may cut trunks explicitly. Noisy Cut changes only Cut Surface geometry; it must not change selected bones or piece structure.
 
 Reasoning:
 Length-first branch detachment better matches the perceived weak points of vehicle impact and nearby blast workflows while preserving manual control for exceptional cuts.
@@ -533,22 +533,27 @@ Status: Active
 Context:
 Rapid or unlucky `Hide Repeated Parts` toggles could crash the packaged Qt
 process with a native `0xc0000005` fault while rebuilding and re-uploading the
-Fracture Preview OpenGL payload.
+Fracture Preview OpenGL payload. Keeping the full payload resident also failed
+on BigSpruce: 3613 hidden instances expanded to 38,044,065 vertices and a
+2.59 GB upload, beyond Qt's signed buffer-size limit.
 
 Decision:
-Keep the full Fracture Preview render payload loaded and implement repeated-part
-visibility by changing the visible vertex range in the viewport. Do not rebuild
-the fracture plan, preview scene, or OpenGL buffers for this checkbox.
+When Repeated Parts are hidden, build and upload only the Base Mesh payload.
+Build the full payload lazily on the first explicit show; after that upload,
+hide/show changes only the visible vertex range. Reject an oversized payload
+before allocating or passing it to Qt.
 
 Reasoning:
 The checkbox is a visual inspection filter, not an operator setting that changes
-fracture ownership. Avoiding buffer re-upload removes the native crash surface
-and keeps the interaction realtime.
+fracture ownership. Hidden geometry must consume neither CPU expansion memory
+nor GPU upload capacity. Reusing a successfully loaded full payload keeps later
+toggles realtime without restoring the startup overflow.
 
 Consequences:
-Future visual-only Fracture Preview controls should update viewport state or
-shader uniforms whenever possible. Rebuild only when source geometry or planner
-settings actually change.
+Opening Fracture Preview with the default hidden state is bounded by Base Mesh
+geometry. Showing Repeated Parts may perform one deliberate upload; later
+toggles reuse it. Future visual-only controls should update viewport state or
+shader uniforms whenever possible.
 
 Related files:
 - `src/xml_to_usda/qt_ui/fracture_preview.py`
@@ -666,6 +671,18 @@ blocks directly. Multiple USD Skeleton prims require an explicit operator
 choice through the Skeleton dropdown. The loader must not choose by largest
 joint count, prim order, or name. Binary `.usd`/`.usdc` stay behind the `pxr`
 requirement.
+The SpeedTree worker result must not contain the full CanonicalTreeModel beside
+the already-built viewport scene. It carries only the skeleton, Dynamic Wind
+data, and compact Base Mesh scene buffers. Repeated Parts are omitted entirely:
+Wind Preview inspects the skeleton, and repeated geometry adds visual noise
+without changing grouping or JSON. Grouping edits recolor those existing draw
+calls and replace the bone overlay. A restored valid XML
+path triggers the same Wind-group refresh as the manual button after startup.
+If Preview is requested before that refresh finishes, queue it instead of
+normalizing the same large XML concurrently in the GUI and preview worker. A
+native Wind Preview process crash receives one clean-process retry; a second
+failure remains fail-loud. All worker environments enable Python faulthandler
+so native failures can populate the existing stderr crash context.
 Detailed V2 behavior lives in `docs/wind_viewport_working_plan.md`.
 
 Related files:
@@ -752,3 +769,53 @@ Related files:
 - `src/xml_to_usda/qt_ui/`
 - `tests/test_qt_wind_preview_dialog.py`
 - `docs/wiki/architecture.md`
+
+## Decision: Fracture Geometry is one deep preview/export module
+
+Status: Active
+
+Context:
+The former Fracture path assigned whole faces by centroid and generated caps
+from ownership boundaries. Preview, export, collision, Repeated Part ownership,
+and cap behavior could not remain exact through that interface.
+
+Decision:
+Keep planning in `fracture_service.py` and place settings-dependent mesh work
+behind the `prepare_fracture_geometry(...)` interface. The Fracture Geometry
+module owns subtree-local Cut Surfaces, deterministic noisy clipping, attribute
+interpolation, loop validation, cap triangulation, and manual cross-section
+snapping. Preview simplifies only after
+this geometry contract; export and collision consume the same per-piece mesh.
+
+Consequences:
+`noisy_cut_enabled=False` preserves the legacy face-ownership path. Repeated
+Parts remain with the Fracture Piece determined by their skeleton attachment;
+their prototype bounds do not veto cuts. A manual segment cut that lands on an
+open source junction snaps to the nearest tested 0.1 segment position with a
+closed cross-section and records a warning; if none exists, it fails loudly.
+Automatic branch cuts use the child `bind -> bind_end` direction and first try
+30% inside the child bone, leaving a visible broken stub and avoiding parent
+branch triangles. If that exact cross-section cannot split/cap safely, geometry
+tries deterministic 5% steps up to 80% on the same bone and records a warning;
+the selected cut and Fracture Piece do not change. Stump/stem joint cuts retain
+the 2% offset.
+Automatic cuts map noise to the child side of the base plane, so displacement
+cannot cut backward into the parent/stump. Manual cuts remain symmetric around
+the operator-selected position. Noisy edge roots are isolated deterministically;
+if a fixed cut would cross one edge more than once or produce an invalid cap,
+only that surface amplitude is retried at 75%, 50%, 25%, then flat. The selected
+cut and piece structure never change, and attenuation records a warning. `Stump
+Piece` plans one cut per independent stem. Multi-stem sources use a segment cut
+near the end of each first stem bone because some SpeedTree stems have no faces
+owned directly by their root joint.
+
+Fracture Preview uses one persistent crash-isolated worker for sequential
+settings changes. This preserves process isolation while avoiding packaged
+Python startup and source-cache reconstruction on every slider release. Cancel
+terminates the server; the next request starts a clean one. Viewport triangle
+packing is NumPy-vectorized rather than a per-vertex Python loop.
+
+Related files:
+- `src/xml_to_usda/fracture_geometry.py`
+- `src/xml_to_usda/fracture_preview_service.py`
+- `src/xml_to_usda/fracture_export_service.py`

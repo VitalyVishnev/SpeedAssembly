@@ -62,6 +62,7 @@ class SmokeContext:
 
 
 ScenarioRunner = Callable[[str, SmokeContext], dict[str, Any]]
+_ACTIVE_SMOKE_ERRORS: list[str] | None = None
 
 
 def build_smoke_parser() -> argparse.ArgumentParser:
@@ -103,6 +104,7 @@ def run_smoke_cli(argv: list[str] | None = None, *, scenario_runner: ScenarioRun
                 result.setdefault("passed", True)
                 result.setdefault("duration_seconds", round(time.time() - scenario_started, 3))
             except Exception as exc:
+                print(f"Smoke scenario {name} failed: {exc}", file=sys.stderr, flush=True)
                 result = {
                     "name": name,
                     "passed": False,
@@ -571,6 +573,16 @@ def _create_smoke_window(context: SmokeContext):
     )
     window._operator_snapshot = replace(window._operator_snapshot, debug_trace_enabled=context.debug_trace)
     window._trace_logger = replace(window._trace_logger, debug_enabled=context.debug_trace)
+    global _ACTIVE_SMOKE_ERRORS
+    _ACTIVE_SMOKE_ERRORS = []
+
+    def report_smoke_error(title, message, *, details=None, status=None):
+        window._set_status(status or title)
+        window._append_log(details or message)
+        if _ACTIVE_SMOKE_ERRORS is not None:
+            _ACTIVE_SMOKE_ERRORS.append(f"{title}: {details or message}")
+
+    window._report_error = report_smoke_error
     window.show()
     app.processEvents()
     return window
@@ -610,6 +622,12 @@ def _pump_events(duration_ms: int) -> None:
     QTimer.singleShot(max(0, int(duration_ms)), loop.quit)
     loop.exec()
     app.processEvents()
+    _raise_pending_smoke_error()
+
+
+def _raise_pending_smoke_error() -> None:
+    if _ACTIVE_SMOKE_ERRORS:
+        raise AssertionError(_ACTIVE_SMOKE_ERRORS[0])
 
 
 def _close_window(window) -> None:
@@ -619,6 +637,8 @@ def _close_window(window) -> None:
     app = QApplication.instance()
     if app is not None:
         app.processEvents()
+    global _ACTIVE_SMOKE_ERRORS
+    _ACTIVE_SMOKE_ERRORS = None
 
 
 def _trace_text(context: SmokeContext) -> str:

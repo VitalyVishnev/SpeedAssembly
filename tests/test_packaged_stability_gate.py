@@ -9,6 +9,7 @@ from xml_to_usda.qt_ui.stability_gate import (
     DEFAULT_REQUIRED_SAMPLE_PROFILES,
     StabilityGateError,
     StabilityGateOptions,
+    _stability_failure_lines,
     _worker_settings_matrix,
     analyze_stability_artifacts,
     prepare_crash_dump_collection,
@@ -71,6 +72,40 @@ def test_stability_artifact_analysis_accepts_clean_user_cancellation(tmp_path: P
     assert result.passed is True
     assert result.worker_crash_count == 0
     assert result.retry_count == 0
+
+
+def test_stability_failure_lines_include_the_nested_smoke_error(tmp_path: Path) -> None:
+    smoke_path = tmp_path / "smoke_report.json"
+    smoke_path.write_text(
+        json.dumps(
+            {
+                "passed": False,
+                "scenarios": [
+                    {"name": "fracture-preview", "passed": False, "error": "Fracture cap bone_033 is open."}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = {
+        "passed": False,
+        "runs": [
+            {
+                "profile": "spruce",
+                "kind": "ui",
+                "scenario": "fracture-preview",
+                "iteration": 0,
+                "passed": False,
+                "exit_code": 1,
+                "error": "smoke report failed",
+                "artifacts": {"smoke_report": {"path": str(smoke_path)}},
+            }
+        ],
+    }
+
+    assert _stability_failure_lines(report) == (
+        "spruce/ui/fracture-preview/0: Fracture cap bone_033 is open.",
+    )
 
 
 def test_required_sample_profiles_include_real_problem_trees() -> None:

@@ -74,6 +74,7 @@ def new_worker_token() -> str:
 def worker_env(token: str) -> dict[str, str]:
     env = os.environ.copy()
     env[WORKER_TOKEN_ENV] = token
+    env["PYTHONFAULTHANDLER"] = "1"
     return env
 
 

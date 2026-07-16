@@ -12,7 +12,6 @@ import math
 import contextlib
 from array import array
 from dataclasses import dataclass, replace
-from math import sqrt
 
 import numpy as np
 
@@ -48,7 +47,7 @@ from ..models import Color4, GeometryBuffer, Quaternion, UdimMode, Vector3
 from ..viewport_scene import ViewportScene
 from .material_controls import MaterialUdimRow, MaterialUdimValue, set_tooltip
 from .preview_shell import PreviewShellDialog, apply_compact_preview_panel_style
-from .viewport import MATCAP_VERTEX_STRIDE, MatcapViewport
+from .viewport import MAX_QT_OPENGL_BUFFER_BYTES, MATCAP_VERTEX_STRIDE, MatcapViewport
 
 
 FRACTURE_SOURCE_VERTEX_STRIDE = 10
@@ -293,6 +292,25 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.hide_repeated_parts_check = QCheckBox("Hide Repeated Parts", settings_panel)
         self.hide_repeated_parts_check.setChecked(True)
         self.generate_caps_check = QCheckBox("Generate Caps", settings_panel)
+        self.noisy_cut_check = QCheckBox("Noisy Cuts", settings_panel)
+        self.noisy_cut_intensity_slider, self.noisy_cut_intensity_spin = _build_float_slider_row(
+            settings_panel,
+            minimum=0.0,
+            maximum=1.0,
+            value=float(self._settings.fracture.noisy_cut_intensity),
+            step=0.01,
+            scale=100,
+        )
+        self.noisy_cut_scale_slider, self.noisy_cut_scale_spin = _build_float_slider_row(
+            settings_panel,
+            minimum=0.1,
+            maximum=2.0,
+            value=float(self._settings.fracture.noisy_cut_scale),
+            step=0.01,
+            scale=100,
+        )
+        self.noisy_cut_intensity_label = QLabel("Cut Intensity", settings_panel)
+        self.noisy_cut_scale_label = QLabel("Chip Scale", settings_panel)
         self.override_caps_material_check = QCheckBox("Override Caps Material", settings_panel)
         set_tooltip("Shows selectable skeleton cut segments. Off hides guides; on shows bones for manual cuts.", self.show_bones_check)
         set_tooltip(
@@ -300,6 +318,22 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.hide_repeated_parts_check,
         )
         set_tooltip("Writes cap faces on cut surfaces. Off leaves open cuts; on closes piece interiors.", self.generate_caps_check)
+        set_tooltip(
+            "Uses deterministic displaced cut surfaces. Off preserves legacy face ownership; on creates exact clipped edges.",
+            self.noisy_cut_check,
+        )
+        set_tooltip(
+            "Maximum displacement along the branch axis: 0 is a plane; 1 reaches 35% of the local branch radius. Automatic cuts displace only into the detached branch.",
+            self.noisy_cut_intensity_label,
+            self.noisy_cut_intensity_slider,
+            self.noisy_cut_intensity_spin,
+        )
+        set_tooltip(
+            "Noise wavelength relative to local branch radius. Lower creates finer splinters; higher creates broader chips without changing depth.",
+            self.noisy_cut_scale_label,
+            self.noisy_cut_scale_slider,
+            self.noisy_cut_scale_spin,
+        )
         set_tooltip(
             "Uses a separate material for cap faces. Off reuses defaults; on assigns the Caps Material row.",
             self.override_caps_material_check,
@@ -315,7 +349,10 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.stump_piece_check = QCheckBox("Stump Piece", settings_panel)
         self.separate_stems_check = QCheckBox("Separate Stems", settings_panel)
         self.collision_check = QCheckBox("Generate Collision", settings_panel)
-        set_tooltip("Forces a ground stump piece. Off follows normal cuts; on keeps a dedicated stump chunk.", self.stump_piece_check)
+        set_tooltip(
+            "Forces a ground stump cut on every independent stem. With Separate Stems, each stump is its own piece.",
+            self.stump_piece_check,
+        )
         set_tooltip(
             "Separates independent root-level stems before automatic branch detachment.",
             self.separate_stems_check,
@@ -402,6 +439,11 @@ class FracturePreviewDialog(PreviewShellDialog):
         settings_layout.addWidget(self.show_bones_check)
         settings_layout.addWidget(self.hide_repeated_parts_check)
         _add_group_header(settings_layout, settings_panel, "Output Pieces")
+        settings_layout.addWidget(self.noisy_cut_check)
+        settings_layout.addWidget(self.noisy_cut_intensity_label)
+        settings_layout.addLayout(_slider_row(self.noisy_cut_intensity_slider, self.noisy_cut_intensity_spin))
+        settings_layout.addWidget(self.noisy_cut_scale_label)
+        settings_layout.addLayout(_slider_row(self.noisy_cut_scale_slider, self.noisy_cut_scale_spin))
         settings_layout.addWidget(self.generate_caps_check)
         settings_layout.addWidget(self.override_caps_material_check)
         settings_layout.addWidget(self.caps_material_row)
@@ -523,6 +565,11 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.show_bones_check.toggled.connect(self._handle_show_bones_changed)
         self.hide_repeated_parts_check.toggled.connect(self._handle_hide_repeated_parts_changed)
         self.generate_caps_check.toggled.connect(self._handle_generate_caps_changed)
+        self.noisy_cut_check.toggled.connect(lambda _checked: self._handle_noisy_cut_controls_changed())
+        self.noisy_cut_intensity_slider.sliderReleased.connect(self._emit_settings_changed)
+        self.noisy_cut_intensity_spin.editingFinished.connect(self._emit_settings_changed)
+        self.noisy_cut_scale_slider.sliderReleased.connect(self._emit_settings_changed)
+        self.noisy_cut_scale_spin.editingFinished.connect(self._emit_settings_changed)
         self.override_caps_material_check.toggled.connect(lambda _checked: self._sync_caps_material_controls())
         self.stump_piece_check.toggled.connect(lambda _checked: self._emit_settings_changed())
         self.separate_stems_check.toggled.connect(lambda _checked: self._emit_settings_changed())
@@ -554,6 +601,9 @@ class FracturePreviewDialog(PreviewShellDialog):
                 force_stump_piece=self.stump_piece_check.isChecked(),
                 separate_stems=self.separate_stems_check.isChecked(),
                 branch_height_bias=float(self.branch_height_bias_spin.value()),
+                noisy_cut_enabled=self.noisy_cut_check.isChecked(),
+                noisy_cut_intensity=float(self.noisy_cut_intensity_spin.value()),
+                noisy_cut_scale=float(self.noisy_cut_scale_spin.value()),
             ),
             collision=FractureCollisionSettings(
                 enabled=self.collision_check.isChecked(),
@@ -595,15 +645,8 @@ class FracturePreviewDialog(PreviewShellDialog):
         self._collision_visual_base_scale = self._collision_geometry_setting(self._settings.collision)
         self._collision_visual_base_length_scale = self._collision_length_setting(self._settings.collision)
         self.current_preview = preview
-        viewport_scene = preview.viewport_scene
-        self._full_viewport_mesh = build_fracture_viewport_mesh_from_scene(viewport_scene)
-        apply_fracture_viewport_mesh(
-            self.viewport,
-            self._full_viewport_mesh,
-            scene=viewport_scene,
-            frame_camera=frame_camera,
-        )
-        self._sync_repeated_parts_visibility()
+        self._full_viewport_mesh = None
+        self._sync_repeated_parts_visibility(frame_camera=frame_camera)
         self._apply_collision_visual_settings()
         self.viewport.set_selected_cut_tokens(self._manual_cut_tokens)
         self.viewport.set_show_bones(self.show_bones_check.isChecked())
@@ -628,6 +671,11 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.branch_height_bias_spin,
             self.show_bones_check,
             self.generate_caps_check,
+            self.noisy_cut_check,
+            self.noisy_cut_intensity_slider,
+            self.noisy_cut_intensity_spin,
+            self.noisy_cut_scale_slider,
+            self.noisy_cut_scale_spin,
             self.override_caps_material_check,
             self.stump_piece_check,
             self.separate_stems_check,
@@ -670,6 +718,11 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.branch_height_bias_slider.setValue(int(round(float(settings.fracture.branch_height_bias) * 100)))
             self.branch_height_bias_spin.setValue(float(settings.fracture.branch_height_bias))
             self.generate_caps_check.setChecked(settings.fracture.generate_caps)
+            self.noisy_cut_check.setChecked(settings.fracture.noisy_cut_enabled)
+            self.noisy_cut_intensity_slider.setValue(int(round(float(settings.fracture.noisy_cut_intensity) * 100)))
+            self.noisy_cut_intensity_spin.setValue(float(settings.fracture.noisy_cut_intensity))
+            self.noisy_cut_scale_slider.setValue(int(round(float(settings.fracture.noisy_cut_scale) * 100)))
+            self.noisy_cut_scale_spin.setValue(float(settings.fracture.noisy_cut_scale))
             self.stump_piece_check.setChecked(settings.fracture.force_stump_piece)
             self.separate_stems_check.setChecked(settings.fracture.separate_stems)
             self.collision_check.setChecked(settings.collision.enabled)
@@ -691,6 +744,7 @@ class FracturePreviewDialog(PreviewShellDialog):
             if not settings.fracture.generate_caps:
                 self.override_caps_material_check.setChecked(False)
         self._sync_caps_material_controls()
+        self._sync_noisy_cut_controls()
         self._sync_collision_controls()
         self._sync_manual_controls()
 
@@ -703,6 +757,22 @@ class FracturePreviewDialog(PreviewShellDialog):
 
     def _handle_generate_caps_changed(self, _checked: bool) -> None:
         self._sync_caps_material_controls()
+        self._emit_settings_changed()
+
+    def _sync_noisy_cut_controls(self) -> None:
+        enabled = self.noisy_cut_check.isChecked()
+        for widget in (
+            self.noisy_cut_intensity_label,
+            self.noisy_cut_intensity_slider,
+            self.noisy_cut_intensity_spin,
+            self.noisy_cut_scale_label,
+            self.noisy_cut_scale_slider,
+            self.noisy_cut_scale_spin,
+        ):
+            widget.setEnabled(enabled)
+
+    def _handle_noisy_cut_controls_changed(self) -> None:
+        self._sync_noisy_cut_controls()
         self._emit_settings_changed()
 
     def _handle_collision_controls_changed(self) -> None:
@@ -826,13 +896,18 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.viewport.set_show_bones(checked)
 
     def _handle_hide_repeated_parts_changed(self, _checked: bool) -> None:
-        self._sync_repeated_parts_visibility()
+        try:
+            self._sync_repeated_parts_visibility()
+        except ValueError as exc:
+            with QSignalBlocker(self.hide_repeated_parts_check):
+                self.hide_repeated_parts_check.setChecked(True)
+            self.summary_label.setText(f"Repeated Parts remain hidden: {exc}")
 
-    def _sync_repeated_parts_visibility(self) -> None:
-        if self._full_viewport_mesh is None:
+    def _sync_repeated_parts_visibility(self, *, frame_camera: bool = False) -> None:
+        if self.current_preview is None or self.current_preview.viewport_scene is None:
             return
         hide_repeated = self.hide_repeated_parts_check.isChecked()
-        if hide_repeated:
+        if hide_repeated and self._full_viewport_mesh is not None:
             self.viewport.set_visible_vertex_count_override(self._full_viewport_mesh.base_vertex_count)
             self.viewport_mesh = replace(
                 self._full_viewport_mesh,
@@ -840,15 +915,48 @@ class FracturePreviewDialog(PreviewShellDialog):
                 uploaded_triangle_count=self._full_viewport_mesh.base_uploaded_triangle_count,
                 instance_count=0,
             )
-        else:
+            self._update_viewport_summary()
+            return
+        if not hide_repeated and self._full_viewport_mesh is not None:
             self.viewport.set_visible_vertex_count_override(None)
             self.viewport_mesh = self._full_viewport_mesh
+            self._update_viewport_summary()
+            return
+        viewport_scene = _filtered_repeated_parts_scene(
+            self.current_preview.viewport_scene,
+            include_repeated_parts=not hide_repeated,
+        )
+        self.viewport_mesh = build_fracture_viewport_mesh_from_scene(viewport_scene)
+        self.viewport.set_visible_vertex_count_override(None)
+        apply_fracture_viewport_mesh(
+            self.viewport,
+            self.viewport_mesh,
+            scene=viewport_scene,
+            frame_camera=frame_camera,
+        )
+        if not hide_repeated:
+            self._full_viewport_mesh = self.viewport_mesh
+        self._update_viewport_summary()
+
+    def _update_viewport_summary(self) -> None:
+        if self.viewport_mesh is None:
+            return
+        notices = (
+            issue.message
+            for issue in (() if self.current_preview is None else self.current_preview.diagnostics)
+            if issue.code in (
+                "fracture_manual_cut_snapped",
+                "fracture_auto_cut_shifted",
+                "fracture_noise_attenuated",
+            )
+        )
         self.summary_label.setText(
             (
                 f"{self.viewport_mesh.piece_count} pieces\n"
                 f"{self.viewport_mesh.triangle_count} preview triangles\n"
                 f"{self.viewport_mesh.uploaded_triangle_count} uploaded triangles\n"
                 f"{self.viewport_mesh.instance_count} repeated instances"
+                + "".join(f"\n{notice}" for notice in notices)
             )
         )
 
@@ -1217,6 +1325,12 @@ def apply_fracture_viewport_mesh(
     scene: ViewportScene,
     frame_camera: bool = True,
 ) -> FractureRenderPayload:
+    required_bytes = mesh.triangle_count * 3 * FRACTURE_VERTEX_STRIDE * 4
+    if required_bytes > MAX_QT_OPENGL_BUFFER_BYTES:
+        raise ValueError(
+            f"scene requires {required_bytes} bytes; Qt supports at most "
+            f"{MAX_QT_OPENGL_BUFFER_BYTES} bytes per OpenGL upload"
+        )
     payload = _build_fracture_render_payload(
         mesh,
         tint_strength=viewport.matcap_tint_strength,
@@ -1333,60 +1447,51 @@ def _append_mesh_triangles(
     orientation: Quaternion = Quaternion(1.0, 0.0, 0.0, 0.0),
     scale: Vector3 = Vector3(1.0, 1.0, 1.0),
 ) -> int:
-    points = tuple(_points(mesh))
-    offset = 0
-    triangle_count = 0
-    for count in mesh.face_vertex_counts:
-        indices = tuple(int(mesh.face_vertex_indices[offset + index]) for index in range(count))
-        offset += count
-        if count < 3:
+    counts = np.asarray(mesh.face_vertex_counts, dtype=np.int64)
+    triangle_count = int(np.maximum(counts - 2, 0).sum())
+    if triangle_count <= 0:
+        return 0
+    source_indices = np.asarray(mesh.face_vertex_indices, dtype=np.int64)
+    triangle_indices = np.empty((triangle_count, 3), dtype=np.int64)
+    source_offset = 0
+    triangle_offset = 0
+    for raw_count in counts:
+        count = int(raw_count)
+        face_indices = source_indices[source_offset : source_offset + count]
+        source_offset += count
+        face_triangle_count = max(0, count - 2)
+        if face_triangle_count == 0:
             continue
-        transformed = tuple(
-            _transform_point(points[index], translate=translate, orientation=orientation, scale=scale)
-            for index in indices
-        )
-        for index in range(1, count - 1):
-            triangle = (transformed[0], transformed[index], transformed[index + 1])
-            normal = _face_normal(triangle)
-            for point in triangle:
-                vertices.extend(
-                    (
-                        point.x,
-                        point.y,
-                        point.z,
-                        normal.x,
-                        normal.y,
-                        normal.z,
-                        color.r,
-                        color.g,
-                        color.b,
-                        color.a,
-                    )
-                )
-            triangle_count += 1
+        end = triangle_offset + face_triangle_count
+        triangle_indices[triangle_offset:end, 0] = face_indices[0]
+        triangle_indices[triangle_offset:end, 1] = face_indices[1:-1]
+        triangle_indices[triangle_offset:end, 2] = face_indices[2:]
+        triangle_offset = end
+
+    points = np.asarray(mesh.point_components, dtype=np.float32).reshape((-1, 3))
+    transformed = points * np.asarray((scale.x, scale.y, scale.z), dtype=np.float32)
+    q = orientation
+    q_vector = np.asarray((q.i, q.j, q.k), dtype=np.float32)
+    twice_cross = 2.0 * np.cross(q_vector, transformed)
+    transformed = transformed + float(q.real) * twice_cross + np.cross(q_vector, twice_cross)
+    transformed += np.asarray((translate.x, translate.y, translate.z), dtype=np.float32)
+
+    triangle_points = transformed[triangle_indices]
+    normals = np.cross(
+        triangle_points[:, 1] - triangle_points[:, 0],
+        triangle_points[:, 2] - triangle_points[:, 0],
+    )
+    lengths = np.linalg.norm(normals, axis=1)
+    valid = lengths > 0.0
+    normals[valid] /= lengths[valid, None]
+    normals[~valid] = np.asarray((0.0, 0.0, 1.0), dtype=np.float32)
+
+    rendered = np.empty((triangle_count, 3, FRACTURE_SOURCE_VERTEX_STRIDE), dtype=np.float32)
+    rendered[:, :, 0:3] = triangle_points
+    rendered[:, :, 3:6] = normals[:, None, :]
+    rendered[:, :, 6:10] = np.asarray((color.r, color.g, color.b, color.a), dtype=np.float32)
+    vertices.frombytes(rendered.tobytes(order="C"))
     return triangle_count
-
-
-def _points(mesh: GeometryBuffer):
-    for index in range(0, len(mesh.point_components), 3):
-        yield Vector3(mesh.point_components[index], mesh.point_components[index + 1], mesh.point_components[index + 2])
-
-
-def _transform_point(
-    point: Vector3,
-    *,
-    translate: Vector3,
-    orientation: Quaternion,
-    scale: Vector3,
-) -> Vector3:
-    scaled = Vector3(point.x * scale.x, point.y * scale.y, point.z * scale.z)
-    rotated = _rotate_vector(orientation, scaled)
-    return Vector3(rotated.x + translate.x, rotated.y + translate.y, rotated.z + translate.z)
-
-
-def _rotate_vector(q: Quaternion, value: Vector3) -> Vector3:
-    x, y, z = _rotate_components(q, value.x, value.y, value.z)
-    return Vector3(x, y, z)
 
 
 def _rotate_components(q: Quaternion, x: float, y: float, z: float) -> tuple[float, float, float]:
@@ -1399,20 +1504,3 @@ def _rotate_components(q: Quaternion, x: float, y: float, z: float) -> tuple[flo
         y + qw * ty + (qz * tx - qx * tz),
         z + qw * tz + (qx * ty - qy * tx),
     )
-
-
-def _face_normal(points: tuple[Vector3, Vector3, Vector3]) -> Vector3:
-    a, b, c = points
-    ux = b.x - a.x
-    uy = b.y - a.y
-    uz = b.z - a.z
-    vx = c.x - a.x
-    vy = c.y - a.y
-    vz = c.z - a.z
-    nx = uy * vz - uz * vy
-    ny = uz * vx - ux * vz
-    nz = ux * vy - uy * vx
-    length = sqrt(nx * nx + ny * ny + nz * nz)
-    if length <= 0.0:
-        return Vector3(0.0, 0.0, 1.0)
-    return Vector3(nx / length, ny / length, nz / length)

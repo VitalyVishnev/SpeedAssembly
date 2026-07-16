@@ -572,7 +572,7 @@ def test_qt_shell_convert_button_switches_to_cancel_while_running(qtbot, tmp_pat
     assert not window.wind_panel.refresh_button.isEnabled()
 
 
-def test_qt_shell_restores_last_paths_when_shared_settings_exist(qtbot, tmp_path) -> None:
+def test_qt_shell_restores_last_paths_and_refreshes_wind_groups(monkeypatch, qtbot, tmp_path) -> None:
     deps = build_default_dependencies()
     saved_xml = tmp_path / "saved.xml"
     saved_usda = tmp_path / "saved.usda"
@@ -593,6 +593,8 @@ def test_qt_shell_restores_last_paths_when_shared_settings_exist(qtbot, tmp_path
             wind_group_settings={},
         ),
     )
+    refresh_calls: list[str] = []
+    monkeypatch.setattr(MainWindow, "refresh_wind_groups", lambda self: refresh_calls.append(self.source_input.text()))
     theme = load_theme()
     window = MainWindow(
         theme,
@@ -607,6 +609,7 @@ def test_qt_shell_restores_last_paths_when_shared_settings_exist(qtbot, tmp_path
     assert window.source_input.text() == str(saved_xml)
     assert window.output_input.text() == str(saved_usda)
     assert window.convert_button.isEnabled()
+    qtbot.waitUntil(lambda: refresh_calls == [str(saved_xml)], timeout=1000)
 
 
 def test_qt_shell_auto_refreshes_wind_after_source_insert(monkeypatch, qtbot, tmp_path) -> None:

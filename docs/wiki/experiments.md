@@ -2,18 +2,21 @@
 
 This page stores rejected, superseded, or otherwise non-current approaches that still matter because they explain why the present contract exists.
 
-## Experiment: Proxy simplification by deterministic face sampling
+## Experiment: Preview simplification by deterministic face sampling
 
 Status: Rejected
 
 Context:
-Face sampling was tested as a cheaper alternative to QEM for proxy geometry.
+Face sampling was tested as a cheaper alternative to QEM for Proxy Mesh and
+later reused in Fracture Preview, including after noisy clipping.
 
 Outcome:
-It produced disconnected triangle clouds and broke the proxy topology contract.
+It produced disconnected triangle clouds and visible missing triangles. In
+Fracture Preview it could break otherwise valid clipped and capped surfaces.
 
 Keep:
-Use QEM through `fast-simplification` for proxy simplification.
+Use the shared `fast-simplification` QEM backend for Proxy Mesh and Fracture
+Preview. Simplify only after exact fracture clipping and cap construction.
 
 Related files:
 - `docs/raw/DECISIONS.md`
@@ -105,6 +108,22 @@ Manual cuts remain the explicit escape hatch for trunk or mid-segment cuts. Auto
 Related files:
 - `src/xml_to_usda/fracture_service.py`
 - `docs/wiki/decisions.md`
+
+## Experiment: Noisy geometry as an automatic cut validator
+
+Status: Rejected
+
+Context:
+Noisy Cut preflight rejected candidates whose Repeated Part bounds or cap loops
+crossed the displaced surface, then asked the planner for replacement cuts.
+
+Outcome:
+On BigSpruce it rejected the stump and every intended long branch, then selected
+six micro-branches. Geometry settings silently changed fracture structure.
+
+Keep:
+Plan once from skeleton length and operator settings. Apply noise only to the
+resulting Cut Surfaces; Repeated Part ownership follows skeleton attachment.
 
 ## Experiment: Wind Preview USD largest-skeleton autoselection
 

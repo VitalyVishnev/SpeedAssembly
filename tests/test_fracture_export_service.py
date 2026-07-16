@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from usda_test_inventory import UsdaInventory
 
+import xml_to_usda.fracture_export_service as fracture_export_service
 from xml_to_usda.fracture_collision import FractureCollisionMode, FractureCollisionSettings
 from xml_to_usda.fracture_export_service import (
     FractureCapMaterialSetting,
@@ -15,7 +16,7 @@ from xml_to_usda.fracture_export_service import (
     export_fracture_usda,
     export_fracture_usda_from_export_request,
 )
-from xml_to_usda.fracture_service import FractureError, FracturePiece, FractureSettings
+from xml_to_usda.fracture_service import FractureError, FracturePiece, FractureSettings as _FractureSettings
 from xml_to_usda.models import (
     BaseMaterialOverride,
     ConversionMode,
@@ -42,6 +43,12 @@ from xml_to_usda.models import (
     Vector2,
     Vector3,
 )
+
+
+def FractureSettings(*args, **kwargs):
+    """Keep synthetic export fixtures on the legacy face-ownership path."""
+    kwargs.setdefault("noisy_cut_enabled", False)
+    return _FractureSettings(*args, **kwargs)
 from xml_to_usda.usda_writer import write_resolved_usda_document
 
 
@@ -378,6 +385,40 @@ def test_fracture_export_from_conversion_request_resolves_current_operator_inten
     assert observed["udim_material_settings"] == request.udim_material_settings
     assert observed["prototype_source_configs"] == request.prototype_source_configs
     assert len(result.outputs) == 3
+
+
+def test_fracture_export_collision_consumes_supplied_clipped_mesh(monkeypatch) -> None:
+    resolved = _resolved_tree()
+    piece = FracturePiece(
+        index=0,
+        name="Oak_Piece_00",
+        is_root_piece=True,
+        cut_joint_token=None,
+        joint_tokens=("root",),
+        base_face_indices=(0, 1, 2),
+        repeated_part_indices=(),
+        repeated_part_names=(),
+    )
+    clipped_mesh = _strip_mesh("Clipped", (0,))
+    observed = {}
+
+    def capture_collision(model, collision_piece, _settings, *, render_mesh_name):
+        observed["mesh"] = model.base_mesh
+        observed["indices"] = collision_piece.base_face_indices
+        observed["name"] = render_mesh_name
+        return ()
+
+    monkeypatch.setattr(fracture_export_service, "build_fracture_collision_meshes", capture_collision)
+
+    _piece_resolved_model(
+        resolved,
+        piece,
+        fractured_base_mesh=clipped_mesh,
+        collision_settings=FractureCollisionSettings(enabled=True, mode=FractureCollisionMode.CONVEX),
+    )
+
+    assert observed["mesh"] is clipped_mesh
+    assert observed["indices"] == (0,)
 
 
 def test_fracture_piece_model_authors_sphere_collision_as_base_mesh_sibling() -> None:

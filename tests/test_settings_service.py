@@ -34,6 +34,23 @@ def test_load_gui_settings_returns_defaults_for_missing_file(tmp_path: Path) -> 
     assert snapshot == GuiSettingsSnapshot()
 
 
+def test_load_gui_settings_discards_legacy_fracture_preview_face_budget(tmp_path: Path) -> None:
+    settings_path = tmp_path / "gui_settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "schema_version": GUI_SETTINGS_SCHEMA_VERSION,
+                "fracture_preview_settings": {"max_base_faces_per_piece": 50_000},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    snapshot = load_gui_settings(settings_path)
+
+    assert snapshot.fracture_preview_settings.max_base_faces_per_piece == 10_000_000
+
+
 def test_load_gui_settings_rejects_payload_without_schema_version(tmp_path: Path) -> None:
     settings_path = tmp_path / "gui_settings.json"
     settings_path.write_text(
@@ -120,6 +137,9 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
                 preserve_trunk_bias=0.25,
                 separate_stems=True,
                 branch_height_bias=-0.5,
+                noisy_cut_enabled=True,
+                noisy_cut_intensity=0.42,
+                noisy_cut_scale=1.25,
             ),
             collision=FractureCollisionSettings(
                 enabled=True,
@@ -165,6 +185,9 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert payload["fracture_preview_settings"]["fracture"]["target_piece_count"] == 0
     assert payload["fracture_preview_settings"]["fracture"]["separate_stems"] is True
     assert payload["fracture_preview_settings"]["fracture"]["branch_height_bias"] == -0.5
+    assert payload["fracture_preview_settings"]["fracture"]["noisy_cut_enabled"] is True
+    assert payload["fracture_preview_settings"]["fracture"]["noisy_cut_intensity"] == 0.42
+    assert payload["fracture_preview_settings"]["fracture"]["noisy_cut_scale"] == 1.25
     assert payload["fracture_preview_settings"]["collision"]["mode"] == "sphere"
     assert payload["fracture_preview_settings"]["collision"]["enabled"] is True
     assert payload["fracture_preview_settings"]["collision"]["include_instance_parts"] is False

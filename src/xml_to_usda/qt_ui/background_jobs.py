@@ -56,6 +56,7 @@ class QtBackgroundJobsController:
 
         self._wind_refresh_thread: threading.Thread | None = None
         self._wind_json_thread: threading.Thread | None = None
+        self._wind_preview_retry_count = 0
         self._wind_preview_job = PreviewProcessJob(
             name="wind_preview",
             start_process=self._deps.start_wind_preview_process,
@@ -306,6 +307,7 @@ class QtBackgroundJobsController:
         self._window._set_status("Preparing Wind Preview...")
         if hasattr(self._window, "_handle_wind_preview_loading"):
             self._window._handle_wind_preview_loading("Preparing wind preview...")
+        self._wind_preview_retry_count = 0
         try:
             self._wind_preview_job.start_latest(request, None)
         except Exception as exc:
@@ -593,6 +595,8 @@ class QtBackgroundJobsController:
                 keep_polling = True
             if self._wind_preview_job.has_process and not self._wind_preview_job.result_received:
                 self._handle_wind_preview_process_crash()
+                if self._wind_preview_job.has_process:
+                    keep_polling = True
 
         if self._drain_proxy_preview_queue():
             keep_polling = True
@@ -743,6 +747,8 @@ class QtBackgroundJobsController:
 
     def _handle_wind_refresh_error(self, payload: _WindErrorPayload) -> None:
         self._window._clear_pending_generate_after_refresh()
+        if hasattr(self._window, "_clear_pending_wind_preview_after_refresh"):
+            self._window._clear_pending_wind_preview_after_refresh()
         details = self._deps.format_wind_error(payload.primary)
         if payload.retry is not None:
             details = (
@@ -884,6 +890,18 @@ class QtBackgroundJobsController:
 
     def _handle_wind_preview_process_crash(self) -> None:
         crash = self._wind_preview_job.crash()
+        if self._wind_preview_retry_count < 1 and crash.request is not None:
+            self._wind_preview_retry_count += 1
+            self._wind_preview_job.close_handles()
+            self._window._set_status(f"Wind Preview worker crashed once (exit code {crash.exit_code}). Retrying...")
+            if hasattr(self._window, "_handle_wind_preview_loading"):
+                self._window._handle_wind_preview_loading("Retrying after worker crash...")
+            try:
+                self._wind_preview_job.start_latest(crash.request, crash.settings)
+            except Exception as exc:
+                self._wind_preview_job.close()
+                self._handle_wind_preview_error(str(exc))
+            return
         message = f"Wind Preview worker process crashed unexpectedly (exit code {crash.exit_code})"
         message = f"{message}\n{self._format_worker_file_context(crash.queue)}"
         message = f"{message}\n{self._format_runtime_crash_context()}"
@@ -898,6 +916,7 @@ class QtBackgroundJobsController:
             return
         if self._wind_preview_job.finish_current():
             return
+        self._wind_preview_retry_count = 0
         self._window._update_action_state()
         self._window._handle_wind_preview_result(result)
 
@@ -905,6 +924,7 @@ class QtBackgroundJobsController:
         self._trace_worker("worker.error", "wind_preview", {"message": message})
         if self._wind_preview_job.finish_current():
             return
+        self._wind_preview_retry_count = 0
         self._window._update_action_state()
         if hasattr(self._window, "_handle_wind_preview_error_message"):
             self._window._handle_wind_preview_error_message(message)

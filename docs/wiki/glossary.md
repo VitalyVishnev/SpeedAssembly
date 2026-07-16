@@ -44,6 +44,9 @@
 - `Proxy Source Projection` - the narrow source-facts model used by Proxy Mesh loading: base geometry, repeated-part transforms, and source prototype geometry without full material, skeleton, or authoring resolution state.
 - `Fracturing` - a companion destructibility workflow that outputs root-pivoted static pieces.
 - `Fracture Piece` - one planned destructible tree piece in the fracture workflow.
+- `Cut Surface` - deterministic subtree-local fracture surface perpendicular to a selected skeleton bone. Manual segment cuts use the selected or nearest closed `t`; automatic branch cuts begin 30% into the first child bone and may move in 5% steps up to 80% on that same bone when source topology requires a safer cross-section.
+- `Noisy Cut` - a Cut Surface displaced by deterministic anisotropic noise relative to the local cut radius. Automatic cuts displace only into the detached child; manual cuts remain centered on the selected position. It changes clipping geometry but never the selected bones or Fracture Piece structure. Cut Intensity controls maximum depth; Chip Scale controls wavelength. Unsafe individual surfaces attenuate deterministically and report a warning.
+- `Fracture Geometry` - the shared preview/export result containing the selected Fracture Plan, clipped Base Mesh for every Fracture Piece, and its Cut Surfaces.
 - `Dynamic Wind` - the separate Unreal JSON wind output generated from the normalized skeleton.
 - `Wind Preview` - the Dynamic Wind inspection and planned authoring window. V1 is an XML source inspector; V2 adds Auto Hierarchy, manual override layers, external skeleton loading, and Dynamic Wind JSON export from the final group stack.
 - `Source Name` - any name observed in XML, FBX, or source filenames.

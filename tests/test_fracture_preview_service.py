@@ -6,13 +6,16 @@ from pathlib import Path
 
 import pytest
 
+import xml_to_usda.fracture_preview_service as fracture_preview_service
+from xml_to_usda.fracture_collision import FractureCollisionMode, FractureCollisionSettings
+from xml_to_usda.fracture_geometry import FractureGeometryPiece, FractureGeometryResult
 from xml_to_usda.fracture_preview_service import (
     FracturePreviewSettings,
     FracturePreviewSourceRequest,
     generate_fracture_preview,
     generate_fracture_preview_from_source_request,
 )
-from xml_to_usda.fracture_service import FractureError, FractureSettings
+from xml_to_usda.fracture_service import FractureError, FractureSettings as _FractureSettings, plan_fracture
 from xml_to_usda.models import (
     ConversionRequest,
     ExportMetadata,
@@ -30,6 +33,12 @@ from xml_to_usda.models import (
     TreeAsset,
     Vector3,
 )
+
+
+def FractureSettings(*args, **kwargs):
+    """Keep synthetic planner fixtures on the legacy face-ownership path."""
+    kwargs.setdefault("noisy_cut_enabled", False)
+    return _FractureSettings(*args, **kwargs)
 
 
 BIG_SPRUCE = (
@@ -194,6 +203,46 @@ def test_fracture_preview_uses_plan_membership_stable_colors_and_simplified_geom
     assert first.viewport_scene.scene_id == "Oak_fracture_preview"
     assert first.viewport_scene.stats.logical_triangles == 5
     assert first.viewport_scene.stats.instance_count == 2
+
+
+def test_noisy_preview_collision_consumes_final_clipped_piece_meshes(monkeypatch) -> None:
+    model = _tree()
+    fracture_settings = _FractureSettings(
+        target_piece_count=2,
+        output_stem="Oak",
+        noisy_cut_enabled=True,
+    )
+    plan = plan_fracture(model, replace(fracture_settings, noisy_cut_enabled=False))
+    final_meshes = tuple(_strip_mesh(f"Final_{piece.index}", (0,)) for piece in plan.pieces)
+    geometry = FractureGeometryResult(
+        plan=plan,
+        pieces=tuple(
+            FractureGeometryPiece(piece=piece, base_mesh=final_meshes[piece.index])
+            for piece in plan.pieces
+        ),
+        cut_surfaces=(),
+    )
+    collision_inputs = []
+
+    monkeypatch.setattr(fracture_preview_service, "prepare_fracture_geometry", lambda *_args, **_kwargs: geometry)
+
+    def capture_collision(collision_model, collision_piece, _settings, *, render_mesh_name):
+        collision_inputs.append((collision_model.base_mesh, collision_piece.base_face_indices, render_mesh_name))
+        return ()
+
+    monkeypatch.setattr(fracture_preview_service, "build_fracture_collision_meshes", capture_collision)
+
+    generate_fracture_preview(
+        model,
+        FracturePreviewSettings(
+            fracture=fracture_settings,
+            collision=FractureCollisionSettings(enabled=True, mode=FractureCollisionMode.CONVEX),
+        ),
+        include_viewport_scene=False,
+    )
+
+    assert tuple(mesh for mesh, _indices, _name in collision_inputs) == final_meshes
+    assert tuple(indices for _mesh, indices, _name in collision_inputs) == ((0,),) * len(final_meshes)
 
 
 def test_fracture_preview_can_skip_viewport_scene_for_worker_transport() -> None:

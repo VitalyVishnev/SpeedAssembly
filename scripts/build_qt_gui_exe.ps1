@@ -280,6 +280,15 @@ try {
             Set-Content -LiteralPath $smokeStdoutPath -Value $smokeStdout -Encoding UTF8
             Set-Content -LiteralPath $smokeStderrPath -Value $smokeStderr -Encoding UTF8
             if ($smokeProcess.ExitCode -ne 0) {
+                if (-not [string]::IsNullOrWhiteSpace($smokeStderr)) {
+                    Write-Host $smokeStderr.Trim()
+                }
+                if (Test-Path $smokeReportPath) {
+                    $failedSmokeReport = Get-Content -LiteralPath $smokeReportPath -Raw | ConvertFrom-Json
+                    foreach ($failedScenario in @($failedSmokeReport.scenarios | Where-Object { -not $_.passed })) {
+                        Write-Host ("Smoke failure [{0}]: {1}" -f $failedScenario.name, $failedScenario.error)
+                    }
+                }
                 throw "Packaged high-risk smoke failed. Report: $smokeReportPath"
             }
             if (-not (Test-Path $smokeReportPath)) {

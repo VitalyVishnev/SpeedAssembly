@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from array import array
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .dynamic_wind import default_group_settings
-from .geometry_buffers import geometry_buffer_from_mesh
 from .models import (
     CanonicalTreeModel,
     Color4,
@@ -15,7 +14,6 @@ from .models import (
     GeometryBuffer,
     Joint,
     MeshData,
-    Prototype,
     Vector3,
 )
 from .viewport_scene import (
@@ -117,11 +115,17 @@ def build_wind_viewport_scene(
     logical_triangles = 0
 
     if model.base_mesh is not None:
+        face_ranges = _face_ranges(model.base_mesh.face_vertex_counts)
         for joint_token, face_indices in sorted(_base_faces_by_joint(model.base_mesh, model.skeleton).items()):
             if not face_indices:
                 continue
             group_index = _require_group(group_by_joint, joint_token)
-            mesh = _slice_mesh_faces(model.base_mesh, tuple(face_indices), name=f"WindBase_{joint_token}")
+            mesh = _slice_mesh_faces(
+                model.base_mesh,
+                tuple(face_indices),
+                ranges=face_ranges,
+                name=f"WindBase_{joint_token}",
+            )
             batch_id = f"wind:base:{joint_token}"
             batches.append(
                 ViewportMeshBatch(
@@ -145,49 +149,6 @@ def build_wind_viewport_scene(
             uploaded_triangles += triangle_count
             logical_triangles += triangle_count
 
-    prototype_batches: set[str] = set()
-    prototype_triangles: dict[str, int] = {}
-    prototypes = {prototype.source_key: prototype for prototype in model.prototypes}
-    visible_instance_count = 0
-    for instance in sorted(model.repeated_parts, key=lambda item: item.name):
-        joint_token = _instance_joint_token(instance.name, instance.binding.joint_tokens)
-        group_index = _require_group(group_by_joint, joint_token)
-        prototype = prototypes.get(instance.prototype_key)
-        if prototype is None:
-            raise ValueError(f"wind_preview_missing_prototype: repeated part {instance.name} references {instance.prototype_key}")
-        batch_id = f"wind:prototype:{prototype.source_key}"
-        if batch_id not in prototype_batches:
-            prototype_batches.add(batch_id)
-            prototype_mesh = _prototype_geometry(prototype)
-            triangle_count = geometry_triangle_count(prototype_mesh)
-            if triangle_count <= 0:
-                raise ValueError(f"wind_preview_empty_prototype: prototype {prototype.source_name or prototype.source_key} has no faces")
-            batches.append(
-                ViewportMeshBatch(
-                    batch_id=batch_id,
-                    name=prototype.source_name or prototype.source_key,
-                    mesh=prototype_mesh,
-                    selectable_id=batch_id,
-                )
-            )
-            prototype_triangles[prototype.source_key] = triangle_count
-            uploaded_triangles += triangle_count
-        color = _selection_color(color_by_group[group_index], selection, group_index, joint_token, selected_joints)
-        draw_calls.append(
-            ViewportDrawCall(
-                draw_id=f"wind:instance:{instance.name}",
-                batch_id=batch_id,
-                translate=instance.position,
-                orientation=instance.orientation,
-                scale=instance.scale,
-                tint=color,
-                selectable_id=f"wind:instance:{instance.name}",
-                visibility_group="repeated_parts",
-            )
-        )
-        visible_instance_count += 1
-        logical_triangles += prototype_triangles[prototype.source_key]
-
     bone_segments = _bone_segments(model.skeleton, group_by_joint, color_by_group, selection, selected_joints)
     if not draw_calls and not bone_segments:
         raise ValueError("wind_preview_empty_skeleton: wind preview requires geometry or skeleton bone segments.")
@@ -199,7 +160,7 @@ def build_wind_viewport_scene(
         stats=ViewportStats(
             uploaded_triangles=uploaded_triangles,
             logical_triangles=logical_triangles,
-            instance_count=visible_instance_count,
+            instance_count=0,
             batch_count=len(batches),
             draw_call_count=len(draw_calls),
         ),
@@ -218,6 +179,44 @@ def build_wind_viewport_bone_segments(
     color_by_group = {group.group_index: group.color for group in groups}
     selected_joints = _selected_joint_tokens(model.skeleton, group_by_joint, selection)
     return _bone_segments(model.skeleton, group_by_joint, color_by_group, selection, selected_joints)
+
+
+def recolor_wind_viewport_scene(
+    scene: ViewportScene,
+    model: CanonicalTreeModel,
+    dynamic_wind: DynamicWindData,
+    *,
+    selection: WindViewportSelection | None = None,
+) -> ViewportScene:
+    group_by_joint = _group_by_joint(dynamic_wind)
+    color_by_group = {group.group_index: group.color for group in build_wind_viewport_groups(dynamic_wind)}
+    selected_joints = _selected_joint_tokens(model.skeleton, group_by_joint, selection)
+    draw_calls = []
+    for draw in scene.draw_calls:
+        joint_token = None
+        if draw.draw_id.startswith("wind:base:") and draw.draw_id.endswith(":draw"):
+            joint_token = draw.draw_id[len("wind:base:") : -len(":draw")]
+        if joint_token is None:
+            draw_calls.append(draw)
+            continue
+        group_index = _require_group(group_by_joint, joint_token)
+        draw_calls.append(
+            replace(
+                draw,
+                tint=_selection_color(
+                    color_by_group[group_index],
+                    selection,
+                    group_index,
+                    joint_token,
+                    selected_joints,
+                ),
+            )
+        )
+    return replace(
+        scene,
+        draw_calls=tuple(draw_calls),
+        bone_segments=_bone_segments(model.skeleton, group_by_joint, color_by_group, selection, selected_joints),
+    )
 
 
 def subtree_root_from_pick_token(pick_token: str) -> str:
@@ -423,12 +422,17 @@ def _base_faces_by_joint(mesh: MeshData, skeleton: tuple[Joint, ...]) -> dict[st
     return by_joint
 
 
-def _slice_mesh_faces(mesh: MeshData, face_indices: tuple[int, ...], *, name: str) -> GeometryBuffer:
+def _slice_mesh_faces(
+    mesh: MeshData,
+    face_indices: tuple[int, ...],
+    *,
+    ranges: tuple[tuple[int, int], ...],
+    name: str,
+) -> GeometryBuffer:
     original_to_new_point: dict[int, int] = {}
     points = array("f")
     face_counts = array("i")
     face_vertex_indices = array("i")
-    ranges = _face_ranges(mesh.face_vertex_counts)
     for face_index in face_indices:
         start, end = ranges[face_index]
         face_counts.append(end - start)
@@ -457,20 +461,6 @@ def _face_ranges(face_vertex_counts: tuple[int, ...]) -> tuple[tuple[int, int], 
         ranges.append((offset, end))
         offset = end
     return tuple(ranges)
-
-
-def _prototype_geometry(prototype: Prototype) -> GeometryBuffer:
-    if prototype.geometry_payload is not None:
-        return prototype.geometry_payload
-    if prototype.mesh is not None:
-        return geometry_buffer_from_mesh(prototype.mesh)
-    raise ValueError(f"wind_preview_empty_prototype: prototype {prototype.source_name or prototype.source_key} has no mesh payload.")
-
-
-def _instance_joint_token(instance_name: str, joint_tokens: tuple[str, ...]) -> str:
-    if not joint_tokens:
-        raise ValueError(f"wind_preview_missing_instance_binding: repeated part {instance_name} has no Attachment joint.")
-    return joint_tokens[0]
 
 
 def _require_group(group_by_joint: dict[str, int], joint_token: str) -> int:

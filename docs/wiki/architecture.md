@@ -22,6 +22,9 @@ Main systems:
 - `src/xml_to_usda/fbx_adapter.py` and `src/xml_to_usda/fbx_import_supervisor.py` - Autodesk FBX integration and helper process control.
 - `src/xml_to_usda/cache_maintenance.py` - bounded runtime cache maintenance for job leftovers, FBX payloads, source-model caches, Proxy Source Projection caches, Fracture Preview source-facts caches, and stale cache temp files.
 - `src/xml_to_usda/proxy_mesh_service.py`, `src/xml_to_usda/fracture_service.py`, and related workers - companion workflows.
+- `src/xml_to_usda/qem_simplification.py` - shared topology-preserving `fast-simplification` QEM backend used by Proxy Mesh and Fracture Preview diagnostic geometry.
+- `src/xml_to_usda/fracture_geometry.py` - deep Fracture Geometry module shared by preview and export; owns subtree-local Cut Surfaces, deterministic noisy clipping, attribute interpolation, intersection-loop caps, and manual cross-section snapping. Cut planning and Repeated Part attachment ownership stay outside geometry.
+- `src/xml_to_usda/fracture_worker_subprocess.py` - crash-isolated persistent Fracture Preview worker. One server handles sequential slider updates, reuses the in-memory source model, and is terminated/restarted on cancel or crash; export remains a one-shot worker.
 - `src/xml_to_usda/wind_preview_service.py`, `src/xml_to_usda/wind_viewport_scene.py`, `src/xml_to_usda/wind_group_stack.py`, and `src/xml_to_usda/wind_external_skeleton.py` - Wind Preview source service, Qt-free viewport scene adapter, manual override stack, and skeleton-only external FBX/USD loading.
 - `src/xml_to_usda/proxy_source_projection.py` - typed Proxy Source Projection loading/cache for Proxy Mesh jobs that need only base geometry, repeated-part transforms, and source prototype geometry.
 - `src/xml_to_usda/mesh_pruning.py` - shared deterministic percentage-based face pruning for preview/proxy workflows that need to drop the smallest disconnected base-mesh islands before their own simplification pass.
@@ -42,11 +45,21 @@ base, manual override layers sit above it, and the flattened result writes the
 existing Dynamic Wind JSON schema. Auto Hierarchy derives groups from skeleton
 topology and SpeedTree/file joint ordering, not from XML wind generator labels.
 Optional per-layer `Continue line` flags let endpoint-continuous child chains
-stay in the same group when explicitly enabled. External Skeleton loading reads
+stay in the same group when explicitly enabled. A restored valid XML path
+automatically refreshes the main Wind groups after startup; the manual Refresh
+button remains available. A Preview request made during that refresh is queued
+until inspection finishes, so the GUI and isolated preview worker do not load
+the same large source concurrently. External Skeleton loading reads
 FBX or USD/UsdSkel payloads as skeleton-only previews. Source loading, USD
 Skeleton prim enumeration, and scene build run in a file-backed worker process
 so XML/external skeleton faults do not crash the Qt shell. The GUI consumes the
-worker-built initial scene directly; only actual grouping edits rebuild it. The Wind Preview right panel uses
+worker-built initial scene directly. The worker result keeps only the compact
+base-mesh viewport scene and skeleton; Repeated Parts are intentionally absent
+because Wind Preview is a skeleton inspection workflow. It does not serialize
+the full CanonicalTreeModel beside the scene. Grouping edits recolor that scene and
+replace its bone overlay without rebuilding source geometry. Base-mesh face
+ranges are computed once per scene rather than once per joint. The Wind Preview
+right panel uses
 one global settings scroll; the Layers block is the only nested scroll and can
 be resized vertically with a local handle even when the global panel scrollbar
 is visible. External Skeleton USD loading uses OpenUSD/`pxr` from `usd-core`
@@ -54,6 +67,9 @@ for normal USD support. Text `.usda` and ASCII `.usd` files can still be read
 through the deterministic text fallback, but multiple Skeleton prims require
 an explicit operator choice instead of any largest-skeleton heuristic.
 The SpeedTree XML worker path does not import the External Skeleton backend.
+An unexpected native Wind Preview worker exit is retried once in a clean
+process. Worker subprocesses enable Python faulthandler so a repeated native
+failure leaves a diagnostic stack in the captured stderr file.
 Release packaging includes only the OpenUSD modules, plugin metadata, and
 release DLLs required by `Usd.Stage`/`UsdSkel`; debug and unrelated pxr
 binaries stay outside the GUI package.

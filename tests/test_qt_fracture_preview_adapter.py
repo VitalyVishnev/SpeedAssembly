@@ -15,8 +15,12 @@ from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QScrollArea
 
 from xml_to_usda.fracture_collision import FractureCollisionMode, FractureCollisionSettings
-from xml_to_usda.fracture_preview_service import FracturePreviewSettings, generate_fracture_preview
-from xml_to_usda.fracture_service import FractureSettings
+from xml_to_usda.fracture_preview_service import (
+    FracturePreviewSettings,
+    FracturePreviewSourceRequest,
+    generate_fracture_preview,
+)
+from xml_to_usda.fracture_service import FractureSettings as _FractureSettings
 from xml_to_usda.fracture_preview_service import FracturePreviewBoneSegment
 from xml_to_usda.models import (
     ExportMetadata,
@@ -31,6 +35,12 @@ from xml_to_usda.models import (
     TreeAsset,
     Vector3,
 )
+
+
+def FractureSettings(*args, **kwargs):
+    """Keep synthetic viewport fixtures on the legacy face-ownership path."""
+    kwargs.setdefault("noisy_cut_enabled", False)
+    return _FractureSettings(*args, **kwargs)
 from xml_to_usda.qt_ui.fracture_preview import (
     FRACTURE_MATCAP_TINT_STRENGTH,
     FRACTURE_SOURCE_VERTEX_STRIDE,
@@ -40,8 +50,9 @@ from xml_to_usda.qt_ui.fracture_preview import (
     apply_fracture_viewport_mesh,
     build_fracture_viewport_mesh,
 )
-from xml_to_usda.qt_ui.window import _fracture_preview_visual_only_settings_changed
+from xml_to_usda.qt_ui.window import MainWindow, _fracture_preview_visual_only_settings_changed
 from xml_to_usda.qt_ui.viewport import (
+    MAX_QT_OPENGL_BUFFER_BYTES,
     MatcapViewport,
     _finish_ghost_mesh_draw,
     _prepare_ghost_mesh_draw,
@@ -305,6 +316,41 @@ def test_fracture_preview_dialog_uses_prebuilt_viewport_scene(qtbot, monkeypatch
 
     assert dialog.viewport_mesh is not None
     assert dialog.viewport_mesh.piece_count == 3
+
+
+def test_fracture_preview_hides_repeated_parts_before_building_the_upload_payload(qtbot) -> None:
+    preview = generate_fracture_preview(
+        _tree(),
+        FracturePreviewSettings(
+            fracture=FractureSettings(target_piece_count=3, output_stem="Oak"),
+            max_base_faces_per_piece=1,
+            max_prototype_faces=1,
+        ),
+    )
+
+    dialog = FracturePreviewDialog(settings=FracturePreviewSettings(), preview=preview)
+    qtbot.addWidget(dialog)
+
+    assert dialog.viewport_mesh is not None
+    assert dialog.viewport_mesh.instance_count == 0
+    assert dialog.viewport._precomputed_matcap_vertices is not None
+    assert dialog.viewport._vertex_count == dialog.viewport_mesh.base_vertex_count
+    assert dialog.viewport_mesh.triangle_count < preview.viewport_scene.stats.logical_triangles
+
+
+def test_fracture_preview_rejects_an_oversized_upload_before_allocating_it(qtbot) -> None:
+    preview = generate_fracture_preview(_tree(), FracturePreviewSettings(fracture=FractureSettings(target_piece_count=3)))
+    mesh = build_fracture_viewport_mesh(preview, include_repeated_parts=False)
+    oversized_triangle_count = MAX_QT_OPENGL_BUFFER_BYTES // (3 * FRACTURE_VERTEX_STRIDE * 4) + 1
+    viewport = MatcapViewport()
+    qtbot.addWidget(viewport)
+
+    with pytest.raises(ValueError, match="Qt supports at most"):
+        apply_fracture_viewport_mesh(
+            viewport,
+            replace(mesh, triangle_count=oversized_triangle_count),
+            scene=preview.viewport_scene,
+        )
 
 
 def test_fracture_preview_dialog_builds_viewport_scene_for_worker_result(qtbot) -> None:
@@ -573,7 +619,7 @@ def test_fracture_preview_dialog_enables_manual_bones_visibility_and_hides_repea
     assert preview.instances
 
 
-def test_fracture_preview_hide_repeated_parts_toggles_without_reuploading_mesh(qtbot) -> None:
+def test_fracture_preview_reuses_full_payload_after_first_repeated_parts_show(qtbot, monkeypatch) -> None:
     preview = generate_fracture_preview(
         _tree(),
         FracturePreviewSettings(
@@ -584,20 +630,24 @@ def test_fracture_preview_hide_repeated_parts_toggles_without_reuploading_mesh(q
     )
     dialog = FracturePreviewDialog(settings=FracturePreviewSettings(), preview=preview)
     qtbot.addWidget(dialog)
-    upload_calls = 0
+    apply_calls = 0
+    import xml_to_usda.qt_ui.fracture_preview as fracture_preview_ui
+    original_apply = fracture_preview_ui.apply_fracture_viewport_mesh
 
-    def count_upload() -> None:
-        nonlocal upload_calls
-        upload_calls += 1
+    def count_apply(*args, **kwargs):
+        nonlocal apply_calls
+        apply_calls += 1
+        return original_apply(*args, **kwargs)
 
-    dialog.viewport._upload_mesh = count_upload  # type: ignore[method-assign]
+    monkeypatch.setattr(fracture_preview_ui, "apply_fracture_viewport_mesh", count_apply)
 
     dialog.hide_repeated_parts_check.setChecked(False)
     dialog.hide_repeated_parts_check.setChecked(True)
+    dialog.hide_repeated_parts_check.setChecked(False)
 
-    assert upload_calls == 0
+    assert apply_calls == 1
     assert dialog.viewport_mesh is not None
-    assert dialog.viewport_mesh.instance_count == 0
+    assert dialog.viewport_mesh.instance_count == 2
 
 
 def test_fracture_preview_dialog_reset_cuts_clears_manual_session_tokens(qtbot) -> None:
@@ -670,6 +720,9 @@ def test_fracture_preview_dialog_round_trips_v1_auto_controls(qtbot) -> None:
                 target_piece_count=0,
                 separate_stems=True,
                 branch_height_bias=-0.5,
+                noisy_cut_enabled=True,
+                noisy_cut_intensity=0.42,
+                noisy_cut_scale=1.25,
             )
         )
     )
@@ -680,15 +733,53 @@ def test_fracture_preview_dialog_round_trips_v1_auto_controls(qtbot) -> None:
     assert dialog.piece_count_spin.value() == 0
     assert dialog.separate_stems_check.isChecked()
     assert dialog.branch_height_bias_spin.value() == pytest.approx(-0.5)
+    assert dialog.noisy_cut_check.isChecked()
+    assert dialog.noisy_cut_intensity_spin.value() == pytest.approx(0.42)
+    assert dialog.noisy_cut_scale_spin.value() == pytest.approx(1.25)
 
     dialog.piece_count_spin.setValue(7)
     dialog.separate_stems_check.setChecked(False)
     dialog.branch_height_bias_spin.setValue(0.75)
+    dialog.noisy_cut_check.setChecked(False)
+    dialog.noisy_cut_intensity_spin.setValue(0.6)
+    dialog.noisy_cut_scale_spin.setValue(0.8)
 
     settings = dialog.settings().fracture
     assert settings.target_piece_count == 7
     assert settings.separate_stems is False
     assert settings.branch_height_bias == pytest.approx(0.75)
+    assert settings.noisy_cut_enabled is False
+    assert settings.noisy_cut_intensity == pytest.approx(0.6)
+    assert settings.noisy_cut_scale == pytest.approx(0.8)
+
+
+def test_noisy_cut_controls_participate_in_preview_cache_key() -> None:
+    request = FracturePreviewSourceRequest(input_path="tree.xml")
+    baseline = FracturePreviewSettings(
+        fracture=FractureSettings(
+            noisy_cut_enabled=True,
+            noisy_cut_intensity=0.35,
+            noisy_cut_scale=0.65,
+        )
+    )
+
+    baseline_key = MainWindow._fracture_preview_cache_key(None, request, baseline)
+
+    assert baseline_key != MainWindow._fracture_preview_cache_key(
+        None,
+        request,
+        replace(baseline, fracture=replace(baseline.fracture, noisy_cut_enabled=False)),
+    )
+    assert baseline_key != MainWindow._fracture_preview_cache_key(
+        None,
+        request,
+        replace(baseline, fracture=replace(baseline.fracture, noisy_cut_intensity=0.6)),
+    )
+    assert baseline_key != MainWindow._fracture_preview_cache_key(
+        None,
+        request,
+        replace(baseline, fracture=replace(baseline.fracture, noisy_cut_scale=1.2)),
+    )
 
 
 def test_fracture_viewport_exploded_view_offsets_bone_overlay_without_reuploading_mesh(qtbot) -> None:

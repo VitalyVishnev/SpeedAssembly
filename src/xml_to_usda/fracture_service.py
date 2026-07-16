@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import sqrt
+from typing import Callable
 
 from .models import CanonicalTreeModel, Joint, RepeatedPartInstance, ValidationIssue, Vector3
 
@@ -39,6 +40,9 @@ class FractureSettings:
     force_stump_piece: bool = False
     separate_stems: bool = False
     branch_height_bias: float = 0.0
+    noisy_cut_enabled: bool = True
+    noisy_cut_intensity: float = 0.35
+    noisy_cut_scale: float = 0.65
 
 
 @dataclass(frozen=True)
@@ -114,6 +118,8 @@ def plan_fracture(
     settings: FractureSettings | None = None,
     *,
     analysis_cache: _FracturePlanCache | None = None,
+    excluded_cut_tokens: frozenset[str] = frozenset(),
+    candidate_validator: Callable[[FractureCutSite], bool] | None = None,
 ) -> FracturePlan:
     resolved_settings = settings or FractureSettings()
     _validate_settings(resolved_settings)
@@ -141,16 +147,16 @@ def plan_fracture(
     )
 
     selected: list[FractureCutSite] = _manual_cut_sites(resolved_settings, graph, subtree_base_face_counts)
-    if resolved_settings.force_stump_piece:
-        stump_cut = _stump_cut_site(
+    rejected: list[FractureCutSite] = []
+    stump_cut_sites = (
+        _stump_cut_sites(
             graph,
             subtree_base_face_counts,
-            main_axis=main_axis,
+            stem_axes=analysis_cache.stem_axes,
         )
-        if stump_cut is not None and all(cut.joint_token != stump_cut.joint_token for cut in selected):
-            selected.append(stump_cut)
-            selected = _ordered_cut_sites_for_settings(selected, graph)
-    rejected: list[FractureCutSite] = []
+        if resolved_settings.force_stump_piece
+        else ()
+    )
     pieces = _build_pieces(
         model,
         graph,
@@ -160,8 +166,38 @@ def plan_fracture(
     )
     _raise_for_empty_manual_cut_pieces(selected, pieces)
 
+    if resolved_settings.force_stump_piece:
+        for stump_cut in stump_cut_sites:
+            if stump_cut.joint_token in excluded_cut_tokens:
+                rejected.append(stump_cut)
+                continue
+            if any(cut.joint_token == stump_cut.joint_token for cut in selected):
+                continue
+            if candidate_validator is not None and not candidate_validator(stump_cut):
+                rejected.append(stump_cut)
+                continue
+            trial_selected = _ordered_cut_sites_for_settings(selected + [stump_cut], graph)
+            trial_pieces = _build_pieces(
+                model,
+                graph,
+                base_face_owner_by_index,
+                trial_selected,
+                output_stem=resolved_settings.output_stem,
+            )
+            if len(trial_pieces) == len(selected) + 2 and all(piece.base_face_indices for piece in trial_pieces):
+                selected = trial_selected
+                pieces = trial_pieces
+            else:
+                rejected.append(stump_cut)
+
     for cut_site in stem_cut_sites:
+        if cut_site.joint_token in excluded_cut_tokens:
+            rejected.append(cut_site)
+            continue
         if any(existing.joint_token == cut_site.joint_token for existing in selected):
+            continue
+        if candidate_validator is not None and not candidate_validator(cut_site):
+            rejected.append(cut_site)
             continue
         trial_selected = _ordered_cut_sites_for_settings(selected + [cut_site], graph)
         trial_pieces = _build_pieces(
@@ -171,7 +207,10 @@ def plan_fracture(
             trial_selected,
             output_stem=resolved_settings.output_stem,
         )
-        if len(trial_pieces) == len(selected) + 2 and all(piece.base_face_indices for piece in trial_pieces):
+        if (
+            len(trial_pieces) == len(selected) + 2
+            and all(piece.base_face_indices for piece in trial_pieces)
+        ):
             selected = trial_selected
             pieces = trial_pieces
         else:
@@ -179,10 +218,16 @@ def plan_fracture(
 
     automatic_branch_count = 0
     for cut_site in branch_cut_sites:
+        if cut_site.joint_token in excluded_cut_tokens:
+            rejected.append(cut_site)
+            continue
         if any(existing.joint_token == cut_site.joint_token for existing in selected):
             continue
         if automatic_branch_count >= resolved_settings.target_piece_count:
             break
+        if candidate_validator is not None and not candidate_validator(cut_site):
+            rejected.append(cut_site)
+            continue
         trial_selected = _ordered_cut_sites_for_settings(selected + [cut_site], graph)
         trial_pieces = _build_pieces(
             model,
@@ -191,7 +236,10 @@ def plan_fracture(
             trial_selected,
             output_stem=resolved_settings.output_stem,
         )
-        if len(trial_pieces) == len(selected) + 2 and all(piece.base_face_indices for piece in trial_pieces):
+        if (
+            len(trial_pieces) == len(selected) + 2
+            and all(piece.base_face_indices for piece in trial_pieces)
+        ):
             selected = trial_selected
             pieces = trial_pieces
             automatic_branch_count += 1
@@ -199,14 +247,40 @@ def plan_fracture(
             rejected.append(cut_site)
 
     diagnostics = candidate_diagnostics + _manual_piece_count_diagnostics(resolved_settings, pieces)
+    selected_stump_count = sum(cut.reason == "stump_piece" for cut in selected)
+    if selected_stump_count < len(stump_cut_sites):
+        diagnostics += (
+            ValidationIssue(
+                severity="warning",
+                code="fracture_stump_count_clamped",
+                message=(
+                    "Fracture stump count was clamped because a requested stem cut did not satisfy geometry, "
+                    "topology, cap, or Repeated Part ownership invariants: "
+                    f"requested {len(stump_cut_sites)}, actual {selected_stump_count}."
+                ),
+            ),
+        )
+    selected_stem_count = sum(cut.reason == "auto_stem_length" for cut in selected)
+    if selected_stem_count < len(stem_cut_sites):
+        diagnostics += (
+            ValidationIssue(
+                severity="warning",
+                code="fracture_stem_count_clamped",
+                message=(
+                    "Fracture stem separation was clamped because a requested stem cut did not satisfy geometry, "
+                    "topology, cap, or Repeated Part ownership invariants: "
+                    f"requested {len(stem_cut_sites)}, actual {selected_stem_count}."
+                ),
+            ),
+        )
     if automatic_branch_count < resolved_settings.target_piece_count:
         diagnostics += (
             ValidationIssue(
                 severity="warning",
                 code="fracture_branch_count_clamped",
                 message=(
-                    "Fracture branch count was clamped because no remaining safe branch base "
-                    "could produce a piece with base mesh faces: "
+                    "Fracture branch count was clamped because no remaining branch cut "
+                    "satisfied geometry, topology, and Repeated Part ownership invariants: "
                     f"requested {resolved_settings.target_piece_count}, actual {automatic_branch_count}."
                 ),
             ),
@@ -283,6 +357,14 @@ def _validate_settings(settings: FractureSettings) -> None:
             )
     if not isinstance(settings.generate_caps, bool):
         raise FractureError(f"Fracture generate_caps must be a bool, got {type(settings.generate_caps).__name__}.")
+    if not isinstance(settings.noisy_cut_enabled, bool):
+        raise FractureError(
+            f"Fracture noisy_cut_enabled must be a bool, got {type(settings.noisy_cut_enabled).__name__}."
+        )
+    if not 0.0 <= float(settings.noisy_cut_intensity) <= 1.0:
+        raise FractureError("Fracture noisy_cut_intensity must be between 0 and 1.")
+    if not 0.1 <= float(settings.noisy_cut_scale) <= 2.0:
+        raise FractureError("Fracture noisy_cut_scale must be between 0.1 and 2.")
     if not 0.0 <= float(settings.preserve_trunk_bias) <= 1.0:
         raise FractureError("Fracture preserve_trunk_bias must be between 0 and 1.")
     if not isinstance(settings.force_stump_piece, bool):
@@ -633,30 +715,50 @@ def _height_bias_factor(
     return 1.0 + abs(bias) * direction
 
 
-def _stump_cut_site(
+def _stump_cut_sites(
     graph: _SkeletonGraph,
     subtree_base_face_counts: dict[str, int],
     *,
-    main_axis: tuple[str, ...],
-) -> FractureCutSite | None:
-    if len(main_axis) < 2:
-        return None
-    root_token = main_axis[0]
-    child_token = main_axis[1]
-    child = graph.joint_by_name[child_token]
-    if child.parent != root_token:
-        return None
-    total_faces = subtree_base_face_counts.get(root_token, 0)
-    child_faces = subtree_base_face_counts.get(child_token, 0)
-    if child_faces <= 0 or total_faces - child_faces <= 0:
-        return None
-    return FractureCutSite(
-        joint_token=child_token,
-        kind="joint",
-        reason="stump_piece",
-        parent_joint_token=root_token,
-        child_joint_token=child_token,
-    )
+    stem_axes: tuple[tuple[str, ...], ...],
+) -> tuple[FractureCutSite, ...]:
+    cut_sites: list[FractureCutSite] = []
+    multi_stem = len(stem_axes) > 1
+    for axis in stem_axes:
+        if len(axis) < 2:
+            continue
+        root_token, child_token = axis[:2]
+        child = graph.joint_by_name[child_token]
+        if child.parent != root_token:
+            continue
+        total_faces = subtree_base_face_counts.get(root_token, 0)
+        child_faces = subtree_base_face_counts.get(child_token, 0)
+        if child_faces <= 0:
+            continue
+        if multi_stem:
+            segment_t = 0.95
+            cut_sites.append(
+                FractureCutSite(
+                    joint_token=format_manual_segment_cut_token(root_token, child_token, segment_t),
+                    kind="manual_segment",
+                    reason="stump_piece",
+                    parent_joint_token=root_token,
+                    child_joint_token=child_token,
+                    segment_t=segment_t,
+                )
+            )
+            continue
+        if total_faces - child_faces <= 0:
+            continue
+        cut_sites.append(
+            FractureCutSite(
+                joint_token=child_token,
+                kind="joint",
+                reason="stump_piece",
+                parent_joint_token=root_token,
+                child_joint_token=child_token,
+            )
+        )
+    return tuple(cut_sites)
 
 
 def _build_pieces(
@@ -697,6 +799,13 @@ def _build_pieces(
             face_centroid = face_centroids[face_index]
             if face_centroid is None:
                 continue
+            owner = _segment_parent_side_owner(
+                graph,
+                face_centroid,
+                owner,
+                segment_cut_sites,
+                owner_by_joint,
+            )
             segment_owner = _spatial_segment_cut_owner(
                 graph,
                 face_centroid,
@@ -738,6 +847,31 @@ def _build_pieces(
             )
         )
     return tuple(pieces)
+
+
+def _segment_parent_side_owner(
+    graph: _SkeletonGraph,
+    face_centroid: Vector3,
+    current_owner: str | None,
+    segment_cut_sites: list[FractureCutSite],
+    owner_by_joint: dict[str, str | None],
+) -> str | None:
+    for cut_site in segment_cut_sites:
+        if current_owner != cut_site.joint_token:
+            continue
+        parent = cut_site.parent_joint_token
+        child = cut_site.child_joint_token
+        segment_t = cut_site.segment_t
+        if parent is None or child is None or segment_t is None:
+            continue
+        projected_t = _project_point_to_segment_t(
+            face_centroid,
+            graph.joint_by_name[parent].bind_translate,
+            graph.joint_by_name[child].bind_translate,
+        )
+        if projected_t < segment_t:
+            return owner_by_joint[parent]
+    return current_owner
 
 
 def _deepest_selected_cut_owner(

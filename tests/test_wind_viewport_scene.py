@@ -29,13 +29,25 @@ from xml_to_usda.wind_viewport_scene import (
     build_auto_wind_viewport_data,
     build_wind_viewport_groups,
     build_wind_viewport_scene,
+    recolor_wind_viewport_scene,
     subtree_root_from_pick_token,
 )
 
 
-def test_wind_viewport_scene_uses_xml_wind_groups_for_base_and_instances() -> None:
+def test_wind_viewport_scene_uses_xml_wind_groups_for_base_and_omits_repeated_parts(monkeypatch) -> None:
     model = _tree_model()
     dynamic_wind = build_dynamic_wind_data(model.skeleton)
+    range_calls = 0
+    from xml_to_usda import wind_viewport_scene
+
+    original_face_ranges = wind_viewport_scene._face_ranges
+
+    def counted_face_ranges(face_vertex_counts):
+        nonlocal range_calls
+        range_calls += 1
+        return original_face_ranges(face_vertex_counts)
+
+    monkeypatch.setattr(wind_viewport_scene, "_face_ranges", counted_face_ranges)
 
     groups = build_wind_viewport_groups(dynamic_wind)
     scene = build_wind_viewport_scene(model, dynamic_wind)
@@ -46,16 +58,16 @@ def test_wind_viewport_scene_uses_xml_wind_groups_for_base_and_instances() -> No
     assert [draw.draw_id for draw in scene.draw_calls] == [
         "wind:base:bone_001:draw",
         "wind:base:root:draw",
-        "wind:instance:leaf_001",
     ]
     assert [segment.segment_id for segment in scene.bone_segments] == [
         "bone:root->root",
         "bone:root->bone_001",
         "bone:bone_001->bone_002",
     ]
-    assert scene.stats.uploaded_triangles == 3
-    assert scene.stats.logical_triangles == 3
-    assert scene.stats.instance_count == 1
+    assert scene.stats.uploaded_triangles == 2
+    assert scene.stats.logical_triangles == 2
+    assert scene.stats.instance_count == 0
+    assert range_calls == 1
 
 
 def test_wind_viewport_scene_accepts_skeleton_only_external_preview() -> None:
@@ -77,10 +89,24 @@ def test_wind_viewport_selection_highlights_group_without_mutating_membership() 
     scene = build_wind_viewport_scene(model, dynamic_wind, selection=WindViewportSelection(group_index=2))
 
     alpha_by_draw = {draw.draw_id: draw.tint.a for draw in scene.draw_calls if draw.tint is not None}
-    assert alpha_by_draw["wind:instance:leaf_001"] == pytest.approx(SELECTED_ALPHA)
     assert alpha_by_draw["wind:base:root:draw"] == pytest.approx(MUTED_ALPHA)
     assert alpha_by_draw["wind:base:bone_001:draw"] == pytest.approx(MUTED_ALPHA)
     assert [assignment.simulation_group_index for assignment in dynamic_wind.joint_assignments] == [0, 1, 2]
+
+
+def test_wind_viewport_scene_can_recolor_compact_preview_without_source_geometry() -> None:
+    model = _tree_model()
+    dynamic_wind = build_dynamic_wind_data(model.skeleton)
+    scene = build_wind_viewport_scene(model, dynamic_wind)
+    compact_model = replace(model, base_mesh=None, prototypes=())
+    selection = WindViewportSelection(group_index=2)
+
+    recolored = recolor_wind_viewport_scene(scene, compact_model, dynamic_wind, selection=selection)
+    rebuilt = build_wind_viewport_scene(model, dynamic_wind, selection=selection)
+
+    assert [draw.tint for draw in recolored.draw_calls] == [draw.tint for draw in rebuilt.draw_calls]
+    assert recolored.mesh_batches is scene.mesh_batches
+    assert recolored.bone_segments == rebuilt.bone_segments
 
 
 def test_auto_wind_viewport_groups_follow_trunk_then_first_branch_order() -> None:
@@ -213,7 +239,6 @@ def test_wind_viewport_subtree_selection_uses_descendant_joints() -> None:
     alpha_by_draw = {draw.draw_id: draw.tint.a for draw in scene.draw_calls if draw.tint is not None}
     assert alpha_by_draw["wind:base:root:draw"] == pytest.approx(MUTED_ALPHA)
     assert alpha_by_draw["wind:base:bone_001:draw"] == pytest.approx(SELECTED_ALPHA)
-    assert alpha_by_draw["wind:instance:leaf_001"] == pytest.approx(SELECTED_ALPHA)
     selected_segments = [segment.child_token for segment in scene.bone_segments if segment.selected]
     assert selected_segments == ["bone_001", "bone_002"]
     assert subtree_root_from_pick_token("root->bone_001@0.500") == "bone_001"
@@ -237,6 +262,9 @@ def test_wind_preview_service_falls_back_to_auto_when_xml_generator_labels_are_m
 
     result = generate_wind_preview_from_request(type("Request", (), {"input_path": "tree.xml"})())
 
+    assert result.source_model.base_mesh is None
+    assert result.source_model.prototypes == ()
+    assert result.source_model.repeated_parts == ()
     assert result.xml_groups_available is False
     assert result.preferred_grouping_mode == "auto"
     assert result.diagnostics[-1].code == "wind_preview_xml_groups_unavailable"

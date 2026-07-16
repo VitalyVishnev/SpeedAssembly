@@ -24,8 +24,8 @@ from .fracture_collision import (
     collision_render_mesh_name,
     validated_collision_settings,
 )
-from .fracture_geometry import slice_mesh_faces
-from .fracture_service import FractureError, FracturePiece, FracturePlan, FractureSettings, plan_fracture
+from .fracture_geometry import prepare_fracture_geometry, slice_mesh_faces
+from .fracture_service import FractureError, FracturePiece, FracturePlan, FractureSettings
 from .job_control import throw_if_cancelled
 from .models import (
     BaseMaterialOverride,
@@ -222,12 +222,18 @@ def export_fracture_usda(
     )
     resolved_collision_settings = validated_collision_settings(collision_settings)
     cap_material_id = _cap_material_id(resolved.authoring_model) if resolved_cap_material_setting.enabled else None
-    plan = plan_fracture(resolved.authoring_model, export_settings)
+    geometry = prepare_fracture_geometry(
+        resolved.authoring_model,
+        export_settings,
+        cap_material_id=cap_material_id,
+    )
+    plan = geometry.plan
     outputs: list[FracturePieceExport] = []
     diagnostics = plan.diagnostics
 
-    for piece in plan.pieces:
+    for geometry_piece in geometry.pieces:
         throw_if_cancelled(cancel_event)
+        piece = geometry_piece.piece
         piece_output_path = _piece_output_path(base_output_path, piece)
         ensure_output_path_allowed(piece_output_path)
         piece_resolved = _piece_resolved_model(
@@ -237,6 +243,7 @@ def export_fracture_usda(
             cap_material_setting=resolved_cap_material_setting,
             cap_material_id=cap_material_id,
             collision_settings=resolved_collision_settings,
+            fractured_base_mesh=geometry_piece.base_mesh,
         )
         diagnostics += piece_resolved.authoring_diagnostics
         document = write_resolved_usda_document(
@@ -322,6 +329,7 @@ def _piece_resolved_model(
     cap_material_setting: FractureCapMaterialSetting | None = None,
     cap_material_id: int | None = None,
     collision_settings: FractureCollisionSettings | None = None,
+    fractured_base_mesh: MeshData | None = None,
 ) -> ResolvedAssemblyModel:
     piece_model, cap_udim_settings = _piece_authoring_model(
         resolved.authoring_model,
@@ -330,6 +338,7 @@ def _piece_resolved_model(
         cap_material_setting=cap_material_setting or FractureCapMaterialSetting(),
         cap_material_id=cap_material_id,
         collision_settings=collision_settings,
+        fractured_base_mesh=fractured_base_mesh,
     )
     authoring_diagnostics = validate_authoring_model(piece_model, conversion_mode=ConversionMode.STATIC_ASSEMBLY)
     return ResolvedAssemblyModel(
@@ -352,6 +361,7 @@ def _piece_authoring_model(
     cap_material_setting: FractureCapMaterialSetting = FractureCapMaterialSetting(),
     cap_material_id: int | None = None,
     collision_settings: FractureCollisionSettings | None = None,
+    fractured_base_mesh: MeshData | None = None,
 ) -> tuple[CanonicalTreeModel, tuple[UdimMaterialSetting, ...]]:
     if model.base_mesh is None:
         raise FractureError("Fracture export requires a base mesh.")
@@ -360,13 +370,15 @@ def _piece_authoring_model(
     used_prototype_keys = {part.prototype_key for part in repeated_parts}
     prototypes = tuple(prototype for prototype in model.prototypes if prototype.source_key in used_prototype_keys)
     metadata = replace(model.metadata, conversion_mode=ConversionMode.STATIC_ASSEMBLY)
-    base_mesh = slice_mesh_faces(
-        model.base_mesh,
-        piece.base_face_indices,
-        name=f"{piece.name}_BaseMesh",
-        generate_caps=generate_caps,
-        cap_material_id=cap_material_id,
-    )
+    base_mesh = fractured_base_mesh
+    if base_mesh is None:
+        base_mesh = slice_mesh_faces(
+            model.base_mesh,
+            piece.base_face_indices,
+            name=f"{piece.name}_BaseMesh",
+            generate_caps=generate_caps,
+            cap_material_id=cap_material_id,
+        )
     materials = model.materials
     cap_udim_settings: tuple[UdimMaterialSetting, ...] = ()
     if cap_material_setting.enabled:
@@ -387,17 +399,19 @@ def _piece_authoring_model(
     collision_primitives = ()
     if resolved_collision.enabled:
         render_mesh_name = collision_render_mesh_name(piece)
+        collision_piece = replace(piece, base_face_indices=tuple(range(len(base_mesh.face_vertex_counts))))
+        collision_model = replace(model, base_mesh=base_mesh)
         if resolved_collision.mode == FractureCollisionMode.CONVEX:
             collision_meshes = build_fracture_collision_meshes(
-                model,
-                piece,
+                collision_model,
+                collision_piece,
                 resolved_collision,
                 render_mesh_name=render_mesh_name,
             )
         else:
             collision_primitives = build_fracture_collision_primitives(
-                model,
-                piece,
+                collision_model,
+                collision_piece,
                 resolved_collision,
                 render_mesh_name=render_mesh_name,
             )

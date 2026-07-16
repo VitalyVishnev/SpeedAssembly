@@ -1172,6 +1172,98 @@ def test_qt_window_opens_read_only_wind_preview_from_xml(monkeypatch, qtbot, tmp
     assert window._wind_preview_dialog.viewport.show_bones is True
 
 
+def test_qt_window_queues_wind_preview_until_auto_refresh_finishes(monkeypatch, qtbot, tmp_path) -> None:
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: None))
+    calls: dict[str, object] = {}
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=_build_fake_deps(calls),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+
+    window.open_wind_preview_dialog()
+
+    assert window._pending_wind_preview_after_refresh is True
+    assert "start_wind_preview_process" not in calls
+
+    window._source_refresh_timer.stop()
+    dynamic_wind = window._deps.inspect_wind_groups(
+        window._deps.prepare_wind_inspection_plan(
+            input_path=str(tree_xml),
+            is_ground_cover=False,
+            async_threshold_bytes=0,
+        ).request
+    )
+    window._set_wind_refresh_running(False)
+    window._handle_wind_data_loaded(dynamic_wind, used_retry=False)
+    qtbot.waitUntil(lambda: window._wind_preview_dialog is not None, timeout=3000)
+
+    assert window._pending_wind_preview_after_refresh is False
+    assert "start_wind_preview_process" in calls
+
+
+def test_qt_window_retries_transient_wind_preview_process_crash(monkeypatch, qtbot, tmp_path) -> None:
+    critical_messages: list[str] = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *args, **kwargs: critical_messages.append(str(args[2]))))
+
+    class _CrashedProcess:
+        exitcode = 3221225477
+
+        def is_alive(self) -> bool:
+            return False
+
+        def join(self, timeout=None) -> None:
+            return None
+
+        def terminate(self) -> None:
+            return None
+
+    calls: dict[str, object] = {}
+    base_deps = _build_fake_deps(calls)
+    starts: list[object] = []
+
+    def start_wind_preview_process(request, settings=None):
+        starts.append(request)
+        if len(starts) == 1:
+            return _CrashedProcess(), [], _CancelFlag()
+        return base_deps.start_wind_preview_process(request, settings)
+
+    deps = replace(base_deps, start_wind_preview_process=start_wind_preview_process)
+    window = MainWindow(
+        load_theme(),
+        UiShellState(),
+        dependencies=deps,
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+    tree_xml = tmp_path / "tree.xml"
+    tree_xml.write_text("<tree/>", encoding="utf-8")
+    window.source_input.setText(str(tree_xml))
+    window._source_refresh_timer.stop()
+
+    window.open_wind_preview_dialog()
+    qtbot.waitUntil(
+        lambda: window._wind_preview_dialog is not None and window._wind_preview_dialog.current_preview is not None,
+        timeout=3000,
+    )
+
+    assert len(starts) == 2
+    assert starts[0] == starts[1]
+    assert critical_messages == []
+    assert "Wind Preview worker process crashed unexpectedly" not in window._log_text
+
+
 def test_proxy_preview_can_show_diagnostic_cube_without_generating_proxy(qtbot) -> None:
     calls: dict[str, object] = {}
     dialog = ProxyPreviewDialog(

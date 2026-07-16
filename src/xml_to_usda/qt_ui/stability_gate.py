@@ -182,7 +182,40 @@ def run_stability_gate_cli(argv: list[str] | None = None) -> int:
     report_path = options.report_path or Path(options.dist_path) / "stability" / "stability_report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    if not bool(report.get("passed")):
+        for failure in _stability_failure_lines(report):
+            print(f"Packaged stability failure: {failure}", file=sys.stderr)
     return 0 if bool(report.get("passed")) else 1
+
+
+def _stability_failure_lines(report: dict[str, object]) -> tuple[str, ...]:
+    lines: list[str] = []
+    for run in report.get("runs", ()):
+        if not isinstance(run, dict) or bool(run.get("passed")):
+            continue
+        label = "/".join(
+            str(value)
+            for value in (run.get("profile"), run.get("kind"), run.get("scenario"), run.get("iteration"))
+            if value not in (None, "")
+        )
+        detail = str(run.get("error") or f"exit code {run.get('exit_code')}")
+        artifacts = run.get("artifacts")
+        smoke_artifact = artifacts.get("smoke_report") if isinstance(artifacts, dict) else None
+        smoke_path = smoke_artifact.get("path") if isinstance(smoke_artifact, dict) else None
+        if smoke_path and Path(str(smoke_path)).exists():
+            try:
+                smoke_report = json.loads(Path(str(smoke_path)).read_text(encoding="utf-8"))
+                scenario_errors = tuple(
+                    str(scenario.get("error"))
+                    for scenario in smoke_report.get("scenarios", ())
+                    if isinstance(scenario, dict) and not bool(scenario.get("passed")) and scenario.get("error")
+                )
+                if scenario_errors:
+                    detail = " | ".join(scenario_errors)
+            except (OSError, json.JSONDecodeError):
+                pass
+        lines.append(f"{label}: {detail}")
+    return tuple(lines)
 
 
 def run_stability_gate(options: StabilityGateOptions) -> dict[str, object]:
@@ -434,6 +467,9 @@ def _fracture_settings_payload(settings) -> dict[str, object]:
         "force_stump_piece": settings.force_stump_piece,
         "separate_stems": settings.separate_stems,
         "branch_height_bias": settings.branch_height_bias,
+        "noisy_cut_enabled": settings.noisy_cut_enabled,
+        "noisy_cut_intensity": settings.noisy_cut_intensity,
+        "noisy_cut_scale": settings.noisy_cut_scale,
     }
 
 
