@@ -8,12 +8,8 @@ geometry and stable colors for inspection instead of authoring USD.
 
 from __future__ import annotations
 
-import contextlib
-import hashlib
-import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-import tempfile
 from typing import TYPE_CHECKING
 
 from .boolean_fracture_prototype import (
@@ -49,24 +45,14 @@ from .mesh_pruning import select_large_connected_face_indices
 from .models import (
     CanonicalTreeModel,
     Color4,
-    ConversionMode,
     ConversionRequest,
     CpuProfile,
-    ExportMetadata,
     GeometryBuffer,
-    InstanceBinding,
-    Joint,
-    MaterialPolicy,
-    Matrix4d,
     MeshData,
-    MeshSection,
-    OutputMode,
     Prototype,
-    PrototypeIdentity,
     Quaternion,
     RepeatedPartInstance,
     ValidationIssue,
-    Vector2,
     Vector3,
 )
 from .output_resolution import render_output_file_name
@@ -81,9 +67,8 @@ DEFAULT_FRACTURE_PREVIEW_BASE_PRIORITY = 0.33
 DEFAULT_FRACTURE_PREVIEW_BRANCH_PRUNE_AGGRESSION = 0.0
 DEFAULT_FRACTURE_PREVIEW_BASE_FACE_BUDGET = 10_000_000
 DEFAULT_FRACTURE_PREVIEW_PROTOTYPE_FACE_BUDGET = 2_000
-FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION = 9
 _PREVIEW_SOURCE_MEMORY_CACHE: tuple[
-    Path,
+    tuple[Path, int | None, int | None],
     tuple[object, CanonicalTreeModel, tuple[ValidationIssue, ...], _FracturePlanCache],
 ] | None = None
 _BOOLEAN_PREVIEW_SESSION_CACHE: tuple[CanonicalTreeModel, BooleanMultiPrototypeSession] | None = None
@@ -221,11 +206,11 @@ def generate_fracture_preview_from_source_request(
     preview_settings = _preview_settings(settings, _preview_output_stem(request, input_path))
     throw_if_cancelled(cancel_event)
     global _PREVIEW_SOURCE_MEMORY_CACHE
-    source_cache_key = _preview_source_model_cache_path(input_path)
+    source_cache_key = _preview_source_memory_cache_key(input_path)
     cached_source = (
         _PREVIEW_SOURCE_MEMORY_CACHE[1]
         if _PREVIEW_SOURCE_MEMORY_CACHE is not None and _PREVIEW_SOURCE_MEMORY_CACHE[0] == source_cache_key
-        else _read_preview_source_model_cache(input_path)
+        else None
     )
     if cached_source is None:
         _report, source_model, source_diagnostics = load_source_tree_model(
@@ -236,7 +221,6 @@ def generate_fracture_preview_from_source_request(
         )
         source_model = _slim_preview_source_model(source_model)
         analysis_cache = _build_fracture_plan_cache(source_model)
-        _write_preview_source_model_cache(input_path, (_report, source_model, source_diagnostics, analysis_cache))
         cached_source = (_report, source_model, source_diagnostics, analysis_cache)
     else:
         _report, source_model, source_diagnostics, analysis_cache = cached_source
@@ -706,437 +690,10 @@ def _slim_preview_source_model(model: CanonicalTreeModel) -> CanonicalTreeModel:
     )
 
 
-def _read_preview_source_model_cache(
-    input_path: str,
-) -> tuple[object, CanonicalTreeModel, tuple[ValidationIssue, ...], _FracturePlanCache] | None:
-    cache_path = _preview_source_model_cache_path(input_path)
-    if not cache_path.exists():
-        return None
+def _preview_source_memory_cache_key(input_path: str) -> tuple[Path, int | None, int | None]:
+    path = Path(input_path).resolve(strict=False)
     try:
-        import numpy as np
-
-        with np.load(cache_path, allow_pickle=False) as data:
-            schema_version = int(data["schema_version"][0])
-            if schema_version != FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION:
-                raise ValueError("Fracture Preview source cache schema mismatch.")
-            model = _preview_source_model_from_arrays(data)
-            diagnostics = _diagnostics_from_arrays(data)
-        analysis_cache = _build_fracture_plan_cache(model)
-        return None, model, diagnostics, analysis_cache
-    except Exception:
-        with contextlib.suppress(Exception):
-            cache_path.unlink(missing_ok=True)
-        return None
-
-
-def _write_preview_source_model_cache(
-    input_path: str,
-    payload: tuple[object, CanonicalTreeModel, tuple[ValidationIssue, ...], _FracturePlanCache],
-) -> None:
-    cache_path = _preview_source_model_cache_path(input_path)
-    temp_path = cache_path.with_name(f"{cache_path.name}.tmp")
-    try:
-        import numpy as np
-
-        _report, model, diagnostics, _analysis_cache = payload
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        arrays = _preview_source_model_to_arrays(model, diagnostics, np)
-        with temp_path.open("wb") as handle:
-            np.savez(handle, **arrays)
-        temp_path.replace(cache_path)
-    except Exception:
-        with contextlib.suppress(Exception):
-            temp_path.unlink(missing_ok=True)
-        with contextlib.suppress(Exception):
-            cache_path.unlink(missing_ok=True)
-
-
-def _preview_source_model_cache_path(input_path: str) -> Path:
-    xml_path = Path(input_path)
-    try:
-        stat_result = xml_path.stat()
+        stat = path.stat()
     except OSError:
-        return _preview_source_model_cache_root() / "unavailable.npz"
-    signature = "|".join(
-        (
-            str(FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION),
-            _preview_source_model_cache_parser_key(),
-            os.path.normcase(str(xml_path.resolve(strict=False))),
-            str(stat_result.st_size),
-            str(stat_result.st_mtime_ns),
-        )
-    )
-    cache_key = hashlib.sha256(signature.encode("utf-8")).hexdigest()
-    return _preview_source_model_cache_root() / f"{cache_key}.npz"
-
-
-def _preview_source_model_cache_parser_key() -> str:
-    from .xml_reader import packaged_xml_parser_adapter_enabled
-
-    return "packaged-et-explicit" if packaged_xml_parser_adapter_enabled() else "defused"
-
-
-def _preview_source_model_cache_root() -> Path:
-    local_app_data = os.environ.get("LOCALAPPDATA")
-    candidate = (
-        Path(local_app_data) / "XMLtoUSDAConverter" / "cache" / "fracture_preview_source_models"
-        if local_app_data
-        else None
-    )
-    fallback = Path(tempfile.gettempdir()) / "XMLtoUSDAConverter" / "cache" / "fracture_preview_source_models"
-    for root in (candidate, fallback):
-        if root is None:
-            continue
-        try:
-            root.mkdir(parents=True, exist_ok=True)
-            return root
-        except OSError:
-            continue
-    return fallback
-
-
-def _preview_source_model_to_arrays(
-    model: CanonicalTreeModel,
-    diagnostics: tuple[ValidationIssue, ...],
-    np,
-) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "schema_version": np.asarray([FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION], dtype=np.int32),
-        "metadata_source_path": np.asarray([model.metadata.source_path]),
-        "metadata_source_version": np.asarray([model.metadata.source_version or ""]),
-        "metadata_meters_per_unit": np.asarray([model.metadata.meters_per_unit], dtype=np.float64),
-        "metadata_up_axis": np.asarray([model.metadata.up_axis]),
-        "metadata_warnings": np.asarray(model.metadata.warnings, dtype=np.str_),
-        "metadata_unknown_sections": np.asarray(model.metadata.unknown_sections, dtype=np.str_),
-        "metadata_output_mode": np.asarray([model.metadata.output_mode.value]),
-        "metadata_material_policy": np.asarray([model.metadata.material_policy.value]),
-        "metadata_conversion_mode": np.asarray([model.metadata.conversion_mode.value]),
-        "diagnostic_severities": np.asarray([issue.severity for issue in diagnostics], dtype=np.str_),
-        "diagnostic_codes": np.asarray([issue.code for issue in diagnostics], dtype=np.str_),
-        "diagnostic_messages": np.asarray([issue.message for issue in diagnostics], dtype=np.str_),
-    }
-    _add_mesh_arrays(payload, "base", model.base_mesh, np)
-    _add_skeleton_arrays(payload, model.skeleton, np)
-    _add_repeated_part_arrays(payload, model.assembly_parts, np)
-    _add_prototype_arrays(payload, model.prototypes, np)
-    return payload
-
-
-def _preview_source_model_from_arrays(data) -> CanonicalTreeModel:
-    metadata = ExportMetadata(
-        source_path=_string_scalar(data, "metadata_source_path"),
-        source_version=_none_if_empty(_string_scalar(data, "metadata_source_version")),
-        meters_per_unit=float(data["metadata_meters_per_unit"][0]),
-        up_axis=_string_scalar(data, "metadata_up_axis"),
-        warnings=tuple(data["metadata_warnings"].astype(str).tolist()),
-        unknown_sections=tuple(data["metadata_unknown_sections"].astype(str).tolist()),
-        output_mode=OutputMode(_string_scalar(data, "metadata_output_mode")),
-        material_policy=MaterialPolicy.parse(_string_scalar(data, "metadata_material_policy")),
-        conversion_mode=ConversionMode.parse(_string_scalar(data, "metadata_conversion_mode")),
-    )
-    return CanonicalTreeModel(
-        metadata=metadata,
-        materials=(),
-        source_objects=(),
-        base_mesh=_mesh_from_arrays(data, "base"),
-        skeleton=_skeleton_from_arrays(data),
-        assembly_parts=_repeated_parts_from_arrays(data),
-        prototypes=_prototypes_from_arrays(data),
-    )
-
-
-def _diagnostics_from_arrays(data) -> tuple[ValidationIssue, ...]:
-    severities = data["diagnostic_severities"].astype(str).tolist()
-    codes = data["diagnostic_codes"].astype(str).tolist()
-    messages = data["diagnostic_messages"].astype(str).tolist()
-    return tuple(
-        ValidationIssue(
-            severity=severities[index],
-            code=codes[index],
-            message=messages[index],
-        )
-        for index in range(len(severities))
-    )
-
-
-def _add_skeleton_arrays(payload: dict[str, object], skeleton: tuple[Joint, ...], np) -> None:
-    payload["joint_names"] = np.asarray([joint.name for joint in skeleton], dtype=np.str_)
-    payload["joint_source_ids"] = np.asarray([joint.source_id if joint.source_id is not None else -1 for joint in skeleton], dtype=np.int64)
-    payload["joint_parents"] = np.asarray([joint.parent or "" for joint in skeleton], dtype=np.str_)
-    payload["joint_generator_labels"] = np.asarray([joint.generator_label or "" for joint in skeleton], dtype=np.str_)
-    payload["joint_generator_levels"] = np.asarray(
-        [joint.generator_level if joint.generator_level is not None else -1 for joint in skeleton],
-        dtype=np.int64,
-    )
-    payload["joint_bind_rows"] = _matrix_array(tuple(joint.bind_transform for joint in skeleton), np)
-    payload["joint_rest_rows"] = _matrix_array(tuple(joint.rest_transform for joint in skeleton), np)
-    payload["joint_bind_end_present"] = np.asarray([1 if joint.bind_end_transform is not None else 0 for joint in skeleton], dtype=np.int8)
-    payload["joint_bind_end_rows"] = _matrix_array(
-        tuple(joint.bind_end_transform or Matrix4d.identity() for joint in skeleton),
-        np,
-    )
-
-
-def _skeleton_from_arrays(data) -> tuple[Joint, ...]:
-    names = data["joint_names"].astype(str).tolist()
-    source_ids = data["joint_source_ids"].astype(int).tolist()
-    parents = data["joint_parents"].astype(str).tolist()
-    generator_labels = data["joint_generator_labels"].astype(str).tolist()
-    generator_levels = data["joint_generator_levels"].astype(int).tolist()
-    bind_rows = data["joint_bind_rows"]
-    rest_rows = data["joint_rest_rows"]
-    bind_end_present = data["joint_bind_end_present"].astype(int).tolist()
-    bind_end_rows = data["joint_bind_end_rows"]
-    return tuple(
-        Joint(
-            name=names[index],
-            source_id=source_ids[index] if source_ids[index] >= 0 else None,
-            parent=parents[index] or None,
-            generator_label=generator_labels[index] or None,
-            generator_level=generator_levels[index] if generator_levels[index] >= 0 else None,
-            bind_transform=_matrix_from_rows(bind_rows[index]),
-            rest_transform=_matrix_from_rows(rest_rows[index]),
-            bind_end_transform=_matrix_from_rows(bind_end_rows[index]) if bind_end_present[index] else None,
-        )
-        for index in range(len(names))
-    )
-
-
-def _add_repeated_part_arrays(payload: dict[str, object], repeated_parts: tuple[RepeatedPartInstance, ...], np) -> None:
-    payload["repeated_names"] = np.asarray([part.name for part in repeated_parts], dtype=np.str_)
-    payload["repeated_prototype_keys"] = np.asarray([part.prototype_key for part in repeated_parts], dtype=np.str_)
-    payload["repeated_positions"] = np.asarray([(part.position.x, part.position.y, part.position.z) for part in repeated_parts], dtype=np.float64)
-    payload["repeated_orientations"] = np.asarray(
-        [(part.orientation.real, part.orientation.i, part.orientation.j, part.orientation.k) for part in repeated_parts],
-        dtype=np.float64,
-    )
-    payload["repeated_scales"] = np.asarray([(part.scale.x, part.scale.y, part.scale.z) for part in repeated_parts], dtype=np.float64)
-    payload["repeated_source_object_ids"] = np.asarray([part.source_object_id or "" for part in repeated_parts], dtype=np.str_)
-    payload["repeated_source_mesh_ids"] = np.asarray(
-        [part.source_mesh_id if part.source_mesh_id is not None else -1 for part in repeated_parts],
-        dtype=np.int64,
-    )
-    payload["repeated_source_material_ids"] = np.asarray(
-        [part.source_material_id if part.source_material_id is not None else -1 for part in repeated_parts],
-        dtype=np.int64,
-    )
-    payload["repeated_mesh_lods"] = np.asarray([part.mesh_lod if part.mesh_lod is not None else -1 for part in repeated_parts], dtype=np.int64)
-    _add_string_offsets(payload, "repeated_binding_tokens", tuple(part.binding.joint_tokens for part in repeated_parts), np)
-    _add_float_offsets(payload, "repeated_binding_weights", tuple(part.binding.weights for part in repeated_parts), np)
-    _add_int_offsets(payload, "repeated_source_bone_ids", tuple(part.source_bone_ids for part in repeated_parts), np)
-
-
-def _repeated_parts_from_arrays(data) -> tuple[RepeatedPartInstance, ...]:
-    names = data["repeated_names"].astype(str).tolist()
-    prototype_keys = data["repeated_prototype_keys"].astype(str).tolist()
-    positions = data["repeated_positions"]
-    orientations = data["repeated_orientations"]
-    scales = data["repeated_scales"]
-    source_object_ids = data["repeated_source_object_ids"].astype(str).tolist()
-    source_mesh_ids = data["repeated_source_mesh_ids"].astype(int).tolist()
-    source_material_ids = data["repeated_source_material_ids"].astype(int).tolist()
-    mesh_lods = data["repeated_mesh_lods"].astype(int).tolist()
-    binding_tokens = _string_groups_from_offsets(data, "repeated_binding_tokens")
-    binding_weights = _float_groups_from_offsets(data, "repeated_binding_weights")
-    source_bone_ids = _int_groups_from_offsets(data, "repeated_source_bone_ids")
-    return tuple(
-        RepeatedPartInstance(
-            name=names[index],
-            prototype_key=prototype_keys[index],
-            position=Vector3(float(positions[index][0]), float(positions[index][1]), float(positions[index][2])),
-            orientation=Quaternion(
-                float(orientations[index][0]),
-                float(orientations[index][1]),
-                float(orientations[index][2]),
-                float(orientations[index][3]),
-            ),
-            scale=Vector3(float(scales[index][0]), float(scales[index][1]), float(scales[index][2])),
-            binding=InstanceBinding(joint_tokens=binding_tokens[index], weights=binding_weights[index]),
-            source_object_id=source_object_ids[index] or None,
-            source_mesh_id=source_mesh_ids[index] if source_mesh_ids[index] >= 0 else None,
-            source_material_id=source_material_ids[index] if source_material_ids[index] >= 0 else None,
-            source_bone_ids=source_bone_ids[index],
-            mesh_lod=mesh_lods[index] if mesh_lods[index] >= 0 else None,
-        )
-        for index in range(len(names))
-    )
-
-
-def _add_prototype_arrays(payload: dict[str, object], prototypes: tuple[Prototype, ...], np) -> None:
-    payload["prototype_keys"] = np.asarray([prototype.source_key for prototype in prototypes], dtype=np.str_)
-    payload["prototype_source_names"] = np.asarray([prototype.source_name for prototype in prototypes], dtype=np.str_)
-    payload["prototype_prim_names"] = np.asarray([prototype.identity.prim_name for prototype in prototypes], dtype=np.str_)
-    payload["prototype_types"] = np.asarray([prototype.identity.prototype_type for prototype in prototypes], dtype=np.str_)
-    payload["prototype_mesh_ids"] = np.asarray(
-        [prototype.source_mesh_id if prototype.source_mesh_id is not None else -1 for prototype in prototypes],
-        dtype=np.int64,
-    )
-    for index, prototype in enumerate(prototypes):
-        _add_mesh_arrays(payload, f"prototype_{index}", prototype.mesh, np)
-
-
-def _prototypes_from_arrays(data) -> tuple[Prototype, ...]:
-    keys = data["prototype_keys"].astype(str).tolist()
-    source_names = data["prototype_source_names"].astype(str).tolist()
-    prim_names = data["prototype_prim_names"].astype(str).tolist()
-    prototype_types = data["prototype_types"].astype(str).tolist()
-    mesh_ids = data["prototype_mesh_ids"].astype(int).tolist()
-    return tuple(
-        Prototype(
-            identity=PrototypeIdentity(
-                source_key=keys[index],
-                prim_name=prim_names[index],
-                prototype_type=prototype_types[index],
-            ),
-            mesh=_mesh_from_arrays(data, f"prototype_{index}"),
-            source_key=keys[index],
-            source_mesh_id=mesh_ids[index] if mesh_ids[index] >= 0 else None,
-            source_name=source_names[index],
-            prototype_type=prototype_types[index],
-        )
-        for index in range(len(keys))
-    )
-
-
-def _add_mesh_arrays(payload: dict[str, object], prefix: str, mesh: MeshData | None, np) -> None:
-    payload[f"{prefix}_present"] = np.asarray([1 if mesh is not None else 0], dtype=np.int8)
-    if mesh is None:
-        payload[f"{prefix}_name"] = np.asarray([""], dtype=np.str_)
-        payload[f"{prefix}_points"] = np.empty((0, 3), dtype=np.float64)
-        payload[f"{prefix}_face_counts"] = np.empty((0,), dtype=np.int32)
-        payload[f"{prefix}_face_indices"] = np.empty((0,), dtype=np.int32)
-        payload[f"{prefix}_normals"] = np.empty((0, 3), dtype=np.float64)
-        payload[f"{prefix}_uv"] = np.empty((0, 2), dtype=np.float64)
-        payload[f"{prefix}_secondary_uv"] = np.empty((0, 2), dtype=np.float64)
-        payload[f"{prefix}_colors"] = np.empty((0, 4), dtype=np.float64)
-        payload[f"{prefix}_section_material_ids"] = np.empty((0,), dtype=np.int64)
-        payload[f"{prefix}_section_offsets"] = np.asarray([0], dtype=np.int64)
-        payload[f"{prefix}_section_face_indices"] = np.empty((0,), dtype=np.int32)
-        payload[f"{prefix}_skel_indices"] = np.empty((0,), dtype=np.int32)
-        payload[f"{prefix}_skel_weights"] = np.empty((0,), dtype=np.float64)
-        payload[f"{prefix}_skel_element_size"] = np.asarray([0], dtype=np.int32)
-        return
-    payload[f"{prefix}_name"] = np.asarray([mesh.name], dtype=np.str_)
-    payload[f"{prefix}_points"] = np.asarray([(point.x, point.y, point.z) for point in mesh.points], dtype=np.float64)
-    payload[f"{prefix}_face_counts"] = np.asarray(mesh.face_vertex_counts, dtype=np.int32)
-    payload[f"{prefix}_face_indices"] = np.asarray(mesh.face_vertex_indices, dtype=np.int32)
-    payload[f"{prefix}_normals"] = np.asarray(
-        [(normal.x, normal.y, normal.z) for normal in mesh.normals],
-        dtype=np.float64,
-    )
-    payload[f"{prefix}_uv"] = np.asarray([(uv.x, uv.y) for uv in mesh.uv_coords], dtype=np.float64)
-    payload[f"{prefix}_secondary_uv"] = np.asarray([(uv.x, uv.y) for uv in mesh.secondary_uv_coords], dtype=np.float64)
-    payload[f"{prefix}_colors"] = np.asarray([(color.r, color.g, color.b, color.a) for color in mesh.vertex_colors], dtype=np.float64)
-    material_ids: list[int] = []
-    offsets = [0]
-    face_indices: list[int] = []
-    for section in mesh.sections:
-        material_ids.append(int(section.material_id))
-        face_indices.extend(int(index) for index in section.face_indices)
-        offsets.append(len(face_indices))
-    payload[f"{prefix}_section_material_ids"] = np.asarray(material_ids, dtype=np.int64)
-    payload[f"{prefix}_section_offsets"] = np.asarray(offsets, dtype=np.int64)
-    payload[f"{prefix}_section_face_indices"] = np.asarray(face_indices, dtype=np.int32)
-    payload[f"{prefix}_skel_indices"] = np.asarray(mesh.skel_joint_indices, dtype=np.int32)
-    payload[f"{prefix}_skel_weights"] = np.asarray(mesh.skel_joint_weights, dtype=np.float64)
-    payload[f"{prefix}_skel_element_size"] = np.asarray([mesh.skel_element_size], dtype=np.int32)
-
-
-def _mesh_from_arrays(data, prefix: str) -> MeshData | None:
-    if not int(data[f"{prefix}_present"][0]):
-        return None
-    points = data[f"{prefix}_points"]
-    normals = data[f"{prefix}_normals"]
-    uv = data[f"{prefix}_uv"]
-    secondary_uv = data[f"{prefix}_secondary_uv"]
-    colors = data[f"{prefix}_colors"]
-    material_ids = data[f"{prefix}_section_material_ids"].astype(int).tolist()
-    offsets = data[f"{prefix}_section_offsets"].astype(int).tolist()
-    section_face_indices = data[f"{prefix}_section_face_indices"].astype(int).tolist()
-    sections = tuple(
-        MeshSection(
-            material_id=material_ids[index],
-            face_indices=tuple(section_face_indices[offsets[index] : offsets[index + 1]]),
-        )
-        for index in range(len(material_ids))
-    )
-    return MeshData(
-        name=_string_scalar(data, f"{prefix}_name"),
-        points=tuple(Vector3(float(row[0]), float(row[1]), float(row[2])) for row in points),
-        face_vertex_counts=tuple(int(value) for value in data[f"{prefix}_face_counts"]),
-        face_vertex_indices=tuple(int(value) for value in data[f"{prefix}_face_indices"]),
-        normals=tuple(Vector3(float(row[0]), float(row[1]), float(row[2])) for row in normals),
-        uv_coords=tuple(Vector2(float(row[0]), float(row[1])) for row in uv),
-        secondary_uv_coords=tuple(Vector2(float(row[0]), float(row[1])) for row in secondary_uv),
-        vertex_colors=tuple(Color4(float(row[0]), float(row[1]), float(row[2]), float(row[3])) for row in colors),
-        sections=sections,
-        skel_joint_indices=tuple(int(value) for value in data[f"{prefix}_skel_indices"]),
-        skel_joint_weights=tuple(float(value) for value in data[f"{prefix}_skel_weights"]),
-        skel_element_size=int(data[f"{prefix}_skel_element_size"][0]),
-    )
-
-
-def _matrix_array(matrices: tuple[Matrix4d, ...], np):
-    if not matrices:
-        return np.empty((0, 4, 4), dtype=np.float64)
-    return np.asarray([matrix.rows for matrix in matrices], dtype=np.float64)
-
-
-def _matrix_from_rows(rows) -> Matrix4d:
-    return Matrix4d(rows=tuple(tuple(float(value) for value in row) for row in rows))
-
-
-def _add_string_offsets(payload: dict[str, object], prefix: str, groups: tuple[tuple[str, ...], ...], np) -> None:
-    offsets = [0]
-    values: list[str] = []
-    for group in groups:
-        values.extend(group)
-        offsets.append(len(values))
-    payload[f"{prefix}_offsets"] = np.asarray(offsets, dtype=np.int64)
-    payload[f"{prefix}_values"] = np.asarray(values, dtype=np.str_)
-
-
-def _add_float_offsets(payload: dict[str, object], prefix: str, groups: tuple[tuple[float, ...], ...], np) -> None:
-    offsets = [0]
-    values: list[float] = []
-    for group in groups:
-        values.extend(float(value) for value in group)
-        offsets.append(len(values))
-    payload[f"{prefix}_offsets"] = np.asarray(offsets, dtype=np.int64)
-    payload[f"{prefix}_values"] = np.asarray(values, dtype=np.float64)
-
-
-def _add_int_offsets(payload: dict[str, object], prefix: str, groups: tuple[tuple[int, ...], ...], np) -> None:
-    offsets = [0]
-    values: list[int] = []
-    for group in groups:
-        values.extend(int(value) for value in group)
-        offsets.append(len(values))
-    payload[f"{prefix}_offsets"] = np.asarray(offsets, dtype=np.int64)
-    payload[f"{prefix}_values"] = np.asarray(values, dtype=np.int64)
-
-
-def _string_groups_from_offsets(data, prefix: str) -> tuple[tuple[str, ...], ...]:
-    offsets = data[f"{prefix}_offsets"].astype(int).tolist()
-    values = data[f"{prefix}_values"].astype(str).tolist()
-    return tuple(tuple(values[offsets[index] : offsets[index + 1]]) for index in range(len(offsets) - 1))
-
-
-def _float_groups_from_offsets(data, prefix: str) -> tuple[tuple[float, ...], ...]:
-    offsets = data[f"{prefix}_offsets"].astype(int).tolist()
-    values = data[f"{prefix}_values"].astype(float).tolist()
-    return tuple(tuple(float(value) for value in values[offsets[index] : offsets[index + 1]]) for index in range(len(offsets) - 1))
-
-
-def _int_groups_from_offsets(data, prefix: str) -> tuple[tuple[int, ...], ...]:
-    offsets = data[f"{prefix}_offsets"].astype(int).tolist()
-    values = data[f"{prefix}_values"].astype(int).tolist()
-    return tuple(tuple(int(value) for value in values[offsets[index] : offsets[index + 1]]) for index in range(len(offsets) - 1))
-
-
-def _string_scalar(data, key: str) -> str:
-    return str(data[key].astype(str).tolist()[0])
-
-
-def _none_if_empty(value: str) -> str | None:
-    return value or None
+        return path, None, None
+    return path, stat.st_size, stat.st_mtime_ns

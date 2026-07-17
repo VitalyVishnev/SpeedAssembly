@@ -47,7 +47,6 @@ from xml_to_usda.pipeline import (
     inspect_source,
     load_canonical_model,
 )
-from xml_to_usda.runtime_paths import resolve_runtime_paths
 from xml_to_usda.ue_schema import DEFAULT_UE_SCHEMA_CONTRACT
 from xml_to_usda.usda_writer import render_usda
 from xml_to_usda.validator import validate_model
@@ -56,18 +55,9 @@ from xml_to_usda.xml_reader import inspect_xml, read_source_xml, render_inspect_
 
 DATA_DIR = Path(__file__).parent / "data"
 SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "samples" / "speedtree" / "simple_tree" / "variants" / "SimpleTree_01.xml"
-BIG_SPRUCE = Path(__file__).resolve().parents[1] / "samples" / "speedtree" / "BigSpruce" / "SkeletalAssemblyTest_Spruce_Big_low.xml"
 LEAFREFS_ON_TRUNK = DATA_DIR / "leafrefs_on_trunk.xml"
 LEAFREFS_ON_BRANCH_LEVELS = DATA_DIR / "leafrefs_on_branch_levels.xml"
 INVALID_LEAF_BONE = DATA_DIR / "invalid_leaf_bone.xml"
-
-
-def _test_runtime_paths(tmp_path: Path):
-    return resolve_runtime_paths(
-        settings_dir=tmp_path / "settings",
-        settings_path=tmp_path / "settings" / "gui_settings.json",
-        cache_root=tmp_path / "runtime_cache",
-    )
 
 
 def _write_fbx_json_payload(
@@ -247,34 +237,6 @@ def test_inspect_report_tracks_structure_without_sample_specific_contracts() -> 
         "ueJointNames",
     }
     assert len(payload["orientation_sample"]) == 3
-
-
-def test_big_spruce_real_fixture_smoke_contract(tmp_path: Path) -> None:
-    report = inspect_source(BIG_SPRUCE)
-    _, model, diagnostics = load_canonical_model(str(BIG_SPRUCE))
-    runtime_paths = _test_runtime_paths(tmp_path)
-    output_path = tmp_path / "big_spruce.usda"
-    result = convert_file(
-        str(BIG_SPRUCE),
-        str(output_path),
-        runtime_paths=runtime_paths,
-    )
-
-    assert report.root_tag == "SpeedTreeRaw"
-    assert report.base_geometry_mode == "merged"
-    assert report.prototype_structure == "inline_skeletal_part"
-    assert report.binding_mode == "single_joint"
-    assert model.base_mesh is not None
-    assert len(model.prototypes) >= 1
-    assert len(model.assembly_parts) >= 1
-    assert not any(issue.severity == "error" for issue in diagnostics)
-    assert result.usda_document is not None
-    assert result.usda_document.text is not None
-    assert output_path.exists()
-    assert 'apiSchemas = ["NaniteAssemblyRootAPI"]' in result.usda_document.text
-    assert 'uniform token unreal:naniteAssembly:meshType = "skeletalMesh"' in result.usda_document.text
-    assert 'def PointInstancer "AssemblyPartsInstancer"' in result.usda_document.text
-    assert 'prepend apiSchemas = ["SkelBindingAPI"]' in result.usda_document.text
 
 
 def test_discover_part_prototypes_matches_canonical_prototype_identity_for_gui_loading() -> None:

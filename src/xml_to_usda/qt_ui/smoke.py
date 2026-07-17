@@ -24,6 +24,7 @@ SMOKE_SCENARIO_WIND_PREVIEW = "wind-preview"
 SMOKE_SCENARIO_FRACTURE_PREVIEW = "fracture-preview"
 SMOKE_SCENARIO_FRACTURE_PREVIEW_INTERACTIVE = "fracture-preview-interactive"
 SMOKE_SCENARIO_FRACTURE_PREVIEW_RAPID_SETTINGS = "fracture-preview-rapid-settings"
+SMOKE_SCENARIO_FRACTURE_PREVIEW_RECOVERY = "fracture-preview-recovery"
 SMOKE_SCENARIO_PROXY_PREVIEW = "proxy-preview"
 SMOKE_SCENARIO_CONVERSION_WORKER = "conversion-worker"
 SMOKE_SCENARIO_DIAGNOSTICS_EXPORT = "diagnostics-export"
@@ -47,6 +48,7 @@ PACKAGED_STABILITY_SCENARIOS: tuple[str, ...] = (
 )
 
 SMOKE_SCENARIOS: tuple[str, ...] = HIGH_RISK_SCENARIOS + (
+    SMOKE_SCENARIO_FRACTURE_PREVIEW_RECOVERY,
     SMOKE_SCENARIO_HIGH_RISK,
     SMOKE_SCENARIO_PACKAGED_STABILITY,
 )
@@ -150,6 +152,8 @@ def run_real_smoke_scenario(name: str, context: SmokeContext) -> dict[str, Any]:
         return _run_fracture_preview_interactive_smoke(context)
     if name == SMOKE_SCENARIO_FRACTURE_PREVIEW_RAPID_SETTINGS:
         return _run_fracture_preview_rapid_settings_smoke(context)
+    if name == SMOKE_SCENARIO_FRACTURE_PREVIEW_RECOVERY:
+        return _run_fracture_preview_recovery_smoke(context)
     if name == SMOKE_SCENARIO_PROXY_PREVIEW:
         return _run_proxy_preview_smoke(context)
     if name == SMOKE_SCENARIO_CONVERSION_WORKER:
@@ -490,6 +494,17 @@ def _run_fracture_preview_rapid_settings_smoke(context: SmokeContext) -> dict[st
         )
         _assert(dialog.viewport_mesh is not None, "fracture viewport mesh exists")
         _assert(dialog.viewport.has_mesh(), "fracture viewport has mesh")
+        dialog.hide_repeated_parts_check.setChecked(False)
+        _pump_events(50)
+        _assert(not dialog.hide_repeated_parts_check.isChecked(), "repeated parts remain visible")
+        _assert(
+            dialog.viewport_mesh.instance_count == len(dialog.current_preview.instances),
+            "all repeated parts keep instanced viewport draws",
+        )
+        _assert(
+            0 < dialog.viewport.instance_batch_count < len(dialog.viewport_mesh.draw_calls),
+            "hardware instancing batches many placements into fewer GPU draws",
+        )
         return _passed(
             name=SMOKE_SCENARIO_FRACTURE_PREVIEW_RAPID_SETTINGS,
             checks=(
@@ -499,6 +514,8 @@ def _run_fracture_preview_rapid_settings_smoke(context: SmokeContext) -> dict[st
                 "detailed_cuts.repeated_toggle",
                 "detailed_cuts.latest_settings",
                 "viewport.mesh",
+                "repeated_parts.instanced",
+                "repeated_parts.hardware_batched",
             ),
             data={
                 "piece_count": dialog.current_preview.plan.actual_piece_count,
@@ -509,7 +526,75 @@ def _run_fracture_preview_rapid_settings_smoke(context: SmokeContext) -> dict[st
                 "detailed_cut_scale": dialog.settings().fracture.detailed_cut_scale,
                 "detailed_cut_density": dialog.settings().fracture.detailed_cut_density,
                 "detailed_cut_max_bend_angle": dialog.settings().fracture.detailed_cut_max_bend_angle,
+                "repeated_instance_count": dialog.viewport_mesh.instance_count,
+                "unique_uploaded_triangles": dialog.viewport_mesh.uploaded_triangle_count,
+                "logical_triangles": dialog.viewport_mesh.triangle_count,
+                "hardware_instance_batches": dialog.viewport.instance_batch_count,
             },
+        )
+    finally:
+        _close_window(window)
+
+
+def _run_fracture_preview_recovery_smoke(context: SmokeContext) -> dict[str, Any]:
+    """Prove the first worker crash is retried once and produces geometry."""
+    window = _create_smoke_window(context)
+    try:
+        input_path, output_path = _resolve_input_output(context, suffix=".usda")
+        window.source_input.setText(str(input_path))
+        window.output_input.setText(str(output_path))
+        attempts = 0
+        injected_queue = object()
+        preview_job = window._background_jobs._fracture_preview_job
+        start_real_worker = preview_job._start_process
+        drain_real_queue = preview_job._drain_queue
+        close_real_queue = preview_job._close_queue
+
+        class _InjectedCrashProcess:
+            exitcode = 70
+
+            def is_alive(self) -> bool:
+                return False
+
+            def join(self, timeout=None) -> None:  # noqa: ARG002
+                return None
+
+            def terminate(self) -> None:
+                return None
+
+        class _InjectedCancelEvent:
+            def set(self) -> None:
+                return None
+
+            def is_set(self) -> bool:
+                return False
+
+        def start_worker(request, settings):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                return _InjectedCrashProcess(), injected_queue, _InjectedCancelEvent()
+            return start_real_worker(request, settings)
+
+        preview_job._start_process = start_worker
+        preview_job._drain_queue = lambda queue: [] if queue is injected_queue else drain_real_queue(queue)
+        preview_job._close_queue = lambda queue: None if queue is injected_queue else close_real_queue(queue)
+        window.open_fracture_preview_dialog()
+        _wait_until(
+            lambda: window._fracture_preview_dialog is not None
+            and window._fracture_preview_dialog.current_preview is not None,
+            timeout_ms=context.timeout_ms,
+            label="fracture preview retry result",
+        )
+        dialog = window._fracture_preview_dialog
+        _assert(dialog is not None, "fracture retry dialog exists")
+        _assert(attempts == 2, "fracture worker retries exactly once")
+        _assert(dialog.viewport_mesh is not None, "fracture retry returns viewport geometry")
+        _assert(dialog.viewport_mesh.uploaded_triangle_count > 0, "fracture retry uploads geometry")
+        return _passed(
+            name=SMOKE_SCENARIO_FRACTURE_PREVIEW_RECOVERY,
+            checks=("worker.crash.injected", "worker.retry", "geometry.result"),
+            data={"attempts": attempts, "uploaded_triangles": dialog.viewport_mesh.uploaded_triangle_count},
         )
     finally:
         _close_window(window)

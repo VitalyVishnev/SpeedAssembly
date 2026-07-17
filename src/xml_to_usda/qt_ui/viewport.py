@@ -9,7 +9,7 @@ Proxy Meshes, plan Fracture Pieces, or interpret source XML.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import math
 from typing import Callable
 
@@ -48,6 +48,31 @@ _MATCAP_ATTRIBUTE_LAYOUT = (
     ("scaleOrigin", 52, 3),
     ("lengthScale", 64, 1),
 )
+_MATCAP_INSTANCE_STRIDE = 13
+_MATCAP_INSTANCE_ATTRIBUTE_LAYOUT = (
+    ("instanceTranslate", 0, 3),
+    ("instanceOrientation", 12, 4),
+    ("instanceScale", 28, 3),
+    ("instanceExplodeOffset", 40, 3),
+)
+
+
+@dataclass(frozen=True)
+class MatcapInstanceDraw:
+    first_vertex: int
+    vertex_count: int
+    translate: Vector3
+    orientation: Quaternion
+    scale: Vector3
+    explode_offset: Vector3 = Vector3(0.0, 0.0, 0.0)
+
+
+@dataclass(frozen=True)
+class _MatcapInstanceBatch:
+    first_vertex: int
+    vertex_count: int
+    first_instance: int
+    instance_count: int
 
 
 def _upload_matcap_vertices(
@@ -82,6 +107,56 @@ def _upload_matcap_vertices(
     return True
 
 
+def _upload_matcap_instances(
+    *,
+    context,
+    program: QOpenGLShaderProgram,
+    instance_buffer: QOpenGLBuffer,
+    vao: QOpenGLVertexArrayObject,
+    instances: np.ndarray,
+) -> bool:
+    vao.bind()
+    instance_buffer.bind()
+    instance_buffer.allocate(instances.tobytes(), instances.nbytes)
+    if not program.bind():
+        instance_buffer.release()
+        vao.release()
+        return False
+    extra_functions = context.extraFunctions()
+    stride = _MATCAP_INSTANCE_STRIDE * 4
+    for attribute_name, byte_offset, component_count in _MATCAP_INSTANCE_ATTRIBUTE_LAYOUT:
+        location = program.attributeLocation(attribute_name)
+        if location >= 0:
+            program.enableAttributeArray(location)
+            program.setAttributeBuffer(location, GL_FLOAT, byte_offset, component_count, stride)
+            extra_functions.glVertexAttribDivisor(location, 1)
+    program.release()
+    instance_buffer.release()
+    vao.release()
+    return True
+
+
+def _bind_matcap_instance_batch(
+    *,
+    program: QOpenGLShaderProgram,
+    instance_buffer: QOpenGLBuffer,
+    first_instance: int,
+) -> None:
+    instance_buffer.bind()
+    stride = _MATCAP_INSTANCE_STRIDE * 4
+    base_offset = first_instance * stride
+    for attribute_name, byte_offset, component_count in _MATCAP_INSTANCE_ATTRIBUTE_LAYOUT:
+        location = program.attributeLocation(attribute_name)
+        if location >= 0:
+            program.setAttributeBuffer(
+                location,
+                GL_FLOAT,
+                base_offset + byte_offset,
+                component_count,
+                stride,
+            )
+
+
 class MatcapViewport(QOpenGLWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -94,6 +169,7 @@ class MatcapViewport(QOpenGLWidget):
         self._mesh: GeometryBuffer | None = None
         self._scene: ViewportScene | None = None
         self._precomputed_matcap_vertices: np.ndarray | None = None
+        self._precomputed_matcap_draws: tuple[MatcapInstanceDraw, ...] | None = None
         self._mesh_tint_alpha = DEFAULT_MATCAP_TINT_ALPHA
         self._target = Vector3(0.0, 0.0, 0.0)
         self._frame_target = self._target
@@ -104,6 +180,7 @@ class MatcapViewport(QOpenGLWidget):
         self._last_mouse: QPoint | None = None
         self._program: QOpenGLShaderProgram | None = None
         self._vertex_buffer: QOpenGLBuffer | None = None
+        self._instance_buffer: QOpenGLBuffer | None = None
         self._vao: QOpenGLVertexArrayObject | None = None
         self._collision_vertex_buffer: QOpenGLBuffer | None = None
         self._collision_vao: QOpenGLVertexArrayObject | None = None
@@ -111,6 +188,7 @@ class MatcapViewport(QOpenGLWidget):
         self._grid_buffer: QOpenGLBuffer | None = None
         self._grid_vao: QOpenGLVertexArrayObject | None = None
         self._vertex_count = 0
+        self._instance_batches: tuple[_MatcapInstanceBatch, ...] = ()
         self._visible_vertex_count_override: int | None = None
         self._collision_vertex_count = 0
         self._grid_vertex_count = 0
@@ -150,6 +228,17 @@ class MatcapViewport(QOpenGLWidget):
     @property
     def grid_vertex_count(self) -> int:
         return self._grid_vertex_count
+
+    @property
+    def instance_batch_count(self) -> int:
+        if self._precomputed_matcap_draws is not None:
+            return len(
+                {
+                    (draw.first_vertex, draw.vertex_count)
+                    for draw in self._visible_instance_draws()
+                }
+            )
+        return len(self._instance_batches)
 
     @property
     def camera_radius(self) -> float:
@@ -277,6 +366,7 @@ class MatcapViewport(QOpenGLWidget):
         self._scene = scene
         self._mesh = None
         self._precomputed_matcap_vertices = None
+        self._precomputed_matcap_draws = None
         self._collision_base_opacity = _scene_collision_opacity(scene)
         if self._hover_cut_token is not None and self._cut_marker_position(self._hover_cut_token) is None:
             self._hover_cut_token = None
@@ -306,6 +396,7 @@ class MatcapViewport(QOpenGLWidget):
         self._scene = None
         self._mesh = mesh
         self._precomputed_matcap_vertices = None
+        self._precomputed_matcap_draws = None
         self._mesh_tint_alpha = max(0.0, min(1.0, float(tint_alpha)))
         self._update_mesh_metrics(frame_camera=frame_camera)
         self._vertex_count = int(len(_build_viewport_vertices(self._mesh, tint_alpha=self._mesh_tint_alpha)) // MATCAP_VERTEX_STRIDE)
@@ -331,6 +422,7 @@ class MatcapViewport(QOpenGLWidget):
             if vertices.dtype == np.float32 and vertices.flags.c_contiguous
             else np.ascontiguousarray(vertices, dtype=np.float32)
         )
+        self._precomputed_matcap_draws = None
         if self._hover_cut_token is not None and self._cut_marker_position(self._hover_cut_token) is None:
             self._hover_cut_token = None
         self._update_bounds_metrics(min_point, max_point, frame_camera=frame_camera)
@@ -342,11 +434,43 @@ class MatcapViewport(QOpenGLWidget):
         self._grid_dirty = True
         self.update()
 
+    def set_precomputed_instanced_matcap_scene(
+        self,
+        scene: ViewportScene,
+        *,
+        vertices: np.ndarray,
+        draws: tuple[MatcapInstanceDraw, ...],
+        min_point: Vector3,
+        max_point: Vector3,
+        frame_camera: bool = True,
+    ) -> None:
+        self._visible_vertex_count_override = None
+        self._scene = scene
+        self._mesh = None
+        self._precomputed_matcap_vertices = (
+            vertices
+            if vertices.dtype == np.float32 and vertices.flags.c_contiguous
+            else np.ascontiguousarray(vertices, dtype=np.float32)
+        )
+        self._precomputed_matcap_draws = tuple(draws)
+        self._collision_base_opacity = _scene_collision_opacity(scene)
+        if self._hover_cut_token is not None and self._cut_marker_position(self._hover_cut_token) is None:
+            self._hover_cut_token = None
+        self._update_bounds_metrics(min_point, max_point, frame_camera=frame_camera)
+        self._vertex_count = sum(draw.vertex_count for draw in draws)
+        self._grid_vertex_count = int(len(_build_grid_vertices(self._target, self._radius, self._ground_y)) // 4)
+        self._trace_set_scene_event(scene)
+        self._mesh_dirty = True
+        self._grid_dirty = True
+        self.update()
+
     def set_visible_vertex_count_override(self, vertex_count: int | None) -> None:
         resolved = None if vertex_count is None else max(0, int(vertex_count))
         if resolved == self._visible_vertex_count_override:
             return
         self._visible_vertex_count_override = resolved
+        if self._precomputed_matcap_draws is not None:
+            self._mesh_dirty = True
         self.update()
 
     def initializeGL(self) -> None:  # type: ignore[override]
@@ -364,6 +488,8 @@ class MatcapViewport(QOpenGLWidget):
         self._vao.create()
         self._vertex_buffer = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
         self._vertex_buffer.create()
+        self._instance_buffer = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
+        self._instance_buffer.create()
         self._collision_vao = QOpenGLVertexArrayObject(self)
         self._collision_vao.create()
         self._collision_vertex_buffer = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
@@ -398,16 +524,41 @@ class MatcapViewport(QOpenGLWidget):
         if self._program is not None and self._vao is not None and visible_vertex_count > 0:
             _prepare_opaque_mesh_draw(functions)
             if self._program.bind():
-                _set_matcap_program_uniforms(
-                    self._program,
-                    functions=functions,
-                    mvp=projection * view,
-                    normal_matrix=view.normalMatrix(),
-                    piece_tint_strength=self._matcap_tint_strength,
-                    exploded_view_strength=self._matcap_exploded_view_strength(),
-                )
                 self._vao.bind()
-                functions.glDrawArrays(GL_TRIANGLES, 0, visible_vertex_count)
+                if self._precomputed_matcap_draws is None:
+                    _set_matcap_program_uniforms(
+                        self._program,
+                        functions=functions,
+                        mvp=projection * view,
+                        normal_matrix=view.normalMatrix(),
+                        piece_tint_strength=self._matcap_tint_strength,
+                        exploded_view_strength=self._matcap_exploded_view_strength(),
+                    )
+                    functions.glDrawArrays(GL_TRIANGLES, 0, visible_vertex_count)
+                else:
+                    _set_matcap_program_uniforms(
+                        self._program,
+                        functions=functions,
+                        mvp=projection * view,
+                        normal_matrix=view.normalMatrix(),
+                        piece_tint_strength=self._matcap_tint_strength,
+                        exploded_view_strength=self._matcap_exploded_view_strength(),
+                        use_instancing=True,
+                    )
+                    extra_functions = self.context().extraFunctions()
+                    for batch in self._instance_batches:
+                        _bind_matcap_instance_batch(
+                            program=self._program,
+                            instance_buffer=self._instance_buffer,
+                            first_instance=batch.first_instance,
+                        )
+                        extra_functions.glDrawArraysInstanced(
+                            GL_TRIANGLES,
+                            batch.first_vertex,
+                            batch.vertex_count,
+                            batch.instance_count,
+                        )
+                    self._instance_buffer.release()
                 self._vao.release()
                 self._program.release()
         if self._program is not None and self._collision_vao is not None and self._collision_vertex_count > 0:
@@ -440,6 +591,20 @@ class MatcapViewport(QOpenGLWidget):
         if self._visible_vertex_count_override is None:
             return self._vertex_count
         return max(0, min(self._vertex_count, self._visible_vertex_count_override))
+
+    def _visible_instance_draws(self) -> tuple[MatcapInstanceDraw, ...]:
+        draws = self._precomputed_matcap_draws or ()
+        limit = self._visible_vertex_count_override
+        if limit is None:
+            return draws
+        visible: list[MatcapInstanceDraw] = []
+        vertex_count = 0
+        for draw in draws:
+            if vertex_count + draw.vertex_count > limit:
+                break
+            visible.append(draw)
+            vertex_count += draw.vertex_count
+        return tuple(visible)
 
     def mousePressEvent(self, event) -> None:  # type: ignore[override]
         if (
@@ -709,7 +874,10 @@ class MatcapViewport(QOpenGLWidget):
         return _build_viewport_vertices(self._mesh, tint_alpha=self._mesh_tint_alpha)
 
     def _current_collision_vertices(self) -> np.ndarray:
-        if self._precomputed_matcap_vertices is not None or self._scene is None:
+        if (
+            self._scene is None
+            or (self._precomputed_matcap_vertices is not None and self._precomputed_matcap_draws is None)
+        ):
             return np.asarray([], dtype=np.float32)
         return _build_scene_vertices(self._scene, collision=True)
 
@@ -717,6 +885,7 @@ class MatcapViewport(QOpenGLWidget):
         if (
             self._program is None
             or self._vertex_buffer is None
+            or self._instance_buffer is None
             or self._vao is None
             or self._collision_vertex_buffer is None
             or self._collision_vao is None
@@ -724,11 +893,13 @@ class MatcapViewport(QOpenGLWidget):
             return
         vertices = self._current_matcap_vertices()
         collision_vertices = self._current_collision_vertices()
-        self._vertex_count = int(len(vertices) // MATCAP_VERTEX_STRIDE)
+        uploaded_vertex_count = int(len(vertices) // MATCAP_VERTEX_STRIDE)
+        if self._precomputed_matcap_draws is None:
+            self._vertex_count = uploaded_vertex_count
         self._collision_vertex_count = int(len(collision_vertices) // MATCAP_VERTEX_STRIDE)
         self._trace_viewport_event(
             "viewport.upload_begin",
-            vertex_count=self._vertex_count + self._collision_vertex_count,
+            vertex_count=uploaded_vertex_count + self._collision_vertex_count,
             byte_count=int(vertices.nbytes + collision_vertices.nbytes),
             scene_id="" if self._scene is None else self._scene.scene_id,
         )
@@ -739,6 +910,31 @@ class MatcapViewport(QOpenGLWidget):
             vertices=vertices,
         )
         if program_bound:
+            if self._precomputed_matcap_draws is None:
+                self._instance_batches = ()
+            else:
+                instance_vertices, self._instance_batches = _build_matcap_instance_batches(
+                    self._visible_instance_draws()
+                )
+                for batch in self._instance_batches:
+                    if (
+                        batch.first_vertex < 0
+                        or batch.vertex_count < 0
+                        or batch.first_vertex + batch.vertex_count > uploaded_vertex_count
+                    ):
+                        raise ValueError(
+                            "Instanced Matcap draw range exceeds the uploaded source vertex buffer: "
+                            f"first={batch.first_vertex}, count={batch.vertex_count}, "
+                            f"uploaded={uploaded_vertex_count}."
+                        )
+                program_bound = _upload_matcap_instances(
+                    context=self.context(),
+                    program=self._program,
+                    instance_buffer=self._instance_buffer,
+                    vao=self._vao,
+                    instances=instance_vertices,
+                )
+        if program_bound:
             program_bound = _upload_matcap_vertices(
                 program=self._program,
                 vertex_buffer=self._collision_vertex_buffer,
@@ -748,7 +944,7 @@ class MatcapViewport(QOpenGLWidget):
         if not program_bound:
             self._trace_viewport_event(
                 "viewport.upload_end",
-                vertex_count=self._vertex_count + self._collision_vertex_count,
+                vertex_count=uploaded_vertex_count + self._collision_vertex_count,
                 byte_count=int(vertices.nbytes + collision_vertices.nbytes),
                 program_bound=False,
             )
@@ -756,7 +952,7 @@ class MatcapViewport(QOpenGLWidget):
         self._mesh_dirty = False
         self._trace_viewport_event(
             "viewport.upload_end",
-            vertex_count=self._vertex_count + self._collision_vertex_count,
+            vertex_count=uploaded_vertex_count + self._collision_vertex_count,
             byte_count=int(vertices.nbytes + collision_vertices.nbytes),
             program_bound=True,
         )
@@ -950,6 +1146,7 @@ class MatcapViewport(QOpenGLWidget):
             for resource in (
                 self._program,
                 self._vertex_buffer,
+                self._instance_buffer,
                 self._vao,
                 self._collision_vertex_buffer,
                 self._collision_vao,
@@ -971,7 +1168,12 @@ class MatcapViewport(QOpenGLWidget):
             self.makeCurrent()
             made_current = True
         try:
-            for buffer in (self._vertex_buffer, self._collision_vertex_buffer, self._grid_buffer):
+            for buffer in (
+                self._vertex_buffer,
+                self._instance_buffer,
+                self._collision_vertex_buffer,
+                self._grid_buffer,
+            ):
                 if buffer is not None:
                     buffer.destroy()
             for vao in (self._vao, self._collision_vao, self._grid_vao):
@@ -984,6 +1186,7 @@ class MatcapViewport(QOpenGLWidget):
         finally:
             self._program = None
             self._vertex_buffer = None
+            self._instance_buffer = None
             self._vao = None
             self._collision_vertex_buffer = None
             self._collision_vao = None
@@ -991,6 +1194,7 @@ class MatcapViewport(QOpenGLWidget):
             self._grid_buffer = None
             self._grid_vao = None
             self._vertex_count = 0
+            self._instance_batches = ()
             self._visible_vertex_count_override = None
             self._grid_vertex_count = 0
             self._mesh_dirty = bool(self._mesh or self._scene)
@@ -1273,8 +1477,15 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
         attribute vec3 explodeOffset;
         attribute vec3 scaleOrigin;
         attribute float lengthScale;
+        attribute vec3 instanceTranslate;
+        attribute vec4 instanceOrientation;
+        attribute vec3 instanceScale;
+        attribute vec3 instanceExplodeOffset;
         uniform mat4 mvp;
+        uniform mat4 modelMatrix;
         uniform mat3 normalMatrix;
+        uniform vec3 drawExplodeOffset;
+        uniform float useInstancing;
         uniform float explodeStrength;
         uniform float pieceTintStrength;
         uniform float geometryScale;
@@ -1282,13 +1493,41 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
         uniform float capsuleBaseLengthScale;
         varying vec3 viewNormal;
         varying vec4 pieceColor;
+        vec3 rotateByQuaternion(vec4 q, vec3 value) {
+            return value + 2.0 * cross(q.xyz, cross(q.xyz, value) + q.w * value);
+        }
+        float safeScale(float value) {
+            if (abs(value) >= 0.000001) {
+                return value;
+            }
+            return value < 0.0 ? -0.000001 : 0.000001;
+        }
         void main() {
-            viewNormal = normalize(normalMatrix * normal);
             pieceColor = vec4(pieceTint.rgb, clamp(pieceTint.a * max(pieceTintStrength, 0.0), 0.0, 1.0));
             float baseLength = max(0.001, 1.0 + max(capsuleBaseLengthScale, 0.0) * lengthScale);
             float currentLength = 1.0 + max(capsuleLengthScale, 0.0) * lengthScale;
             vec3 scaledPosition = scaleOrigin + (position - scaleOrigin) * max(geometryScale, 0.001) * currentLength / baseLength;
-            gl_Position = mvp * vec4(scaledPosition + explodeOffset * explodeStrength, 1.0);
+            vec3 worldPosition;
+            vec3 worldExplodeOffset;
+            if (useInstancing > 0.5) {
+                vec4 orientation = normalize(instanceOrientation);
+                worldPosition = instanceTranslate + rotateByQuaternion(
+                    orientation,
+                    scaledPosition * instanceScale
+                );
+                vec3 inverseScaleNormal = normal / vec3(
+                    safeScale(instanceScale.x),
+                    safeScale(instanceScale.y),
+                    safeScale(instanceScale.z)
+                );
+                viewNormal = normalize(normalMatrix * rotateByQuaternion(orientation, inverseScaleNormal));
+                worldExplodeOffset = instanceExplodeOffset;
+            } else {
+                worldPosition = (modelMatrix * vec4(scaledPosition, 1.0)).xyz;
+                viewNormal = normalize(normalMatrix * normal);
+                worldExplodeOffset = drawExplodeOffset;
+            }
+            gl_Position = mvp * vec4(worldPosition + (explodeOffset + worldExplodeOffset) * explodeStrength, 1.0);
         }
         """,
     ):
@@ -1325,6 +1564,46 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
     return program
 
 
+def _build_matcap_instance_batches(
+    draws: tuple[MatcapInstanceDraw, ...],
+) -> tuple[np.ndarray, tuple[_MatcapInstanceBatch, ...]]:
+    grouped: dict[tuple[int, int], list[MatcapInstanceDraw]] = {}
+    for draw in draws:
+        grouped.setdefault((draw.first_vertex, draw.vertex_count), []).append(draw)
+
+    rows: list[tuple[float, ...]] = []
+    batches: list[_MatcapInstanceBatch] = []
+    for (first_vertex, vertex_count), group in grouped.items():
+        first_instance = len(rows)
+        for draw in group:
+            rows.append(
+                (
+                    float(draw.translate.x),
+                    float(draw.translate.y),
+                    float(draw.translate.z),
+                    float(draw.orientation.i),
+                    float(draw.orientation.j),
+                    float(draw.orientation.k),
+                    float(draw.orientation.real),
+                    float(draw.scale.x),
+                    float(draw.scale.y),
+                    float(draw.scale.z),
+                    float(draw.explode_offset.x),
+                    float(draw.explode_offset.y),
+                    float(draw.explode_offset.z),
+                )
+            )
+        batches.append(
+            _MatcapInstanceBatch(
+                first_vertex=first_vertex,
+                vertex_count=vertex_count,
+                first_instance=first_instance,
+                instance_count=len(group),
+            )
+        )
+    return np.asarray(rows, dtype=np.float32).reshape((-1, _MATCAP_INSTANCE_STRIDE)), tuple(batches)
+
+
 def _set_matcap_program_uniforms(
     program: QOpenGLShaderProgram,
     *,
@@ -1336,9 +1615,24 @@ def _set_matcap_program_uniforms(
     geometry_scale: float = 1.0,
     capsule_length_scale: float = 0.0,
     capsule_base_length_scale: float = 0.0,
+    model_matrix: QMatrix4x4 | None = None,
+    draw_explode_offset: Vector3 = Vector3(0.0, 0.0, 0.0),
+    use_instancing: bool = False,
 ) -> None:
     program.setUniformValue("mvp", mvp)
+    program.setUniformValue("modelMatrix", model_matrix if model_matrix is not None else QMatrix4x4())
     program.setUniformValue("normalMatrix", normal_matrix)
+    program.setUniformValue(
+        "drawExplodeOffset",
+        QVector3D(
+            float(draw_explode_offset.x),
+            float(draw_explode_offset.y),
+            float(draw_explode_offset.z),
+        ),
+    )
+    instancing_location = program.uniformLocation("useInstancing")
+    if instancing_location >= 0:
+        functions.glUniform1f(instancing_location, 1.0 if use_instancing else 0.0)
     tint_strength_location = program.uniformLocation("pieceTintStrength")
     if tint_strength_location >= 0:
         functions.glUniform1f(tint_strength_location, float(max(0.0, piece_tint_strength)))

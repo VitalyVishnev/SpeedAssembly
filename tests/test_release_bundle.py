@@ -51,9 +51,12 @@ def test_qt_package_script_builds_release_zip() -> None:
     assert "xml_to_usda/embedded_worker" not in script_text
     assert "'--add-binary'" not in script_text
     assert "External worker exe must not be distributed" in script_text
-    assert "smoke --scenario high-risk" in script_text
+    assert "smoke --scenario packaged-stability --repeat 2 --fail-on-retry" in script_text
+    assert "fracture-preview-recovery" in script_text
+    assert "pytest -q -m packaged" in script_text
+    assert "Packaged Fracture worker recovery smoke failed" in script_text
     assert "smoke_report.json" in script_text
-    assert "Packaged high-risk smoke failed" in script_text
+    assert "Packaged Detailed Cuts stability smoke failed" in script_text
     assert "xml_to_usda.qt_ui.release_build" in script_text
     assert "Missing application icon" in script_text
     assert "'--icon', $iconPath" in script_text

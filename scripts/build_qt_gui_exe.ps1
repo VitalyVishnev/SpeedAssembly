@@ -135,6 +135,11 @@ try {
     }
 
     if ($Package) {
+        Write-Host 'Running packaged contract tests ...'
+        & $pythonExe -m pytest -q -m packaged
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Packaged contract tests failed.'
+        }
         if (-not (Test-Path $iconPath)) {
             throw "Missing application icon: $iconPath"
         }
@@ -244,15 +249,15 @@ try {
             $smokeInputPath = Join-Path $repoRoot 'samples\speedtree\simple_tree\variants\SimpleTree_01.xml'
             $smokeOutputPath = Join-Path $smokeDir 'SimpleTree_01.usda'
             New-Item -ItemType Directory -Force -Path $smokeDir | Out-Null
-            Write-Host "Running packaged high-risk smoke..."
-            # smoke --scenario high-risk
+            Write-Host "Running packaged Detailed Cuts stability smoke..."
+            # smoke --scenario packaged-stability --repeat 2 --fail-on-retry
             Remove-Item -LiteralPath $smokeReportPath -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $smokeStdoutPath -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $smokeStderrPath -ErrorAction SilentlyContinue
             $smokeArguments = Join-ProcessArguments @(
                 'smoke',
                 '--scenario',
-                'high-risk',
+                'packaged-stability',
                 '--input',
                 $smokeInputPath,
                 '--output',
@@ -260,7 +265,10 @@ try {
                 '--report',
                 $smokeReportPath,
                 '--timeout-ms',
-                '180000'
+                '180000',
+                '--repeat',
+                '2',
+                '--fail-on-retry'
             )
             $smokeStartInfo = New-Object System.Diagnostics.ProcessStartInfo
             $smokeStartInfo.FileName = $exePath
@@ -272,7 +280,7 @@ try {
             $smokeProcess = New-Object System.Diagnostics.Process
             $smokeProcess.StartInfo = $smokeStartInfo
             if (-not $smokeProcess.Start()) {
-                throw 'Packaged high-risk smoke did not start.'
+                throw 'Packaged Detailed Cuts stability smoke did not start.'
             }
             $smokeStdout = $smokeProcess.StandardOutput.ReadToEnd()
             $smokeStderr = $smokeProcess.StandardError.ReadToEnd()
@@ -289,16 +297,50 @@ try {
                         Write-Host ("Smoke failure [{0}]: {1}" -f $failedScenario.name, $failedScenario.error)
                     }
                 }
-                throw "Packaged high-risk smoke failed. Report: $smokeReportPath"
+                throw "Packaged Detailed Cuts stability smoke failed. Report: $smokeReportPath"
             }
             if (-not (Test-Path $smokeReportPath)) {
-                throw "Packaged high-risk smoke did not write report: $smokeReportPath"
+                throw "Packaged Detailed Cuts stability smoke did not write report: $smokeReportPath"
             }
             $smokeReport = Get-Content -LiteralPath $smokeReportPath -Raw | ConvertFrom-Json
             if (-not $smokeReport.passed) {
-                throw "Packaged high-risk smoke report failed: $smokeReportPath"
+                throw "Packaged Detailed Cuts stability smoke report failed: $smokeReportPath"
             }
-            Write-Host "Packaged high-risk smoke passed: $smokeReportPath"
+            Write-Host "Packaged Detailed Cuts stability smoke passed: $smokeReportPath"
+
+            $recoveryReportPath = Join-Path $smokeDir 'smoke_recovery_report.json'
+            $recoveryArguments = Join-ProcessArguments @(
+                'smoke',
+                '--scenario',
+                'fracture-preview-recovery',
+                '--input',
+                $smokeInputPath,
+                '--output',
+                $smokeOutputPath,
+                '--report',
+                $recoveryReportPath,
+                '--timeout-ms',
+                '180000'
+            )
+            $recoveryStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+            $recoveryStartInfo.FileName = $exePath
+            $recoveryStartInfo.Arguments = $recoveryArguments
+            $recoveryStartInfo.UseShellExecute = $false
+            $recoveryStartInfo.CreateNoWindow = $true
+            $recoveryProcess = New-Object System.Diagnostics.Process
+            $recoveryProcess.StartInfo = $recoveryStartInfo
+            if (-not $recoveryProcess.Start()) {
+                throw 'Packaged Fracture worker recovery smoke did not start.'
+            }
+            $recoveryProcess.WaitForExit()
+            if ($recoveryProcess.ExitCode -ne 0 -or -not (Test-Path $recoveryReportPath)) {
+                throw "Packaged Fracture worker recovery smoke failed. Report: $recoveryReportPath"
+            }
+            $recoveryReport = Get-Content -LiteralPath $recoveryReportPath -Raw | ConvertFrom-Json
+            if (-not $recoveryReport.passed) {
+                throw "Packaged Fracture worker recovery smoke report failed: $recoveryReportPath"
+            }
+            Write-Host "Packaged Fracture worker recovery smoke passed: $recoveryReportPath"
         }
         else {
             Write-Host "Skipping packaged smoke because -SkipSmoke was supplied."

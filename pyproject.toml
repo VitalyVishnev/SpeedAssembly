@@ -39,8 +39,11 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["--basetemp=.pytest_tmp", "-m", "not stress"]
+addopts = ["--basetemp=.pytest_tmp", "-m", "not stress and not packaged"]
 markers = [
+  "core: fast deterministic contract tests",
+  "integration: source, worker, or Qt workflow tests",
+  "packaged: frozen executable boundary tests",
   "qt: Qt workflow and UI shell tests",
   "stress: heavy or long-running local stress checks",
   "ue_manual: manual UE 5.7 import validation checklist only",

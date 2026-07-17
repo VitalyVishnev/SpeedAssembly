@@ -2,6 +2,20 @@
 
 This page stores active project contracts. Rejected or superseded approaches live in [experiments.md](experiments.md). Current limitations and bugs live in [known-bugs.md](known-bugs.md).
 
+## Decision: Tests are organized by system contract and execution boundary
+
+Status: Active
+
+Core tests protect fast deterministic invariants with synthetic fixtures.
+Integration tests cover source workflows plus worker/Qt request transport.
+Packaged tests prove the frozen executable boundary and must validate actual
+geometry results. UE import validation stays manual and separate from pytest.
+
+Simple Tree is the normal workflow fixture and the three-trunk variant owns
+multi-stem/stump behavior. Big Spruce is not a general regression fixture: use
+it only for measured scale/performance or packaged stress. See
+[Test Policy](testing.md) for the contract map and commands.
+
 ## Decision: Detailed Boolean Fracture is the production cut backend
 
 The connectivity-first physical Boolean now serves Detailed Cuts in preview and export; the standalone prototype commands remain diagnostic viewers for the same backend.
@@ -572,10 +586,11 @@ on BigSpruce: 3613 hidden instances expanded to 38,044,065 vertices and a
 
 Decision:
 When Repeated Parts are hidden, build and upload only the Base Mesh payload.
-Build the full payload lazily on the first explicit show; after that upload,
-hide/show changes only the visible vertex range. Fracture Preview applies a
-256 MiB safety budget before CPU expansion or Qt upload; an unsafe request keeps
-Repeated Parts hidden and reports the required size.
+On the first explicit show, upload every unique prototype/piece-color batch
+once and keep every placement in a compact GPU instance buffer. Render one
+hardware-instanced draw per unique source mesh. Later hide/show changes only
+the visible instance batches. The 256 MiB safety budget applies to unique
+source vertices, not the logical instance-expanded triangle count.
 
 Reasoning:
 The checkbox is a visual inspection filter, not an operator setting that changes
@@ -586,40 +601,40 @@ toggles realtime without restoring the startup overflow.
 Consequences:
 Opening Fracture Preview with the default hidden state is bounded by Base Mesh
 geometry. Showing Repeated Parts may perform one deliberate upload; later
-toggles reuse it. Future visual-only controls should update viewport state or
-shader uniforms whenever possible.
+toggles reuse it, and all source instances remain visible. Future visual-only
+controls should update viewport state or shader uniforms whenever possible.
 
 Related files:
 - `src/xml_to_usda/qt_ui/fracture_preview.py`
 - `src/xml_to_usda/qt_ui/viewport.py`
 
-## Decision: Fracture Preview source facts use a typed cache
+## Decision: Fracture Preview source facts stay in persistent worker memory
 
 Status: Active
 
 Context:
 Fracture Preview recomputes settings-dependent geometry repeatedly. Re-reading
 and re-normalizing the same SpeedTree XML for every branch-count, stem, height,
-caps, or preview-quality change was both slower and a larger native-crash
-surface in the packaged worker path.
+caps, or preview-quality change is unnecessary. The former typed `.npz` cache,
+however, intermittently access-violated inside NumPy array iteration in the
+packaged worker even after cyclic GC was disabled.
 
 Decision:
-Cache the slim Fracture Preview source facts as a typed `.npz` payload keyed by
-source path, file size, mtime, cache schema, and parser mode. The cache stores
-only the preview source model facts needed by fracture planning and preview
-generation: metadata, base mesh, skeleton, repeated parts, prototypes, and
-diagnostics. It does not use pickle and loads with `allow_pickle=False`.
+Keep the slim source model and analysis cache in the crash-isolated persistent
+worker, keyed by resolved source path, size, and mtime. A clean worker reloads
+the XML directly; it does not reconstruct Fracture source facts from disk.
 
 Reasoning:
-The earlier generic worker-payload JSON cache serialized full dataclass graphs
-and was slower than direct reload on large trees. The typed cache avoids per-
-`Vector3` object metadata and keeps the cache narrow to this workflow.
+Big Spruce measured about 0.50 s from `.npz` versus 0.79 s from XML locally.
+The roughly 0.29 s one-time saving did not justify a recurring native crash.
+Subsequent settings changes still reuse the in-memory source model and prepared
+Boolean sessions without reparsing.
 
 Consequences:
-Fracture Preview warm runs should reuse source facts and recompute only the
-settings-dependent fracture preview. Corrupt or stale cache files are deleted
-and fall back to XML reload. Do not replace this with the generic source-model
-JSON cache.
+Fracture Preview warm runs reuse source facts and recompute only the settings-
+dependent preview. A worker crash loses that memory by design; retry starts
+cleanly from XML. Do not replace this with the generic JSON cache or another
+disk source-model cache without evidence that outweighs the native boundary.
 
 Related files:
 - `src/xml_to_usda/fracture_preview_service.py`
@@ -666,9 +681,10 @@ Status: Active
 
 Context:
 The converter now has several useful persistent caches: FBX payloads, generic
-source models, Proxy Source Projections, and Fracture Preview source facts. The
-file-signature keys keep them correct, but old entries from changed XML files
-would otherwise accumulate indefinitely.
+source models, and Proxy Source Projections. The file-signature keys keep them
+correct, but old entries from changed XML files would otherwise accumulate
+indefinitely. Maintenance also removes legacy Fracture Preview `.npz` files
+left by releases that used the retired disk cache.
 
 Decision:
 Keep disk-retention policy in `cache_maintenance.py`. GUI and CLI startup sweep
@@ -680,9 +696,9 @@ The Global Settings dialog can clear all managed cache entries.
 
 Reasoning:
 Cache producers should own payload shape, but not separate unbounded retention
-rules. One runtime-facing maintenance module prevents source/proxy/fracture
-caches from becoming invisible disk growth while preserving low-latency warm
-preview paths.
+rules. One runtime-facing maintenance module prevents source/proxy caches and
+legacy files from becoming invisible disk growth while preserving low-latency
+warm preview paths.
 
 Consequences:
 New persistent cache directories must be registered with cache maintenance or

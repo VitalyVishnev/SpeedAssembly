@@ -1,5 +1,23 @@
 # Known Bugs
 
+## Bug: Generic source-model caching can crash while serializing a very large tree
+
+Status: Open
+
+The former Big Spruce cache regression triggered `0xC0000005` in Python while
+the generic worker-payload encoder serialized the model. The normal cache
+contract now uses Simple Tree, so the default suite remains stable; this does
+not prove generic full-model caching is safe at Big Spruce scale.
+
+Keep Big Spruce validation in an explicit stress/packaged run. The likely next
+step is to replace generic full-model JSON caching only if it is required by a
+real workflow and can be measured against the existing typed projections.
+
+Related files:
+- `src/xml_to_usda/canonical_loader.py`
+- `src/xml_to_usda/worker_file_protocol.py`
+- `tests/test_canonical_loader_cache.py`
+
 ## Limitation: Detailed Boolean cuts need broad real-tree validation
 
 Status: Partially verified
@@ -19,28 +37,28 @@ This page stores current bugs, limitations, and validation gaps. It should stay 
 
 ## Bug: Fracture Preview worker could access-violate during cached mesh reconstruction
 
-Status: Mitigated; packaged/operator stress remains pending
+Status: Resolved in code; packaged/operator stress remains pending
 
 Symptoms:
-The packaged persistent worker sometimes exited with `0xC0000005` while Python
-reported `Garbage-collecting` inside `_mesh_from_arrays`. Rapid settings edits
-made the failure more likely by repeatedly terminating the persistent worker
-and forcing fresh typed-cache reconstruction.
+The packaged persistent worker sometimes exited with `0xC0000005` inside
+`_mesh_from_arrays`. Disabling cyclic GC reduced but did not eliminate it; the
+same failure recurred while switching Detailed Cuts off on Big Spruce.
 
 Current behavior:
-The bounded Fracture Preview server keeps cyclic GC disabled for its lifetime;
-normal reference counting still releases acyclic request payloads and process
-exit bounds any remaining cycles. Shared preview scheduling now lets current
-native work finish, keeps only the latest pending edit, and treats an unread
-finished job as active. Big Spruce passed sequential Detailed runs at 5, 15,
-and 28 requested branches across the full height-bias range.
+Fracture Preview no longer reads or writes the typed `.npz` source-model cache.
+A clean worker loads XML once, then the persistent server reuses the slim model
+and analysis cache in memory for later settings changes. Local Big Spruce cold
+loading changed from about 0.50 s to 0.79 s, removing the failing native path
+for a roughly 0.29 s one-time cost.
 
 Do not repeat:
-Do not kill/restart native preview workers for every slider tick, and do not
-use `is_alive()` alone as proof that a job result lifecycle is finished.
+Do not restore a disk source-model cache for this worker without a packaged
+stability result that justifies crossing the NumPy/PyInstaller boundary. Do
+not kill/restart native preview workers for every slider tick.
 
 Related files:
 - `src/xml_to_usda/fracture_worker_subprocess.py`
+- `src/xml_to_usda/fracture_preview_service.py`
 - `src/xml_to_usda/qt_ui/preview_jobs.py`
 - `src/xml_to_usda/qt_ui/background_jobs.py`
 
@@ -71,7 +89,7 @@ Related files:
 
 ## Bug: Expanded Repeated Parts could exhaust Fracture Viewport memory
 
-Status: Mitigated; broader GPU validation pending
+Status: Mitigated; packaged GPU validation passed, operator validation pending
 
 Symptoms:
 Big Spruce expanded 3613 Repeated Parts into 30,454,695 vertices and a 2.07 GB
@@ -80,17 +98,21 @@ The trace contains no failing bone segment; all 1108 overlay segments were
 present and non-zero length.
 
 Likely cause:
-The diagnostic renderer bakes every instance transform into a unique vertex
-payload. The previous limit only guarded Qt's signed 2 GB buffer boundary, not
-a safe CPU/GPU working-set size.
+The diagnostic renderer baked every instance transform into a unique vertex
+payload, discarding the source scene's existing instancing contract.
 
 Current behavior:
-Fracture Preview rejects expanded payloads above 256 MiB before allocation,
-keeps Repeated Parts hidden, and reports the required size. Bone visibility is
-now traced with its segment count.
+Fracture Preview uploads unique geometry and one compact transform buffer, then
+issues one hardware-instanced draw per unique source mesh. Big Spruce therefore
+keeps all 3613 placements without either the former multi-gigabyte flattened
+buffer or 3613 draw/uniform sequences per frame. The 256 MiB guard remains on
+the actual unique vertex upload. Three consecutive packaged Big Spruce rapid-
+settings runs passed with all instances and no worker retry; keep operator
+validation open because the original GUI disappearance produced no dump.
 
 Do not repeat:
-Do not treat an API maximum buffer size as a safe interactive memory budget.
+Do not flatten instanced viewport scenes or treat an API maximum buffer size as
+a safe interactive memory budget.
 
 Related files:
 - `src/xml_to_usda/qt_ui/fracture_preview.py`
@@ -343,12 +365,11 @@ The generic cache recursively encodes full dataclass graphs into JSON. That form
 
 Current workaround:
 Proxy Mesh source loading uses a dedicated typed Proxy Source Projection cache.
-Fracture Preview uses a dedicated typed `.npz` source-facts cache for the slim
-preview model instead of the former generic worker-payload JSON cache. Normal
-conversion callers still use the existing generic cache until a faster typed
-cache is justified for the full source model. Runtime cache maintenance now
-bounds generic source-model, Proxy Source Projection, and Fracture Preview
-source-facts cache growth by age and shared source-facts budget.
+Fracture Preview bypasses the generic cache and reuses its slim source model in
+the persistent worker only. Normal conversion callers still use the existing
+generic cache until a faster typed cache is justified for the full source
+model. Runtime cache maintenance bounds generic source-model and Proxy Source
+Projection cache growth and removes legacy Fracture Preview cache files.
 
 Do not repeat:
 Do not re-enable generic worker-payload JSON caches for Proxy Mesh or Fracture

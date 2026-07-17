@@ -47,7 +47,7 @@ from ..models import Color4, GeometryBuffer, Quaternion, UdimMode, Vector3
 from ..viewport_scene import ViewportScene
 from .material_controls import MaterialUdimRow, MaterialUdimValue, set_tooltip
 from .preview_shell import PreviewShellDialog, apply_compact_preview_panel_style
-from .viewport import MAX_QT_OPENGL_BUFFER_BYTES, MATCAP_VERTEX_STRIDE, MatcapViewport
+from .viewport import MAX_QT_OPENGL_BUFFER_BYTES, MATCAP_VERTEX_STRIDE, MatcapInstanceDraw, MatcapViewport
 
 
 FRACTURE_SOURCE_VERTEX_STRIDE = 10
@@ -332,7 +332,7 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.override_caps_material_check = QCheckBox("Override Caps Material", settings_panel)
         set_tooltip("Shows selectable skeleton cut segments. Off hides guides; on shows bones for manual cuts.", self.show_bones_check)
         set_tooltip(
-            "Hides instanced repeated parts in preview. Off shows foliage/parts; on focuses on base fracture geometry.",
+            "Hides instanced repeated parts in preview. Off uploads each prototype once and draws every placed instance.",
             self.hide_repeated_parts_check,
         )
         set_tooltip("Writes cap faces on cut surfaces. Off leaves open cuts; on closes piece interiors.", self.generate_caps_check)
@@ -1389,29 +1389,53 @@ def apply_fracture_viewport_mesh(
     scene: ViewportScene,
     frame_camera: bool = True,
 ) -> FractureRenderPayload:
-    required_bytes = mesh.triangle_count * 3 * FRACTURE_VERTEX_STRIDE * 4
+    payload, draws = _build_fracture_instanced_render_payload(mesh, scene)
+    required_bytes = int(payload.vertex_components.nbytes)
     upload_limit = min(MAX_QT_OPENGL_BUFFER_BYTES, MAX_FRACTURE_PREVIEW_UPLOAD_BYTES)
     if required_bytes > upload_limit:
         raise ValueError(
             f"scene requires {required_bytes} bytes; Fracture Preview safely allows at most "
             f"{upload_limit} bytes per OpenGL upload"
         )
-    payload = _build_fracture_render_payload(
-        mesh,
-        tint_strength=viewport.matcap_tint_strength,
+    viewport.set_precomputed_instanced_matcap_scene(
+        scene,
+        vertices=payload.vertex_components,
+        draws=draws,
+        min_point=payload.min_point,
+        max_point=payload.max_point,
+        frame_camera=frame_camera,
     )
-    min_point, max_point = _fracture_view_bounds(mesh, payload)
-    if any(draw_call.visibility_group == "collision" for draw_call in scene.draw_calls):
-        viewport.set_scene(scene, frame_camera=frame_camera)
-    else:
-        viewport.set_precomputed_matcap_scene(
-            scene,
-            vertices=payload.vertex_components,
-            min_point=min_point,
-            max_point=max_point,
-            frame_camera=frame_camera,
-        )
     return payload
+
+
+def _build_fracture_instanced_render_payload(
+    mesh: FractureViewportMesh,
+    scene: ViewportScene,
+) -> tuple[FractureRenderPayload, tuple[MatcapInstanceDraw, ...]]:
+    source = np.asarray(mesh.vertex_components, dtype=np.float32).reshape((-1, FRACTURE_SOURCE_VERTEX_STRIDE))
+    vertices = np.zeros((len(source), FRACTURE_VERTEX_STRIDE), dtype=np.float32)
+    if len(source):
+        vertices[:, 0:10] = source[:, 0:10]
+        vertices[:, 13:16] = source[:, 0:3]
+    draws = tuple(
+        MatcapInstanceDraw(
+            first_vertex=mesh.draw_sources[draw.source_index].first_vertex,
+            vertex_count=mesh.draw_sources[draw.source_index].vertex_count,
+            translate=draw.translate,
+            orientation=draw.orientation,
+            scale=draw.scale,
+            explode_offset=draw.explode_offset,
+        )
+        for draw in mesh.draw_calls
+    )
+    return (
+        FractureRenderPayload(
+            vertex_components=vertices.reshape(-1),
+            min_point=scene.bounds.min_point,
+            max_point=scene.bounds.max_point,
+        ),
+        draws,
+    )
 
 
 def _scene_piece_count(scene: ViewportScene) -> int:
@@ -1421,83 +1445,6 @@ def _scene_piece_count(scene: ViewportScene) -> int:
         if draw_call.visibility_group == "base_mesh" and draw_call.selectable_id
     }
     return len(piece_ids) if piece_ids else scene.stats.batch_count
-
-
-def _build_fracture_render_payload(
-    mesh: FractureViewportMesh,
-    *,
-    tint_strength: float = FRACTURE_MATCAP_TINT_STRENGTH,
-) -> FractureRenderPayload:
-    _ = tint_strength
-    source_vertices = np.asarray(mesh.vertex_components, dtype=np.float32).reshape((-1, FRACTURE_SOURCE_VERTEX_STRIDE))
-    total_vertex_count = sum(mesh.draw_sources[draw_call.source_index].vertex_count for draw_call in mesh.draw_calls)
-    if total_vertex_count <= 0:
-        return FractureRenderPayload(
-            vertex_components=np.asarray([], dtype=np.float32),
-            min_point=Vector3(0.0, 0.0, 0.0),
-            max_point=Vector3(0.0, 0.0, 0.0),
-        )
-
-    render_vertices = np.empty((total_vertex_count, FRACTURE_VERTEX_STRIDE), dtype=np.float32)
-    min_values = np.array((math.inf, math.inf, math.inf), dtype=np.float32)
-    max_values = np.array((-math.inf, -math.inf, -math.inf), dtype=np.float32)
-    output_start = 0
-    for draw_call in mesh.draw_calls:
-        source = mesh.draw_sources[draw_call.source_index]
-        start = source.first_vertex
-        end = start + source.vertex_count
-        if end <= start:
-            continue
-        output_end = output_start + source.vertex_count
-        source_slice = source_vertices[start:end]
-        positions = np.array(source_slice[:, 0:3], dtype=np.float32, copy=True)
-        positions *= np.array((draw_call.scale.x, draw_call.scale.y, draw_call.scale.z), dtype=np.float32)
-        positions = _rotate_positions(draw_call.orientation, positions)
-        positions += np.array((draw_call.translate.x, draw_call.translate.y, draw_call.translate.z), dtype=np.float32)
-        normals = np.array(source_slice[:, 3:6], dtype=np.float32, copy=True)
-        normals /= np.maximum(
-            np.abs(np.array((draw_call.scale.x, draw_call.scale.y, draw_call.scale.z), dtype=np.float32)),
-            1e-8,
-        )
-        normals = _rotate_positions(draw_call.orientation, normals)
-        lengths = np.linalg.norm(normals, axis=1)
-        normals /= np.where(lengths > 1e-8, lengths, 1.0)[:, None]
-        normals[lengths <= 1e-8] = np.array((0.0, 0.0, 1.0), dtype=np.float32)
-
-        render_vertices[output_start:output_end, 0:3] = positions
-        render_vertices[output_start:output_end, 3:6] = normals
-        render_vertices[output_start:output_end, 6:9] = source_slice[:, 6:9]
-        render_vertices[output_start:output_end, 9] = source_slice[:, 9]
-        render_vertices[output_start:output_end, 10:13] = np.array(
-            (draw_call.explode_offset.x, draw_call.explode_offset.y, draw_call.explode_offset.z),
-            dtype=np.float32,
-        )
-        render_vertices[output_start:output_end, 13:16] = positions
-        render_vertices[output_start:output_end, 16] = 0.0
-        min_values = np.minimum(min_values, positions.min(axis=0))
-        max_values = np.maximum(max_values, positions.max(axis=0))
-        output_start = output_end
-
-    render_vertices = render_vertices[:output_start].reshape(-1)
-    return FractureRenderPayload(
-        vertex_components=render_vertices,
-        min_point=Vector3(float(min_values[0]), float(min_values[1]), float(min_values[2])),
-        max_point=Vector3(float(max_values[0]), float(max_values[1]), float(max_values[2])),
-    )
-
-
-def _fracture_view_bounds(mesh: FractureViewportMesh, payload: FractureRenderPayload) -> tuple[Vector3, Vector3]:
-    if len(payload.vertex_components) > 0:
-        return payload.min_point, payload.max_point
-    if not mesh.bone_segments:
-        return payload.min_point, payload.max_point
-    min_x = min(min(segment.parent_position.x, segment.child_position.x) for segment in mesh.bone_segments)
-    min_y = min(min(segment.parent_position.y, segment.child_position.y) for segment in mesh.bone_segments)
-    min_z = min(min(segment.parent_position.z, segment.child_position.z) for segment in mesh.bone_segments)
-    max_x = max(max(segment.parent_position.x, segment.child_position.x) for segment in mesh.bone_segments)
-    max_y = max(max(segment.parent_position.y, segment.child_position.y) for segment in mesh.bone_segments)
-    max_z = max(max(segment.parent_position.z, segment.child_position.z) for segment in mesh.bone_segments)
-    return Vector3(min_x, min_y, min_z), Vector3(max_x, max_y, max_z)
 
 
 def _rotate_positions(q: Quaternion, positions: np.ndarray) -> np.ndarray:

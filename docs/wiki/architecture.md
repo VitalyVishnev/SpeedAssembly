@@ -6,6 +6,7 @@ For current contracts and problem tracking, see:
 
 - [Decisions](decisions.md)
 - [Known Bugs](known-bugs.md)
+- [Encountered Crashes](encountered-crashes.md)
 - [Experiments](experiments.md)
 - [Glossary](glossary.md)
 
@@ -20,7 +21,7 @@ Main systems:
 - `src/xml_to_usda/conversion_service.py` and `src/xml_to_usda/conversion_orchestrator.py` - normalize caller intent and run conversions.
 - `src/xml_to_usda/qt_ui/` - supported PySide6 shell and preview adapters.
 - `src/xml_to_usda/fbx_adapter.py` and `src/xml_to_usda/fbx_import_supervisor.py` - Autodesk FBX integration and helper process control.
-- `src/xml_to_usda/cache_maintenance.py` - bounded runtime cache maintenance for job leftovers, FBX payloads, source-model caches, Proxy Source Projection caches, Fracture Preview source-facts caches, and stale cache temp files.
+- `src/xml_to_usda/cache_maintenance.py` - bounded runtime cache maintenance for job leftovers, FBX payloads, source-model caches, Proxy Source Projection caches, legacy Fracture Preview cache files, and stale cache temp files.
 - `src/xml_to_usda/proxy_mesh_service.py`, `src/xml_to_usda/fracture_service.py`, and related workers - companion workflows.
 - `src/xml_to_usda/qem_simplification.py` - shared topology-preserving `fast-simplification` QEM backend used by Proxy Mesh and Fracture Preview diagnostic geometry.
 - `src/xml_to_usda/fracture_geometry.py` - deep Fracture Geometry module shared by preview and export; owns subtree-local Cut Surfaces, deterministic noisy clipping, attribute interpolation, intersection-loop caps, and manual cross-section snapping. Cut planning and Repeated Part attachment ownership stay outside geometry.
@@ -92,8 +93,10 @@ camera plane, wheel zoom, double-left-click mesh focus, and `F` frame-all.
 Wheel zoom can approach to 0.1% of the framed scene radius, with a distance-
 adaptive near plane for close cut inspection. Scene setters only mark OpenGL
 buffers dirty; GPU uploads run in `paintGL` while Qt owns the current context.
-Fracture Preview additionally caps expanded diagnostic uploads at 256 MiB;
-large Repeated Part sets stay hidden rather than exhausting CPU/GPU memory.
+Fracture Preview uploads each unique Base/Repeated Part mesh once, stores
+placement transforms in a compact GPU instance buffer, and issues one hardware-
+instanced draw per unique source mesh. The 256 MiB guard covers unique vertex
+buffers rather than logical instance-expanded geometry.
 
 The Wind Preview right panel is the compact-control reference for every
 viewport dialog. Proxy Mesh, Fracture, and Prototype Preview reuse its shared
@@ -127,6 +130,13 @@ This screenshot loop is a design preflight, not final validation. Keep the
 packaged smoke/build gate for completed UI changes.
 
 5. Runtime wrappers handle worker isolation, cleanup, packaging, and diagnostics.
+
+Testing has four separate execution boundaries: Core (synthetic deterministic
+contracts), Integration (source/worker/Qt workflows), Packaged (frozen EXE and
+runtime cache/worker boundaries), and manual UE 5.7.x validation. The first
+three use pytest markers managed by `tests/conftest.py`; UE validation is never
+folded into pytest. The current contract map and commands live in
+[`testing.md`](testing.md).
 
 Important folders:
 

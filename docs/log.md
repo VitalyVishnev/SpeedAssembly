@@ -397,3 +397,45 @@ Major moves:
 
 - Replaced repeated `min(int(numpy.uint32), ...)` edge expressions with one row conversion and comparison-based canonical edge keys in connectivity, boundary-loop, and diagnostics scans.
 - Reproduced the reported Big Spruce settings locally, added a direct uint32 connectivity regression, and passed the same 15-branch request through the rebuilt packaged worker.
+
+## 2026-07-17 - Test suite contract map and execution layers
+
+- Recorded the 735-test / 98.16 s baseline and the 489-test default suite / 514-test non-stress collection result in `docs/wiki/testing.md`.
+- Added Core, Integration, and Packaged pytest layers plus a single PowerShell test entrypoint; UE validation remains a manual gate.
+- Moved the generic source-cache regression from Big Spruce to the equivalent Simple Tree contract after the large-model serialization path raised `0xC0000005`; Big Spruce remains stress-only.
+
+## 2026-07-17 - Restored four compact safety contracts
+
+- Restored `MeshData` boundary validation, deferred Qt GPU upload, and Fracture Preview's 256 MiB upload guard as focused tests.
+- Added a packaged smoke scenario that injects one Fracture Preview worker crash and requires exactly one retry with real geometry before passing.
+- Final collection is 518 non-stress tests (29.5% below the 735-test baseline); the small variance from the 30% target is intentional because these contracts guard native/UI failure modes.
+
+## 2026-07-17 - Fracture coverage under contract-based test layers
+
+- Restored three focused contracts removed by the test-policy reduction: Qt latest-request delivery without worker termination, smooth Fracture fallback normals, and close viewport focus/zoom.
+- Reclassified real-source Detailed export and Boolean workflows as Integration while keeping Big Spruce explicit stress.
+- Wired the 26 packaged contract tests into the package build before frozen Detailed Cuts stability and recovery smoke, so the packaged marker is no longer orphaned.
+
+## 2026-07-17 - Fracture cold-cache crash removal and bounded Repeated Parts inspection
+
+- Removed production Fracture Preview `.npz` reconstruction after the packaged Big Spruce worker again raised `0xC0000005` inside `_mesh_from_arrays`; a clean worker now reloads XML once and subsequent settings changes reuse the slim model in memory.
+- Measured Big Spruce source preparation at about 0.50 s from `.npz` and 0.79 s from XML locally, accepting the one-time 0.29 s cost to remove the unstable native path.
+- Preserved Fracture viewport instancing through OpenGL upload: unique prototype/piece-color geometry is uploaded once and all placement transforms are applied at draw time. Big Spruce keeps all 3613 instances without attempting the former 10.1-million-triangle flatten.
+
+## 2026-07-17 - Encountered Crashes ledger and hardware instancing
+
+- Added `docs/wiki/encountered-crashes.md`, a maintained crash ledger with evidence strength, process boundary,
+  systemic class, fix, and regression gate for resolved and open native failures.
+- Replaced 3613 per-frame draw/uniform sequences with one compact GPU transform
+  buffer and one hardware-instanced draw per unique source mesh.
+- The packaged Big Spruce rapid-settings scenario passed three consecutive runs
+  with all 3613 instances and no retry; the command-pressure cause remains an
+  explicit hypothesis until broader operator use confirms it.
+
+## 2026-07-17 - Detailed Cuts material lookup failure mitigation
+
+- Replaced incremental material lookup mutation with an atomic deterministic
+  comprehension after the frozen worker reported an impossible local `int`
+  assignment; the precise trigger remains unverified.
+- Rebuilt the package and verified Big Spruce through Computer Use by toggling
+  Detailed Cuts off/on with 17 pieces and all 3613 repeated instances visible.

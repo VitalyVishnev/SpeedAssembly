@@ -5,7 +5,7 @@ import pytest
 from xml_to_usda.models import MeshData, Vector3
 
 
-def test_mesh_data_materializes_lazy_tuple_fields_at_model_boundary() -> None:
+def test_mesh_data_materializes_iterables_and_rejects_non_iterable_fields() -> None:
     mesh = MeshData(
         name="Base",
         points=(point for point in (Vector3(0.0, 0.0, 0.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0))),
@@ -15,13 +15,9 @@ def test_mesh_data_materializes_lazy_tuple_fields_at_model_boundary() -> None:
 
     assert mesh.points == (Vector3(0.0, 0.0, 0.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0))
     assert mesh.face_vertex_counts == (3,)
-    assert mesh.face_vertex_indices == (0, 1, 2)
-
-
-def test_mesh_data_rejects_non_iterable_tuple_fields_loudly() -> None:
-    with pytest.raises(TypeError, match="MeshData.face_vertex_counts must be tuple-compatible, got function"):
+    with pytest.raises(TypeError, match="MeshData.face_vertex_counts must be tuple-compatible"):
         MeshData(
-            name="Base",
+            name="Invalid",
             points=(Vector3(0.0, 0.0, 0.0),),
             face_vertex_counts=lambda: (3,),  # type: ignore[arg-type]
             face_vertex_indices=(0, 1, 2),

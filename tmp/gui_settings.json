@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "last_input_path": "samples\\speedtree\\simple_tree\\variants\\SimpleTree_02_three_trunks.xml",
-  "last_output_path": "tmp\\wind_native_fix.usda",
+  "last_input_path": "samples\\speedtree\\BigSpruce\\SkeletalAssemblyTest_Spruce_Big_low.xml",
+  "last_output_path": "tmp\\hardware_instancing_verified.usda",
   "conversion_mode": "skeletal_assembly",
   "material_policy": "source_materials",
   "bark_material_path": "",
@@ -23,11 +23,16 @@
   "fracture_preview_settings": {
     "fracture": {
       "target_piece_count": 5,
-      "generate_caps": false,
+      "generate_caps": true,
       "preserve_trunk_bias": 0.5,
-      "force_stump_piece": false,
+      "force_stump_piece": true,
       "separate_stems": false,
-      "branch_height_bias": 0.0
+      "branch_height_bias": -1.0,
+      "detailed_cuts_enabled": true,
+      "detailed_cut_intensity": 22.0,
+      "detailed_cut_scale": 0.7,
+      "detailed_cut_density": 8,
+      "detailed_cut_max_bend_angle": 35.0
     },
     "collision": {
       "enabled": false,
@@ -42,11 +47,11 @@
     },
     "final_polycount": 1000000,
     "base_mesh_priority": 0.33,
-    "max_base_faces_per_piece": 50000,
+    "max_base_faces_per_piece": 10000000,
     "max_prototype_faces": 2000
   },
   "fbx_cache_max_size_gb": 20,
   "fbx_cache_max_age_days": 14,
-  "debug_trace_enabled": true,
+  "debug_trace_enabled": false,
   "active_preset_name": "Factory Defaults"
 }

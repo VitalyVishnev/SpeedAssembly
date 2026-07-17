@@ -1781,10 +1781,11 @@ def _attributed_mesh_data(
         and len(source.skel_joint_indices) >= len(source.points) * skin_size
         and len(source.skel_joint_weights) >= len(source.points) * skin_size
     )
-    material_by_face: dict[int, int] = {}
-    for section in source.sections:
-        for face_index in section.face_indices:
-            material_by_face[int(face_index)] = int(section.material_id)
+    material_by_face = {
+        int(face_index): int(section.material_id)
+        for section in source.sections
+        for face_index in section.face_indices
+    }
     default_material = 0 if source.sections else -1
 
     resolved_cap_frames = cap_frames or {2: frame}

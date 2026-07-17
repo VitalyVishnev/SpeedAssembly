@@ -10,6 +10,7 @@ from xml_to_usda.qt_ui.smoke import (
     HIGH_RISK_SCENARIOS,
     SMOKE_SCENARIO_FRACTURE_PREVIEW_INTERACTIVE,
     SMOKE_SCENARIO_FRACTURE_PREVIEW_RAPID_SETTINGS,
+    SMOKE_SCENARIO_FRACTURE_PREVIEW_RECOVERY,
     SMOKE_SCENARIO_PACKAGED_STABILITY,
     SMOKE_SCENARIO_WIND_PREVIEW,
     build_smoke_parser,
@@ -151,6 +152,24 @@ def test_packaged_stability_smoke_scenario_runs_interactive_preview_repeatedly(t
     ] * 3
     assert report["scenario"] == SMOKE_SCENARIO_PACKAGED_STABILITY
     assert report["fail_on_retry"] is True
+
+
+def test_recovery_smoke_is_a_distinct_non_strict_packaged_scenario(tmp_path: Path) -> None:
+    report_path = tmp_path / "smoke_report.json"
+    seen: list[str] = []
+
+    exit_code = run_smoke_cli(
+        [
+            "--scenario",
+            SMOKE_SCENARIO_FRACTURE_PREVIEW_RECOVERY,
+            "--report",
+            str(report_path),
+        ],
+        scenario_runner=lambda name, _context: seen.append(name) or {"passed": True},
+    )
+
+    assert exit_code == 0
+    assert seen == [SMOKE_SCENARIO_FRACTURE_PREVIEW_RECOVERY]
 
 
 def test_smoke_runner_fail_on_retry_marks_report_failed_from_trace_even_after_success(tmp_path: Path) -> None:

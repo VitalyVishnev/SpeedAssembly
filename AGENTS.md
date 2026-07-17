@@ -13,8 +13,9 @@ Use these maintained docs in this order:
 3. `docs/wiki/architecture.md`
 4. `docs/wiki/decisions.md`
 5. `docs/wiki/known-bugs.md`
-6. `docs/wiki/experiments.md`
-7. `docs/wiki/glossary.md`
+6. `docs/wiki/encountered-crashes.md`
+7. `docs/wiki/experiments.md`
+8. `docs/wiki/glossary.md`
 
 For importer-facing contract details, read these raw source docs next:
 
@@ -69,6 +70,11 @@ After meaningful project changes:
 - add experiments or uncertain ideas to `docs/wiki/experiments.md`
 - append a short entry to `docs/log.md`
 
+For every observed crash, update `docs/wiki/encountered-crashes.md` with the
+signature, process boundary, short context, evidence strength, cause if known,
+fix or workaround, and regression gate. Keep hypotheses explicitly unverified;
+if the risk remains active, also keep it in `docs/wiki/known-bugs.md`.
+
 Rules:
 
 - Do not invent facts.
@@ -108,6 +114,17 @@ If the converter cannot safely determine skeleton hierarchy, prototype identity,
 Importer-facing changes are not done until they are covered by tests and validated in UE 5.7.x. For fixed XML and config, output must stay logically stable, skeleton topology must match, and instance counts must match. Compare against `vault` examples when useful.
 
 Test density should stay practical. Preserve existing tests, but do not add or rewrite tests after every small edit, polish pass, or experiment iteration. Add the smallest useful test only when behavior becomes a stable feature, a new module or public contract is introduced, or an importer-facing invariant could regress silently. Prefer broad intent-level regression checks over exhaustive case-by-case encoding; when such a test fails, inspect the code to find the precise cause.
+
+## Test Policy
+
+- Test contracts and invariants, not individual samples or implementation details.
+- Reproduce an asset bug, then retain the smallest fixture preserving its cause.
+- Use real samples only for unique topology, scale, importer behavior, or packaged boundaries.
+- Prefer one intent-level test; parameterize only meaningful behavior.
+- Extend or replace an existing test before adding another one. Merge tests whose failure meaning is already covered.
+- Backend behavior belongs in backend tests; Qt tests cover transport and lifecycle only.
+- Packaged smoke must wait for and validate a real result, not merely open UI.
+- Test count and coverage are not quality metrics; runtime, contract coverage, and demonstrated failure detection are.
 
 ## Forbidden Shortcuts
 

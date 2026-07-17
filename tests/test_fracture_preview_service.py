@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pickle
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -301,11 +300,10 @@ def test_fracture_preview_reuses_base_cap_source_context_for_all_pieces(monkeypa
     assert calls == 1
 
 
-def test_fracture_preview_source_request_reuses_typed_source_cache(monkeypatch, tmp_path) -> None:
+def test_fracture_preview_source_request_reuses_in_memory_source_model(monkeypatch) -> None:
     from xml_to_usda import fracture_preview_service
 
-    cache_root = tmp_path / "cache" / "fracture_preview_source_models"
-    monkeypatch.setattr(fracture_preview_service, "_preview_source_model_cache_root", lambda: cache_root)
+    monkeypatch.setattr(fracture_preview_service, "_PREVIEW_SOURCE_MEMORY_CACHE", None)
     original_load_source_tree_model = fracture_preview_service.load_source_tree_model
     load_count = 0
 
@@ -328,11 +326,10 @@ def test_fracture_preview_source_request_reuses_typed_source_cache(monkeypatch, 
         settings,
         include_viewport_scene=False,
     )
-    assert len(list(cache_root.glob("*.npz"))) == 1
     assert load_count == 1
 
     def fail_source_load(*args, **kwargs):  # type: ignore[no-untyped-def]
-        raise AssertionError("Fracture Preview should reuse the typed source cache")
+        raise AssertionError("Fracture Preview should reuse the persistent worker's source model")
 
     monkeypatch.setattr(fracture_preview_service, "load_source_tree_model", fail_source_load)
     second = generate_fracture_preview_from_source_request(
@@ -342,26 +339,6 @@ def test_fracture_preview_source_request_reuses_typed_source_cache(monkeypatch, 
     )
 
     assert second.plan == first.plan
-
-
-def test_fracture_preview_source_cache_ignores_legacy_pickle_without_unpickling(monkeypatch, tmp_path) -> None:
-    from xml_to_usda import fracture_preview_service
-
-    cache_root = tmp_path / "cache" / "fracture_preview_source_models"
-    cache_root.mkdir(parents=True)
-    monkeypatch.setattr(fracture_preview_service, "_preview_source_model_cache_root", lambda: cache_root)
-    cache_path = fracture_preview_service._preview_source_model_cache_path(str(BIG_SPRUCE))
-    called: list[str] = []
-
-    class _Exploit:
-        def __reduce__(self):
-            return (called.append, ("executed",))
-
-    cache_path.write_bytes(pickle.dumps(_Exploit()))
-
-    assert fracture_preview_service._read_preview_source_model_cache(str(BIG_SPRUCE)) is None
-    assert not cache_path.exists()
-    assert called == []
 
 
 def test_fracture_preview_includes_bone_overlay_segments_and_selected_manual_cuts() -> None:
@@ -520,8 +497,7 @@ def test_fracture_preview_from_conversion_request_uses_source_xml_geometry_not_o
     from xml_to_usda import fracture_preview_service
 
     observed: dict[str, object] = {}
-    cache_root = tmp_path / "cache" / "fracture_preview_source_models"
-    monkeypatch.setattr(fracture_preview_service, "_preview_source_model_cache_root", lambda: cache_root)
+    monkeypatch.setattr(fracture_preview_service, "_PREVIEW_SOURCE_MEMORY_CACHE", None)
 
     def fake_load_source_tree_model(input_path, *, source_cache_enabled=True, telemetry_callback=None, cancel_event=None):
         observed["input_path"] = input_path
