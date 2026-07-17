@@ -23,6 +23,10 @@ def geometry_buffer_from_mesh(mesh: MeshData) -> GeometryBuffer:
     face_vertex_counts = array("i", mesh.face_vertex_counts)
     face_vertex_indices = array("i", mesh.face_vertex_indices)
 
+    normal_components = array("f")
+    for normal in mesh.normals:
+        normal_components.extend((normal.x, normal.y, normal.z))
+
     uv_components = array("f")
     for uv in mesh.uv_coords:
         uv_components.extend((uv.x, uv.y))
@@ -46,6 +50,7 @@ def geometry_buffer_from_mesh(mesh: MeshData) -> GeometryBuffer:
         point_components=point_components,
         face_vertex_counts=face_vertex_counts,
         face_vertex_indices=face_vertex_indices,
+        normal_components=normal_components,
         uv_components=uv_components,
         secondary_uv_components=secondary_uv_components,
         vertex_color_components=vertex_color_components,
@@ -69,6 +74,14 @@ def geometry_buffer_to_mesh(buffer: GeometryBuffer, max_points: int = 250_000) -
             buffer.point_components[index + 2],
         )
         for index in range(0, len(buffer.point_components), 3)
+    )
+    normals = tuple(
+        Vector3(
+            buffer.normal_components[index],
+            buffer.normal_components[index + 1],
+            buffer.normal_components[index + 2],
+        )
+        for index in range(0, len(buffer.normal_components), 3)
     )
     uv_coords = tuple(
         Vector2(
@@ -102,6 +115,7 @@ def geometry_buffer_to_mesh(buffer: GeometryBuffer, max_points: int = 250_000) -
         points=points,
         face_vertex_counts=tuple(buffer.face_vertex_counts),
         face_vertex_indices=tuple(buffer.face_vertex_indices),
+        normals=normals,
         uv_coords=uv_coords,
         secondary_uv_coords=secondary_uv_coords,
         vertex_colors=vertex_colors,

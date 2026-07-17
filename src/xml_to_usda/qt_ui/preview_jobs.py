@@ -120,12 +120,13 @@ class PreviewProcessJob:
             self._trace("worker.pending", self._name, self._trace_payload(request, settings, self._active_job_id))
             return PreviewJobStart(started=False, queued=True)
 
-        if self.running:
+        # A finished process still owns an unread result until the UI handles it.
+        # Queue behind any active lifecycle, not only behind a live PID.
+        if self.has_process:
             self._pending_request = request
             self._pending_settings = settings
             self._defer_pending_start()
             self._trace("worker.pending", self._name, self._trace_payload(request, settings, self._active_job_id))
-            self.cancel_running(clear_pending=False)
             return PreviewJobStart(started=False, queued=True)
 
         self._error_traceback = None
@@ -252,13 +253,16 @@ class PreviewProcessJob:
         )
 
     def finish_current(self) -> bool:
+        had_pending = self.has_pending
         self.close_handles()
         if self.start_pending_if_any():
             return True
         self._request = None
         self._settings = None
         self._active_job_id = 0
-        return False
+        # A debounced pending request is not ready yet, but the completed result
+        # is already stale and must not flash in the viewport or show an error.
+        return had_pending
 
     def close(self) -> None:
         self._pending_request = None

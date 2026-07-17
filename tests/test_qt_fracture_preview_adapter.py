@@ -22,7 +22,9 @@ from xml_to_usda.fracture_preview_service import (
 )
 from xml_to_usda.fracture_service import FractureSettings as _FractureSettings
 from xml_to_usda.fracture_preview_service import FracturePreviewBoneSegment
+from xml_to_usda.geometry_buffers import geometry_buffer_from_mesh
 from xml_to_usda.models import (
+    Color4,
     ExportMetadata,
     InstanceBinding,
     Joint,
@@ -39,14 +41,16 @@ from xml_to_usda.models import (
 
 def FractureSettings(*args, **kwargs):
     """Keep synthetic viewport fixtures on the legacy face-ownership path."""
-    kwargs.setdefault("noisy_cut_enabled", False)
+    kwargs.setdefault("detailed_cuts_enabled", False)
     return _FractureSettings(*args, **kwargs)
 from xml_to_usda.qt_ui.fracture_preview import (
     FRACTURE_MATCAP_TINT_STRENGTH,
     FRACTURE_SOURCE_VERTEX_STRIDE,
     FRACTURE_VERTEX_STRIDE,
+    MAX_FRACTURE_PREVIEW_UPLOAD_BYTES,
     FracturePreviewDialog,
     FractureViewportMesh,
+    _append_mesh_triangles,
     apply_fracture_viewport_mesh,
     build_fracture_viewport_mesh,
 )
@@ -243,6 +247,31 @@ def test_fracture_viewport_payload_triangulates_base_and_instanced_preview_geome
     assert mesh.draw_calls[4].translate.x == pytest.approx(20.0)
 
 
+def test_fracture_viewport_smooths_meshes_without_authored_normals() -> None:
+    mesh = geometry_buffer_from_mesh(
+        MeshData(
+            name="Bent",
+            points=(
+                Vector3(0.0, 0.0, 0.0),
+                Vector3(1.0, 0.0, 0.0),
+                Vector3(0.0, 1.0, 0.0),
+                Vector3(0.0, 0.0, 1.0),
+            ),
+            face_vertex_counts=(3, 3),
+            face_vertex_indices=(0, 1, 2, 0, 3, 1),
+        )
+    )
+    vertices = array("f")
+
+    assert _append_mesh_triangles(vertices, mesh, color=Color4(1.0, 1.0, 1.0, 1.0)) == 2
+
+    first_normal = tuple(vertices[3:6])
+    second_face_same_point = tuple(vertices[3 * FRACTURE_SOURCE_VERTEX_STRIDE + 3 : 3 * FRACTURE_SOURCE_VERTEX_STRIDE + 6])
+    assert second_face_same_point == pytest.approx(first_normal)
+    assert first_normal[1] > 0.0
+    assert first_normal[2] > 0.0
+
+
 def test_fracture_viewport_payload_reuses_repeated_prototype_source_for_same_piece_instances() -> None:
     tree = _tree()
     preview = generate_fracture_preview(
@@ -341,11 +370,12 @@ def test_fracture_preview_hides_repeated_parts_before_building_the_upload_payloa
 def test_fracture_preview_rejects_an_oversized_upload_before_allocating_it(qtbot) -> None:
     preview = generate_fracture_preview(_tree(), FracturePreviewSettings(fracture=FractureSettings(target_piece_count=3)))
     mesh = build_fracture_viewport_mesh(preview, include_repeated_parts=False)
-    oversized_triangle_count = MAX_QT_OPENGL_BUFFER_BYTES // (3 * FRACTURE_VERTEX_STRIDE * 4) + 1
+    upload_limit = min(MAX_QT_OPENGL_BUFFER_BYTES, MAX_FRACTURE_PREVIEW_UPLOAD_BYTES)
+    oversized_triangle_count = upload_limit // (3 * FRACTURE_VERTEX_STRIDE * 4) + 1
     viewport = MatcapViewport()
     qtbot.addWidget(viewport)
 
-    with pytest.raises(ValueError, match="Qt supports at most"):
+    with pytest.raises(ValueError, match="Fracture Preview safely allows at most"):
         apply_fracture_viewport_mesh(
             viewport,
             replace(mesh, triangle_count=oversized_triangle_count),
@@ -619,6 +649,29 @@ def test_fracture_preview_dialog_enables_manual_bones_visibility_and_hides_repea
     assert preview.instances
 
 
+def test_fracture_preview_keeps_repeated_parts_hidden_when_their_upload_is_unsafe(qtbot, monkeypatch) -> None:
+    preview = generate_fracture_preview(
+        _tree(),
+        FracturePreviewSettings(
+            fracture=FractureSettings(target_piece_count=3, output_stem="Oak"),
+            max_base_faces_per_piece=1,
+            max_prototype_faces=1,
+        ),
+    )
+    dialog = FracturePreviewDialog(settings=FracturePreviewSettings(), preview=preview)
+    qtbot.addWidget(dialog)
+    base_mesh = dialog.viewport_mesh
+    import xml_to_usda.qt_ui.fracture_preview as fracture_preview_ui
+
+    monkeypatch.setattr(fracture_preview_ui, "MAX_FRACTURE_PREVIEW_UPLOAD_BYTES", 1)
+    dialog.hide_repeated_parts_check.setChecked(False)
+
+    assert dialog.hide_repeated_parts_check.isChecked()
+    assert dialog.viewport_mesh is base_mesh
+    assert dialog.viewport_mesh is not None and dialog.viewport_mesh.instance_count == 0
+    assert "Repeated Parts remain hidden" in dialog.summary_label.text()
+
+
 def test_fracture_preview_reuses_full_payload_after_first_repeated_parts_show(qtbot, monkeypatch) -> None:
     preview = generate_fracture_preview(
         _tree(),
@@ -720,9 +773,10 @@ def test_fracture_preview_dialog_round_trips_v1_auto_controls(qtbot) -> None:
                 target_piece_count=0,
                 separate_stems=True,
                 branch_height_bias=-0.5,
-                noisy_cut_enabled=True,
-                noisy_cut_intensity=0.42,
-                noisy_cut_scale=1.25,
+                detailed_cuts_enabled=True,
+                detailed_cut_intensity=20.0,
+                detailed_cut_scale=1.25,
+                detailed_cut_density=12,
             )
         )
     )
@@ -733,33 +787,40 @@ def test_fracture_preview_dialog_round_trips_v1_auto_controls(qtbot) -> None:
     assert dialog.piece_count_spin.value() == 0
     assert dialog.separate_stems_check.isChecked()
     assert dialog.branch_height_bias_spin.value() == pytest.approx(-0.5)
-    assert dialog.noisy_cut_check.isChecked()
-    assert dialog.noisy_cut_intensity_spin.value() == pytest.approx(0.42)
-    assert dialog.noisy_cut_scale_spin.value() == pytest.approx(1.25)
+    assert dialog.detailed_cut_check.isChecked()
+    assert dialog.detailed_cut_intensity_spin.value() == pytest.approx(20.0)
+    assert dialog.detailed_cut_scale_spin.value() == pytest.approx(1.25)
+    assert dialog.detailed_cut_density_spin.value() == 12
+    assert dialog.generate_caps_check.isChecked()
+    assert not dialog.generate_caps_check.isEnabled()
 
     dialog.piece_count_spin.setValue(7)
     dialog.separate_stems_check.setChecked(False)
     dialog.branch_height_bias_spin.setValue(0.75)
-    dialog.noisy_cut_check.setChecked(False)
-    dialog.noisy_cut_intensity_spin.setValue(0.6)
-    dialog.noisy_cut_scale_spin.setValue(0.8)
+    dialog.detailed_cut_check.setChecked(False)
+    assert dialog.generate_caps_check.isEnabled()
+    dialog.detailed_cut_intensity_spin.setValue(40.0)
+    dialog.detailed_cut_scale_spin.setValue(0.8)
+    dialog.detailed_cut_density_spin.setValue(16)
 
     settings = dialog.settings().fracture
     assert settings.target_piece_count == 7
     assert settings.separate_stems is False
     assert settings.branch_height_bias == pytest.approx(0.75)
-    assert settings.noisy_cut_enabled is False
-    assert settings.noisy_cut_intensity == pytest.approx(0.6)
-    assert settings.noisy_cut_scale == pytest.approx(0.8)
+    assert settings.detailed_cuts_enabled is False
+    assert settings.detailed_cut_intensity == pytest.approx(40.0)
+    assert settings.detailed_cut_scale == pytest.approx(0.8)
+    assert settings.detailed_cut_density == 16
 
 
-def test_noisy_cut_controls_participate_in_preview_cache_key() -> None:
+def test_detailed_cut_controls_participate_in_preview_cache_key() -> None:
     request = FracturePreviewSourceRequest(input_path="tree.xml")
     baseline = FracturePreviewSettings(
         fracture=FractureSettings(
-            noisy_cut_enabled=True,
-            noisy_cut_intensity=0.35,
-            noisy_cut_scale=0.65,
+            detailed_cuts_enabled=True,
+            detailed_cut_intensity=20.0,
+            detailed_cut_scale=0.65,
+            detailed_cut_density=8,
         )
     )
 
@@ -768,17 +829,27 @@ def test_noisy_cut_controls_participate_in_preview_cache_key() -> None:
     assert baseline_key != MainWindow._fracture_preview_cache_key(
         None,
         request,
-        replace(baseline, fracture=replace(baseline.fracture, noisy_cut_enabled=False)),
+        replace(baseline, fracture=replace(baseline.fracture, detailed_cuts_enabled=False)),
     )
     assert baseline_key != MainWindow._fracture_preview_cache_key(
         None,
         request,
-        replace(baseline, fracture=replace(baseline.fracture, noisy_cut_intensity=0.6)),
+        replace(baseline, fracture=replace(baseline.fracture, detailed_cut_intensity=40.0)),
     )
     assert baseline_key != MainWindow._fracture_preview_cache_key(
         None,
         request,
-        replace(baseline, fracture=replace(baseline.fracture, noisy_cut_scale=1.2)),
+        replace(baseline, fracture=replace(baseline.fracture, detailed_cut_scale=1.2)),
+    )
+    assert baseline_key != MainWindow._fracture_preview_cache_key(
+        None,
+        request,
+        replace(baseline, fracture=replace(baseline.fracture, detailed_cut_density=16)),
+    )
+    assert baseline_key != MainWindow._fracture_preview_cache_key(
+        None,
+        request,
+        replace(baseline, fracture=replace(baseline.fracture, detailed_cut_max_bend_angle=45.0)),
     )
 
 

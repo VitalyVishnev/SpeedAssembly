@@ -522,9 +522,10 @@ class _RunningProcess:
 
     def __init__(self) -> None:
         self.terminated = False
+        self.completed = False
 
     def is_alive(self) -> bool:
-        return not self.terminated
+        return not self.terminated and not self.completed
 
     def join(self, timeout=None) -> None:
         return None
@@ -1630,7 +1631,8 @@ def test_qt_window_reuses_cached_fracture_preview_when_settings_return_to_previo
     start_events = calls["start_fracture_preview_process_events"]
     assert len(start_events) == 1
 
-    window._fracture_preview_dialog.generate_caps_check.setChecked(True)
+    window._fracture_preview_dialog.detailed_cut_intensity_spin.setValue(21.0)
+    window._fracture_preview_dialog.detailed_cut_intensity_spin.editingFinished.emit()
     qtbot.waitUntil(
         lambda: window._fracture_preview_dialog.current_preview is not None
         and window._fracture_preview_dialog.current_preview is not first_preview,
@@ -1638,14 +1640,15 @@ def test_qt_window_reuses_cached_fracture_preview_when_settings_return_to_previo
     )
     assert len(start_events) == 2
 
-    window._fracture_preview_dialog.generate_caps_check.setChecked(False)
+    window._fracture_preview_dialog.detailed_cut_intensity_spin.setValue(20.0)
+    window._fracture_preview_dialog.detailed_cut_intensity_spin.editingFinished.emit()
     qtbot.waitUntil(
         lambda: window._fracture_preview_dialog.current_preview is first_preview,
         timeout=3000,
     )
 
     assert len(start_events) == 2
-    assert window._fracture_preview_settings.fracture.generate_caps is False
+    assert window._fracture_preview_settings.fracture.detailed_cut_intensity == 20.0
 
 
 def test_qt_window_opens_fracture_preview_shell_while_process_is_running(monkeypatch, qtbot, tmp_path) -> None:
@@ -1830,11 +1833,8 @@ def test_qt_fracture_caps_material_controls_do_not_restart_preview(monkeypatch, 
 
     dialog = window._fracture_preview_dialog
     assert dialog is not None
-    assert dialog.override_caps_material_check.isHidden()
+    assert not dialog.override_caps_material_check.isHidden()
     assert dialog.caps_material_row.isHidden()
-
-    dialog.generate_caps_check.setChecked(True)
-    qtbot.waitUntil(lambda: len(calls.get("start_fracture_preview_process_events", [])) >= 2, timeout=3000)
     preview_start_count = len(calls["start_fracture_preview_process_events"])
 
     dialog.override_caps_material_check.setChecked(True)
@@ -2120,7 +2120,7 @@ def test_qt_window_retries_transient_fracture_preview_process_crash(monkeypatch,
     assert "Fracture preview worker process crashed unexpectedly" not in window._log_text
 
 
-def test_qt_window_restarts_fracture_preview_process_for_latest_settings(
+def test_qt_window_coalesces_fracture_preview_settings_without_killing_active_process(
     monkeypatch,
     qtbot,
     tmp_path,
@@ -2131,6 +2131,7 @@ def test_qt_window_restarts_fracture_preview_process_for_latest_settings(
     calls: dict[str, object] = {}
     base_deps = _build_fake_deps(calls)
     first_process = _RunningProcess()
+    first_queue: list[tuple[str, object]] = []
     cancel_flag = _CancelFlag()
     start_events: list[dict[str, object]] = []
 
@@ -2138,7 +2139,7 @@ def test_qt_window_restarts_fracture_preview_process_for_latest_settings(
         start_events.append({"request": request, "settings": settings})
         calls["start_fracture_preview_process"] = {"request": request, "settings": settings}
         if len(start_events) == 1:
-            return first_process, [], cancel_flag
+            return first_process, first_queue, cancel_flag
         return _FinishedProcess(), [
             ("result", base_deps.generate_fracture_preview_from_source_request(request, settings))
         ], _CancelFlag()
@@ -2173,6 +2174,19 @@ def test_qt_window_restarts_fracture_preview_process_for_latest_settings(
     window._fracture_preview_dialog.piece_count_spin.setValue(6)
     window._fracture_preview_dialog.piece_count_spin.editingFinished.emit()
 
+    qtbot.wait(300)
+    assert len(start_events) == 1
+    assert first_process.terminated is False
+    assert cancel_flag.was_set is False
+
+    first_settings = start_events[0]["settings"]
+    first_queue.append(
+        (
+            "result",
+            base_deps.generate_fracture_preview_from_source_request(start_events[0]["request"], first_settings),
+        )
+    )
+    first_process.completed = True
     qtbot.waitUntil(lambda: len(start_events) == 2, timeout=3000)
 
     qtbot.waitUntil(
@@ -2181,8 +2195,8 @@ def test_qt_window_restarts_fracture_preview_process_for_latest_settings(
         timeout=3000,
     )
 
-    assert first_process.terminated is True
-    assert cancel_flag.was_set is True
+    assert first_process.terminated is False
+    assert cancel_flag.was_set is False
     assert start_events[0]["settings"].fracture.target_piece_count == 5
     assert start_events[1]["settings"].fracture.target_piece_count == 6
     assert window._fracture_preview_dialog.current_preview.plan.actual_piece_count == 6

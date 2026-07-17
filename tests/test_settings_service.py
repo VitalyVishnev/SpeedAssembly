@@ -137,9 +137,11 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
                 preserve_trunk_bias=0.25,
                 separate_stems=True,
                 branch_height_bias=-0.5,
-                noisy_cut_enabled=True,
-                noisy_cut_intensity=0.42,
-                noisy_cut_scale=1.25,
+                detailed_cuts_enabled=True,
+                detailed_cut_intensity=20.0,
+                detailed_cut_scale=1.25,
+                detailed_cut_density=12,
+                detailed_cut_max_bend_angle=45.0,
             ),
             collision=FractureCollisionSettings(
                 enabled=True,
@@ -185,9 +187,11 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert payload["fracture_preview_settings"]["fracture"]["target_piece_count"] == 0
     assert payload["fracture_preview_settings"]["fracture"]["separate_stems"] is True
     assert payload["fracture_preview_settings"]["fracture"]["branch_height_bias"] == -0.5
-    assert payload["fracture_preview_settings"]["fracture"]["noisy_cut_enabled"] is True
-    assert payload["fracture_preview_settings"]["fracture"]["noisy_cut_intensity"] == 0.42
-    assert payload["fracture_preview_settings"]["fracture"]["noisy_cut_scale"] == 1.25
+    assert payload["fracture_preview_settings"]["fracture"]["detailed_cuts_enabled"] is True
+    assert payload["fracture_preview_settings"]["fracture"]["detailed_cut_intensity"] == 20.0
+    assert payload["fracture_preview_settings"]["fracture"]["detailed_cut_scale"] == 1.25
+    assert payload["fracture_preview_settings"]["fracture"]["detailed_cut_density"] == 12
+    assert payload["fracture_preview_settings"]["fracture"]["detailed_cut_max_bend_angle"] == 45.0
     assert payload["fracture_preview_settings"]["collision"]["mode"] == "sphere"
     assert payload["fracture_preview_settings"]["collision"]["enabled"] is True
     assert payload["fracture_preview_settings"]["collision"]["include_instance_parts"] is False

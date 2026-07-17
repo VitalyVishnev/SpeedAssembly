@@ -96,6 +96,7 @@ class MatcapViewport(QOpenGLWidget):
         self._precomputed_matcap_vertices: np.ndarray | None = None
         self._mesh_tint_alpha = DEFAULT_MATCAP_TINT_ALPHA
         self._target = Vector3(0.0, 0.0, 0.0)
+        self._frame_target = self._target
         self._radius = 1.0
         self._distance = 3.0
         self._yaw = math.radians(38.0)
@@ -133,6 +134,7 @@ class MatcapViewport(QOpenGLWidget):
         self._bone_pick_requires_control = True
         self._shortcut_hints: tuple[str, ...] = ()
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def has_mesh(self) -> bool:
         if self._precomputed_matcap_vertices is not None:
@@ -156,6 +158,10 @@ class MatcapViewport(QOpenGLWidget):
     @property
     def camera_distance(self) -> float:
         return self._distance
+
+    @property
+    def camera_target(self) -> Vector3:
+        return self._target
 
     @property
     def matcap_tint_strength(self) -> float:
@@ -220,6 +226,11 @@ class MatcapViewport(QOpenGLWidget):
         self._show_bones = bool(value)
         if not self._show_bones:
             self._hover_cut_token = None
+        self._trace_viewport_event(
+            "viewport.bones_visibility",
+            show_bones=self._show_bones,
+            bone_segment_count=len(self._bone_segments_for_overlay()),
+        )
         self.update()
 
     def set_selected_cut_tokens(self, joint_tokens: tuple[str, ...]) -> None:
@@ -282,7 +293,7 @@ class MatcapViewport(QOpenGLWidget):
         self._trace_set_scene_event(scene)
         self._mesh_dirty = True
         self._grid_dirty = True
-        self._upload_if_valid()
+        self.update()
 
     def set_mesh(
         self,
@@ -301,7 +312,7 @@ class MatcapViewport(QOpenGLWidget):
         self._grid_vertex_count = int(len(_build_grid_vertices(self._target, self._radius, self._ground_y)) // 4)
         self._mesh_dirty = True
         self._grid_dirty = True
-        self._upload_if_valid()
+        self.update()
 
     def set_precomputed_matcap_scene(
         self,
@@ -329,23 +340,13 @@ class MatcapViewport(QOpenGLWidget):
         self._trace_set_scene_event(scene)
         self._mesh_dirty = True
         self._grid_dirty = True
-        self._upload_if_valid()
+        self.update()
 
     def set_visible_vertex_count_override(self, vertex_count: int | None) -> None:
         resolved = None if vertex_count is None else max(0, int(vertex_count))
         if resolved == self._visible_vertex_count_override:
             return
         self._visible_vertex_count_override = resolved
-        self.update()
-
-    def _upload_if_valid(self) -> None:
-        if self.isValid():
-            self.makeCurrent()
-            try:
-                self._upload_mesh()
-                self._upload_grid()
-            finally:
-                self.doneCurrent()
         self.update()
 
     def initializeGL(self) -> None:  # type: ignore[override]
@@ -452,8 +453,9 @@ class MatcapViewport(QOpenGLWidget):
                 self.on_bone_cut_toggled(token)
                 event.accept()
                 return
-        if event.button() == Qt.MouseButton.LeftButton:
+        if event.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton):
             self._last_mouse = event.position().toPoint()
+            self.setFocus()
             event.accept()
             return
         super().mousePressEvent(event)
@@ -486,6 +488,13 @@ class MatcapViewport(QOpenGLWidget):
             self.update()
             event.accept()
             return
+        if self._last_mouse is not None and event.buttons() & Qt.MouseButton.MiddleButton:
+            current = event.position().toPoint()
+            delta = current - self._last_mouse
+            self._last_mouse = current
+            self._pan_camera_pixels(float(delta.x()), float(delta.y()))
+            event.accept()
+            return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
@@ -498,6 +507,21 @@ class MatcapViewport(QOpenGLWidget):
             self.update()
         super().keyReleaseEvent(event)
 
+    def keyPressEvent(self, event) -> None:  # type: ignore[override]
+        if event.key() == Qt.Key.Key_F and not event.isAutoRepeat():
+            self.frame_camera()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton and self.focus_at_screen_point(
+            event.position().x(), event.position().y()
+        ):
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def leaveEvent(self, event) -> None:  # type: ignore[override]
         if self._hover_cut_token is not None:
             self._hover_cut_token = None
@@ -506,9 +530,97 @@ class MatcapViewport(QOpenGLWidget):
 
     def wheelEvent(self, event) -> None:  # type: ignore[override]
         steps = event.angleDelta().y() / 120.0
-        self._distance = max(self._radius * 0.35, self._distance * (0.88 ** steps))
+        self._distance = max(0.0001, self._radius * 0.001, self._distance * (0.88 ** steps))
         self.update()
         event.accept()
+
+    def frame_camera(self) -> None:
+        self._target = self._frame_target
+        self._distance = self._radius * 3.0
+        self._camera_target_changed()
+
+    def focus_at_screen_point(self, x: float, y: float) -> bool:
+        hit = self._pick_mesh_point(float(x), float(y))
+        if hit is None:
+            return False
+        self._target = hit
+        self._camera_target_changed()
+        return True
+
+    def _pan_camera_pixels(self, delta_x: float, delta_y: float) -> None:
+        if not delta_x and not delta_y:
+            return
+        world_per_pixel = 2.0 * self._distance * math.tan(math.radians(21.0)) / max(1, self.height())
+        sin_yaw = math.sin(self._yaw)
+        cos_yaw = math.cos(self._yaw)
+        sin_pitch = math.sin(self._pitch)
+        cos_pitch = math.cos(self._pitch)
+        right = Vector3(cos_yaw, 0.0, -sin_yaw)
+        up = Vector3(-sin_yaw * sin_pitch, cos_pitch, -cos_yaw * sin_pitch)
+        self._target = Vector3(
+            self._target.x + (-delta_x * right.x + delta_y * up.x) * world_per_pixel,
+            self._target.y + (-delta_x * right.y + delta_y * up.y) * world_per_pixel,
+            self._target.z + (-delta_x * right.z + delta_y * up.z) * world_per_pixel,
+        )
+        self._camera_target_changed()
+
+    def _camera_target_changed(self) -> None:
+        self._grid_dirty = True
+        self.update()
+
+    def _pick_mesh_point(self, x: float, y: float) -> Vector3 | None:
+        vertices = self._current_matcap_vertices()
+        visible_count = self._visible_vertex_count()
+        triangle_count = visible_count // 3
+        if triangle_count <= 0:
+            return None
+        ray_origin, ray_direction = self._screen_ray(x, y)
+        packed = vertices[: triangle_count * 3 * MATCAP_VERTEX_STRIDE].reshape(triangle_count, 3, MATCAP_VERTEX_STRIDE)
+        origin = np.asarray((ray_origin.x, ray_origin.y, ray_origin.z), dtype=np.float64)
+        direction = np.asarray((ray_direction.x, ray_direction.y, ray_direction.z), dtype=np.float64)
+        nearest = math.inf
+        for start in range(0, triangle_count, 65_536):
+            chunk = packed[start : start + 65_536]
+            points = chunk[:, :, 0:3] + chunk[:, :, 10:13] * self._exploded_view_strength
+            first = points[:, 0].astype(np.float64, copy=False)
+            edge_1 = points[:, 1] - first
+            edge_2 = points[:, 2] - first
+            h = np.cross(direction, edge_2)
+            determinant = np.einsum("ij,ij->i", edge_1, h)
+            valid = np.abs(determinant) > 1e-10
+            inverse = np.zeros_like(determinant)
+            inverse[valid] = 1.0 / determinant[valid]
+            offset = origin - first
+            u = inverse * np.einsum("ij,ij->i", offset, h)
+            q = np.cross(offset, edge_1)
+            v = inverse * (q @ direction)
+            distance = inverse * np.einsum("ij,ij->i", edge_2, q)
+            valid &= (u >= 0.0) & (v >= 0.0) & (u + v <= 1.0) & (distance > 1e-8)
+            if np.any(valid):
+                nearest = min(nearest, float(np.min(distance[valid])))
+        if not math.isfinite(nearest):
+            return None
+        point = origin + direction * nearest
+        return Vector3(float(point[0]), float(point[1]), float(point[2]))
+
+    def _screen_ray(self, x: float, y: float) -> tuple[Vector3, Vector3]:
+        width = max(1, self.width())
+        height = max(1, self.height())
+        ndc_x = 2.0 * x / width - 1.0
+        ndc_y = 1.0 - 2.0 * y / height
+        tan_half_fov = math.tan(math.radians(21.0))
+        aspect = width / height
+        sin_yaw = math.sin(self._yaw)
+        cos_yaw = math.cos(self._yaw)
+        sin_pitch = math.sin(self._pitch)
+        cos_pitch = math.cos(self._pitch)
+        forward = np.asarray((-sin_yaw * cos_pitch, -sin_pitch, -cos_yaw * cos_pitch), dtype=np.float64)
+        right = np.asarray((cos_yaw, 0.0, -sin_yaw), dtype=np.float64)
+        up = np.asarray((-sin_yaw * sin_pitch, cos_pitch, -cos_yaw * sin_pitch), dtype=np.float64)
+        direction = forward + right * ndc_x * tan_half_fov * aspect + up * ndc_y * tan_half_fov
+        direction /= np.linalg.norm(direction)
+        eye = self._camera_eye()
+        return eye, Vector3(float(direction[0]), float(direction[1]), float(direction[2]))
 
     def pick_bone_segment_child_token(self, x: float, y: float, *, max_distance: float = 14.0) -> str | None:
         bone_segments = self._bone_segments_for_overlay()
@@ -535,8 +647,9 @@ class MatcapViewport(QOpenGLWidget):
         return best[2]
 
     def _update_empty_metrics(self, *, frame_camera: bool) -> None:
+        self._frame_target = Vector3(0.0, 0.0, 0.0)
         if frame_camera:
-            self._target = Vector3(0.0, 0.0, 0.0)
+            self._target = self._frame_target
             self._radius = 1.0
             self._distance = 3.0
         self._ground_y = 0.0
@@ -562,12 +675,13 @@ class MatcapViewport(QOpenGLWidget):
             )
             * 0.5,
         )
+        self._frame_target = Vector3(
+            (min_point.x + max_point.x) * 0.5,
+            (min_point.y + max_point.y) * 0.5,
+            (min_point.z + max_point.z) * 0.5,
+        )
         if frame_camera:
-            self._target = Vector3(
-                (min_point.x + max_point.x) * 0.5,
-                (min_point.y + max_point.y) * 0.5,
-                (min_point.z + max_point.z) * 0.5,
-            )
+            self._target = self._frame_target
             self._distance = self._radius * 3.0
 
     def _update_mesh_metrics(self, *, frame_camera: bool) -> None:
@@ -700,7 +814,8 @@ class MatcapViewport(QOpenGLWidget):
     def _projection_matrix(self) -> QMatrix4x4:
         matrix = QMatrix4x4()
         aspect = max(0.001, self.width() / max(1, self.height()))
-        matrix.perspective(42.0, aspect, max(0.001, self._radius * 0.01), max(10.0, self._radius * 20.0))
+        near_plane = max(0.00001, min(self._radius * 0.01, self._distance * 0.1))
+        matrix.perspective(42.0, aspect, near_plane, max(10.0, self._radius * 20.0))
         return matrix
 
     def _project_point_to_screen(self, point: Vector3) -> tuple[float, float] | None:

@@ -2,6 +2,39 @@
 
 This page stores active project contracts. Rejected or superseded approaches live in [experiments.md](experiments.md). Current limitations and bugs live in [known-bugs.md](known-bugs.md).
 
+## Decision: Detailed Boolean Fracture is the production cut backend
+
+The connectivity-first physical Boolean now serves Detailed Cuts in preview and export; the standalone prototype commands remain diagnostic viewers for the same backend.
+
+Keep the `boolean-prototype` UI separate from the production Fracture Preview, but share its geometry backend. It resolves the existing cut semantics, uses the flat plan only to identify the whole connected branch shell, closes every valid degree-two boundary loop, and runs a deterministic `manifold3d` split. Temporary closures and cutter caps have distinct provenance. Manifold can triangulate complementary caps differently, so a small deterministic simplification removes redundant collinear split vertices and the child reuses the parent cap topology with opposite winding.
+
+When several disconnected child-subtree shells cross one cut plane, select the
+unique shell with the strongest face ownership by the cut bone. Descendant twig
+shells with only transition faces owned by that bone remain untouched in their
+planned child piece. Equal strongest evidence remains an explicit error.
+
+Requested noise amplitude is scaled uniformly, never hard-clamped per lattice vertex, to the first physical skeleton terminal, real branch, or local bend above the operator threshold. One lattice edge is reserved before that limiter. Source-derived Boolean faces carry exact source-triangle provenance for barycentric UV, color, material, and skin-weight transfer. Cutter caps use planar cutter-space UVs, inherit the boundary-ring material and attributes, and remain explicitly tagged.
+
+The multi-cut prototype stays sequential. Do not add an outer thread pool: the wheel already has internal oneTBB and the Python binding does not release the GIL. A process pool is allowed only after the documented 1/2/4-process speed, RSS, determinism, and packaged-stability gate.
+
+Interactive Boolean regeneration must use explicit prepared sessions scoped to its window/job. Base Mesh analysis, triangulation, and connectivity are shared once per source context; boundary closure, provenance, and the closed branch Manifold are immutable per cut. Noise controls rebuild only cutters and complementary results. A changed cut plan creates a new multi session. Do not use a global model cache.
+
+Multi-cut replanning must reuse an unchanged cut session and its last result when both the resolved `FractureCutSite` and cutter settings are identical. Enabling a stump or raising branch count may build only newly introduced cuts; ownership and untouched source slices may still change. Never reuse by joint name alone when the resolved cut site differs.
+
+Cuts on one connectivity shell are evaluated sequentially in plan order. Each cut splits the current region owned by its resolved parent Fracture Piece, leaves the intersection in that parent, and assigns the complementary child to the cut piece. If the parent region does not yet exist, fail loudly rather than reorder cuts heuristically. Every cutter keeps a distinct provenance tag so all final adjacent caps can be canonicalized and attributed independently.
+
+Production Boolean geometry preserves source-side normals and uses an unconditional hard edge along the source/Boolean-cap perimeter. Within the Boolean cap, edges with dihedral angle greater than or equal to 90 degrees are hard; shallower edges may smooth. This is encoded as mesh data/export behavior, not only as viewport shading.
+
+Fracture Piece ownership resolves the deepest selected cut by one parent-chain walk per skeleton joint. Do not restore the previous selected-cuts × joints × ancestry scan; the same shared planner serves Preview, Export, and Boolean preparation.
+
+Why: preview and export need one deterministic topology, attribute, collision, and Repeated Part ownership contract; the diagnostic viewer should expose that implementation rather than define a second one.
+
+## Decision: Manual cut `t` is measured on the physical child bone
+
+SpeedTree hierarchy edges may be connector links from a trunk or parent branch to the start of a child branch. They are not necessarily the physical bone displayed for that child.
+
+Keep the token format `parent->child@t`, but interpret `t` on `child.bind → child.bind_end`. Use `parent.bind → child.bind` only when the source has no `bind_end`. The planner, preview overlay, exact Fracture Geometry, and Boolean prototype share this contract. Manual spatial ownership is limited to the child subtree plus local faces owned by the immediate parent; sibling branches sharing that parent must never enter the cut piece.
+
 ## Decision: Skeletal assembly remains the primary contract
 
 Status: Active
@@ -352,7 +385,7 @@ Context:
 The old automatic fill could refine trunk chains and synthetic face regions, producing visibly unnatural trunk shredding on simple trees.
 
 Decision:
-Treat `target_piece_count` as operator-facing Auto Branches / Branch Count. Automatic V1 cuts may add a stump piece, separate independent root-level stems, and detach branch bases ranked by skeleton path length with optional height bias. Stump and separated stems are counted outside Branch Count. Manual pinned cuts still run first and may cut trunks explicitly. Noisy Cut changes only Cut Surface geometry; it must not change selected bones or piece structure.
+Treat `target_piece_count` as operator-facing Auto Branches / Branch Count. Automatic V1 cuts may add a stump piece, separate independent root-level stems, and detach branch bases ranked by skeleton path length with optional height bias. Stump and separated stems are counted outside Branch Count. Manual pinned cuts still run first and may cut trunks explicitly. Detailed Cuts change only Cut Surface geometry; they must not change selected bones or piece structure.
 
 Reasoning:
 Length-first branch detachment better matches the perceived weak points of vehicle impact and nearby blast workflows while preserving manual control for exceptional cuts.
@@ -540,8 +573,9 @@ on BigSpruce: 3613 hidden instances expanded to 38,044,065 vertices and a
 Decision:
 When Repeated Parts are hidden, build and upload only the Base Mesh payload.
 Build the full payload lazily on the first explicit show; after that upload,
-hide/show changes only the visible vertex range. Reject an oversized payload
-before allocating or passing it to Qt.
+hide/show changes only the visible vertex range. Fracture Preview applies a
+256 MiB safety budget before CPU expansion or Qt upload; an unsafe request keeps
+Repeated Parts hidden and reports the required size.
 
 Reasoning:
 The checkbox is a visual inspection filter, not an operator setting that changes
@@ -564,7 +598,7 @@ Related files:
 Status: Active
 
 Context:
-Fracture Preview settings changes restart the isolated preview worker. Re-reading
+Fracture Preview recomputes settings-dependent geometry repeatedly. Re-reading
 and re-normalizing the same SpeedTree XML for every branch-count, stem, height,
 caps, or preview-quality change was both slower and a larger native-crash
 surface in the packaged worker path.
@@ -590,6 +624,41 @@ JSON cache.
 Related files:
 - `src/xml_to_usda/fracture_preview_service.py`
 - `tests/test_fracture_preview_service.py`
+
+## Decision: Interactive process previews coalesce instead of cancelling
+
+Status: Active
+
+Context:
+Rapid UI edits previously terminated an in-flight preview process for every
+new value. Fracture Preview uses a persistent worker, so this also discarded
+the warm source/Boolean caches and repeatedly reconstructed the source model.
+A result file could additionally exist before the UI consumed it, leaving a
+short lifecycle window that was not represented by `process.is_alive()`.
+
+Decision:
+Every `PreviewProcessJob` owns at most one active lifecycle and one pending
+request. New requests replace only the pending request. They never terminate
+the active process. A lifecycle remains active until its result/error handles
+are consumed, even if the PID already exited. When current work completes, its
+stale result/error is suppressed and only the latest pending request starts
+after the existing debounce. Explicit dialog close/cancel may terminate work.
+
+Independent preview types are not globally serialized: they do not share a
+mutable job payload and a project-wide mutex would create unnecessary stalls.
+Conversion/export actions keep their existing single-action guards rather than
+entering the interactive latest-request queue.
+
+Consequences:
+Fast sliders may wait for the current computation, but cannot create overlapping
+jobs or process-restart storms. Crash retry never replaces a newer pending
+request. Active-state checks use owned handles, not only live-PID state.
+
+Related files:
+- `src/xml_to_usda/qt_ui/preview_jobs.py`
+- `src/xml_to_usda/qt_ui/background_jobs.py`
+- `tests/test_preview_jobs.py`
+- `tests/test_qt_ui_workflows.py`
 
 ## Decision: Runtime caches are centrally bounded
 
@@ -723,7 +792,9 @@ attempt to extend it. Heavy static scenes should use the shared
 `MatcapViewport.set_scene(..., precompute_static=True)` path or a documented
 public equivalent. Visual-only selection, highlight, or visibility changes
 should not rebuild or re-upload static mesh buffers; add a small public
-viewport update method instead. Every viewport window should show active
+viewport update method instead. Scene replacement marks GPU buffers dirty and
+lets the next `paintGL` upload them with Qt's context current; result callbacks
+must not force eager uploads with `makeCurrent()`/`doneCurrent()`. Every viewport window should show active
 shortcuts briefly in the bottom-right corner as small translucent text, so
 mode-specific interactions remain discoverable without adding instructional UI
 blocks. Packaged smoke should cover any new high-risk viewport path.
@@ -780,42 +851,37 @@ from ownership boundaries. Preview, export, collision, Repeated Part ownership,
 and cap behavior could not remain exact through that interface.
 
 Decision:
-Keep planning in `fracture_service.py` and place settings-dependent mesh work
-behind the `prepare_fracture_geometry(...)` interface. The Fracture Geometry
-module owns subtree-local Cut Surfaces, deterministic noisy clipping, attribute
-interpolation, loop validation, cap triangulation, and manual cross-section
-snapping. Preview simplifies only after
-this geometry contract; export and collision consume the same per-piece mesh.
+Keep planning in `fracture_service.py`. Flat cuts use the shared
+`prepare_fracture_geometry(...)` contract; Detailed Cuts use the connectivity-
+first Manifold backend in `boolean_fracture_prototype.py` and adapt its result
+to that same geometry contract. Preview simplifies only after this boundary;
+export and collision consume the same final per-piece mesh.
 
 Consequences:
-`noisy_cut_enabled=False` preserves the legacy face-ownership path. Repeated
-Parts remain with the Fracture Piece determined by their skeleton attachment;
-their prototype bounds do not veto cuts. A manual segment cut that lands on an
-open source junction snaps to the nearest tested 0.1 segment position with a
-closed cross-section and records a warning; if none exists, it fails loudly.
-Automatic branch cuts use the child `bind -> bind_end` direction and first try
-30% inside the child bone, leaving a visible broken stub and avoiding parent
-branch triangles. If that exact cross-section cannot split/cap safely, geometry
-tries deterministic 5% steps up to 80% on the same bone and records a warning;
-the selected cut and Fracture Piece do not change. Stump/stem joint cuts retain
-the 2% offset.
-Automatic cuts map noise to the child side of the base plane, so displacement
-cannot cut backward into the parent/stump. Manual cuts remain symmetric around
-the operator-selected position. Noisy edge roots are isolated deterministically;
-if a fixed cut would cross one edge more than once or produce an invalid cap,
-only that surface amplitude is retried at 75%, 50%, 25%, then flat. The selected
-cut and piece structure never change, and attenuation records a warning. `Stump
-Piece` plans one cut per independent stem. Multi-stem sources use a segment cut
-near the end of each first stem bone because some SpeedTree stems have no faces
-owned directly by their root joint.
+Turning Detailed Cuts off preserves the fast flat path. Repeated Parts remain
+with the Fracture Piece determined by their skeleton binding/source bone; their
+topology and prototype bounds do not veto cuts. Detailed mode closes each
+connectivity-selected source shell temporarily, splits it with a closed
+triangular-lattice cutter, removes temporary closures by provenance, transfers
+source attributes, and keeps the cutter-derived matching caps. Generate Caps is
+therefore forced on in Detailed mode. Displacement is one-sided toward the
+detached child and is limited before the next fork, terminal bone, or configured
+sharp bend. `Stump Piece` plans one cut per independent stem, including
+multi-stem sources. Collision continues to use the existing convex/sphere/
+capsule builders on the final Boolean piece mesh.
 
 Fracture Preview uses one persistent crash-isolated worker for sequential
 settings changes. This preserves process isolation while avoiding packaged
-Python startup and source-cache reconstruction on every slider release. Cancel
-terminates the server; the next request starts a clean one. Viewport triangle
-packing is NumPy-vectorized rather than a per-vertex Python loop.
+Python startup and source-cache reconstruction on every slider release. Rapid
+changes coalesce behind current work instead of terminating the server. Explicit
+cancel terminates the server; the next request starts a clean one. Cyclic GC is
+disabled only for this bounded worker lifetime because its payloads are
+reference-counted and a packaged access violation was observed during cyclic
+collection while rebuilding cached mesh objects. Viewport triangle packing is
+NumPy-vectorized rather than a per-vertex Python loop.
 
 Related files:
 - `src/xml_to_usda/fracture_geometry.py`
+- `src/xml_to_usda/boolean_fracture_prototype.py`
 - `src/xml_to_usda/fracture_preview_service.py`
 - `src/xml_to_usda/fracture_export_service.py`

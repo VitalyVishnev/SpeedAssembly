@@ -212,6 +212,7 @@ class MeshData:
     points: tuple[Vector3, ...]
     face_vertex_counts: tuple[int, ...]
     face_vertex_indices: tuple[int, ...]
+    normals: tuple[Vector3, ...] = ()
     uv_coords: tuple[Vector2, ...] = ()
     secondary_uv_coords: tuple[Vector2, ...] = ()
     vertex_colors: tuple[Color4, ...] = ()
@@ -225,6 +226,7 @@ class MeshData:
             "points",
             "face_vertex_counts",
             "face_vertex_indices",
+            "normals",
             "uv_coords",
             "secondary_uv_coords",
             "vertex_colors",
@@ -417,6 +419,7 @@ class GeometryBuffer:
     point_components: array
     face_vertex_counts: array
     face_vertex_indices: array
+    normal_components: array = field(default_factory=lambda: array("f"))
     uv_components: array = field(default_factory=lambda: array("f"))
     secondary_uv_components: array = field(default_factory=lambda: array("f"))
     vertex_color_components: array = field(default_factory=lambda: array("f"))

@@ -1,6 +1,100 @@
 # Known Bugs
 
+## Limitation: Detailed Boolean cuts need broad real-tree validation
+
+Status: Partially verified
+
+Detailed Cuts are integrated into Fracture Preview and export, retain Repeated
+Parts by skeleton attachment, author transferred/cap normals, and feed the
+existing collision builders. Automated coverage includes synthetic geometry,
+SimpleTree, multi-stem stump cuts, and packaged stability smoke. Broader visual
+validation across unrelated SpeedTree assets and Unreal import remains pending.
+
+Related files:
+- `src/xml_to_usda/boolean_fracture_prototype.py`
+- `src/xml_to_usda/fracture_preview_service.py`
+- `src/xml_to_usda/fracture_export_service.py`
+
 This page stores current bugs, limitations, and validation gaps. It should stay focused on dangerous or still-open issues.
+
+## Bug: Fracture Preview worker could access-violate during cached mesh reconstruction
+
+Status: Mitigated; packaged/operator stress remains pending
+
+Symptoms:
+The packaged persistent worker sometimes exited with `0xC0000005` while Python
+reported `Garbage-collecting` inside `_mesh_from_arrays`. Rapid settings edits
+made the failure more likely by repeatedly terminating the persistent worker
+and forcing fresh typed-cache reconstruction.
+
+Current behavior:
+The bounded Fracture Preview server keeps cyclic GC disabled for its lifetime;
+normal reference counting still releases acyclic request payloads and process
+exit bounds any remaining cycles. Shared preview scheduling now lets current
+native work finish, keeps only the latest pending edit, and treats an unread
+finished job as active. Big Spruce passed sequential Detailed runs at 5, 15,
+and 28 requested branches across the full height-bias range.
+
+Do not repeat:
+Do not kill/restart native preview workers for every slider tick, and do not
+use `is_alive()` alone as proof that a job result lifecycle is finished.
+
+Related files:
+- `src/xml_to_usda/fracture_worker_subprocess.py`
+- `src/xml_to_usda/qt_ui/preview_jobs.py`
+- `src/xml_to_usda/qt_ui/background_jobs.py`
+
+## Bug: Rapid Fracture Preview geometry replacement could crash the Qt process
+
+Status: Mitigated; packaged stress validation passed, broader operator validation pending
+
+Symptoms:
+After several Detailed Cuts on/off transitions, the worker completed normally
+but the GUI process could terminate while replacing the viewport mesh.
+
+Likely cause:
+Trace ended after `viewport.upload_end` and before `set_preview` returned. Scene
+callbacks eagerly called `makeCurrent()`, uploaded buffers, then called
+`doneCurrent()` outside `paintGL`, creating an unsafe Qt/OpenGL context lifecycle.
+
+Current behavior:
+Scene replacement only marks mesh/grid buffers dirty. The next `paintGL` owns
+the upload with Qt's context already current. The packaged rapid-toggle scenario
+passed; keep this issue open until broader operator use remains stable.
+
+Do not repeat:
+Do not upload QOpenGLBuffer data directly from preview-result callbacks.
+
+Related files:
+- `src/xml_to_usda/qt_ui/viewport.py`
+- `src/xml_to_usda/qt_ui/fracture_preview.py`
+
+## Bug: Expanded Repeated Parts could exhaust Fracture Viewport memory
+
+Status: Mitigated; broader GPU validation pending
+
+Symptoms:
+Big Spruce expanded 3613 Repeated Parts into 30,454,695 vertices and a 2.07 GB
+OpenGL upload. The process later disappeared while the bone overlay was active.
+The trace contains no failing bone segment; all 1108 overlay segments were
+present and non-zero length.
+
+Likely cause:
+The diagnostic renderer bakes every instance transform into a unique vertex
+payload. The previous limit only guarded Qt's signed 2 GB buffer boundary, not
+a safe CPU/GPU working-set size.
+
+Current behavior:
+Fracture Preview rejects expanded payloads above 256 MiB before allocation,
+keeps Repeated Parts hidden, and reports the required size. Bone visibility is
+now traced with its segment count.
+
+Do not repeat:
+Do not treat an API maximum buffer size as a safe interactive memory budget.
+
+Related files:
+- `src/xml_to_usda/qt_ui/fracture_preview.py`
+- `src/xml_to_usda/qt_ui/viewport.py`
 
 ## Bug: External PartMesh override can look ignored
 
@@ -130,37 +224,29 @@ Related files:
 - `src/xml_to_usda/fracture_collision.py`
 - `src/xml_to_usda/fracture_export_service.py`
 
-## Limitation: Noisy fracture detail follows source tessellation
+## Limitation: Detailed Cut cost scales with cut count and cutter density
 
 Status: Open
 
 Symptoms:
-Noisy Cut produces deterministic displaced cut surfaces and exact clipped
-boundaries, but V1 does not add separate splinter extrusions or general-purpose
-remeshing. Sparse source meshes therefore produce broader, less detailed chips.
+Large trees with many selected cuts update more slowly than flat cuts. Higher
+Cut Detail increases lattice construction, Boolean, validation, and attribute
+transfer work.
 
 Current behavior:
-Preview and export share the same clipping and cap contract. Ambiguous Repeated
-Part bounds do not influence planning: Repeated Parts stay with their skeleton-
-attached Fracture Piece. Noisy Cut preserves the flat planner's selected bones.
-Manual segment cuts may snap to the nearest tested closed cross-section. A
-source whose nearby cut intersections are all genuinely open or non-manifold
-does not receive an approximate cap. The likely next step for such assets is
-source-topology repair or a separately specified remeshing stage, not a larger
-silent weld tolerance.
-Automatic noise displaces only toward the detached child piece. If full
-amplitude would create multiple roots on one source edge or an invalid cap, the
-geometry stage deterministically lowers only that cut's amplitude and reports a
-warning. If amplitude alone cannot make an automatic branch cross-section safe,
-the cut moves in deterministic 5% steps from 30% to at most 80% along the same
-first child bone. Neither fallback selects a replacement branch.
+Preview reuses prepared source/cut sessions and export uses the same final mesh
+contract. Local Big Spruce profiling still identifies cutter noise generation
+and attribute transfer as the main regeneration costs; the Boolean operation
+itself is comparatively small. Outer multi-process execution remains disabled
+until it demonstrates at least 25% speedup without excessive RSS or packaged
+native instability.
 
 Do not repeat:
-Do not add synthetic splinter geometry until it has a separate topology and
-performance contract.
+Do not enable a thread pool around Python bindings: the binding does not release
+the GIL and the wheel already uses internal oneTBB parallelism.
 
 Related files:
-- `src/xml_to_usda/fracture_geometry.py`
+- `src/xml_to_usda/boolean_fracture_prototype.py`
 - `src/xml_to_usda/fracture_preview_service.py`
 - `src/xml_to_usda/fracture_export_service.py`
 

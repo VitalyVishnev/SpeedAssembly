@@ -11,6 +11,7 @@ queues.
 from __future__ import annotations
 
 import faulthandler
+import gc
 import time
 import traceback
 import sys
@@ -105,9 +106,11 @@ def run_fracture_worker_request_file(path: str | Path) -> int:
                 force_stump_piece=request.settings.fracture.force_stump_piece,
                 separate_stems=request.settings.fracture.separate_stems,
                 branch_height_bias=request.settings.fracture.branch_height_bias,
-                noisy_cut_enabled=request.settings.fracture.noisy_cut_enabled,
-                noisy_cut_intensity=request.settings.fracture.noisy_cut_intensity,
-                noisy_cut_scale=request.settings.fracture.noisy_cut_scale,
+                detailed_cuts_enabled=request.settings.fracture.detailed_cuts_enabled,
+                detailed_cut_intensity=request.settings.fracture.detailed_cut_intensity,
+                detailed_cut_scale=request.settings.fracture.detailed_cut_scale,
+                detailed_cut_density=request.settings.fracture.detailed_cut_density,
+                detailed_cut_max_bend_angle=request.settings.fracture.detailed_cut_max_bend_angle,
             )
             result = generate_fracture_preview_from_source_request(
                 request.request,
@@ -131,21 +134,32 @@ def run_fracture_worker_request_file(path: str | Path) -> int:
 def run_fracture_preview_worker_server(queue_directory: str | Path, *, idle_timeout_seconds: float = 300.0) -> int:
     """Serve sequential preview requests in one crash-isolated process."""
     suppress_windows_native_error_dialogs()
+    cyclic_gc_was_enabled = gc.isenabled()
+    if cyclic_gc_was_enabled:
+        # This bounded worker holds large immutable mesh payloads and native
+        # Manifold state. Reference counting releases request data; cyclic GC
+        # can run at unsafe native-lifetime boundaries while rebuilding a mesh.
+        gc.disable()
+        _worker_stage("runtime.cyclic_gc.disabled")
     queue_dir = Path(queue_directory)
     queue_dir.mkdir(parents=True, exist_ok=True)
     processed: set[str] = set()
     last_activity = time.monotonic()
-    while time.monotonic() - last_activity < idle_timeout_seconds:
-        requests = tuple(sorted(queue_dir.glob("*.request.json")))
-        pending = tuple(path for path in requests if path.name not in processed)
-        if not pending:
-            time.sleep(0.02)
-            continue
-        for request_path in pending:
-            processed.add(request_path.name)
-            last_activity = time.monotonic()
-            run_fracture_worker_request_file(request_path)
-    return 0
+    try:
+        while time.monotonic() - last_activity < idle_timeout_seconds:
+            requests = tuple(sorted(queue_dir.glob("*.request.json")))
+            pending = tuple(path for path in requests if path.name not in processed)
+            if not pending:
+                time.sleep(0.02)
+                continue
+            for request_path in pending:
+                processed.add(request_path.name)
+                last_activity = time.monotonic()
+                run_fracture_worker_request_file(request_path)
+        return 0
+    finally:
+        if cyclic_gc_was_enabled:
+            gc.enable()
 
 
 def read_fracture_worker_result(path: str | Path) -> "FractureExportResult | FracturePreviewResult | None":

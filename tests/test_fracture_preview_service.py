@@ -3,6 +3,7 @@ from __future__ import annotations
 import pickle
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -37,7 +38,7 @@ from xml_to_usda.models import (
 
 def FractureSettings(*args, **kwargs):
     """Keep synthetic planner fixtures on the legacy face-ownership path."""
-    kwargs.setdefault("noisy_cut_enabled", False)
+    kwargs.setdefault("detailed_cuts_enabled", False)
     return _FractureSettings(*args, **kwargs)
 
 
@@ -205,14 +206,16 @@ def test_fracture_preview_uses_plan_membership_stable_colors_and_simplified_geom
     assert first.viewport_scene.stats.instance_count == 2
 
 
-def test_noisy_preview_collision_consumes_final_clipped_piece_meshes(monkeypatch) -> None:
+def test_detailed_preview_collision_consumes_final_boolean_piece_meshes(monkeypatch) -> None:
     model = _tree()
     fracture_settings = _FractureSettings(
         target_piece_count=2,
         output_stem="Oak",
-        noisy_cut_enabled=True,
+        detailed_cuts_enabled=True,
+        detailed_cut_intensity=0.0,
+        detailed_cut_density=4,
     )
-    plan = plan_fracture(model, replace(fracture_settings, noisy_cut_enabled=False))
+    plan = plan_fracture(model, replace(fracture_settings, detailed_cuts_enabled=False))
     final_meshes = tuple(_strip_mesh(f"Final_{piece.index}", (0,)) for piece in plan.pieces)
     geometry = FractureGeometryResult(
         plan=plan,
@@ -220,11 +223,17 @@ def test_noisy_preview_collision_consumes_final_clipped_piece_meshes(monkeypatch
             FractureGeometryPiece(piece=piece, base_mesh=final_meshes[piece.index])
             for piece in plan.pieces
         ),
-        cut_surfaces=(),
     )
     collision_inputs = []
 
-    monkeypatch.setattr(fracture_preview_service, "prepare_fracture_geometry", lambda *_args, **_kwargs: geometry)
+    monkeypatch.setattr(fracture_preview_service, "_BOOLEAN_PREVIEW_SESSION_CACHE", None)
+    monkeypatch.setattr(fracture_preview_service, "prepare_boolean_fracture_source", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        fracture_preview_service,
+        "prepare_boolean_multi_prototype",
+        lambda *_args, **_kwargs: SimpleNamespace(build=lambda _settings: object()),
+    )
+    monkeypatch.setattr(fracture_preview_service, "fracture_geometry_from_boolean_multi", lambda _result: geometry)
 
     def capture_collision(collision_model, collision_piece, _settings, *, render_mesh_name):
         collision_inputs.append((collision_model.base_mesh, collision_piece.base_face_indices, render_mesh_name))

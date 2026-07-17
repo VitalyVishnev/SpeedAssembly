@@ -284,7 +284,8 @@ def _source_model_cache_path(input_path: str) -> Path:
 def _source_model_cache_parser_key() -> str:
     from .xml_reader import packaged_xml_parser_adapter_enabled
 
-    return "packaged-et-explicit" if packaged_xml_parser_adapter_enabled() else "defused"
+    parser = "packaged-et-explicit" if packaged_xml_parser_adapter_enabled() else "defused"
+    return f"{parser}-normals-v1"
 
 
 def _read_source_model_cache(cache_path: Path):

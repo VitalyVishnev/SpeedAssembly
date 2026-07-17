@@ -467,9 +467,10 @@ def _fracture_settings_payload(settings) -> dict[str, object]:
         "force_stump_piece": settings.force_stump_piece,
         "separate_stems": settings.separate_stems,
         "branch_height_bias": settings.branch_height_bias,
-        "noisy_cut_enabled": settings.noisy_cut_enabled,
-        "noisy_cut_intensity": settings.noisy_cut_intensity,
-        "noisy_cut_scale": settings.noisy_cut_scale,
+        "detailed_cuts_enabled": settings.detailed_cuts_enabled,
+        "detailed_cut_intensity": settings.detailed_cut_intensity,
+        "detailed_cut_scale": settings.detailed_cut_scale,
+        "detailed_cut_density": settings.detailed_cut_density,
     }
 
 

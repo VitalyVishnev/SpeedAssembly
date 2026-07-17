@@ -208,3 +208,21 @@ def test_fracture_interactive_smoke_waits_for_caps_preview_result() -> None:
     assert "previous_caps_preview = dialog.current_preview" in smoke_source
     assert "dialog.current_preview is not previous_caps_preview" in smoke_source
     assert '"caps.update"' in smoke_source
+
+
+def test_fracture_rapid_settings_smoke_stresses_detailed_cuts_and_waits_for_latest_worker() -> None:
+    smoke_source = Path("src/xml_to_usda/qt_ui/smoke.py").read_text(encoding="utf-8")
+
+    for control_name in (
+        "detailed_cut_check",
+        "detailed_cut_intensity_spin",
+        "detailed_cut_scale_spin",
+        "detailed_cut_density_spin",
+        "detailed_cut_bend_spin",
+    ):
+        assert control_name in smoke_source
+    assert "not window._background_jobs.fracture_preview_running" in smoke_source
+    assert "not window._background_jobs._fracture_preview_job.has_pending" in smoke_source
+    assert "window._fracture_preview_cache_get(window._build_fracture_preview_request(), expected_settings)" in smoke_source
+    assert '"detailed_cuts.repeated_toggle"' in smoke_source
+    assert '"detailed_cuts.latest_settings"' in smoke_source

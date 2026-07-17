@@ -114,7 +114,7 @@ def test_startup_sweep_removes_only_stale_job_workspaces(tmp_path: Path, monkeyp
         os.utime(target, (old_timestamp, old_timestamp))
     isolated_temp = tmp_path / "temp"
     isolated_temp.mkdir()
-    monkeypatch.setattr("xml_to_usda.runtime_paths.tempfile.gettempdir", lambda: str(isolated_temp))
+    monkeypatch.setattr("xml_to_usda.runtime_paths._system_temp_root", lambda: isolated_temp)
 
     summary = sweep_stale_job_workspaces(runtime_paths, stale_after_seconds=24 * 60 * 60)
 
@@ -143,7 +143,7 @@ def test_startup_sweep_removes_stale_project_worker_temp_files(tmp_path: Path, m
     old_timestamp = time.time() - (25 * 60 * 60)
     for path in (stale_request, stale_stderr, unrelated):
         os.utime(path, (old_timestamp, old_timestamp))
-    monkeypatch.setattr("xml_to_usda.runtime_paths.tempfile.gettempdir", lambda: str(temp_root))
+    monkeypatch.setattr("xml_to_usda.runtime_paths._system_temp_root", lambda: temp_root)
 
     summary = sweep_stale_job_workspaces(runtime_paths, stale_after_seconds=24 * 60 * 60)
 
@@ -174,7 +174,7 @@ def test_startup_sweep_removes_stale_project_temp_dirs(tmp_path: Path, monkeypat
     old_timestamp = time.time() - (25 * 60 * 60)
     for path in (event_dir, project_mei, current_mei, foreign_mei):
         os.utime(path, (old_timestamp, old_timestamp))
-    monkeypatch.setattr("xml_to_usda.runtime_paths.tempfile.gettempdir", lambda: str(temp_root))
+    monkeypatch.setattr("xml_to_usda.runtime_paths._system_temp_root", lambda: temp_root)
     monkeypatch.setattr("xml_to_usda.runtime_paths.sys._MEIPASS", str(current_mei), raising=False)
 
     summary = sweep_stale_job_workspaces(runtime_paths, stale_after_seconds=24 * 60 * 60)
@@ -226,7 +226,7 @@ def test_startup_sweep_reports_inaccessible_jobs_root(tmp_path: Path, monkeypatc
     monkeypatch.setattr(type(runtime_paths.jobs_root), "exists", raise_permission_error)
     isolated_temp = tmp_path / "temp"
     isolated_temp.mkdir()
-    monkeypatch.setattr("xml_to_usda.runtime_paths.tempfile.gettempdir", lambda: str(isolated_temp))
+    monkeypatch.setattr("xml_to_usda.runtime_paths._system_temp_root", lambda: isolated_temp)
 
     summary = sweep_stale_job_workspaces(runtime_paths, stale_after_seconds=24 * 60 * 60)
 

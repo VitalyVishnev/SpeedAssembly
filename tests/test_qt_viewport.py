@@ -319,6 +319,42 @@ def test_matcap_viewport_accepts_precomputed_matcap_scene_payload(qtbot) -> None
     ]
 
 
+def test_matcap_viewport_defers_scene_upload_to_paint_gl(qtbot, monkeypatch) -> None:
+    viewport = MatcapViewport()
+    qtbot.addWidget(viewport)
+    uploads: list[str] = []
+    monkeypatch.setattr(viewport, "_upload_mesh", lambda: uploads.append("mesh"))
+    monkeypatch.setattr(viewport, "_upload_grid", lambda: uploads.append("grid"))
+
+    viewport.set_mesh(_triangle_mesh())
+
+    assert uploads == []
+    assert viewport._mesh_dirty is True
+    assert viewport._grid_dirty is True
+
+
+def test_matcap_viewport_allows_close_detail_zoom(qtbot) -> None:
+    class _Delta:
+        def y(self) -> int:
+            return 120 * 100
+
+    class _WheelEvent:
+        def angleDelta(self) -> _Delta:
+            return _Delta()
+
+        def accept(self) -> None:
+            return None
+
+    viewport = MatcapViewport()
+    qtbot.addWidget(viewport)
+    viewport._radius = 100.0
+    viewport._distance = 300.0
+
+    viewport.wheelEvent(_WheelEvent())
+
+    assert viewport.camera_distance == pytest.approx(0.1)
+
+
 def test_matcap_viewport_can_precompute_static_scene_from_shared_interface(qtbot) -> None:
     batch = ViewportMeshBatch(batch_id="triangle", name="Triangle", mesh=_triangle_mesh())
     scene = ViewportScene(
@@ -389,6 +425,38 @@ def test_matcap_viewport_scene_update_can_preserve_camera(qtbot) -> None:
     assert viewport.camera_distance == pytest.approx(42.0)
 
 
+def test_matcap_viewport_can_pan_focus_on_mesh_and_frame_all(qtbot) -> None:
+    batch = ViewportMeshBatch(batch_id="triangle", name="Triangle", mesh=_triangle_mesh())
+    scene = ViewportScene(
+        scene_id="camera_navigation",
+        mesh_batches=(batch,),
+        draw_calls=(ViewportDrawCall(draw_id="triangle:0", batch_id=batch.batch_id),),
+        bounds=ViewportBounds(min_point=Vector3(0.0, 0.0, 0.0), max_point=Vector3(1.0, 1.0, 0.0)),
+        stats=ViewportStats(uploaded_triangles=1, logical_triangles=1, batch_count=1, draw_call_count=1),
+    )
+    viewport = MatcapViewport()
+    qtbot.addWidget(viewport)
+    viewport.resize(500, 400)
+    viewport.set_scene(scene)
+    framed_target = viewport.camera_target
+    framed_distance = viewport.camera_distance
+
+    viewport._pan_camera_pixels(40.0, -20.0)
+
+    assert viewport.camera_target != framed_target
+    viewport.frame_camera()
+    assert viewport.camera_target == framed_target
+    assert viewport.camera_distance == pytest.approx(framed_distance)
+
+    expected_focus = Vector3(0.2, 0.2, 0.0)
+    screen = viewport._project_point_to_screen(expected_focus)
+    assert screen is not None
+    assert viewport.focus_at_screen_point(*screen) is True
+    assert viewport.camera_target.x == pytest.approx(expected_focus.x, abs=1e-5)
+    assert viewport.camera_target.y == pytest.approx(expected_focus.y, abs=1e-5)
+    assert viewport.camera_target.z == pytest.approx(expected_focus.z, abs=1e-5)
+
+
 def test_matcap_viewport_picks_bone_segment_from_viewport_scene(qtbot) -> None:
     batch = ViewportMeshBatch(batch_id="triangle", name="Triangle", mesh=_triangle_mesh())
     scene = ViewportScene(
@@ -409,7 +477,9 @@ def test_matcap_viewport_picks_bone_segment_from_viewport_scene(qtbot) -> None:
             ),
         ),
     )
+    events: list[tuple[str, dict[str, object]]] = []
     viewport = MatcapViewport()
+    viewport.set_trace_callback(lambda kind, data: events.append((kind, data)))
     qtbot.addWidget(viewport)
     viewport.resize(500, 400)
     viewport.set_scene(scene)
@@ -423,6 +493,10 @@ def test_matcap_viewport_picks_bone_segment_from_viewport_scene(qtbot) -> None:
     assert cut_token is not None
     assert cut_token.startswith("root->branch@")
     assert 0.45 < float(cut_token.rsplit("@", 1)[1]) < 0.55
+    assert events[-1] == (
+        "viewport.bones_visibility",
+        {"show_bones": True, "bone_segment_count": 1},
+    )
 
 
 def test_matcap_viewport_scene_vertices_include_explode_direction() -> None:

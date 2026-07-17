@@ -284,7 +284,7 @@ def _resolve_default_cache_root() -> Path:
     primary_root = _default_cache_root()
     if _is_runtime_cache_root_usable(primary_root):
         return primary_root
-    fallback_root = Path(tempfile.gettempdir()) / APP_NAME / "cache"
+    fallback_root = _system_temp_root() / APP_NAME / "cache"
     _ensure_existing_directory(fallback_root)
     return fallback_root
 
@@ -321,7 +321,7 @@ def _sweep_stale_temp_artifacts(
     stale_after_seconds: int,
     failed_paths: list[str],
 ) -> tuple[int, int]:
-    temp_root = Path(tempfile.gettempdir())
+    temp_root = _system_temp_root()
     try:
         children = list(temp_root.iterdir())
     except OSError:
@@ -435,6 +435,10 @@ def _ensure_existing_directory(path: Path) -> None:
         if os.path.isdir(str(path)):
             return
         raise
+
+
+def _system_temp_root() -> Path:
+    return Path(tempfile.gettempdir())
 
 
 def _is_runtime_cache_root_usable(path: Path) -> bool:

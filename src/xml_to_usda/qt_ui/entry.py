@@ -81,6 +81,14 @@ def main(argv: list[str] | None = None) -> int:
         from .smoke import run_smoke_cli
 
         return run_smoke_cli(argv[1:])
+    if argv and argv[0] == "boolean-prototype":
+        from .boolean_prototype import run_boolean_prototype_cli
+
+        return run_boolean_prototype_cli(argv[1:])
+    if argv and argv[0] == "boolean-multi-prototype":
+        from .boolean_prototype import run_boolean_multi_prototype_cli
+
+        return run_boolean_multi_prototype_cli(argv[1:])
 
     parser = build_parser()
     args = parser.parse_args(argv)

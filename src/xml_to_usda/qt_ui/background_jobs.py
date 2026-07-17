@@ -132,7 +132,7 @@ class QtBackgroundJobsController:
 
     @property
     def wind_preview_running(self) -> bool:
-        return self._wind_preview_job.running
+        return self._wind_preview_job.has_process
 
     @property
     def proxy_mesh_running(self) -> bool:
@@ -143,7 +143,7 @@ class QtBackgroundJobsController:
 
     @property
     def proxy_preview_running(self) -> bool:
-        return self._proxy_preview_job.running
+        return self._proxy_preview_job.has_process
 
     @property
     def fracture_export_running(self) -> bool:
@@ -151,11 +151,11 @@ class QtBackgroundJobsController:
 
     @property
     def fracture_preview_running(self) -> bool:
-        return self._fracture_preview_job.running
+        return self._fracture_preview_job.has_process
 
     @property
     def part_preview_running(self) -> bool:
-        return self._part_preview_job.running
+        return self._part_preview_job.has_process
 
     def start_conversion(self, *, request: ConversionRequest, run_async: bool) -> None:
         if self.conversion_running:
@@ -890,6 +890,9 @@ class QtBackgroundJobsController:
 
     def _handle_wind_preview_process_crash(self) -> None:
         crash = self._wind_preview_job.crash()
+        if self._wind_preview_job.has_pending:
+            self._wind_preview_job.finish_current()
+            return
         if self._wind_preview_retry_count < 1 and crash.request is not None:
             self._wind_preview_retry_count += 1
             self._wind_preview_job.close_handles()
@@ -936,6 +939,9 @@ class QtBackgroundJobsController:
 
     def _handle_proxy_preview_process_crash(self) -> None:
         crash = self._proxy_preview_job.crash()
+        if self._proxy_preview_job.has_pending:
+            self._proxy_preview_job.finish_current()
+            return
         if self._proxy_preview_retry_count < 1 and crash.request is not None and crash.settings is not None:
             self._proxy_preview_retry_count += 1
             self._proxy_preview_job.close_handles()
@@ -1056,6 +1062,9 @@ class QtBackgroundJobsController:
 
     def _handle_fracture_preview_process_crash(self) -> None:
         crash = self._fracture_preview_job.crash()
+        if self._fracture_preview_job.has_pending:
+            self._fracture_preview_job.finish_current()
+            return
         if self._fracture_preview_retry_count < 1 and crash.request is not None and crash.settings is not None:
             self._fracture_preview_retry_count += 1
             self._fracture_preview_job.close_handles()

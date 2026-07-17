@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+import gc
 import importlib
 import sys
 from pathlib import Path
@@ -95,14 +96,22 @@ def test_fracture_preview_worker_server_processes_multiple_requests_without_rest
     first.write_text("{}", encoding="utf-8")
     second.write_text("{}", encoding="utf-8")
     processed = []
+    gc_states = []
+
+    def record_request(path: str | Path) -> int:
+        gc_states.append(gc.isenabled())
+        processed.append(Path(path).name)
+        return 0
 
     monkeypatch.setattr(
         "xml_to_usda.fracture_worker_subprocess.run_fracture_worker_request_file",
-        lambda path: processed.append(Path(path).name) or 0,
+        record_request,
     )
 
     assert run_fracture_preview_worker_server(tmp_path, idle_timeout_seconds=0.05) == 0
     assert processed == ["001.request.json", "002.request.json"]
+    assert gc_states == [False, False]
+    assert gc.isenabled() is True
 
 
 def test_fracture_preview_worker_reports_caps_stage_breadcrumbs(monkeypatch, capsys, tmp_path: Path) -> None:
@@ -122,9 +131,11 @@ def test_fracture_preview_worker_reports_caps_stage_breadcrumbs(monkeypatch, cap
                 fracture=FractureSettings(
                     target_piece_count=2,
                     generate_caps=True,
-                    noisy_cut_enabled=True,
-                    noisy_cut_intensity=0.42,
-                    noisy_cut_scale=1.25,
+                    detailed_cuts_enabled=True,
+                    detailed_cut_intensity=20.0,
+                    detailed_cut_scale=1.25,
+                    detailed_cut_density=8,
+                    detailed_cut_max_bend_angle=45.0,
                 ),
                 max_base_faces_per_piece=10,
                 max_prototype_faces=5,
@@ -142,9 +153,11 @@ def test_fracture_preview_worker_reports_caps_stage_breadcrumbs(monkeypatch, cap
     assert "fracture-worker stage=request.read.start" in stderr
     assert "fracture-worker stage=preview.generate.start" in stderr
     assert "generate_caps=True" in stderr
-    assert "noisy_cut_enabled=True" in stderr
-    assert "noisy_cut_intensity=0.42" in stderr
-    assert "noisy_cut_scale=1.25" in stderr
+    assert "detailed_cuts_enabled=True" in stderr
+    assert "detailed_cut_intensity=20.0" in stderr
+    assert "detailed_cut_scale=1.25" in stderr
+    assert "detailed_cut_density=8" in stderr
+    assert "detailed_cut_max_bend_angle=45.0" in stderr
     assert "fracture-worker stage=preview.generate.end" in stderr
     assert "fracture-worker stage=result.write.end" in stderr
     result = read_fracture_worker_result(result_path)

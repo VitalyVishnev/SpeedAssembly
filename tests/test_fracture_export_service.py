@@ -47,7 +47,7 @@ from xml_to_usda.models import (
 
 def FractureSettings(*args, **kwargs):
     """Keep synthetic export fixtures on the legacy face-ownership path."""
-    kwargs.setdefault("noisy_cut_enabled", False)
+    kwargs.setdefault("detailed_cuts_enabled", False)
     return _FractureSettings(*args, **kwargs)
 from xml_to_usda.usda_writer import write_resolved_usda_document
 

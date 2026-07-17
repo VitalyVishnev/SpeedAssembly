@@ -1191,6 +1191,26 @@ def _emit_mesh_payload(sink, mesh: MeshData | GeometryBuffer, mesh_orientation: 
         "int[] faceVertexIndices",
         _iter_payload_face_index_strings(mesh),
     )
+    normal_count = _payload_normal_count(mesh)
+    if normal_count:
+        point_count = mesh.point_count if isinstance(mesh, GeometryBuffer) else len(mesh.points)
+        face_vertex_count = len(mesh.face_vertex_indices)
+        if normal_count == point_count:
+            interpolation = "vertex"
+        elif normal_count == face_vertex_count:
+            interpolation = "faceVarying"
+        else:
+            raise ValueError(
+                f"Mesh {mesh.name} normal count {normal_count} matches neither points "
+                f"({point_count}) nor face vertices ({face_vertex_count})."
+            )
+        _write_array_attribute(
+            sink,
+            indent_level,
+            "normal3f[] normals",
+            _iter_payload_normal_strings(mesh),
+            metadata_lines=(f'interpolation = "{interpolation}"',),
+        )
     if _payload_has_uvs(mesh):
         _write_uv_array_attribute(
             sink,
@@ -1704,6 +1724,18 @@ def _iter_payload_point_strings(mesh: MeshData | GeometryBuffer):
         yield f"({point.x:g}, {point.y:g}, {point.z:g})"
 
 
+def _iter_payload_normal_strings(mesh: MeshData | GeometryBuffer):
+    if isinstance(mesh, GeometryBuffer):
+        for index in range(0, len(mesh.normal_components), 3):
+            yield (
+                f"({mesh.normal_components[index]:g}, {mesh.normal_components[index + 1]:g}, "
+                f"{mesh.normal_components[index + 2]:g})"
+            )
+        return
+    for normal in mesh.normals:
+        yield f"({normal.x:g}, {normal.y:g}, {normal.z:g})"
+
+
 def _iter_payload_face_count_strings(mesh: MeshData | GeometryBuffer):
     return map(str, mesh.face_vertex_counts)
 
@@ -1788,6 +1820,12 @@ def _payload_has_uvs(mesh: MeshData | GeometryBuffer) -> bool:
     if isinstance(mesh, GeometryBuffer):
         return bool(mesh.uv_components)
     return bool(mesh.uv_coords)
+
+
+def _payload_normal_count(mesh: MeshData | GeometryBuffer) -> int:
+    if isinstance(mesh, GeometryBuffer):
+        return len(mesh.normal_components) // 3
+    return len(mesh.normals)
 
 
 def _payload_has_secondary_uvs(mesh: MeshData | GeometryBuffer) -> bool:

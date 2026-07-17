@@ -1,5 +1,23 @@
 # Experiments
 
+## Experiment: Connectivity-first Manifold Boolean fracture
+
+Status: prototype implemented; production integration unverified.
+
+The `boolean-prototype` command isolates one whole connected branch before any face-ownership split, closes its oriented boundary loops, and splits it with a closed triangular-lattice cutter displaced by one-sided deterministic fractal noise. `manifold3d` provenance removes temporary source closures while retaining cutter-derived caps. Requested amplitude is uniformly limited before the next physical terminal, branch, or bend above `Max Bend Angle`. Exact source-triangle provenance transfers UV0/UV1, colors, material sections, and skinning; caps receive planar UVs and nearest boundary-ring attributes. Its viewer can regenerate the same source in place with editable cut/noise controls while the deterministic seed remains fixed. The synthetic open-cylinder case, Simple Tree `bone_086`, and Big Spruce `bone_508` pass locally.
+
+The `boolean-multi-prototype` command prepares source analysis/triangulation/connectivity once and assembles untouched faces, parent stubs, and detached branches by Fracture Plan ownership. Independent components build separately. Same-shell cuts split their current parent region sequentially with distinct cap provenance; this covers the real SimpleTree stump-plus-branch case without overlapping geometry. Structural `auto_stem_length` pieces reuse already disconnected source shells. Collision, Repeated Parts, export, and any external process pool remain separate work.
+
+Big Spruce `bone_033` exposed a disconnected descendant twig crossing the same
+plane with three transition faces owned by the cut bone. The production selector
+now chooses the unique component with dominant cut-bone evidence and leaves the
+twig intact in its child piece. A local matrix covering 7/11/19/37/64 requested
+branches, height bias from -1 to +1, stump, and separate-stem variants completed.
+
+Big Spruce profiling showed that the former `select_component` timing mostly measured repeated planning rather than component selection: two `plan_fracture` calls consumed about 2.9 s under `cProfile`, while `_select_component` itself consumed about 35 ms. A prepared one-cut session reduced repeated `bone_508`, Density 8 regeneration to a 56 ms median. The shared planner owner lookup reduced the normal 11-cut Big Spruce plan from 122 ms to 90 ms and a 64-cut stress plan from 1695 ms to 481 ms. The sequential 11-cut Big Spruce multi session at Intensity 20 / Density 8 prepared in about 1.31 s and regenerated in about 0.88 s locally. These are local measurements, not cross-machine guarantees.
+
+Exact-site/result reuse reduced adding a Big Spruce stump to an already built 11-cut session to about 353 ms of replan/slicing plus 99 ms for the new stump Boolean; the 11 unchanged branch results were reused. On SimpleTree, a four-cut plan containing a stump and branch on the same shell completed sequential geometry in about 192 ms locally.
+
 This page stores rejected, superseded, or otherwise non-current approaches that still matter because they explain why the present contract exists.
 
 ## Experiment: Preview simplification by deterministic face sampling

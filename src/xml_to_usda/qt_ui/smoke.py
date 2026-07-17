@@ -433,19 +433,60 @@ def _run_fracture_preview_rapid_settings_smoke(context: SmokeContext) -> dict[st
             dialog.color_strength_slider.setValue((0, 78, 35, 92)[index % 4])
             dialog.exploded_view_slider.setValue((0, 20, 70, 0)[index % 4])
             dialog.hide_repeated_parts_check.setChecked(index % 2 == 0)
+            dialog.detailed_cut_check.setChecked(index % 2 == 0)
+            dialog.detailed_cut_intensity_spin.setValue((0.0, 20.0, 55.0, 100.0)[index % 4])
+            dialog.detailed_cut_intensity_spin.editingFinished.emit()
+            dialog.detailed_cut_scale_spin.setValue((0.1, 0.65, 1.25, 2.0)[index % 4])
+            dialog.detailed_cut_scale_spin.editingFinished.emit()
+            dialog.detailed_cut_density_spin.setValue((4, 8, 24, 64)[index % 4])
+            dialog.detailed_cut_density_spin.editingFinished.emit()
+            dialog.detailed_cut_bend_spin.setValue((5.0, 30.0, 75.0, 180.0)[index % 4])
+            dialog.detailed_cut_bend_spin.editingFinished.emit()
             _pump_events(10)
 
+        previous_preview = dialog.current_preview
         dialog.piece_count_spin.setValue(5)
         dialog.piece_count_spin.editingFinished.emit()
         dialog.stump_piece_check.setChecked(True)
         dialog.generate_caps_check.setChecked(True)
+        dialog.detailed_cut_intensity_spin.setValue(22.0)
+        dialog.detailed_cut_intensity_spin.editingFinished.emit()
+        dialog.detailed_cut_scale_spin.setValue(0.7)
+        dialog.detailed_cut_scale_spin.editingFinished.emit()
+        dialog.detailed_cut_density_spin.setValue(8)
+        dialog.detailed_cut_density_spin.editingFinished.emit()
+        dialog.detailed_cut_bend_spin.setValue(35.0)
+        dialog.detailed_cut_bend_spin.editingFinished.emit()
+        dialog.detailed_cut_check.setChecked(True)
+
+        expected_settings = dialog.settings()
         _wait_until(
             lambda: dialog.current_preview is not None
+            and dialog.current_preview is not previous_preview
             and dialog.current_preview.plan.requested_piece_count == 5
-            and dialog.settings().fracture.force_stump_piece
-            and dialog.settings().fracture.generate_caps,
+            and not window._background_jobs.fracture_preview_running
+            and not window._background_jobs._fracture_preview_job.has_pending,
             timeout_ms=context.timeout_ms,
             label="rapid fracture preview latest settings result",
+        )
+        _assert(dialog.settings() == expected_settings, "dialog retains latest detailed cut settings")
+        _assert(window._fracture_preview_settings == expected_settings, "window retains latest detailed cut settings")
+        _assert(
+            window._fracture_preview_cache_get(window._build_fracture_preview_request(), expected_settings)
+            is dialog.current_preview,
+            "latest detailed cut result is cached under the final settings",
+        )
+        _assert(
+            all(
+                control.isEnabled()
+                for control in (
+                    dialog.detailed_cut_intensity_spin,
+                    dialog.detailed_cut_scale_spin,
+                    dialog.detailed_cut_density_spin,
+                    dialog.detailed_cut_bend_spin,
+                )
+            ),
+            "detailed cut controls re-enabled after repeated toggles",
         )
         _assert(dialog.viewport_mesh is not None, "fracture viewport mesh exists")
         _assert(dialog.viewport.has_mesh(), "fracture viewport has mesh")
@@ -455,12 +496,19 @@ def _run_fracture_preview_rapid_settings_smoke(context: SmokeContext) -> dict[st
                 "dialog.open",
                 "rapid.settings.coalesced",
                 "latest.result",
+                "detailed_cuts.repeated_toggle",
+                "detailed_cuts.latest_settings",
                 "viewport.mesh",
             ),
             data={
                 "piece_count": dialog.current_preview.plan.actual_piece_count,
                 "generate_caps": dialog.settings().fracture.generate_caps,
                 "force_stump_piece": dialog.settings().fracture.force_stump_piece,
+                "detailed_cuts_enabled": dialog.settings().fracture.detailed_cuts_enabled,
+                "detailed_cut_intensity": dialog.settings().fracture.detailed_cut_intensity,
+                "detailed_cut_scale": dialog.settings().fracture.detailed_cut_scale,
+                "detailed_cut_density": dialog.settings().fracture.detailed_cut_density,
+                "detailed_cut_max_bend_angle": dialog.settings().fracture.detailed_cut_max_bend_angle,
             },
         )
     finally:

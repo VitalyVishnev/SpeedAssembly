@@ -35,14 +35,16 @@ class FractureSettings:
     target_piece_count: int = 5
     output_stem: str = "Tree"
     pinned_cut_joint_tokens: tuple[str, ...] = ()
-    generate_caps: bool = False
+    generate_caps: bool = True
     preserve_trunk_bias: float = 0.5
     force_stump_piece: bool = False
     separate_stems: bool = False
     branch_height_bias: float = 0.0
-    noisy_cut_enabled: bool = True
-    noisy_cut_intensity: float = 0.35
-    noisy_cut_scale: float = 0.65
+    detailed_cuts_enabled: bool = True
+    detailed_cut_intensity: float = 20.0
+    detailed_cut_scale: float = 0.65
+    detailed_cut_density: int = 8
+    detailed_cut_max_bend_angle: float = 30.0
 
 
 @dataclass(frozen=True)
@@ -111,6 +113,22 @@ def format_manual_segment_cut_token(parent_joint_token: str, child_joint_token: 
     if t <= 0.0 or t >= 1.0:
         raise FractureError(f"Manual segment cut position must be between 0 and 1, got {segment_t}.")
     return f"{parent}->{child}@{t:.3f}"
+
+
+def source_bone_segment_positions(joint: Joint, parent: Joint | None) -> tuple[Vector3, Vector3]:
+    """Return the physical source bone, not its hierarchy connector."""
+    end = joint.bind_end_translate
+    if end is not None:
+        return joint.bind_translate, end
+    if parent is not None:
+        return parent.bind_translate, joint.bind_translate
+    return joint.bind_translate, joint.bind_translate
+
+
+def base_face_owner_tokens(model: CanonicalTreeModel) -> tuple[str | None, ...]:
+    """Return the planner's dominant skeleton owner for each Base Mesh face."""
+    _validate_fracture_source(model)
+    return _base_face_owner_by_index(model, _build_skeleton_graph(model.skeleton))
 
 
 def plan_fracture(
@@ -357,14 +375,19 @@ def _validate_settings(settings: FractureSettings) -> None:
             )
     if not isinstance(settings.generate_caps, bool):
         raise FractureError(f"Fracture generate_caps must be a bool, got {type(settings.generate_caps).__name__}.")
-    if not isinstance(settings.noisy_cut_enabled, bool):
+    if not isinstance(settings.detailed_cuts_enabled, bool):
         raise FractureError(
-            f"Fracture noisy_cut_enabled must be a bool, got {type(settings.noisy_cut_enabled).__name__}."
+            "Fracture detailed_cuts_enabled must be a bool, "
+            f"got {type(settings.detailed_cuts_enabled).__name__}."
         )
-    if not 0.0 <= float(settings.noisy_cut_intensity) <= 1.0:
-        raise FractureError("Fracture noisy_cut_intensity must be between 0 and 1.")
-    if not 0.1 <= float(settings.noisy_cut_scale) <= 2.0:
-        raise FractureError("Fracture noisy_cut_scale must be between 0.1 and 2.")
+    if not 0.0 <= float(settings.detailed_cut_intensity) <= 100.0:
+        raise FractureError("Fracture detailed cut intensity must be between 0 and 100.")
+    if not 0.1 <= float(settings.detailed_cut_scale) <= 2.0:
+        raise FractureError("Fracture detailed cut scale must be between 0.1 and 2.")
+    if not isinstance(settings.detailed_cut_density, int) or not 4 <= settings.detailed_cut_density <= 64:
+        raise FractureError("Fracture detailed cut density must be an integer from 4 to 64.")
+    if not 0.0 < float(settings.detailed_cut_max_bend_angle) <= 180.0:
+        raise FractureError("Fracture detailed cut bend limit must be greater than 0 and at most 180 degrees.")
     if not 0.0 <= float(settings.preserve_trunk_bias) <= 1.0:
         raise FractureError("Fracture preserve_trunk_bias must be between 0 and 1.")
     if not isinstance(settings.force_stump_piece, bool):
@@ -770,10 +793,7 @@ def _build_pieces(
     output_stem: str,
 ) -> tuple[FracturePiece, ...]:
     selected_tokens = tuple(cut_site.joint_token for cut_site in selected_cut_sites)
-    owner_by_joint = {
-        joint.name: _deepest_selected_cut_owner(graph, joint.name, selected_cut_sites)
-        for joint in graph.joints
-    }
+    owner_by_joint = _selected_cut_owner_by_joint(graph, selected_cut_sites)
     joint_tokens_by_owner: dict[str | None, list[str]] = {None: []}
     face_indices_by_owner: dict[str | None, list[int]] = {None: []}
     repeated_indices_by_owner: dict[str | None, list[int]] = {None: []}
@@ -864,32 +884,31 @@ def _segment_parent_side_owner(
         segment_t = cut_site.segment_t
         if parent is None or child is None or segment_t is None:
             continue
-        projected_t = _project_point_to_segment_t(
-            face_centroid,
-            graph.joint_by_name[parent].bind_translate,
-            graph.joint_by_name[child].bind_translate,
+        segment_start, segment_end = source_bone_segment_positions(
+            graph.joint_by_name[child],
+            graph.joint_by_name[parent],
         )
+        projected_t = _project_point_to_segment_t(face_centroid, segment_start, segment_end)
         if projected_t < segment_t:
             return owner_by_joint[parent]
     return current_owner
 
 
-def _deepest_selected_cut_owner(
+def _selected_cut_owner_by_joint(
     graph: _SkeletonGraph,
-    joint_token: str,
     selected_cut_sites: list[FractureCutSite],
-) -> str | None:
-    best_owner: str | None = None
-    best_depth = -1
+) -> dict[str, str | None]:
+    owner_by_anchor: dict[str, str] = {}
     for cut_site in selected_cut_sites:
         anchor = cut_site.child_joint_token or cut_site.joint_token
-        if not _is_ancestor_or_self(graph, anchor, joint_token):
-            continue
-        depth = graph.depth_by_name[anchor]
-        if depth > best_depth:
-            best_owner = cut_site.joint_token
-            best_depth = depth
-    return best_owner
+        owner_by_anchor.setdefault(anchor, cut_site.joint_token)
+    owner_by_joint: dict[str, str | None] = {}
+    for joint in graph.joints:
+        current: str | None = joint.name
+        while current is not None and current not in owner_by_anchor:
+            current = graph.joint_by_name[current].parent
+        owner_by_joint[joint.name] = None if current is None else owner_by_anchor[current]
+    return owner_by_joint
 
 
 def _spatial_segment_cut_owner(
@@ -910,15 +929,15 @@ def _spatial_segment_cut_owner(
         if parent is None or child is None or segment_t is None:
             continue
         if not (
-            _is_ancestor_or_self(graph, parent, face_owner_joint_token)
-            or _is_ancestor_or_self(graph, face_owner_joint_token, parent)
+            _is_ancestor_or_self(graph, child, face_owner_joint_token)
+            or face_owner_joint_token == parent
         ):
             continue
-        projected_t = _project_point_to_segment_t(
-            face_centroid,
-            graph.joint_by_name[parent].bind_translate,
-            graph.joint_by_name[child].bind_translate,
+        segment_start, segment_end = source_bone_segment_positions(
+            graph.joint_by_name[child],
+            graph.joint_by_name[parent],
         )
+        projected_t = _project_point_to_segment_t(face_centroid, segment_start, segment_end)
         if projected_t < segment_t:
             continue
         depth = graph.depth_by_name[child]

@@ -14,6 +14,11 @@ from pathlib import Path
 
 from .asset_paths import is_valid_unreal_asset_path, normalize_unreal_asset_path
 from .authoring_validation import validate_authoring_model
+from .boolean_fracture_prototype import (
+    boolean_multi_settings_from_fracture,
+    fracture_geometry_from_boolean_multi,
+    prepare_boolean_multi_prototype,
+)
 from .canonical_loader import load_resolved_assembly_model
 from .conversion_validation import validate_conversion_request
 from .fracture_collision import (
@@ -222,11 +227,21 @@ def export_fracture_usda(
     )
     resolved_collision_settings = validated_collision_settings(collision_settings)
     cap_material_id = _cap_material_id(resolved.authoring_model) if resolved_cap_material_setting.enabled else None
-    geometry = prepare_fracture_geometry(
-        resolved.authoring_model,
-        export_settings,
-        cap_material_id=cap_material_id,
-    )
+    if export_settings.detailed_cuts_enabled:
+        boolean_settings = boolean_multi_settings_from_fracture(
+            export_settings,
+            cap_material_id=cap_material_id,
+        )
+        boolean_session = prepare_boolean_multi_prototype(resolved.authoring_model, boolean_settings)
+        geometry = fracture_geometry_from_boolean_multi(
+            boolean_session.build(boolean_settings, include_preparation_timings=True)
+        )
+    else:
+        geometry = prepare_fracture_geometry(
+            resolved.authoring_model,
+            export_settings,
+            cap_material_id=cap_material_id,
+        )
     plan = geometry.plan
     outputs: list[FracturePieceExport] = []
     diagnostics = plan.diagnostics

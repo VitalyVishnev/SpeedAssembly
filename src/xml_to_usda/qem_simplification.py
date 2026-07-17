@@ -17,6 +17,8 @@ def simplify_geometry_buffer_qem(mesh: GeometryBuffer, *, target_triangle_count:
         raise QemSimplificationError(f"Mesh {mesh.name} contains no surface triangles.")
     target_triangle_count = max(1, int(target_triangle_count))
     if len(triangles) <= target_triangle_count:
+        if all(int(count) == 3 for count in mesh.face_vertex_counts):
+            return mesh
         return _geometry_buffer_from_triangles(points, triangles, name=mesh.name)
     try:
         import fast_simplification

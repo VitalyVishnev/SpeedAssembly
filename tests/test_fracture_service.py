@@ -8,11 +8,31 @@ import pytest
 import xml_to_usda.fracture_service as fracture_service
 from xml_to_usda.fracture_service import (
     FRACTURE_METHOD_MANUAL_FRACTURING,
+    FractureCutSite,
     FractureError,
     FractureSettings,
     format_manual_segment_cut_token,
     plan_fracture,
 )
+
+
+def test_selected_cut_owners_resolve_by_single_parent_walk() -> None:
+    joints = (
+        _joint("root", 0, None, 0.0, 0),
+        _joint("branch", 1, "root", 1.0, 1),
+        _joint("twig", 2, "branch", 2.0, 2),
+        _joint("tip", 3, "twig", 3.0, 3),
+    )
+    graph = fracture_service._build_skeleton_graph(joints)
+    owners = fracture_service._selected_cut_owner_by_joint(
+        graph,
+        [
+            FractureCutSite("branch", "joint", "test"),
+            FractureCutSite("tip", "joint", "test"),
+        ],
+    )
+
+    assert owners == {"root": None, "branch": "branch", "twig": "branch", "tip": "tip"}
 from xml_to_usda.models import (
     ExportMetadata,
     InstanceBinding,
@@ -374,6 +394,46 @@ def test_manual_segment_cut_splits_base_faces_between_joints_by_cut_position() -
     assert tuple(piece.base_face_indices for piece in plan.pieces) == ((0, 1), (2, 3))
     assert plan.pieces[1].cut_joint_token == "root->top@0.500"
     assert plan.pieces[1].joint_tokens == ("top",)
+
+
+def test_manual_segment_face_ownership_uses_physical_child_bone() -> None:
+    root = _joint("root", 0, None, 0.0, 0)
+    child = Joint(
+        name="branch",
+        source_id=1,
+        parent="root",
+        bind_transform=Matrix4d.from_translation(Vector3(1.0, 2.0, 0.0)),
+        rest_transform=Matrix4d.from_translation(Vector3(1.0, 2.0, 0.0)),
+        bind_end_transform=Matrix4d.from_translation(Vector3(1.0, 10.0, 0.0)),
+    )
+    sibling = Joint(
+        name="sibling",
+        source_id=2,
+        parent="root",
+        bind_transform=Matrix4d.from_translation(Vector3(-1.0, 2.0, 0.0)),
+        rest_transform=Matrix4d.from_translation(Vector3(-1.0, 2.0, 0.0)),
+        bind_end_transform=Matrix4d.from_translation(Vector3(-1.0, 10.0, 0.0)),
+    )
+    mesh = _vertical_strip_mesh((3.0, 5.0, 7.0, 9.0, 9.0), joint_index=0)
+    mesh = replace(mesh, skel_joint_indices=mesh.skel_joint_indices[:-3] + (2, 2, 2))
+    tree = TreeAsset(
+        metadata=ExportMetadata(source_path="connector.xml", source_version=None),
+        materials=(),
+        source_objects=(),
+        base_mesh=mesh,
+        skeleton=(root, child, sibling),
+        assembly_parts=(),
+    )
+
+    plan = plan_fracture(
+        tree,
+        FractureSettings(
+            target_piece_count=0,
+            pinned_cut_joint_tokens=(format_manual_segment_cut_token("root", "branch", 0.5),),
+        ),
+    )
+
+    assert tuple(piece.base_face_indices for piece in plan.pieces) == ((0, 1, 4), (2, 3))
 
 
 def test_manual_segment_cuts_on_same_edge_must_not_be_too_close() -> None:

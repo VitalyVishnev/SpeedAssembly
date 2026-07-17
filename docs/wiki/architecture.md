@@ -24,7 +24,10 @@ Main systems:
 - `src/xml_to_usda/proxy_mesh_service.py`, `src/xml_to_usda/fracture_service.py`, and related workers - companion workflows.
 - `src/xml_to_usda/qem_simplification.py` - shared topology-preserving `fast-simplification` QEM backend used by Proxy Mesh and Fracture Preview diagnostic geometry.
 - `src/xml_to_usda/fracture_geometry.py` - deep Fracture Geometry module shared by preview and export; owns subtree-local Cut Surfaces, deterministic noisy clipping, attribute interpolation, intersection-loop caps, and manual cross-section snapping. Cut planning and Repeated Part attachment ownership stay outside geometry.
+- `src/xml_to_usda/boolean_fracture_prototype.py` - connectivity-first Manifold Boolean backend used by production Detailed Cuts and the standalone prototype viewers. A source context prepares analysis, triangulation, and connectivity once; prepared cut sessions own closed solids and cache their last result. Independent components build separately. Cuts sharing one shell split the current parent region sequentially in Fracture Plan order, preserving distinct cap provenance and final piece ownership. Multi-cut replans reuse unchanged independent sessions/results by exact cut-site identity.
+- `src/xml_to_usda/qt_ui/boolean_prototype.py` - standalone `boolean-prototype` stage viewer and `boolean-multi-prototype` whole-tree piece viewer.
 - `src/xml_to_usda/fracture_worker_subprocess.py` - crash-isolated persistent Fracture Preview worker. One server handles sequential slider updates, reuses the in-memory source model, and is terminated/restarted on cancel or crash; export remains a one-shot worker.
+- `src/xml_to_usda/qt_ui/preview_jobs.py` - shared latest-request lifecycle for process-backed previews. Each preview type owns at most one active job and one coalesced pending request; settings changes never terminate active native work, and stale results/errors are discarded before the latest request starts.
 - `src/xml_to_usda/wind_preview_service.py`, `src/xml_to_usda/wind_viewport_scene.py`, `src/xml_to_usda/wind_group_stack.py`, and `src/xml_to_usda/wind_external_skeleton.py` - Wind Preview source service, Qt-free viewport scene adapter, manual override stack, and skeleton-only external FBX/USD loading.
 - `src/xml_to_usda/proxy_source_projection.py` - typed Proxy Source Projection loading/cache for Proxy Mesh jobs that need only base geometry, repeated-part transforms, and source prototype geometry.
 - `src/xml_to_usda/mesh_pruning.py` - shared deterministic percentage-based face pruning for preview/proxy workflows that need to drop the smallest disconnected base-mesh islands before their own simplification pass.
@@ -84,6 +87,13 @@ Visual-only selection changes should update overlay/visibility state through
 the shared viewport instead of rebuilding and re-uploading static mesh buffers.
 Viewport-specific shortcuts should be shown as small contextual translucent text
 in the bottom-right corner of the viewport.
+Shared camera navigation includes left-button orbit, middle-button pan in the
+camera plane, wheel zoom, double-left-click mesh focus, and `F` frame-all.
+Wheel zoom can approach to 0.1% of the framed scene radius, with a distance-
+adaptive near plane for close cut inspection. Scene setters only mark OpenGL
+buffers dirty; GPU uploads run in `paintGL` while Qt owns the current context.
+Fracture Preview additionally caps expanded diagnostic uploads at 256 MiB;
+large Repeated Part sets stay hidden rather than exhausting CPU/GPU memory.
 
 The Wind Preview right panel is the compact-control reference for every
 viewport dialog. Proxy Mesh, Fracture, and Prototype Preview reuse its shared

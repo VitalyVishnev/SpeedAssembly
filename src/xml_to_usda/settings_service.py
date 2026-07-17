@@ -472,22 +472,41 @@ def _parse_fracture_preview_settings(raw_value) -> FracturePreviewSettings:
                     _coerce_float(fracture_payload.get("branch_height_bias"), fracture.branch_height_bias),
                 ),
             ),
-            noisy_cut_enabled=_coerce_bool(
-                fracture_payload.get("noisy_cut_enabled"),
-                fracture.noisy_cut_enabled,
+            detailed_cuts_enabled=_coerce_bool(
+                fracture_payload.get("detailed_cuts_enabled"),
+                fracture.detailed_cuts_enabled,
             ),
-            noisy_cut_intensity=max(
+            detailed_cut_intensity=max(
                 0.0,
                 min(
-                    1.0,
-                    _coerce_float(fracture_payload.get("noisy_cut_intensity"), fracture.noisy_cut_intensity),
+                    100.0,
+                    _coerce_float(
+                        fracture_payload.get("detailed_cut_intensity"),
+                        fracture.detailed_cut_intensity,
+                    ),
                 ),
             ),
-            noisy_cut_scale=max(
+            detailed_cut_scale=max(
                 0.1,
                 min(
                     2.0,
-                    _coerce_float(fracture_payload.get("noisy_cut_scale"), fracture.noisy_cut_scale),
+                    _coerce_float(fracture_payload.get("detailed_cut_scale"), fracture.detailed_cut_scale),
+                ),
+            ),
+            detailed_cut_density=_coerce_bounded_int(
+                fracture_payload.get("detailed_cut_density"),
+                fracture.detailed_cut_density,
+                4,
+                64,
+            ),
+            detailed_cut_max_bend_angle=max(
+                1.0,
+                min(
+                    180.0,
+                    _coerce_float(
+                        fracture_payload.get("detailed_cut_max_bend_angle"),
+                        fracture.detailed_cut_max_bend_angle,
+                    ),
                 ),
             ),
         )
@@ -705,9 +724,11 @@ def _serialize_fracture_preview_settings(settings: FracturePreviewSettings) -> d
             "force_stump_piece": bool(settings.fracture.force_stump_piece),
             "separate_stems": bool(settings.fracture.separate_stems),
             "branch_height_bias": round(float(settings.fracture.branch_height_bias), 4),
-            "noisy_cut_enabled": bool(settings.fracture.noisy_cut_enabled),
-            "noisy_cut_intensity": round(float(settings.fracture.noisy_cut_intensity), 4),
-            "noisy_cut_scale": round(float(settings.fracture.noisy_cut_scale), 4),
+            "detailed_cuts_enabled": bool(settings.fracture.detailed_cuts_enabled),
+            "detailed_cut_intensity": round(float(settings.fracture.detailed_cut_intensity), 4),
+            "detailed_cut_scale": round(float(settings.fracture.detailed_cut_scale), 4),
+            "detailed_cut_density": int(settings.fracture.detailed_cut_density),
+            "detailed_cut_max_bend_angle": round(float(settings.fracture.detailed_cut_max_bend_angle), 4),
         },
         "collision": {
             "enabled": bool(settings.collision.enabled),

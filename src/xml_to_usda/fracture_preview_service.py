@@ -16,6 +16,13 @@ from pathlib import Path
 import tempfile
 from typing import TYPE_CHECKING
 
+from .boolean_fracture_prototype import (
+    BooleanMultiPrototypeSession,
+    boolean_multi_settings_from_fracture,
+    fracture_geometry_from_boolean_multi,
+    prepare_boolean_fracture_source,
+    prepare_boolean_multi_prototype,
+)
 from .canonical_loader import load_source_tree_model
 from .fracture_collision import (
     CollisionMeshSet,
@@ -34,6 +41,7 @@ from .fracture_service import (
     _FracturePlanCache,
     _build_fracture_plan_cache,
     plan_fracture,
+    source_bone_segment_positions,
 )
 from .geometry_buffers import geometry_buffer_from_mesh, geometry_buffer_to_mesh
 from .job_control import throw_if_cancelled
@@ -73,11 +81,12 @@ DEFAULT_FRACTURE_PREVIEW_BASE_PRIORITY = 0.33
 DEFAULT_FRACTURE_PREVIEW_BRANCH_PRUNE_AGGRESSION = 0.0
 DEFAULT_FRACTURE_PREVIEW_BASE_FACE_BUDGET = 10_000_000
 DEFAULT_FRACTURE_PREVIEW_PROTOTYPE_FACE_BUDGET = 2_000
-FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION = 8
+FRACTURE_PREVIEW_SOURCE_CACHE_SCHEMA_VERSION = 9
 _PREVIEW_SOURCE_MEMORY_CACHE: tuple[
     Path,
     tuple[object, CanonicalTreeModel, tuple[ValidationIssue, ...], _FracturePlanCache],
 ] | None = None
+_BOOLEAN_PREVIEW_SESSION_CACHE: tuple[CanonicalTreeModel, BooleanMultiPrototypeSession] | None = None
 
 
 @dataclass(frozen=True)
@@ -251,13 +260,28 @@ def generate_fracture_preview(
     """Build lightweight diagnostic preview payloads from one tree model."""
     resolved_settings = settings or FracturePreviewSettings()
     _validate_preview_settings(resolved_settings)
+    global _BOOLEAN_PREVIEW_SESSION_CACHE
     geometry = None
-    if resolved_settings.fracture.noisy_cut_enabled:
-        geometry = prepare_fracture_geometry(
-            model,
-            resolved_settings.fracture,
-            analysis_cache=analysis_cache,
+    if resolved_settings.fracture.detailed_cuts_enabled:
+        boolean_settings = boolean_multi_settings_from_fracture(resolved_settings.fracture)
+        previous_session = (
+            _BOOLEAN_PREVIEW_SESSION_CACHE[1]
+            if _BOOLEAN_PREVIEW_SESSION_CACHE is not None and _BOOLEAN_PREVIEW_SESSION_CACHE[0] is model
+            else None
         )
+        source_context = (
+            None
+            if previous_session is not None
+            else prepare_boolean_fracture_source(model, analysis_cache=analysis_cache)
+        )
+        boolean_session = prepare_boolean_multi_prototype(
+            model,
+            boolean_settings,
+            previous_session=previous_session,
+            source_context=source_context,
+        )
+        geometry = fracture_geometry_from_boolean_multi(boolean_session.build(boolean_settings))
+        _BOOLEAN_PREVIEW_SESSION_CACHE = (model, boolean_session)
         plan = geometry.plan
         geometry_pieces = geometry.pieces
     else:
@@ -623,7 +647,7 @@ def _preview_bone_segments(
         parent = joints_by_name.get(joint.parent or "")
         if joint.parent is not None and parent is None:
             raise FractureError(f"Fracture preview skeleton joint {joint.name} references missing parent {joint.parent}.")
-        start, end = _source_bone_segment_positions(joint, parent)
+        start, end = source_bone_segment_positions(joint, parent)
         if start == end:
             continue
         segments.append(
@@ -638,15 +662,6 @@ def _preview_bone_segments(
             )
         )
     return tuple(segments)
-
-
-def _source_bone_segment_positions(joint, parent) -> tuple[Vector3, Vector3]:
-    end = joint.bind_end_translate
-    if end is not None:
-        return joint.bind_translate, end
-    if parent is not None:
-        return parent.bind_translate, joint.bind_translate
-    return joint.bind_translate, joint.bind_translate
 
 
 def _prototype_mesh(prototype: Prototype) -> MeshData:
@@ -990,6 +1005,7 @@ def _add_mesh_arrays(payload: dict[str, object], prefix: str, mesh: MeshData | N
         payload[f"{prefix}_points"] = np.empty((0, 3), dtype=np.float64)
         payload[f"{prefix}_face_counts"] = np.empty((0,), dtype=np.int32)
         payload[f"{prefix}_face_indices"] = np.empty((0,), dtype=np.int32)
+        payload[f"{prefix}_normals"] = np.empty((0, 3), dtype=np.float64)
         payload[f"{prefix}_uv"] = np.empty((0, 2), dtype=np.float64)
         payload[f"{prefix}_secondary_uv"] = np.empty((0, 2), dtype=np.float64)
         payload[f"{prefix}_colors"] = np.empty((0, 4), dtype=np.float64)
@@ -1004,6 +1020,10 @@ def _add_mesh_arrays(payload: dict[str, object], prefix: str, mesh: MeshData | N
     payload[f"{prefix}_points"] = np.asarray([(point.x, point.y, point.z) for point in mesh.points], dtype=np.float64)
     payload[f"{prefix}_face_counts"] = np.asarray(mesh.face_vertex_counts, dtype=np.int32)
     payload[f"{prefix}_face_indices"] = np.asarray(mesh.face_vertex_indices, dtype=np.int32)
+    payload[f"{prefix}_normals"] = np.asarray(
+        [(normal.x, normal.y, normal.z) for normal in mesh.normals],
+        dtype=np.float64,
+    )
     payload[f"{prefix}_uv"] = np.asarray([(uv.x, uv.y) for uv in mesh.uv_coords], dtype=np.float64)
     payload[f"{prefix}_secondary_uv"] = np.asarray([(uv.x, uv.y) for uv in mesh.secondary_uv_coords], dtype=np.float64)
     payload[f"{prefix}_colors"] = np.asarray([(color.r, color.g, color.b, color.a) for color in mesh.vertex_colors], dtype=np.float64)
@@ -1026,6 +1046,7 @@ def _mesh_from_arrays(data, prefix: str) -> MeshData | None:
     if not int(data[f"{prefix}_present"][0]):
         return None
     points = data[f"{prefix}_points"]
+    normals = data[f"{prefix}_normals"]
     uv = data[f"{prefix}_uv"]
     secondary_uv = data[f"{prefix}_secondary_uv"]
     colors = data[f"{prefix}_colors"]
@@ -1044,6 +1065,7 @@ def _mesh_from_arrays(data, prefix: str) -> MeshData | None:
         points=tuple(Vector3(float(row[0]), float(row[1]), float(row[2])) for row in points),
         face_vertex_counts=tuple(int(value) for value in data[f"{prefix}_face_counts"]),
         face_vertex_indices=tuple(int(value) for value in data[f"{prefix}_face_indices"]),
+        normals=tuple(Vector3(float(row[0]), float(row[1]), float(row[2])) for row in normals),
         uv_coords=tuple(Vector2(float(row[0]), float(row[1])) for row in uv),
         secondary_uv_coords=tuple(Vector2(float(row[0]), float(row[1])) for row in secondary_uv),
         vertex_colors=tuple(Color4(float(row[0]), float(row[1]), float(row[2]), float(row[3])) for row in colors),

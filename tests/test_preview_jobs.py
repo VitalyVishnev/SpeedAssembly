@@ -68,7 +68,7 @@ def _build_job(
     return job, processes, cancel_flags, traces
 
 
-def test_preview_process_job_latest_request_waits_until_running_process_is_closed() -> None:
+def test_preview_process_job_latest_request_waits_without_killing_active_process() -> None:
     starts: list[dict[str, object]] = []
     job, processes, cancel_flags, traces = _build_job(starts=starts)
 
@@ -79,11 +79,11 @@ def test_preview_process_job_latest_request_waits_until_running_process_is_close
     assert second.queued is True
     assert second.started is False
     assert starts == [{"request": "tree_a.xml", "settings": {"pieces": 5}}]
-    assert cancel_flags[0].was_set is True
-    assert processes[0].terminated is True
+    assert cancel_flags[0].was_set is False
+    assert processes[0].terminated is False
     assert job.request == "tree_a.xml"
     assert any(kind == "worker.pending" for kind, _worker, _data in traces)
-    assert any(kind == "worker.cancel_result" for kind, _worker, _data in traces)
+    assert not any(kind == "worker.cancel_result" for kind, _worker, _data in traces)
 
     assert job.finish_current() is True
     assert starts == [
@@ -113,6 +113,24 @@ def test_preview_process_job_coalesces_rapid_requests_before_pending_start() -> 
     ]
 
 
+def test_preview_process_job_coalesces_a_fast_slider_burst_to_one_followup() -> None:
+    starts: list[dict[str, object]] = []
+    job, processes, cancel_flags, _traces = _build_job(starts=starts)
+
+    job.start_latest("tree.xml", {"pieces": 1})
+    for pieces in range(2, 102):
+        job.start_latest("tree.xml", {"pieces": pieces})
+
+    assert len(starts) == 1
+    assert processes[0].terminated is False
+    assert cancel_flags[0].was_set is False
+    assert job.finish_current() is True
+    assert starts == [
+        {"request": "tree.xml", "settings": {"pieces": 1}},
+        {"request": "tree.xml", "settings": {"pieces": 101}},
+    ]
+
+
 def test_preview_process_job_defers_pending_start_until_debounce_expires() -> None:
     now = 100.0
     starts: list[dict[str, object]] = []
@@ -125,7 +143,7 @@ def test_preview_process_job_defers_pending_start_until_debounce_expires() -> No
     job.start_latest("tree.xml", {"pieces": 5})
     job.start_latest("tree.xml", {"pieces": 14})
 
-    assert job.finish_current() is False
+    assert job.finish_current() is True
     assert starts == [{"request": "tree.xml", "settings": {"pieces": 5}}]
 
     now = 100.24
@@ -138,6 +156,21 @@ def test_preview_process_job_defers_pending_start_until_debounce_expires() -> No
         {"request": "tree.xml", "settings": {"pieces": 5}},
         {"request": "tree.xml", "settings": {"pieces": 14}},
     ]
+
+
+def test_preview_process_job_queues_behind_finished_but_unread_process() -> None:
+    starts: list[dict[str, object]] = []
+    job, processes, _cancel_flags, _traces = _build_job(starts=starts)
+
+    job.start_latest("tree.xml", {"pieces": 5})
+    processes[0]._alive = False
+
+    queued = job.start_latest("tree.xml", {"pieces": 9})
+
+    assert queued.queued is True
+    assert starts == [{"request": "tree.xml", "settings": {"pieces": 5}}]
+    assert job.finish_current() is True
+    assert starts[-1] == {"request": "tree.xml", "settings": {"pieces": 9}}
 
 
 def test_preview_process_job_drain_records_traceback_and_result_state() -> None:

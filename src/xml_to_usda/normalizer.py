@@ -180,6 +180,7 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
     merged_points: list[Vector3] = []
     merged_face_counts: list[int] = []
     merged_face_indices: list[int] = []
+    merged_normals: list[Vector3] = []
     merged_uv_coords: list[Vector2] = []
     merged_vertex_colors: list[Color4] = []
     merged_joint_indices: list[int] = []
@@ -187,6 +188,8 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
     merged_sections: dict[int, list[int]] = defaultdict(list)
     merged_parts: list[BaseTreePart] = []
     preserve_vertex_colors = True
+    preserve_normals = True
+    normal_interpolation: str | None = None
 
     for source_object in candidates:
         mesh = source_object.mesh
@@ -201,6 +204,18 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
         merged_points.extend(Vector3(point.x + tx, point.y + ty, point.z + tz) for point in mesh.points)
         merged_face_counts.extend(mesh.face_vertex_counts)
         merged_face_indices.extend(index + point_offset for index in mesh.face_vertex_indices)
+        if preserve_normals:
+            mesh_normal_interpolation = (
+                "vertex"
+                if len(mesh.normals) == len(mesh.points)
+                else ("faceVarying" if len(mesh.normals) == len(mesh.face_vertex_indices) else None)
+            )
+            if mesh_normal_interpolation is not None and normal_interpolation in (None, mesh_normal_interpolation):
+                normal_interpolation = mesh_normal_interpolation
+                merged_normals.extend(mesh.normals)
+            else:
+                preserve_normals = False
+                merged_normals.clear()
         merged_uv_coords.extend(mesh.uv_coords)
         if preserve_vertex_colors:
             if len(mesh.vertex_colors) == len(mesh.points):
@@ -231,6 +246,7 @@ def _build_base_mesh(source_objects: tuple[SourceObject, ...]) -> tuple[MeshData
             points=tuple(merged_points),
             face_vertex_counts=tuple(merged_face_counts),
             face_vertex_indices=tuple(merged_face_indices),
+            normals=tuple(merged_normals if preserve_normals else ()),
             uv_coords=tuple(merged_uv_coords),
             vertex_colors=tuple(merged_vertex_colors if preserve_vertex_colors else ()),
             sections=_ordered_sections(merged_sections),
@@ -461,6 +477,14 @@ def _build_mesh_data(
         messages,
         allow_point_index_fallback=False,
     )
+    normals = _extract_face_varying_normals(
+        vertices_node,
+        vertex_indices,
+        face_indices,
+        f"{name}.vertices",
+        messages,
+        source_transform,
+    )
     return _build_mesh_from_faces(
         name,
         points,
@@ -468,6 +492,7 @@ def _build_mesh_data(
         face_indices,
         sections,
         uv_coords,
+        normals=normals,
         joint_indices=joint_indices,
         joint_weights=joint_weights,
     )
@@ -494,12 +519,30 @@ def _build_library_mesh_data(
         messages,
         allow_point_index_fallback=True,
     )
+    normals = _extract_face_varying_normals(
+        points_node,
+        vertex_indices,
+        face_indices,
+        f"{name}.vertices",
+        messages,
+        source_transform,
+        allow_point_index_fallback=True,
+    )
     vertex_colors = _extract_vertex_colors(
         points_node,
         f"{name}.vertices",
         messages,
     )
-    return _build_mesh_from_faces(name, points, face_counts, face_indices, sections, uv_coords, vertex_colors=vertex_colors)
+    return _build_mesh_from_faces(
+        name,
+        points,
+        face_counts,
+        face_indices,
+        sections,
+        uv_coords,
+        normals=normals,
+        vertex_colors=vertex_colors,
+    )
 
 
 def _build_mesh_from_faces(
@@ -509,6 +552,7 @@ def _build_mesh_from_faces(
     face_indices: list[int],
     sections: tuple[MeshSection, ...],
     uv_coords: list[Vector2] | None = None,
+    normals: list[Vector3] | None = None,
     vertex_colors: list[Color4] | None = None,
     joint_indices: list[int] | None = None,
     joint_weights: list[float] | None = None,
@@ -518,6 +562,7 @@ def _build_mesh_from_faces(
         points=tuple(points),
         face_vertex_counts=tuple(face_counts),
         face_vertex_indices=tuple(face_indices),
+        normals=tuple(normals or ()),
         uv_coords=tuple(uv_coords or ()),
         vertex_colors=tuple(vertex_colors or ()),
         sections=sections,
@@ -1012,6 +1057,28 @@ def _extract_packed_points(
     return source_transform.points_components_to_stage(xs[:count], ys[:count], zs[:count])
 
 
+def _extract_packed_normals(
+    node: ET.Element,
+    context: str,
+    messages: list[str],
+    source_transform: SourceTransform,
+) -> list[Vector3]:
+    xs = _read_float_list(node.findtext("NormalX"))
+    ys = _read_float_list(node.findtext("NormalY"))
+    zs = _read_float_list(node.findtext("NormalZ"))
+    if not xs and not ys and not zs:
+        return []
+    count = _consistent_count(
+        f"{context}.normals",
+        messages,
+        required=[("NormalX", xs), ("NormalY", ys), ("NormalZ", zs)],
+    )
+    return [
+        source_transform.axis_to_stage(Vector3(x, y, z))
+        for x, y, z in zip(xs[:count], ys[:count], zs[:count])
+    ]
+
+
 def _extract_packed_triangles(
     node: ET.Element,
     context: str,
@@ -1279,6 +1346,45 @@ def _extract_face_varying_uvs(
         )
         return []
     return uv_coords
+
+
+def _extract_face_varying_normals(
+    vertices_node: ET.Element | None,
+    vertex_indices: list[int],
+    face_indices: list[int],
+    context: str,
+    messages: list[str],
+    source_transform: SourceTransform,
+    *,
+    allow_point_index_fallback: bool = False,
+) -> list[Vector3]:
+    if vertices_node is None:
+        return []
+    source_normals = _extract_packed_normals(vertices_node, context, messages, source_transform)
+    if not source_normals:
+        return []
+    if vertex_indices:
+        authored_indices = vertex_indices
+    elif allow_point_index_fallback:
+        authored_indices = face_indices
+    elif len(source_normals) == len(face_indices):
+        authored_indices = list(range(len(source_normals)))
+    else:
+        messages.append(
+            f"packed_array_error: {context} normal count {len(source_normals)} requires VertexIndices "
+            f"for {len(face_indices)} face vertices"
+        )
+        return []
+    if len(authored_indices) != len(face_indices):
+        messages.append(
+            f"packed_array_error: {context} normal index count {len(authored_indices)} does not match "
+            f"face vertex count {len(face_indices)}"
+        )
+        return []
+    if any(index < 0 or index >= len(source_normals) for index in authored_indices):
+        messages.append(f"packed_array_error: {context} normal vertex index exceeds normal count")
+        return []
+    return [source_normals[index] for index in authored_indices]
 
 
 def _extract_vertex_colors(

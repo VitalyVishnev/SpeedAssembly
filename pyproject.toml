@@ -14,6 +14,7 @@ authors = [
 dependencies = [
   "numpy>=1.26,<2",
   "fast-simplification>=0.1.9,<1",
+  "manifold3d>=3.5,<4",
   "defusedxml>=0.7,<1",
   "usd-core>=24.8,<26",
 ]

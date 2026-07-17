@@ -166,6 +166,31 @@ def _encode_worker_value(value: object) -> object:
         return {_TYPE_KEY: "bytes", "data": b64encode(value).decode("ascii")}
     if isinstance(value, Path):
         return {_TYPE_KEY: "path", "value": str(value)}
+    packed_fields = _packed_model_value_fields(value)
+    if packed_fields is not None:
+        components = array("d")
+        for item in value:
+            components.extend(tuple(getattr(item, name) for name in packed_fields))
+        return {
+            _TYPE_KEY: "model_value_tuple",
+            _CLASS_KEY: _allowed_worker_class_key(type(value[0])),
+            "width": len(packed_fields),
+            "data": b64encode(components.tobytes()).decode("ascii"),
+        }
+    if isinstance(value, tuple) and value and all(type(item) is int for item in value):
+        components = array("q", value)
+        return {
+            _TYPE_KEY: "numeric_tuple",
+            "typecode": components.typecode,
+            "data": b64encode(components.tobytes()).decode("ascii"),
+        }
+    if isinstance(value, tuple) and value and all(type(item) is float for item in value):
+        components = array("d", value)
+        return {
+            _TYPE_KEY: "numeric_tuple",
+            "typecode": components.typecode,
+            "data": b64encode(components.tobytes()).decode("ascii"),
+        }
     if isinstance(value, tuple):
         return {_TYPE_KEY: "tuple", "items": [_encode_worker_value(item) for item in value]}
     if isinstance(value, list):
@@ -220,6 +245,28 @@ def _decode_worker_value(value: object) -> object:
         if not isinstance(items, list):
             raise TypeError("Worker tuple payload must contain an item list.")
         return tuple(_decode_worker_value(item) for item in items)
+    if payload_type == "vector3_tuple":
+        cls = _allowed_worker_class(str(value[_CLASS_KEY]))
+        components = array("d")
+        components.frombytes(b64decode(str(value["data"]).encode("ascii")))
+        if len(components) % 3:
+            raise TypeError("Worker Vector3 tuple payload has an invalid component count.")
+        return tuple(cls(*components[index : index + 3]) for index in range(0, len(components), 3))
+    if payload_type == "model_value_tuple":
+        cls = _allowed_worker_class(str(value[_CLASS_KEY]))
+        width = int(value["width"])
+        components = array("d")
+        components.frombytes(b64decode(str(value["data"]).encode("ascii")))
+        if width <= 0 or len(components) % width:
+            raise TypeError("Worker model-value tuple payload has an invalid component count.")
+        return tuple(cls(*components[index : index + width]) for index in range(0, len(components), width))
+    if payload_type == "numeric_tuple":
+        typecode = str(value["typecode"])
+        if typecode not in {"q", "d"}:
+            raise TypeError(f"Worker numeric tuple payload has unsupported typecode {typecode!r}.")
+        components = array(typecode)
+        components.frombytes(b64decode(str(value["data"]).encode("ascii")))
+        return tuple(components)
     if payload_type == "dict":
         items = value.get("items")
         if not isinstance(items, list):
@@ -237,6 +284,22 @@ def _decode_worker_value(value: object) -> object:
             raise TypeError("Worker object payload must contain a field object.")
         return cls(**{name: _decode_worker_value(item) for name, item in raw_fields.items()})
     raise TypeError(f"Unsupported worker payload marker: {payload_type}.")
+
+
+def _packed_model_value_fields(value: object) -> tuple[str, ...] | None:
+    if not isinstance(value, tuple) or not value:
+        return None
+    cls = type(value[0])
+    fields_by_name = {
+        "Vector2": ("x", "y"),
+        "Vector3": ("x", "y", "z"),
+        "Color4": ("r", "g", "b", "a"),
+        "Quaternion": ("real", "i", "j", "k"),
+    }
+    field_names = fields_by_name.get(cls.__qualname__) if cls.__module__ == "xml_to_usda.models" else None
+    if field_names is None or not all(type(item) is cls for item in value):
+        return None
+    return field_names
 
 
 @lru_cache(maxsize=None)

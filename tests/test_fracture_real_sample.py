@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
@@ -76,53 +76,6 @@ def test_fracture_preview_and_export_on_real_simple_tree_sample(tmp_path: Path) 
     assert all(Path(output.output_path).exists() for output in export.outputs)
 
 
-def test_noisy_preview_and_export_share_exact_geometry_before_preview_sampling(monkeypatch, tmp_path: Path) -> None:
-    captured = {}
-    actual_prepare = fracture_geometry.prepare_fracture_geometry
-
-    def capture_preview(*args, **kwargs):
-        result = actual_prepare(*args, **kwargs)
-        captured["preview"] = result
-        return result
-
-    def capture_export(*args, **kwargs):
-        result = actual_prepare(*args, **kwargs)
-        captured["export"] = result
-        return result
-
-    monkeypatch.setattr(fracture_preview_service, "prepare_fracture_geometry", capture_preview)
-    monkeypatch.setattr(fracture_export_service, "prepare_fracture_geometry", capture_export)
-    settings = FractureSettings(
-        target_piece_count=2,
-        noisy_cut_enabled=True,
-        noisy_cut_intensity=0.55,
-        noisy_cut_scale=0.8,
-    )
-    request = ConversionRequest(
-        input_paths=(str(SIMPLE_TREE_01),),
-        output_path=str(tmp_path / "SimpleTree_01.usda"),
-    )
-
-    generate_fracture_preview_from_source_request(
-        FracturePreviewSourceRequest.from_conversion_request(request),
-        FracturePreviewSettings(
-            fracture=settings,
-            max_base_faces_per_piece=1_000_000,
-            max_prototype_faces=1_000_000,
-        ),
-        include_viewport_scene=False,
-    )
-    export_fracture_usda_from_export_request(
-        FractureExportRequest.from_conversion_request(request),
-        settings,
-    )
-
-    assert captured["preview"].plan.selected_cut_sites == captured["export"].plan.selected_cut_sites
-    assert tuple(piece.base_mesh for piece in captured["preview"].pieces) == tuple(
-        piece.base_mesh for piece in captured["export"].pieces
-    )
-
-
 def test_fracture_preview_capsule_collision_on_real_simple_tree_sample(tmp_path: Path) -> None:
     request = ConversionRequest(
         input_paths=(str(SIMPLE_TREE_01),),
@@ -164,50 +117,6 @@ def test_real_simple_tree_auto_fracture_does_not_cut_trunk_chain() -> None:
         "bone_004",
         "bone_005",
     }.intersection(cut.joint_token for cut in preview.plan.selected_cut_sites)
-
-
-def test_big_spruce_noisy_geometry_preserves_the_flat_cut_plan() -> None:
-    _report, model, _diagnostics = load_source_tree_model(BIG_SPRUCE)
-    flat_settings = FractureSettings(
-        target_piece_count=11,
-        force_stump_piece=True,
-        separate_stems=True,
-        branch_height_bias=0.05,
-        generate_caps=True,
-        noisy_cut_enabled=False,
-    )
-    noisy_settings = replace(
-        flat_settings,
-        noisy_cut_enabled=True,
-        noisy_cut_intensity=0.46,
-        noisy_cut_scale=1.01,
-    )
-
-    flat_plan = plan_fracture(model, flat_settings)
-    noisy_geometry = fracture_geometry.prepare_fracture_geometry(model, noisy_settings)
-
-    assert noisy_geometry.plan.selected_cut_sites == flat_plan.selected_cut_sites
-    assert noisy_geometry.plan.actual_piece_count == 13
-    assert noisy_geometry.plan.selected_cut_sites[0].reason == "stump_piece"
-
-
-def test_big_spruce_manual_cut_snaps_to_a_closed_cross_section() -> None:
-    _report, model, _diagnostics = load_source_tree_model(BIG_SPRUCE)
-    settings = FractureSettings(
-        target_piece_count=0,
-        force_stump_piece=False,
-        separate_stems=False,
-        generate_caps=True,
-        noisy_cut_enabled=True,
-        noisy_cut_intensity=0.46,
-        noisy_cut_scale=1.01,
-        pinned_cut_joint_tokens=("bone_009->bone_284@0.223",),
-    )
-
-    geometry = fracture_geometry.prepare_fracture_geometry(model, settings)
-
-    assert geometry.plan.selected_cut_sites[0].joint_token == "bone_009->bone_284@0.400"
-    assert any(issue.code == "fracture_manual_cut_snapped" for issue in geometry.plan.diagnostics)
 
 
 def test_three_trunk_sample_can_separate_stems_without_branch_count() -> None:

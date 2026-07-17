@@ -23,7 +23,7 @@ def _runtime_paths(tmp_path: Path):
 def _isolate_runtime_temp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     temp_root = tmp_path / "temp"
     temp_root.mkdir()
-    monkeypatch.setattr("xml_to_usda.runtime_paths.tempfile.gettempdir", lambda: str(temp_root))
+    monkeypatch.setattr("xml_to_usda.runtime_paths._system_temp_root", lambda: temp_root)
 
 
 def _write(path: Path, size: int = 4, *, mtime: float = 1.0) -> Path:

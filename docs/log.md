@@ -318,3 +318,82 @@ Major moves:
 - Added per-surface deterministic noise attenuation as a last-resort topology guard without replanning cuts; the 28M stability sample now keeps all five cuts at full intensity.
 - Made packaged smoke errors non-modal: GUI failures now abort the scenario, write the JSON report/stderr, and print the concrete failure back to the build terminal automatically.
 - Added same-bone automatic cut-position fallback from 30% to 80% in deterministic 5% steps for high-count cap scenarios; strict stability failures now print nested smoke errors directly to stderr.
+
+## 2026-07-17 - Isolated Manifold Boolean fracture prototype
+
+- Added a standalone one-cut connectivity-first Boolean path backed by `manifold3d`, with oriented loop closure, provenance, one-sided fractal lattice cutter, complementary split, common cap topology, volume conservation, and fail-loud diagnostics.
+- Added a synthetic open cylinder with a manual skeleton cut and a separate Qt viewer for Original Shell, Closed Solid, Cutter Surface, Parent Stub, and Detached Branch.
+- Verified the geometry core on the synthetic cylinder, Simple Tree `bone_086`, and Big Spruce `bone_508`; production Fracture Preview/export remains unchanged.
+
+## 2026-07-17 - Physical-bone manual cut contract
+
+- Changed manual cut position, direction, planner ownership, preview overlay, and Boolean prototype to use `child.bind → child.bind_end` instead of the hierarchy connector whenever `bind_end` exists.
+- Prevented a manual branch cut from absorbing sibling branches that share the same trunk parent.
+- Updated the synthetic cylinder to contain a distinct connector and verified real manual midpoint cuts on Simple Tree `bone_086` and Big Spruce `bone_508`.
+
+## 2026-07-17 - Interactive Boolean prototype parameters
+
+- Added editable cut position, intensity, chip scale, and remesh density controls to the standalone Boolean prototype viewer with explicit in-place regeneration and refreshed diagnostics/timings.
+- Kept the noise seed deterministic so parameter comparisons remain repeatable.
+- Removed the normalized intensity ceiling; the prototype UI now permits values through `100` for aggressive splinter-shape experiments.
+
+## 2026-07-17 - Skeleton-limited Boolean noise and attribute transfer
+
+- Uniformly limited requested cutter amplitude before the next physical skeleton terminal, branch, or bend above the editable `Max Bend Angle`, reserving one lattice edge and reporting requested/effective amplitude.
+- Added exact source-triangle Manifold provenance and barycentric transfer of UV0, UV1, vertex colors, material sections, and normalized skin weights.
+- Added planar cutter-space cap UVs plus side-local boundary-ring material/color/skinning transfer; verified synthetic, Simple Tree `bone_086`, and Big Spruce `bone_508`.
+
+## 2026-07-17 - Prepared Boolean regeneration and shared planner speedup
+
+- Split one-time Boolean cut preparation from cutter regeneration; the viewer now reuses plan, triangulation, connectivity, closed source solid, provenance, and static debug stages until the cut token changes.
+- Replaced the shared planner's repeated selected-cut ancestry scan with one parent walk per skeleton joint, preserving deepest-cut ownership for Preview, Export, and Boolean.
+- On local Big Spruce benchmarks, repeated Boolean regeneration fell to a 56 ms median; the shared 11-cut planner fell from 122 ms to 90 ms and the 64-cut stress plan from 1695 ms to 481 ms.
+
+## 2026-07-17 - Multi-cut Boolean tree prototype
+
+- Added `boolean-multi-prototype`: one shared source preparation, reusable independent cut sessions, Fracture Plan ownership assembly, colored piece visibility, exploded view, cut diagnostics, and stage timings.
+- Verified 5-cut SimpleTree assembly, 11-cut Big Spruce assembly, and three independent stump Booleans on the three-trunk sample; structural stem separation reuses disconnected source shells without a fake cut.
+- Measured repeated sequential Big Spruce regeneration at about 0.88 s for 11 cuts, Intensity 20, Density 8; outer process parallelism remains gated by speed/RSS/stability measurements.
+
+## 2026-07-17 - Shared viewport focus and selective Boolean replan
+
+- Added shared middle-button camera-plane pan, double-click mesh focus, and `F` frame-all to `MatcapViewport`; Boolean viewers expose the shortcuts without owning separate camera code.
+- Multi-cut replans now reuse the source context, exact unchanged cut sessions, and their last Boolean results. Adding a Big Spruce stump reused 11 branch cuts and locally took about 353 ms replan plus 99 ms new Boolean.
+- Fixed the production normal contract for future integration: hard source/cap perimeter, hard cap edges at 90 degrees or more, and preserved source-side normals.
+
+## 2026-07-17 - Sequential same-shell Boolean cuts
+
+- Grouped cuts by source connectivity component and sequentially split the region owned by each cut's parent Fracture Piece instead of rejecting duplicate components.
+- Kept distinct cutter provenance through final regions, canonicalized every complementary cap independently, and transferred UVs, colors, materials, and skinning across pieces with multiple caps.
+- Verified SimpleTree stump plus branch cuts on one shell, the three-trunk stump plan, and the independent 11-cut Big Spruce plan; local SimpleTree four-cut geometry took about 192 ms after preparation.
+
+## 2026-07-17 - Production Detailed Cuts integration
+
+- Replaced the former Noisy Cuts operator with production `Detailed Cuts`, defaulting to Intensity 20 and Cut Detail 8, and routed both Fracture Preview and export through the multi-cut Manifold backend.
+- Kept Repeated Parts assigned only by skeleton binding/source bone, reused the existing collision builders on final Boolean meshes, transferred source/cap normals, and forced matching caps while Detailed Cuts are enabled.
+- Added a real SimpleTree export regression covering all 39 Repeated Parts, filtered prototypes, authored normals, and capsule collision, plus packaged smoke that toggles Detailed Cuts ten times and varies every parameter.
+- Fixed native-session lifetime and test-global tempfile isolation; the full suite completed without worker/native crashes.
+- Vectorized cap-corner normal smoothing. Local Intensity 20 / Detail 8 regeneration medians improved from about 508 to 451 ms on SimpleTree and from 1197 to 1068 ms on 11-cut Big Spruce.
+
+## 2026-07-17 - Fracture viewport shading, close zoom, and GL lifecycle
+
+- Made flat and Detailed Fracture Preview use smooth source-surface shading; flat caps retain source normals and QEM payloads without normals receive area-weighted viewport normals.
+- Reduced the shared viewport zoom floor from 35% to 0.1% of scene radius and made the near plane distance-adaptive for close cut inspection.
+- Deferred scene buffer uploads to `paintGL` instead of forcing `makeCurrent()`/`doneCurrent()` from preview-result callbacks after a rapid Detailed toggle crash ended immediately after `viewport.upload_end`.
+
+## 2026-07-17 - Dominant Boolean shell selection and viewport memory bound
+
+- Selected the unique cut-plane component with strongest cut-bone face ownership, so disconnected descendant twigs with a few transition faces no longer make cuts such as Big Spruce `bone_033` ambiguous.
+- Verified complete Detailed geometry for Big Spruce at 7/11/19/37/64 requested branches across height bias, stump, and separate-stem variants.
+- Added a 256 MiB Fracture Preview upload budget. A 2.07 GB expanded Repeated Parts request now remains hidden instead of risking CPU/GPU exhaustion; bone visibility and segment count are traced.
+
+## 2026-07-17 - Preview request coalescing and Fracture worker GC stability
+
+- Replaced terminate-on-slider-change with one-active/one-latest scheduling for every process-backed interactive preview; completed but unread jobs remain active and stale results/errors are suppressed.
+- Prevented crash retry from replacing a newer pending request and kept explicit close/cancel as the only normal termination path.
+- Disabled cyclic GC for the bounded persistent Fracture Preview worker after a packaged `0xC0000005` occurred during cached mesh reconstruction; Big Spruce passed 5/15/28-cut sequential Detailed stress and the full 734-test suite.
+
+## 2026-07-17 - Packaged uint32 Boolean connectivity fix
+
+- Replaced repeated `min(int(numpy.uint32), ...)` edge expressions with one row conversion and comparison-based canonical edge keys in connectivity, boundary-loop, and diagnostics scans.
+- Reproduced the reported Big Spruce settings locally, added a direct uint32 connectivity regression, and passed the same 15-branch request through the rebuilt packaged worker.
