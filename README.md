@@ -5,7 +5,7 @@
 
 ## [Download SpeedAssembly](https://github.com/VitalyVishnev/SpeedAssembly/releases)
 
-Download the latest .exe build from **Releases**, run the app.
+
 
 ![SpeedAssembly main workspace, Dynamic Wind, Proxy Mesh, and Fracture Preview](assets/readme/speedassembly-workflows.png)
 
