@@ -108,7 +108,7 @@ $distPath = Join-Path $repoRoot 'dist-next'
 $buildPath = Join-Path $repoRoot 'build-next'
 $qtUiSourceRoot = Join-Path $repoRoot 'src\xml_to_usda\qt_ui'
 $qtUiStagingRoot = Join-Path $buildPath 'qt_ui_data'
-$exePath = Join-Path $distPath 'XMLtoUSDAConverter.exe'
+$exePath = Join-Path $distPath 'SpeedAssembly.exe'
 $distWorkerExePath = Join-Path $distPath 'XMLtoUSDAWorker.exe'
 $iconPath = Join-Path $repoRoot 'src\xml_to_usda\qt_ui\assets\Icon.ico'
 $hooksPath = Join-Path $repoRoot 'hooks'
@@ -162,7 +162,7 @@ try {
             '--clean',
             '--onefile',
             '--windowed',
-            '--name', 'XMLtoUSDAConverter',
+            '--name', 'SpeedAssembly',
             '--icon', $iconPath,
             '--additional-hooks-dir', $hooksPath,
             '--paths', (Join-Path $repoRoot 'src'),
@@ -234,7 +234,7 @@ try {
         }
 
         Write-BuildInfo -DistPath $distPath -ExePath $exePath -PythonExe $pythonExe -RepoRoot $repoRoot -BuildMode 'release'
-        $bundlePath = Join-Path $distPath 'XMLtoUSDAConverter_release.zip'
+        $bundlePath = Join-Path $distPath 'SpeedAssembly_release.zip'
         & $pythonExe -s -m xml_to_usda.release_bundle --repo-root $repoRoot --dist-path $distPath --zip-path $bundlePath
         if ($LASTEXITCODE -ne 0) {
             throw 'Release zip assembly failed.'

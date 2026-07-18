@@ -455,3 +455,11 @@ Major moves:
 - Reserved the top demo slot for a future verified SpeedTree-to-Unreal capture instead of using a synthetic visual.
 - Refocused that README on the standalone artist workflow: removed developer setup and internal pipeline detail; added UE 5.8 validation, Dynamic Wind JSON, instanced parts, proxy, fracture, and part-export discovery paths.
 - Added a compact README workflow composite from real application screenshots: main workspace above tightly packed Dynamic Wind, Proxy Mesh, and Fracture Preview viewports.
+## 2026-07-19 - SpeedAssembly release identity and UE 5.8 baseline confirmation
+
+- Renamed the distributed executable and release archive to `SpeedAssembly.exe` and `SpeedAssembly_release.zip`; aligned the Qt title, Windows application ID, runtime root, diagnostics archive, package help, release bundle, and packaged stability gate.
+- Recorded manual baseline confirmation in UE 5.7 and UE 5.8.
+- Clarified Proxy Mesh as the companion Static Mesh for collision, distance-field, and lower-cost shadow workflows; per-asset scene-lighting validation remains open.
+## 2026-07-19 - Minimal first release bundle
+
+- Reduced `SpeedAssembly_release.zip` to the executable and one `SimpleTree_01.xml` example. Build metadata and generated help remain local diagnostics/build artifacts and are not distributed.

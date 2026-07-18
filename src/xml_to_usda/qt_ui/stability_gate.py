@@ -220,7 +220,7 @@ def _stability_failure_lines(report: dict[str, object]) -> tuple[str, ...]:
 
 def run_stability_gate(options: StabilityGateOptions) -> dict[str, object]:
     dist_path = Path(options.dist_path)
-    gui_exe = dist_path / "XMLtoUSDAConverter.exe"
+    gui_exe = dist_path / "SpeedAssembly.exe"
     if not gui_exe.exists():
         raise StabilityGateError(f"Missing packaged GUI executable: {gui_exe}")
 
@@ -259,7 +259,7 @@ def prepare_crash_dump_collection(report_root: Path, *, enabled: bool = True) ->
         import winreg
 
         base_path = r"Software\Microsoft\Windows\Windows Error Reporting\LocalDumps"
-        for executable_name in ("XMLtoUSDAConverter.exe",):
+        for executable_name in ("SpeedAssembly.exe",):
             key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, base_path + "\\" + executable_name)
             try:
                 winreg.SetValueEx(key, "DumpFolder", 0, winreg.REG_EXPAND_SZ, str(dump_dir))
@@ -276,7 +276,7 @@ def prepare_crash_dump_collection(report_root: Path, *, enabled: bool = True) ->
     return {
         "enabled": True,
         "dump_dir": str(dump_dir),
-        "executables": ("XMLtoUSDAConverter.exe",),
+        "executables": ("SpeedAssembly.exe",),
     }
 
 

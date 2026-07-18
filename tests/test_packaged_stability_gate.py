@@ -164,7 +164,7 @@ def test_stability_gate_uses_packaged_gui_exe_for_direct_worker_stress(
 
     dist_path = tmp_path / "dist-next"
     dist_path.mkdir()
-    gui_exe = dist_path / "XMLtoUSDAConverter.exe"
+    gui_exe = dist_path / "SpeedAssembly.exe"
     gui_exe.write_bytes(b"gui")
     calls: list[Path] = []
 

@@ -105,7 +105,7 @@ class SupportDialog(QDialog):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
 
-        self.title_label = QLabel("XML to USDA Converter", self)
+        self.title_label = QLabel("SpeedAssembly", self)
         self.title_label.setStyleSheet("font-size: 20px; font-weight: 700;")
         layout.addWidget(self.title_label)
 

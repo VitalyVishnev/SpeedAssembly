@@ -48,7 +48,7 @@ available logical geometry.
 
 - primary release GUI entrypoint is `xml_to_usda.qt_ui.entry`
 - `python -m xml_to_usda gui` and `xml-to-usda-gui` route to the PySide6 shell
-- primary packaged build is `dist-next\XMLtoUSDAConverter.exe`
+- primary packaged build is `dist-next\SpeedAssembly.exe`
 - packaged worker commands launch the same packaged executable in worker mode
   before Qt imports, so heavy geometry work remains process-isolated while
   distribution stays one executable

@@ -788,7 +788,7 @@ class MainWindow(QWidget):
             runtime_paths=self._runtime_paths,
         )
 
-        self.setWindowTitle("XML to USDA Converter")
+        self.setWindowTitle("SpeedAssembly")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -1084,7 +1084,7 @@ class MainWindow(QWidget):
         right_column = QVBoxLayout()
         self._right_column_layout = right_column
         right_column.setSpacing(spacing)
-        self.status_label = QLabel("XML to USDA Converter is ready.", self)
+        self.status_label = QLabel("SpeedAssembly is ready.", self)
         self.status_label.setObjectName("StatusLabel")
         self.status_label.setWordWrap(True)
         right_column.addWidget(self.status_label, 0)
@@ -1764,7 +1764,7 @@ class MainWindow(QWidget):
 
     def _startup_log_text(self) -> str:
         return (
-            "XML to USDA Converter is alive.\n\n"
+            "SpeedAssembly is alive.\n\n"
             "- Frameless shell\n"
             "- Background cover/crop\n"
             "- Glass panel\n"
@@ -1858,7 +1858,7 @@ class MainWindow(QWidget):
         self._append_log(f"Diagnostics bundle exported\n{exported_path}")
 
     def _default_diagnostics_bundle_path(self) -> Path:
-        return self._runtime_paths.settings_dir / "XMLtoUSDA_diagnostics.zip"
+        return self._runtime_paths.settings_dir / "SpeedAssembly_diagnostics.zip"
 
     def dismiss_help_prompt(self) -> None:
         self._state = replace(self._state, help_prompt_dismissed=True)

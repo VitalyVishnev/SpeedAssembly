@@ -2,6 +2,30 @@
 
 This page stores active project contracts. Rejected or superseded approaches live in [experiments.md](experiments.md). Current limitations and bugs live in [known-bugs.md](known-bugs.md).
 
+## Decision: Public standalone identity is SpeedAssembly
+
+Status: Active
+
+The distributed executable is `SpeedAssembly.exe`; the release archive is
+`SpeedAssembly_release.zip`; the Qt application title, Windows application ID,
+runtime settings/cache root, diagnostics archive, package help, and current
+operator-facing documentation use `SpeedAssembly`.
+
+The release ZIP contains only `SpeedAssembly.exe` and
+`examples/SimpleTree_01.xml`. Keep `build_info.json` beside the local package
+for diagnostics, but do not distribute it; a concise HTML quick-start may be
+added to the archive later.
+
+The internal Python package remains `xml_to_usda` so existing source imports,
+worker commands, and file-format contracts remain stable. Legacy
+`XMLtoUSDAWorker.exe` references are retained only for cleanup of obsolete
+sidecar releases.
+
+The baseline import workflow has been manually confirmed in UE 5.7 and UE 5.8.
+Proxy Mesh exists as a companion Static Mesh for collision, distance-field, and
+lower-cost shadow workflows; import confirmation does not by itself validate
+lighting quality.
+
 ## Decision: Tests are organized by system contract and execution boundary
 
 Status: Active

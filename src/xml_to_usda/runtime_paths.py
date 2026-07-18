@@ -13,7 +13,7 @@ from pathlib import Path
 from .models import CleanupPolicy, ConversionPhase
 
 
-APP_NAME = "XMLtoUSDAConverter"
+APP_NAME = "SpeedAssembly"
 DEFAULT_STALE_JOB_SECONDS = 24 * 60 * 60
 RUNTIME_TEMP_FILE_PREFIXES = (
     "xml_to_usda_conversion_",

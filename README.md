@@ -21,7 +21,8 @@ and leaves, materials, wind data, and optional companion assets.
 - **Instanced twigs and leaves.** Preserve repeated parts as instances inside nanite assembly
 - **Materials.** Map SpeedTree materials to Unreal materials and control
   repeated-part material handling.
-- **Proxy Mesh.** Generate a lightweight proxy mesh for distance fields or lower-cost scene representation.
+- **Proxy Mesh.** Generate a lightweight proxy mesh for collision, distance
+  fields, and lower-cost shadow workflows.
 - **Tree fracturing.** Preview and export destructible tree pieces with
   optional collision shapes.
 - **More export choices.** Export static mesh assembly or individual parts
@@ -51,7 +52,7 @@ Unreal import behavior.
 | Skeletal Mesh export | A tree ready for the Unreal vegetation pipeline |
 | Dynamic Wind JSON | Wind groups and animation controls for Dynamic Wind Plugin |
 | Instanced parts | Repeated twigs and leaves without duplicated mesh payloads |
-| Proxy Mesh | A simplified companion mesh for distance fields and collisions |
+| Proxy Mesh | A simplified companion mesh for collision, distance fields, and lower-cost shadows |
 | Fracturing | Breakable tree pieces and optional collision output |
 | Part export / replacement | Individual parts or a custom downstream asset workflow |
 

@@ -305,7 +305,7 @@ def test_fbx_import_supervisor_uses_self_executable_in_frozen_mode(
     import xml_to_usda.worker_file_protocol as worker_file_protocol
 
     request_path = tmp_path / "worker_request.json"
-    gui_executable = tmp_path / "XMLtoUSDAConverter.exe"
+    gui_executable = tmp_path / "SpeedAssembly.exe"
     gui_executable.write_bytes(b"")
 
     monkeypatch.setattr(worker_file_protocol.sys, "frozen", True, raising=False)

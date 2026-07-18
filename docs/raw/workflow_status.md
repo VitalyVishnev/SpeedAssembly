@@ -28,6 +28,7 @@ These synthetic files exist to validate normalization, binding, and material aut
 The project has passed the baseline importer gate:
 
 - UE accepts the generated baseline USDA as skeletal Nanite Assembly input
+- the baseline import path has been manually confirmed in UE 5.7 and UE 5.8
 - the baseline keeps a real `Base Skeletal Tree`
 - repeated parts are authored through `PointInstancer`
 - UE-backed material overrides work on the current baseline workflow
@@ -70,6 +71,8 @@ Current Proxy Mesh status:
 
 - Proxy Mesh preview/export is implemented as a companion workflow, not as a new
   main conversion mode
+- its intended downstream uses are collision, distance-field participation, and
+  lower-cost shadow representation for the skeletal tree
 - the current shipping method is `density_field`
 - `instance_bounds` remains an explicit debug baseline, not the shipping method
 - base geometry is simplified directly from the base mesh
@@ -100,8 +103,9 @@ Current Proxy Mesh status:
   foliage is present
 - invalid persisted proxy settings are coerced back to the supported
   `density_field` method and positive/clamped numeric ranges
-- UE import as a Static Mesh has been manually confirmed; Distance Field and
-  shadow quality validation remain pending
+- UE import as a Static Mesh has been manually confirmed; collision setup,
+  distance-field generation, and shadow quality still require scene-level
+  validation per asset
 
 Current Fracturing status:
 
@@ -176,7 +180,7 @@ The primary standalone package build path has also been stabilized:
 - strict packaged stability is a separate release-candidate gate:
   `.\scripts\run_packaged_stability_gate.ps1`. It uses real
   Spruce and 28-million-triangle skeletal samples, runs direct worker stress
-  through the packaged `XMLtoUSDAConverter.exe` worker command mode, preserves
+  through the packaged `SpeedAssembly.exe` worker command mode, preserves
   per-iteration artifacts under `dist-next\stability\`, and fails on any worker
   crash, retry, missing result, or missing smoke report.
 

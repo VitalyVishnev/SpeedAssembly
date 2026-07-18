@@ -60,7 +60,7 @@ BOOLEAN_MULTI_PROTOTYPE_COMMAND = "boolean-multi-prototype"
 
 
 def build_boolean_prototype_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=f"XMLtoUSDAConverter.exe {BOOLEAN_PROTOTYPE_COMMAND}")
+    parser = argparse.ArgumentParser(prog=f"SpeedAssembly.exe {BOOLEAN_PROTOTYPE_COMMAND}")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--input", help="SpeedTree Raw XML source.")
     source.add_argument(
@@ -78,7 +78,7 @@ def build_boolean_prototype_parser() -> argparse.ArgumentParser:
 
 
 def build_boolean_multi_prototype_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=f"XMLtoUSDAConverter.exe {BOOLEAN_MULTI_PROTOTYPE_COMMAND}")
+    parser = argparse.ArgumentParser(prog=f"SpeedAssembly.exe {BOOLEAN_MULTI_PROTOTYPE_COMMAND}")
     parser.add_argument("--input", required=True, help="SpeedTree Raw XML source.")
     parser.add_argument("--auto-branches", type=int, default=5)
     parser.add_argument("--intensity", type=float, default=0.35)

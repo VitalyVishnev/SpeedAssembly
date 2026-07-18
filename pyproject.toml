@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "xml-to-usda-converter"
 version = "0.1.0"
-description = "Observed-schema SpeedTree Raw XML to USDA converter scaffold for UE 5.7 skeletal nanite assemblies."
+description = "SpeedAssembly: SpeedTree Raw XML to USDA converter for UE 5.7–5.8 skeletal Nanite Assembly workflows."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [

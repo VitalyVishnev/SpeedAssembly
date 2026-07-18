@@ -1,6 +1,6 @@
 # Glossary
 
-- `Converter` - deterministic SpeedTree Raw XML to USDA pipeline for UE 5.7.x vegetation import.
+- `Converter` - deterministic SpeedTree Raw XML to USDA pipeline for UE 5.7–5.8 vegetation import.
 - `Observed Source XML` - a real SpeedTree XML sample treated as observed schema, not a formal spec.
 - `Skeletal Assembly` (`Skeletal Mesh Nanite Assembly`) - the skeletal import shape: Assembly Root, Main Skeleton, Base Skeletal Tree, and repeated skeletal Assembly Parts.
 - `Static Assembly` (`Static Mesh Nanite Assembly`) - the secondary rigid export shape: Assembly Root, rigid prototypes, and repeated static Assembly Parts without skeletons.
@@ -40,7 +40,8 @@
 - `Job Workspace` - the per-run temp/cache directory and diagnostics surface.
 - `Conversion Worker` - the subprocess that owns a large conversion outside the UI process.
 - `FBX Helper` - the isolated native Autodesk FBX import helper process.
-- `Proxy Mesh` - a companion USDA asset for a compact static preview/export mesh.
+- `Proxy Mesh` - a companion Static Mesh USDA asset for collision,
+  distance-field, and lower-cost shadow workflows.
 - `Proxy Source Projection` - the narrow source-facts model used by Proxy Mesh loading: base geometry, repeated-part transforms, and source prototype geometry without full material, skeleton, or authoring resolution state.
 - `Fracturing` - a companion destructibility workflow that outputs root-pivoted static pieces.
 - `Fracture Piece` - one planned destructible tree piece in the fracture workflow.

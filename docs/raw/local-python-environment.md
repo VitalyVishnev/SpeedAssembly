@@ -56,7 +56,7 @@ Build helpers also use `.venv310`:
 .\scripts\build_qt_gui_exe.cmd -Package -Clean
 ```
 
-The primary release artifact is `dist-next\XMLtoUSDAConverter.exe`. Each package build also writes `dist-next\build_info.json`. The GUI reads that file on startup and prints a `Build info:` banner at the top of the in-app `Log`, so package testing no longer depends on the executable file timestamp.
+The primary release artifact is `dist-next\SpeedAssembly.exe`. Each package build also writes `dist-next\build_info.json`. The GUI reads that file on startup and prints a `Build info:` banner at the top of the in-app `Log`, so package testing no longer depends on the executable file timestamp.
 
 `.\scripts\build_qt_gui_exe.cmd -Package` also runs packaged high-risk smoke by
 default after the release zip is assembled. The smoke command opens the packaged
@@ -72,7 +72,7 @@ For release-candidate stability, run the strict packaged gate after packaging:
 .\scripts\run_packaged_stability_gate.ps1
 ```
 
-This gate uses the packaged `XMLtoUSDAConverter.exe` for both UI smoke and
+This gate uses the packaged `SpeedAssembly.exe` for both UI smoke and
 direct worker stress, requires the real Spruce and 28-million-triangle skeletal
 samples, and fails on any worker crash, retry, missing result, or missing
 report even if a later preview succeeds.
@@ -81,7 +81,7 @@ Large-job execution note:
 
 - the GUI now launches big conversion jobs through a spawned worker subprocess
 - on Windows, that worker may itself launch additional `spawn` worker processes for parallel FBX prototype import
-- the release package includes only `XMLtoUSDAConverter.exe`; packaged worker commands launch that same executable with a worker command prefix before Qt imports
+- the release package includes only `SpeedAssembly.exe`; packaged worker commands launch that same executable with a worker command prefix before Qt imports
 - this is why `.venv310`, `multiprocessing.freeze_support()`, and a real file-backed Python entry point matter for stress tests and packaged builds
 
 ## Runtime temp files and cache hygiene

@@ -90,7 +90,7 @@ def test_worker_command_resolution_preserves_development_command(monkeypatch, tm
 def test_worker_command_resolution_uses_self_executable_in_frozen_mode(monkeypatch, tmp_path: Path) -> None:
     from xml_to_usda.worker_file_protocol import resolve_worker_command
 
-    exe_path = tmp_path / "XMLtoUSDAConverter.exe"
+    exe_path = tmp_path / "SpeedAssembly.exe"
     request_path = tmp_path / "worker.request.json"
     monkeypatch.setattr("xml_to_usda.worker_file_protocol.sys.executable", str(exe_path))
     monkeypatch.setattr("xml_to_usda.worker_file_protocol.sys.frozen", True, raising=False)

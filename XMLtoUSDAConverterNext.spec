@@ -41,7 +41,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='XMLtoUSDAConverter',
+    name='SpeedAssembly',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

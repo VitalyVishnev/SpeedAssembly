@@ -22,7 +22,7 @@ from ..worker_commands import (
 )
 from .smoke import SMOKE_COMMAND
 
-WINDOWS_APP_USER_MODEL_ID = "XMLtoUSDAConverter.XMLtoUSDAConverter"
+WINDOWS_APP_USER_MODEL_ID = "SpeedAssembly.SpeedAssembly"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -118,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
     deps = build_default_dependencies()
     configure_windows_taskbar_identity()
     app = QApplication.instance() or QApplication(sys.argv[:1])
-    app.setApplicationName("XML to USDA Converter")
+    app.setApplicationName("SpeedAssembly")
     app.setWindowIcon(QIcon(application_icon_path()))
     window = MainWindow(
         theme,

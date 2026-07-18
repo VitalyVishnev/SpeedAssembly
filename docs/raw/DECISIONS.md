@@ -148,7 +148,7 @@ Status: Superseded by 2026-06-19 self-worker packaged executable
 
 Decision:
 
-- Packaged release builds include `XMLtoUSDAConverter.exe` for the Qt shell and
+- Packaged release builds include `SpeedAssembly.exe` for the Qt shell and
   `XMLtoUSDAWorker.exe` for file-protocol worker commands.
 - Conversion, Proxy Mesh, Fracture Preview/Export, and FBX helper worker
   commands should resolve to the sidecar worker when it exists.
@@ -168,7 +168,7 @@ Status: Superseded by 2026-06-19 self-worker packaged executable
 
 Decision:
 
-- The distributed release contains one executable: `XMLtoUSDAConverter.exe`.
+- The distributed release contains one executable: `SpeedAssembly.exe`.
 - The GUI executable embeds `XMLtoUSDAWorker.exe` as a PyInstaller binary
   payload and extracts it on demand to
   `%LOCALAPPDATA%\XMLtoUSDAConverter\runtime\worker\<worker-build-id>\`.
@@ -192,9 +192,9 @@ Status: Accepted
 
 Decision:
 
-- The distributed release contains one executable: `XMLtoUSDAConverter.exe`.
+- The distributed release contains one executable: `SpeedAssembly.exe`.
 - Packaged worker commands launch the same executable with the worker command
-  prefix, such as `XMLtoUSDAConverter.exe fracture-worker --request <path>`.
+  prefix, such as `SpeedAssembly.exe fracture-worker --request <path>`.
 - `xml_to_usda.qt_ui.entry` must keep worker command dispatch before Qt imports
   and before GUI bootstrap so worker processes do not construct the UI shell.
 - The release build must not create, embed, extract, or distribute

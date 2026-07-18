@@ -1,8 +1,17 @@
 # Project Overview
 
-SpeedAssembly is a deterministic converter from SpeedTree Raw XML to USDA for the UE 5.7.x vegetation pipeline. It is not a generic XML-to-USD tool.
+SpeedAssembly is a deterministic converter from SpeedTree Raw XML to USDA for the UE 5.7–5.8 vegetation pipeline. It is not a generic XML-to-USD tool.
 
 The current goal is to preserve the importer contract while keeping the pipeline inspectable and deterministic. The validated primary path is `skeletal_assembly` (Skeletal Assembly, or `Skeletal Mesh Nanite Assembly`). `static_assembly` is supported as a secondary export shape (`Static Mesh Nanite Assembly`), but it must not redefine the skeletal contract.
+
+The standalone release is named `SpeedAssembly.exe` and its release bundle is
+`SpeedAssembly_release.zip`. The release ZIP contains only the executable and
+`examples/SimpleTree_01.xml`; `build_info.json` remains beside the executable
+in `dist-next` for local diagnostics and is not distributed. The primary
+baseline workflow has been manually confirmed in UE 5.7 and UE 5.8. Proxy Mesh
+is a companion Static Mesh workflow for collision, distance-field, and
+lower-cost shadow use; detailed lighting quality validation remains separate
+from import confirmation.
 
 The maintained memory split is:
 
