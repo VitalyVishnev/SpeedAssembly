@@ -1,197 +1,67 @@
-﻿# XML to USDA Converter
+﻿# [SpeedAssembly](https://github.com/VitalyVishnev/SpeedAssembly)
 
-Deterministic converter for SpeedTree Raw XML that emits USDA targeting Unreal Engine 5.7 skeletal Nanite Assembly import.
+> A standalone tool for bringing **SpeedTree Raw XML** trees into the new
+> **Unreal Engine 5.7–5.8** vegetation pipeline.
 
-This is not a generic XML-to-USD tool. It is a skeletal tree assembly authoring pipeline.
+## [Download SpeedAssembly](https://github.com/VitalyVishnev/SpeedAssembly/releases)
 
-## Project model
+Download the latest Windows build from **Releases**, unzip it, and run the app.
 
-The project treats the source tree as two major components:
+![SpeedAssembly main workspace, Dynamic Wind, Proxy Mesh, and Fracture Preview](assets/readme/speedassembly-workflows.png)
 
-- `Base Skeletal Tree`
-  All unique tree geometry on the `Main Skeleton`.
-- `Assembly Parts`
-  Everything sourced from `LeafReferences`, instanced through `PointInstancer`, each part authored as a skeletal mesh with a one-bone local skeleton.
+SpeedAssembly converts SpeedTree Raw XML into Unreal-ready USDA and keeps skeletal structure, repeated twigs
+and leaves, materials, wind data, and optional companion assets.
 
-## Current baseline
+## Built for the new Unreal vegetation workflow
 
-The active baseline sample is:
+- **Dynamic Wind.** Generate and tune wind JSON for Dynamic Wind Plugin,
+  including the full set of wind-group settings needed by the new pipeline.
+- **Unreal Engine 5.7 and 5.8.** Export a Skeletal Mesh-ready USDA from a
+  SpeedTree Raw XML source.
+- **Instanced twigs and leaves.** Preserve repeated parts as instances inside nanite assembly
+- **Materials.** Map SpeedTree materials to Unreal materials and control
+  repeated-part material handling.
+- **Proxy Mesh.** Generate a lightweight proxy mesh for distance fields or lower-cost scene representation.
+- **Tree fracturing.** Preview and export destructible tree pieces with
+  optional collision shapes.
+- **More export choices.** Export static mesh assembly or individual parts
 
-- `samples/speedtree/simple_tree/variants/SimpleTree_01.xml`
+## Quick start
 
-Current status:
+1. [Download the latest SpeedAssembly build](https://github.com/VitalyVishnev/SpeedAssembly/releases).
+2. Open SpeedAssembly and select your **SpeedTree Raw XML** file.
+3. Review the tree, materials, part sources, and wind settings.
+4. Generate the USDA.
+5. Import the result into Unreal Engine 5.7 or 5.8 through the USD/Interchange
+   workflow.
+6. Use the generated wind JSON with Dynamic Wind Plugin, then tune the final
+   look in Unreal.
 
-- UE accepts the generated baseline USDA as skeletal Nanite Assembly input
-- the remaining v1 work is broader validation across multiple real tree, shrub, palm, and grass structures
+## What SpeedAssembly is for
 
-## Commands
+SpeedAssembly is for environment artists and technical artists who already use
+SpeedTree and want a practical route to Unreal's current vegetation workflow.
+It is not a generic XML converter: it is built around SpeedTree tree data and
+Unreal import behavior.
 
-Environment note:
+## Included workflows
 
-- use [`.venv310`](./.venv310) as the default working environment for this repository
-- real FBX import support is wired through Autodesk `FBX Python SDK 2020.3.4` installed into `.venv310`
-- tests and build helpers should also run from `.venv310`
-- do not assume the legacy `.venv` or global Python install has working FBX bindings
-
-```powershell
-python -m xml_to_usda inspect path\to\tree.xml
-python -m xml_to_usda convert path\to\tree.xml path\to\tree.usda
-python -m xml_to_usda convert path\to\tree.xml path\to\tree.usda --part-source-config part_sources.json --cpu-profile balanced
-python -m xml_to_usda convert path\to\tree.xml path\to\tree.usda --preserve-temp-files
-python -m xml_to_usda gui
-```
-
-`gui` launches the supported PySide6 shell. The old Tk launcher is retired and no longer supported.
-
-`part_sources.json` is a JSON object keyed by prototype name or `Mesh_<id>`, for example:
-
-```json
-{
-  "Twig_01": {
-    "mode": "fbx_file",
-    "fbx_material_mode": "vertex_color_split",
-    "fbx_path": "D:/Trees/HeroBranch.fbx"
-  },
-  "Mesh_2": {
-    "mode": "unreal_asset",
-    "asset_path": "/Game/TreeParts/SK_Twig02.SK_Twig02"
-  }
-}
-```
-
-Supported per-prototype source modes:
-
-- `xml_mesh`
-- `unreal_asset`
-- `fbx_file`
-
-GUI material workflow, stage 1:
-
-- `Base XML materials` are discovered from the XML `Materials/Material` list
-- в этот список попадают только те XML material slots, которые реально используются `Base Skeletal Tree`, а не prototype-only материалы из instanced веток
-- each base XML material row exposes its source `ID`, source `Name`, and one Unreal material path field
-- assigning the same Unreal path to multiple XML rows is valid; it intentionally reuses one UE material asset across multiple XML source slots
-- repeated part prototypes have a separate material contract from the base tree
-- part rows currently expose:
-  - `vertex_color_split`
-  - `single_material`
-  - `material_slots` for `FBX file` rows only
-- `vertex_color_split` on part rows is explicit black/white bucketing, not a hidden bark/leaves fallback
-- `single_material` on part rows uses its own dedicated Unreal material path field
-- `material_slots` analyzes the FBX and shows only the material slots that are actually used by faces in that FBX payload
-- `material_slots` merges identical FBX material names into one UI row
-- `material_slots` labels rows using the FBX material name, or `Unassigned` when the FBX faces are not bound to a named material slot
-
-Huge FBX branch replacement notes:
-
-- the converter ignores XML `LOD/@Filename` for this workflow
-- FBX mode is explicit and per prototype
-- rigid polygon meshes only are supported in v1
-- CLI/JSON source config still supports `fbx_material_mode`:
-  - `auto`
-  - `vertex_color_split`
-  - `single_material`
-  - `material_slots`
-- the GUI workflow intentionally exposes explicit repeated-part material modes instead of `auto`; `auto` stays in CLI/JSON workflows, not the recommended interactive workflow
-- `auto` uses vertex-color split only when vertex colors exist and produce more than one bucket
-- if vertex colors are missing, incomplete, or effectively uniform, `auto` falls back to a single material section
-- explicit `vertex_color_split` is strict: it must produce a usable split or the conversion fails with a detailed reason
-- if Autodesk FBX SDK bindings throw an internal vertex-color access error during import, the converter retries strict `vertex_color_split` once in a fresh worker process before surfacing the detailed failure
-- `vertex_color_split` expects exact black and exact white face buckets for part materials
-- `material_slots` is available only for `fbx_file` prototype rows
-- `material_slots` uses only FBX slots that are actually referenced by imported faces
-- if multiple FBX mesh nodes use the same material name, they are merged into one UI slot row
-- if some `material_slots` paths are left blank, the converter reuses one of the filled slot paths and emits a warning
-- if every `material_slots` path is blank, conversion fails loudly
-- huge FBX jobs stream USDA directly to disk instead of building one giant in-memory string
-- runtime conversion temp files live in a separate cache root under `%LOCALAPPDATA%/XMLtoUSDAConverter/cache/jobs`
-- explicit `.fbx` Part Mesh payloads are cached under `%LOCALAPPDATA%/XMLtoUSDAConverter/cache/fbx-payloads` using the FBX path, file size, timestamp, and import read-options as the cache key
-- the FBX payload cache defaults to `20 GB` / `14 days`; the title-bar gear opens global cache controls for refresh, clear, and policy changes
-- corrupt/stale FBX cache entries fall back to a normal FBX import instead of changing conversion output
-- by default the converter removes per-job runtime temp data on success, cancel, and failure
-- the GUI `Preserve temp files for debugging` switch and CLI `--preserve-temp-files` flag keep the job manifest/temp dir for inspection
-- stale runtime job dirs older than 24 hours are swept on startup
-- the GUI `CPU Profile` field controls how many logical CPUs remain available to the system during heavy jobs
-- `balanced` is the default and recommended profile for normal work because it prioritizes stable completion and system responsiveness
-- GUI errors are now non-modal by default: failures are written to the in-app `Log` panel and to `~/.xml_to_usda/gui_runtime.log` instead of blocking the screen with modal error popups
-- wind-group slider settings are now persisted per input XML, so different trees do not overwrite each other's wind tuning
-- the GUI runs large conversions in a dedicated worker process instead of inside the UI process
-- multiple explicit FBX prototype imports are fanned out through a `spawn` process pool, so different huge branch FBX files can import in parallel
-- `balanced` now matters most when there are multiple independent heavy stages or prototype FBX imports; one single giant FBX is still largely limited by the Autodesk SDK's own single-file import path
-- because of that, a huge job can legitimately show low total `% CPU` in Task Manager while still behaving correctly
-- repeated-part FBX import skips vertex color reads for `single_material` and `material_slots`, and skips material slot face-section reads unless `material_slots` is selected
-- current optimization priority is stability, diagnostics, and predictable UE-facing output rather than forcing maximum all-core utilization on a single huge FBX
-- packaged frozen runs now prefer sequential multi-FBX prototype import for stability, while launcher/dev runs may still import multiple prototypes in parallel
-
-Developer benchmark helper:
-
-```powershell
-python -m xml_to_usda benchmark-fbx "D:\3D Personal\XMLtoUSD_miscFiles\SM_BigBranch_01_HIGH.fbx" --material-mode single_material
-```
-
-Autodesk FBX SDK note:
-
-- real `.fbx` import uses the official Autodesk FBX SDK Python bindings when the `fbx` module is importable
-- the current known-good Windows setup is:
-  - `Python 3.10`
-  - `.venv310`
-  - `C:\Program Files\Autodesk\FBX\FBX Python SDK\2020.3.4\fbx-2020.3.4-cp310-none-win_amd64.whl`
-- `.json` geometry payloads are supported only as a deterministic test backend for automated regression tests
-- if the process pool needed for parallel FBX prototype import is unavailable, the converter falls back to sequential FBX import instead of failing
-
-Material-policy note:
-
-- `source_material_roles` does not require XML material ids to be `1/2`
-- source material ids are treated as XML-local references only; semantic bark/leaves remapping is handled by the resolver policy, not by hardcoded source-id numbering
-
-## Build helpers
-
-Primary one-file PySide6 release build:
-
-```powershell
-.\scripts\build_qt_gui_exe.cmd -Package
-```
-
-Explicit clean rebuild for release:
-
-```powershell
-.\scripts\build_qt_gui_exe.cmd -Package -Clean
-```
-
-Release artifact:
-
-- `dist-next\XMLtoUSDAConverter.exe`
-
-The release exe is a single-file PyInstaller package. It launches the PySide6
-operator UI normally and reuses the same executable for `fbx-worker` helper
-mode during packaged FBX imports, so a sidecar `XMLtoUSDAWorker.exe` is not
-required for the primary `dist-next` release.
-
-Notes:
-
-- `dist-next` is the primary operator release path
-- the old Tk release path is retired and not supported
-- the primary `-Package` build removes stale `build-next` / `dist-next` state first, then runs PyInstaller with `--clean` to produce the standalone executable
-- every package build writes `dist-next\build_info.json`
-- on startup the GUI writes a `Build info:` banner into the in-app `Log`, including build time, build mode, and a short git summary when available
-- on startup the GUI also writes a `Runtime info:` banner into the in-app `Log`, including whether the app is frozen, which executable launched it, and which runtime paths are active
-- the exe is portable as an app binary, but UI settings and runtime cache still live under the user's profile (`~\.xml_to_usda` and `%LOCALAPPDATA%\XMLtoUSDAConverter`)
-
-## Docs
-
-- `AGENTS.md`
-  Mission, hard rules, and wiki maintenance rules.
-- `docs/wiki/index.md`
-  Maintained project memory and navigation.
-- `docs/raw/`
-  Legacy source material preserved for reference.
-
-## Repo areas
-
-- `samples/` holds controlled XML inputs and generated outputs.
-- `docs/wiki/` holds the maintained project memory.
-- `docs/raw/` holds the preserved legacy source material.
-- `vault/` holds reference USDA, UE schema, importer source, and related research artifacts.
+| Workflow | Use it when you need |
+| --- | --- |
+| Skeletal Mesh export | A tree ready for the Unreal vegetation pipeline |
+| Dynamic Wind JSON | Wind groups and animation controls for Dynamic Wind Plugin |
+| Instanced parts | Repeated twigs and leaves without duplicated mesh payloads |
+| Proxy Mesh | A simplified companion mesh for distance fields and collisions |
+| Fracturing | Breakable tree pieces and optional collision output |
+| Part export / replacement | Individual parts or a custom downstream asset workflow |
 
 
+## Project status
 
+The primary workflow has been validated in Unreal Engine 5.7 and 5.8. Real
+asset coverage continues to grow across different tree and vegetation forms.
+
+---
+
+*A short visual walkthrough will be added here: SpeedTree → SpeedAssembly →
+Unreal Engine, ending with the imported tree moving in the viewport.*

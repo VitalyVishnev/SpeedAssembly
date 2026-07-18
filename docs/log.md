@@ -449,3 +449,9 @@ Major moves:
   overlap, and a failed native lifetime cannot poison the next request.
 - Recorded the incident as CR-010. The native root cause remains unverified;
   repeated packaged Big Spruce UI smoke is the regression gate.
+## 2026-07-19 - Public SpeedAssembly README
+
+- Replaced the internal-first root README with a public entry point for SpeedAssembly: release download link, validated UE 5.7.x skeletal-assembly workflow, quick start, explicit limitations, and links to maintained detailed documentation.
+- Reserved the top demo slot for a future verified SpeedTree-to-Unreal capture instead of using a synthetic visual.
+- Refocused that README on the standalone artist workflow: removed developer setup and internal pipeline detail; added UE 5.8 validation, Dynamic Wind JSON, instanced parts, proxy, fracture, and part-export discovery paths.
+- Added a compact README workflow composite from real application screenshots: main workspace above tightly packed Dynamic Wind, Proxy Mesh, and Fracture Preview viewports.
