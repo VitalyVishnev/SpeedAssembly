@@ -1,0 +1,6 @@
+fracture-worker stage=request.read.start
+fracture-worker stage=preview.profile.start
+fracture-worker stage=preview.generate.start branch_height_bias=-1.0 detailed_cut_density=8 detailed_cut_intensity=20.0 detailed_cut_max_bend_angle=30.0 detailed_cut_scale=0.65 detailed_cuts_enabled=True force_stump_piece=False generate_caps=False separate_stems=False target_branch_count=5
+fracture-worker stage=preview.generate.end
+fracture-worker stage=result.write.start
+fracture-worker stage=result.write.end

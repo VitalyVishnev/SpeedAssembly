@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import atexit
 import multiprocessing
 import os
 import shutil
@@ -176,7 +175,9 @@ def start_fracture_preview_process(
     request: FracturePreviewSourceRequest,
     settings: FracturePreviewSettings,
 ):
-    return _start_persistent_fracture_preview_process(request, settings)
+    # Detailed Cuts call native Manifold.  A one-request process boundary keeps
+    # a failed native lifetime from corrupting later preview requests.
+    return _start_fracture_worker_process(request, settings, action=FRACTURE_WORKER_ACTION_PREVIEW)
 
 
 def start_part_preview_process(
@@ -301,104 +302,6 @@ def _start_fracture_worker_process(
     )
 
 
-@dataclass
-class _FracturePreviewServer:
-    process: subprocess.Popen
-    queue_dir: Path
-    stderr_path: Path
-    worker_token: str
-
-
-_fracture_preview_server: _FracturePreviewServer | None = None
-_fracture_preview_server_cleanup_registered = False
-
-
-def _start_persistent_fracture_preview_process(
-    request: FracturePreviewSourceRequest,
-    settings: FracturePreviewSettings,
-):
-    suppress_windows_native_error_dialogs()
-    server = _ensure_fracture_preview_server()
-    request_path = _create_server_job_path(server.queue_dir, ".request.json")
-    result_path = _create_server_job_path(server.queue_dir, ".result.json")
-    error_path = _create_server_job_path(server.queue_dir, ".error.json")
-    write_fracture_worker_request(
-        request_path,
-        FractureWorkerRequest(
-            request=request,
-            settings=settings,
-            action=FRACTURE_WORKER_ACTION_PREVIEW,
-            result_path=str(result_path),
-            error_path=str(error_path),
-            worker_token=server.worker_token,
-        ),
-    )
-    process = _PersistentFracturePreviewJobProcess(server, result_path, error_path)
-    return (
-        process,
-        _FractureWorkerQueue(
-            request_path=request_path,
-            result_path=result_path,
-            error_path=error_path,
-            stderr_path=server.stderr_path,
-            owns_stderr=False,
-        ),
-        _PersistentFracturePreviewCancelEvent(process),
-    )
-
-
-def _ensure_fracture_preview_server() -> _FracturePreviewServer:
-    global _fracture_preview_server, _fracture_preview_server_cleanup_registered
-    if _fracture_preview_server is not None and _fracture_preview_server.process.poll() is None:
-        return _fracture_preview_server
-    _stop_fracture_preview_server(_fracture_preview_server)
-    queue_dir = Path(tempfile.mkdtemp(prefix="xml_to_usda_fracture_preview_server_"))
-    stderr_path = queue_dir / "server.stderr.log"
-    worker_token = new_worker_token()
-    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    with stderr_path.open("wb") as stderr_handle:
-        process = subprocess.Popen(
-            _resolve_fracture_preview_server_command(queue_dir),
-            stdout=subprocess.DEVNULL,
-            stderr=stderr_handle,
-            creationflags=creation_flags,
-            env=worker_env(worker_token),
-        )
-    _fracture_preview_server = _FracturePreviewServer(process, queue_dir, stderr_path, worker_token)
-    if not _fracture_preview_server_cleanup_registered:
-        atexit.register(_stop_fracture_preview_server_at_exit)
-        _fracture_preview_server_cleanup_registered = True
-    return _fracture_preview_server
-
-
-def _create_server_job_path(queue_dir: Path, suffix: str) -> Path:
-    descriptor, raw_path = tempfile.mkstemp(prefix="job_", suffix=suffix, dir=queue_dir)
-    os.close(descriptor)
-    path = Path(raw_path)
-    path.unlink()
-    return path
-
-
-def _stop_fracture_preview_server(server: _FracturePreviewServer | None) -> None:
-    global _fracture_preview_server
-    if server is None:
-        return
-    if server.process.poll() is None:
-        server.process.terminate()
-        try:
-            server.process.wait(timeout=1.0)
-        except subprocess.TimeoutExpired:
-            server.process.kill()
-            server.process.wait(timeout=1.0)
-    shutil.rmtree(server.queue_dir, ignore_errors=True)
-    if _fracture_preview_server is server:
-        _fracture_preview_server = None
-
-
-def _stop_fracture_preview_server_at_exit() -> None:
-    _stop_fracture_preview_server(_fracture_preview_server)
-
-
 def drain_process_queue(message_queue) -> list[tuple[str, object]]:
     if hasattr(message_queue, "drain"):
         return message_queue.drain()
@@ -516,32 +419,6 @@ class _SubprocessWorkerProcess:
 
 
 @dataclass
-class _PersistentFracturePreviewJobProcess:
-    server: _FracturePreviewServer
-    result_path: Path
-    error_path: Path
-
-    @property
-    def exitcode(self):
-        if self.result_path.exists() or self.error_path.exists():
-            return 0
-        return self.server.process.poll()
-
-    def is_alive(self) -> bool:
-        return not (self.result_path.exists() or self.error_path.exists()) and self.server.process.poll() is None
-
-    def join(self, timeout=None) -> None:
-        deadline = None if timeout is None else time.monotonic() + float(timeout)
-        while self.is_alive():
-            if deadline is not None and time.monotonic() >= deadline:
-                return
-            time.sleep(0.01)
-
-    def terminate(self) -> None:
-        _stop_fracture_preview_server(self.server)
-
-
-@dataclass
 class _SubprocessCancelEvent:
     process: subprocess.Popen
 
@@ -551,17 +428,6 @@ class _SubprocessCancelEvent:
     def set(self) -> None:
         if self.process.poll() is None:
             self.process.terminate()
-
-
-@dataclass
-class _PersistentFracturePreviewCancelEvent:
-    process: _PersistentFracturePreviewJobProcess
-
-    def is_set(self) -> bool:
-        return False
-
-    def set(self) -> None:
-        self.process.terminate()
 
 
 @dataclass
@@ -786,12 +652,6 @@ def _resolve_proxy_mesh_worker_command(request_path: Path) -> list[str]:
 
 def _resolve_fracture_worker_command(request_path: Path) -> list[str]:
     return resolve_worker_command(FRACTURE_WORKER_COMMAND, request_path)
-
-
-def _resolve_fracture_preview_server_command(queue_dir: Path) -> list[str]:
-    if bool(getattr(sys, "frozen", False)):
-        return [sys.executable, FRACTURE_WORKER_COMMAND, "--server-dir", str(queue_dir)]
-    return [sys.executable, "-m", "xml_to_usda", FRACTURE_WORKER_COMMAND, "--server-dir", str(queue_dir)]
 
 
 def _resolve_part_preview_worker_command(request_path: Path) -> list[str]:

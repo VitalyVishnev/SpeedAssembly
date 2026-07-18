@@ -439,3 +439,13 @@ Major moves:
   assignment; the precise trigger remains unverified.
 - Rebuilt the package and verified Big Spruce through Computer Use by toggling
   Detailed Cuts off/on with 17 pieces and all 3613 repeated instances visible.
+
+## 2026-07-17 - Detailed Cuts native worker isolation
+
+- Replaced the persistent Fracture Preview server with one fresh worker per
+  request after Big Spruce produced unrelated access violations and Python
+  internal errors after native Boolean work.
+- Kept the GUI's one-active/one-latest coalescing contract; no preview workers
+  overlap, and a failed native lifetime cannot poison the next request.
+- Recorded the incident as CR-010. The native root cause remains unverified;
+  repeated packaged Big Spruce UI smoke is the regression gate.

@@ -260,7 +260,7 @@ def test_start_fracture_export_process_uses_file_based_worker(monkeypatch) -> No
     close_process_queue(queue)
 
 
-def test_start_fracture_preview_process_uses_persistent_file_based_worker(monkeypatch) -> None:
+def test_start_fracture_preview_process_uses_fresh_file_based_worker(monkeypatch) -> None:
     class _DummyPopen:
         def __init__(self, args, **kwargs) -> None:
             self.args = args
@@ -293,7 +293,7 @@ def test_start_fracture_preview_process_uses_persistent_file_based_worker(monkey
 
     assert popen_calls
     assert process.is_alive() is True
-    assert "--server-dir" in popen_calls[0].args
+    assert "--request" in popen_calls[0].args
     request_path = queue.request_path
     payload = read_fracture_worker_request(request_path)
     assert payload.worker_token == popen_calls[0].kwargs["env"][WORKER_TOKEN_ENV]

@@ -11,8 +11,6 @@ queues.
 from __future__ import annotations
 
 import faulthandler
-import gc
-import time
 import traceback
 import sys
 from dataclasses import dataclass, replace
@@ -129,37 +127,6 @@ def run_fracture_worker_request_file(path: str | Path) -> int:
         _worker_stage("error.write.start", error_type=type(exc).__name__, message=str(exc))
         write_error_payload(request.error_path, message=str(exc), formatted_traceback=traceback.format_exc())
         return 1
-
-
-def run_fracture_preview_worker_server(queue_directory: str | Path, *, idle_timeout_seconds: float = 300.0) -> int:
-    """Serve sequential preview requests in one crash-isolated process."""
-    suppress_windows_native_error_dialogs()
-    cyclic_gc_was_enabled = gc.isenabled()
-    if cyclic_gc_was_enabled:
-        # This bounded worker holds large immutable mesh payloads and native
-        # Manifold state. Reference counting releases request data; cyclic GC
-        # can run at unsafe native-lifetime boundaries while rebuilding a mesh.
-        gc.disable()
-        _worker_stage("runtime.cyclic_gc.disabled")
-    queue_dir = Path(queue_directory)
-    queue_dir.mkdir(parents=True, exist_ok=True)
-    processed: set[str] = set()
-    last_activity = time.monotonic()
-    try:
-        while time.monotonic() - last_activity < idle_timeout_seconds:
-            requests = tuple(sorted(queue_dir.glob("*.request.json")))
-            pending = tuple(path for path in requests if path.name not in processed)
-            if not pending:
-                time.sleep(0.02)
-                continue
-            for request_path in pending:
-                processed.add(request_path.name)
-                last_activity = time.monotonic()
-                run_fracture_worker_request_file(request_path)
-        return 0
-    finally:
-        if cyclic_gc_was_enabled:
-            gc.enable()
 
 
 def read_fracture_worker_result(path: str | Path) -> "FractureExportResult | FracturePreviewResult | None":

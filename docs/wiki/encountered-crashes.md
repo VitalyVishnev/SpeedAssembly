@@ -125,7 +125,7 @@ Evidence labels:
 ### CR-009 - Mutable material lookup failed during Detailed Cuts attribute transfer
 
 - Date: 2026-07-17
-- Status/evidence: Mitigated / Traceback confirmed, trigger unverified
+- Status/evidence: Superseded by CR-010 / Traceback confirmed, trigger unverified
 - Signature: handled worker error `'int' object does not support item assignment`
   in `_attributed_mesh_data`; this was not a native process crash.
 - Boundary: Fracture Preview worker while transferring source material IDs to
@@ -134,16 +134,35 @@ Evidence labels:
 - Evidence: the reported frozen traceback points to assignment into a local
   material lookup. The exact settings and a Detailed/flat/Detailed sequence do
   not reproduce the failure on current source.
-- Mitigation/gate: construct the lookup atomically with a deterministic dict
-  comprehension, removing the failing mutation. Focused attribute/cache tests,
-  the packaged build gates, and a Computer Use packaged Big Spruce toggle all
-  pass with 17 pieces and 3613 repeated instances. Keep the cause unverified
-  unless the signature recurs in a fresh build.
+- The atomic lookup avoids one unsafe mutation but did not explain later
+  unrelated native and Python failures in the same persistent worker. It is
+  retained as deterministic code, not treated as the crash fix.
+
+### CR-010 - Persistent Detailed Cuts worker produced unrelated heap-corruption signatures
+
+- Date: 2026-07-17
+- Status/evidence: Mitigated / Strong boundary, native instruction unverified
+- Signature: Big Spruce preview produced `0xC0000005` in XML normalization and
+  source limits, a `dictobject.c:1605` internal error during attribute
+  transfer, and a float-index TypeError in normalizer code. These locations
+  cannot share a normal input-validation cause.
+- Boundary: long-lived Fracture Preview worker after native Manifold work.
+- Class: `NATIVE-LIFETIME`
+- Cause/fix: the exact native instruction is unverified. The persistent worker
+  retained native Boolean state across requests, allowing a later request to
+  observe corruption. Detailed/flat previews now run in one fresh worker per
+  request; latest-request coalescing remains in the GUI, so requests do not
+  overlap.
+- Regression gate: focused worker-lifecycle tests plus repeated packaged Big
+  Spruce interactive and rapid-settings smoke. A worker crash or retry fails
+  the gate.
 
 ## System rules derived from the incidents
 
-1. Keep heavy/native geometry in crash-isolated workers; keep Qt/OpenGL in the
-   GUI process and only inside Qt's current-context callbacks.
+1. Keep heavy/native geometry in crash-isolated workers; when a native backend
+   shows nondeterministic heap faults, use a fresh worker per interactive
+   request. Keep Qt/OpenGL in the GUI process and only inside Qt's
+   current-context callbacks.
 2. Never mutate stdlib or dependency singleton state in tests; patch a narrow
    project seam.
 3. Budget transported bytes, unique uploaded bytes, instance count, and GPU

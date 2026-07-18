@@ -35,32 +35,33 @@ Related files:
 
 This page stores current bugs, limitations, and validation gaps. It should stay focused on dangerous or still-open issues.
 
-## Bug: Fracture Preview worker could access-violate during cached mesh reconstruction
+## Bug: Detailed Cuts worker previously retained unsafe native state
 
-Status: Resolved in code; packaged/operator stress remains pending
+Status: Mitigated; native root cause remains unverified
 
 Symptoms:
-The packaged persistent worker sometimes exited with `0xC0000005` inside
-`_mesh_from_arrays`. Disabling cyclic GC reduced but did not eliminate it; the
-same failure recurred while switching Detailed Cuts off on Big Spruce.
+The former persistent worker sometimes exited with `0xC0000005` in unrelated
+normalization/source-limit paths after Detailed Cuts, and also emitted
+impossible Python internal errors during attribute transfer. Disabling cyclic
+GC did not provide a reliable fix.
 
 Current behavior:
-Fracture Preview no longer reads or writes the typed `.npz` source-model cache.
-A clean worker loads XML once, then the persistent server reuses the slim model
-and analysis cache in memory for later settings changes. Local Big Spruce cold
-loading changed from about 0.50 s to 0.79 s, removing the failing native path
-for a roughly 0.29 s one-time cost.
+Fracture Preview no longer reads or writes the typed `.npz` source-model cache
+and runs every request in a fresh worker. The GUI still coalesces changes to
+one active request plus the latest pending settings, so no native workers
+overlap. This accepts the measured sub-second startup/cache cost in exchange
+for containing unsafe native state to one result.
 
 Do not repeat:
-Do not restore a disk source-model cache for this worker without a packaged
-stability result that justifies crossing the NumPy/PyInstaller boundary. Do
-not kill/restart native preview workers for every slider tick.
+Do not restore the persistent native worker or a disk source-model cache for
+this path without a packaged stability result that identifies and removes the
+native root cause.
 
 Related files:
 - `src/xml_to_usda/fracture_worker_subprocess.py`
 - `src/xml_to_usda/fracture_preview_service.py`
+- `src/xml_to_usda/conversion_process.py`
 - `src/xml_to_usda/qt_ui/preview_jobs.py`
-- `src/xml_to_usda/qt_ui/background_jobs.py`
 
 ## Bug: Rapid Fracture Preview geometry replacement could crash the Qt process
 
@@ -365,11 +366,11 @@ The generic cache recursively encodes full dataclass graphs into JSON. That form
 
 Current workaround:
 Proxy Mesh source loading uses a dedicated typed Proxy Source Projection cache.
-Fracture Preview bypasses the generic cache and reuses its slim source model in
-the persistent worker only. Normal conversion callers still use the existing
-generic cache until a faster typed cache is justified for the full source
-model. Runtime cache maintenance bounds generic source-model and Proxy Source
-Projection cache growth and removes legacy Fracture Preview cache files.
+Fracture Preview bypasses the generic cache and reloads XML in its fresh native
+worker. Normal conversion callers still use the existing generic cache until a
+faster typed cache is justified for the full source model. Runtime cache
+maintenance bounds generic source-model and Proxy Source Projection cache
+growth and removes legacy Fracture Preview cache files.
 
 Do not repeat:
 Do not re-enable generic worker-payload JSON caches for Proxy Mesh or Fracture

@@ -1,0 +1,67 @@
+{
+  "debug_trace": true,
+  "duration_seconds": 7.488,
+  "fail_on_retry": false,
+  "input_path": "samples\\speedtree\\BigSpruce\\SkeletalAssemblyTest_Spruce_Big_low.xml",
+  "output_path": "tmp\\fracture_ui_repro\\repo_big_spruce\\ui\\fracture-preview-rapid-settings\\001\\SkeletalAssemblyTest_Spruce_Big_low.usda",
+  "passed": true,
+  "repeat": 1,
+  "sample_profiles": [],
+  "scenario": "fracture-preview-rapid-settings",
+  "scenarios": [
+    {
+      "checks": [
+        {
+          "name": "dialog.open",
+          "passed": true
+        },
+        {
+          "name": "rapid.settings.coalesced",
+          "passed": true
+        },
+        {
+          "name": "latest.result",
+          "passed": true
+        },
+        {
+          "name": "detailed_cuts.repeated_toggle",
+          "passed": true
+        },
+        {
+          "name": "detailed_cuts.latest_settings",
+          "passed": true
+        },
+        {
+          "name": "viewport.mesh",
+          "passed": true
+        },
+        {
+          "name": "repeated_parts.instanced",
+          "passed": true
+        },
+        {
+          "name": "repeated_parts.hardware_batched",
+          "passed": true
+        }
+      ],
+      "data": {
+        "detailed_cut_density": 8,
+        "detailed_cut_intensity": 22.0,
+        "detailed_cut_max_bend_angle": 35.0,
+        "detailed_cut_scale": 0.7,
+        "detailed_cuts_enabled": true,
+        "force_stump_piece": true,
+        "generate_caps": true,
+        "hardware_instance_batches": 13,
+        "logical_triangles": 10148509,
+        "piece_count": 7,
+        "repeated_instance_count": 3613,
+        "unique_uploaded_triangles": 77765
+      },
+      "duration_seconds": 7.488,
+      "name": "fracture-preview-rapid-settings",
+      "passed": true
+    }
+  ],
+  "schema_version": 1
+}

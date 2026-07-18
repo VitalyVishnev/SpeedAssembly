@@ -1,0 +1,74 @@
+{
+  "debug_trace": true,
+  "duration_seconds": 17.347,
+  "fail_on_retry": false,
+  "input_path": "D:\\3D Personal\\VibeCode\\XMLtoUSDAconverter\\samples\\speedtree\\BigSpruce\\SkeletalAssemblyTest_Spruce_Big_low.xml",
+  "output_path": "tmp\\fracture_cold_repro\\repo_big_spruce\\ui\\fracture-preview-interactive\\000\\SkeletalAssemblyTest_Spruce_Big_low.usda",
+  "passed": true,
+  "repeat": 1,
+  "sample_profiles": [],
+  "scenario": "fracture-preview-interactive",
+  "scenarios": [
+    {
+      "checks": [
+        {
+          "name": "initial.result",
+          "passed": true
+        },
+        {
+          "name": "dialog.non_modal",
+          "passed": true
+        },
+        {
+          "name": "window.visible",
+          "passed": true
+        },
+        {
+          "name": "branch_count.update",
+          "passed": true
+        },
+        {
+          "name": "height_bias.update",
+          "passed": true
+        },
+        {
+          "name": "caps.update",
+          "passed": true
+        },
+        {
+          "name": "manual.bones",
+          "passed": true
+        },
+        {
+          "name": "piece_color.visual",
+          "passed": true
+        },
+        {
+          "name": "exploded_view.visual",
+          "passed": true
+        },
+        {
+          "name": "capsule_collision.result",
+          "passed": true
+        },
+        {
+          "name": "capsule_collision.visual",
+          "passed": true
+        },
+        {
+          "name": "viewport.bones",
+          "passed": true
+        }
+      ],
+      "data": {
+        "bone_segments": 1108,
+        "bone_vertices": 2216,
+        "piece_count": 27
+      },
+      "duration_seconds": 17.347,
+      "name": "fracture-preview-interactive",
+      "passed": true
+    }
+  ],
+  "schema_version": 1
+}

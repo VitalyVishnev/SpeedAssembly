@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import builtins
-import gc
 import importlib
 import sys
 from pathlib import Path
@@ -14,7 +13,6 @@ from xml_to_usda.fracture_worker_subprocess import (
     FRACTURE_WORKER_ACTION_PREVIEW,
     FractureWorkerRequest,
     read_fracture_worker_result,
-    run_fracture_preview_worker_server,
     run_fracture_worker_request_file,
     write_fracture_worker_request,
     write_fracture_worker_result,
@@ -88,30 +86,6 @@ def test_fracture_preview_worker_does_not_depend_on_export_service(monkeypatch, 
     assert result is not None
     assert result.plan.actual_piece_count == 3
     assert error_path.exists() is False
-
-
-def test_fracture_preview_worker_server_processes_multiple_requests_without_restart(monkeypatch, tmp_path: Path) -> None:
-    first = tmp_path / "001.request.json"
-    second = tmp_path / "002.request.json"
-    first.write_text("{}", encoding="utf-8")
-    second.write_text("{}", encoding="utf-8")
-    processed = []
-    gc_states = []
-
-    def record_request(path: str | Path) -> int:
-        gc_states.append(gc.isenabled())
-        processed.append(Path(path).name)
-        return 0
-
-    monkeypatch.setattr(
-        "xml_to_usda.fracture_worker_subprocess.run_fracture_worker_request_file",
-        record_request,
-    )
-
-    assert run_fracture_preview_worker_server(tmp_path, idle_timeout_seconds=0.05) == 0
-    assert processed == ["001.request.json", "002.request.json"]
-    assert gc_states == [False, False]
-    assert gc.isenabled() is True
 
 
 def test_fracture_preview_worker_reports_caps_stage_breadcrumbs(monkeypatch, capsys, tmp_path: Path) -> None:

@@ -1,0 +1,5 @@
+{
+  "error": "Command '['dist-next\\\\XMLtoUSDAConverter.exe', 'smoke', '--scenario', 'fracture-preview-interactive', '--input', 'D:\\\\3D Personal\\\\VibeCode\\\\XMLtoUSDAconverter\\\\samples\\\\speedtree\\\\BigSpruce\\\\SkeletalAssemblyTest_Spruce_Big_low.xml', '--output', 'tmp\\\\fracture_cold_repro\\\\repo_big_spruce\\\\ui\\\\fracture-preview-interactive\\\\002\\\\SkeletalAssemblyTest_Spruce_Big_low.usda', '--report', 'tmp\\\\fracture_cold_repro\\\\repo_big_spruce\\\\ui\\\\fracture-preview-interactive\\\\002\\\\smoke_report.json', '--timeout-ms', '180000', '--debug-trace']' timed out after 180.0 seconds",
+  "passed": false,
+  "schema_version": 1
+}

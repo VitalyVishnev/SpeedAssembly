@@ -608,33 +608,32 @@ Related files:
 - `src/xml_to_usda/qt_ui/fracture_preview.py`
 - `src/xml_to_usda/qt_ui/viewport.py`
 
-## Decision: Fracture Preview source facts stay in persistent worker memory
+## Decision: Fracture Preview Detailed Cuts use a fresh native worker per request
 
 Status: Active
 
 Context:
-Fracture Preview recomputes settings-dependent geometry repeatedly. Re-reading
-and re-normalizing the same SpeedTree XML for every branch-count, stem, height,
-caps, or preview-quality change is unnecessary. The former typed `.npz` cache,
-however, intermittently access-violated inside NumPy array iteration in the
-packaged worker even after cyclic GC was disabled.
+The former persistent Fracture Preview worker intermittently produced access
+violations and unrelated Python internal errors after Detailed Cuts. A typed
+`.npz` cache was already removed after a separate packaged NumPy boundary
+failure.
 
 Decision:
-Keep the slim source model and analysis cache in the crash-isolated persistent
-worker, keyed by resolved source path, size, and mtime. A clean worker reloads
-the XML directly; it does not reconstruct Fracture source facts from disk.
+Run each Fracture Preview request in one crash-isolated worker. It loads XML
+directly and exits after it writes the result; it does not reconstruct Fracture
+source facts from disk or retain native Boolean state for the next request.
 
 Reasoning:
-Big Spruce measured about 0.50 s from `.npz` versus 0.79 s from XML locally.
-The roughly 0.29 s one-time saving did not justify a recurring native crash.
-Subsequent settings changes still reuse the in-memory source model and prepared
-Boolean sessions without reparsing.
+The retained persistent state could poison a later request at unrelated Python
+locations. The measured fresh-worker overhead on Big Spruce is below one
+second, which is preferable to a nondeterministic crash.
 
 Consequences:
-Fracture Preview warm runs reuse source facts and recompute only the settings-
-dependent preview. A worker crash loses that memory by design; retry starts
-cleanly from XML. Do not replace this with the generic JSON cache or another
-disk source-model cache without evidence that outweighs the native boundary.
+The GUI still coalesces to one active request plus the latest settings. A
+worker crash is contained to its own result and cannot poison the next job. Do
+not reintroduce a persistent native worker, generic JSON cache, or disk source
+model cache without packaged evidence that identifies and eliminates the root
+native fault.
 
 Related files:
 - `src/xml_to_usda/fracture_preview_service.py`
@@ -646,10 +645,9 @@ Status: Active
 
 Context:
 Rapid UI edits previously terminated an in-flight preview process for every
-new value. Fracture Preview uses a persistent worker, so this also discarded
-the warm source/Boolean caches and repeatedly reconstructed the source model.
-A result file could additionally exist before the UI consumed it, leaving a
-short lifecycle window that was not represented by `process.is_alive()`.
+new value. A result file could additionally exist before the UI consumed it,
+leaving a short lifecycle window that was not represented by
+`process.is_alive()`.
 
 Decision:
 Every `PreviewProcessJob` owns at most one active lifecycle and one pending

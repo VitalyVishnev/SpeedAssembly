@@ -1,0 +1,117 @@
+
+[2026-07-17 21:20:15] INFO Fracture Preview requested
+input_path=D:\3D Personal\VibeCode\XMLtoUSDAconverter\samples\speedtree\BigSpruce\SkeletalAssemblyTest_Spruce_Big_low.xml
+output_path=tmp\fracture_cold_repro\repo_big_spruce\ui\fracture-preview-interactive\002\SkeletalAssemblyTest_Spruce_Big_low.usda
+target_branch_count=5
+force_stump_piece=False
+separate_stems=False
+branch_height_bias=0.0
+generate_caps=True
+detailed_cuts_enabled=True
+detailed_cut_intensity=20.0
+detailed_cut_scale=0.65
+detailed_cut_density=8
+detailed_cut_max_bend_angle=30.0
+preview_polycount=1000000
+remove_small_branches=0.0
+preview_base_priority=0.33
+preview_prototype_faces=2000
+
+[2026-07-17 21:20:19] INFO Fracture Preview result received
+piece_count=6
+prototype_count=1
+instance_count=3613
+
+[2026-07-17 21:20:19] INFO Fracture Preview preparing viewport mesh
+
+[2026-07-17 21:20:19] INFO Fracture Preview viewport mesh ready
+piece_count=6
+instance_count=0
+uploaded_triangles=60757
+logical_triangles=60757
+
+[2026-07-17 21:20:19] INFO Fracture Preview settings changed
+target_branch_count=26
+force_stump_piece=False
+separate_stems=False
+branch_height_bias=0.0
+generate_caps=True
+detailed_cuts_enabled=True
+detailed_cut_intensity=20.0
+detailed_cut_scale=0.65
+detailed_cut_density=8
+detailed_cut_max_bend_angle=30.0
+preview_polycount=1000000
+remove_small_branches=0.0
+preview_base_priority=0.33
+
+[2026-07-17 21:20:25] INFO Fracture Preview result received
+piece_count=27
+prototype_count=1
+instance_count=3613
+
+[2026-07-17 21:20:25] INFO Fracture Preview preparing viewport mesh
+
+[2026-07-17 21:20:25] INFO Fracture Preview viewport mesh ready
+piece_count=27
+instance_count=0
+uploaded_triangles=69269
+logical_triangles=69269
+
+[2026-07-17 21:20:25] INFO Fracture Preview settings changed
+target_branch_count=26
+force_stump_piece=False
+separate_stems=False
+branch_height_bias=1.0
+generate_caps=True
+detailed_cuts_enabled=True
+detailed_cut_intensity=20.0
+detailed_cut_scale=0.65
+detailed_cut_density=8
+detailed_cut_max_bend_angle=30.0
+preview_polycount=1000000
+remove_small_branches=0.0
+preview_base_priority=0.33
+
+[2026-07-17 21:20:28] INFO Fracture Preview result received
+piece_count=27
+prototype_count=1
+instance_count=3613
+
+[2026-07-17 21:20:28] INFO Fracture Preview preparing viewport mesh
+
+[2026-07-17 21:20:28] INFO Fracture Preview viewport mesh ready
+piece_count=27
+instance_count=0
+uploaded_triangles=68561
+logical_triangles=68561
+
+[2026-07-17 21:20:29] INFO Fracture Preview settings changed
+target_branch_count=26
+force_stump_piece=False
+separate_stems=False
+branch_height_bias=1.0
+generate_caps=True
+detailed_cuts_enabled=True
+detailed_cut_intensity=20.0
+detailed_cut_scale=0.65
+detailed_cut_density=8
+detailed_cut_max_bend_angle=30.0
+preview_polycount=1000000
+remove_small_branches=0.0
+preview_base_priority=0.33
+
+[2026-07-17 21:20:29] INFO Fracture Preview settings changed
+target_branch_count=26
+force_stump_piece=False
+separate_stems=False
+branch_height_bias=1.0
+generate_caps=True
+detailed_cuts_enabled=True
+detailed_cut_intensity=20.0
+detailed_cut_scale=0.65
+detailed_cut_density=8
+detailed_cut_max_bend_angle=30.0
+preview_polycount=1000000
+remove_small_branches=0.0
+preview_base_priority=0.33

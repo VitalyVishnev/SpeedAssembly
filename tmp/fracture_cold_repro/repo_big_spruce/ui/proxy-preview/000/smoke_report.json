@@ -1,0 +1,38 @@
+{
+  "debug_trace": true,
+  "duration_seconds": 3.049,
+  "fail_on_retry": false,
+  "input_path": "D:\\3D Personal\\VibeCode\\XMLtoUSDAconverter\\samples\\speedtree\\BigSpruce\\SkeletalAssemblyTest_Spruce_Big_low.xml",
+  "output_path": "tmp\\fracture_cold_repro\\repo_big_spruce\\ui\\proxy-preview\\000\\SkeletalAssemblyTest_Spruce_Big_low.usda",
+  "passed": true,
+  "repeat": 1,
+  "sample_profiles": [],
+  "scenario": "proxy-preview",
+  "scenarios": [
+    {
+      "checks": [
+        {
+          "name": "dialog.result",
+          "passed": true
+        },
+        {
+          "name": "dialog.non_modal",
+          "passed": true
+        },
+        {
+          "name": "window.visible",
+          "passed": true
+        },
+        {
+          "name": "viewport.mesh",
+          "passed": true
+        }
+      ],
+      "data": {},
+      "duration_seconds": 3.049,
+      "name": "proxy-preview",
+      "passed": true
+    }
+  ],
+  "schema_version": 1
+}
