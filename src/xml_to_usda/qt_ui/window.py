@@ -846,10 +846,9 @@ class MainWindow(QWidget):
         self._build_help_callout()
 
     def _build_help_callout(self) -> None:
-        self.help_callout = QFrame(
-            self,
-            Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint,
-        )
+        # Keep this inside the shell: Tool windows use screen coordinates and can
+        # escape a restored non-maximized window.
+        self.help_callout = QFrame(self)
         self.help_callout.setObjectName("TutorialCallout")
         self.help_callout.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.help_callout.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
@@ -1863,6 +1862,7 @@ class MainWindow(QWidget):
     def dismiss_help_prompt(self) -> None:
         self._state = replace(self._state, help_prompt_dismissed=True)
         self._apply_help_prompt_state()
+        self._save_ui_shell_state()
 
     def _apply_help_prompt_state(self) -> None:
         visible = not self._state.help_prompt_dismissed
@@ -3125,6 +3125,10 @@ class MainWindow(QWidget):
             self._wind_preview_dialog.close()
         self._save_operator_state()
         self._background_jobs.shutdown()
+        self._save_ui_shell_state()
+        super().closeEvent(event)
+
+    def _save_ui_shell_state(self) -> None:
         geometry = self.normalGeometry() if self.isMaximized() else self.geometry()
         save_ui_shell_state(
             UiShellState(
@@ -3140,7 +3144,6 @@ class MainWindow(QWidget):
             ),
             self._state_path,
         )
-        super().closeEvent(event)
 
     def _hit_test_edges(self, position: QPoint):
         margin = self.EDGE_RESIZE_MARGIN

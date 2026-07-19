@@ -61,6 +61,8 @@ def load_ui_shell_state(
         current_build_signature = _load_build_signature(build_info_path)
     stored_build_signature = str(payload.get("help_prompt_build_signature", ""))
     help_prompt_dismissed = bool(payload.get("help_prompt_dismissed", False))
+    # The prompt is shown once for every new build, so a rebuilt package can be
+    # checked without manually deleting UI state.
     if current_build_signature and stored_build_signature != current_build_signature:
         help_prompt_dismissed = False
         stored_build_signature = current_build_signature

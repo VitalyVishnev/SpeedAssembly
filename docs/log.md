@@ -463,3 +463,19 @@ Major moves:
 ## 2026-07-19 - Minimal first release bundle
 
 - Reduced `SpeedAssembly_release.zip` to the executable and one `SimpleTree_01.xml` example. Build metadata and generated help remain local diagnostics/build artifacts and are not distributed.
+
+## 2026-07-19 - In-shell tutorial callout
+
+- Replaced the first-launch tutorial `Tool` window with a child callout under `How to use`, preventing it from escaping a restored non-maximized main window.
+- Kept per-build first-launch behavior and persist dismissal immediately; added Qt regression coverage for containment and build-signature reset.
+
+## 2026-07-19 - Modal viewport previews
+
+- Restored shared window-modal behavior for operational viewport previews: they remain above the main shell and require closing before editing the main UI.
+
+## 2026-07-19 - Cross-process crash context
+
+- Recorded CR-011: current GUI requests ended without a worker result while
+  historical WER also showed unrelated-process access violations. No
+  application-local cause or code fix is claimed; next reproduction must retain
+  the active executable path/build and matching worker/Windows evidence.

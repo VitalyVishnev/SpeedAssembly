@@ -200,7 +200,7 @@ def _run_wind_preview_smoke(context: SmokeContext) -> dict[str, Any]:
         )
         dialog = window._wind_preview_dialog
         _assert(dialog is not None, "wind dialog exists")
-        _assert(not dialog.isModal(), "wind dialog is non-modal")
+        _assert(dialog.isModal(), "wind dialog is modal")
         _assert(window.isVisible(), "main window remains visible")
         _assert(dialog.viewport.has_mesh(), "wind viewport has mesh")
         _assert(dialog.viewport.show_bones, "wind viewport bone overlay is visible")
@@ -235,7 +235,7 @@ def _run_wind_preview_smoke(context: SmokeContext) -> dict[str, Any]:
             name=SMOKE_SCENARIO_WIND_PREVIEW,
             checks=(
                 "dialog.result",
-                "dialog.non_modal",
+                "dialog.modal",
                 "window.visible",
                 "viewport.mesh",
                 "viewport.bones",
@@ -270,7 +270,7 @@ def _run_fracture_preview_smoke(context: SmokeContext) -> dict[str, Any]:
         )
         dialog = window._fracture_preview_dialog
         _assert(dialog is not None, "fracture dialog exists")
-        _assert(not dialog.isModal(), "fracture dialog is non-modal")
+        _assert(dialog.isModal(), "fracture dialog is modal")
         _assert(window.isVisible(), "main window remains visible")
         _assert(dialog.viewport_mesh is not None, "fracture viewport mesh exists")
         _assert(dialog.viewport_mesh.uploaded_triangle_count > 0, "fracture viewport uploaded triangles")
@@ -290,7 +290,7 @@ def _run_fracture_preview_smoke(context: SmokeContext) -> dict[str, Any]:
             name=SMOKE_SCENARIO_FRACTURE_PREVIEW,
             checks=(
                 "dialog.result",
-                "dialog.non_modal",
+                "dialog.modal",
                 "window.visible",
                 "viewport.mesh",
                 "viewport.uploaded_triangles",
@@ -320,7 +320,7 @@ def _run_fracture_preview_interactive_smoke(context: SmokeContext) -> dict[str, 
         )
         dialog = window._fracture_preview_dialog
         _assert(dialog is not None, "fracture dialog exists")
-        _assert(not dialog.isModal(), "fracture dialog is non-modal")
+        _assert(dialog.isModal(), "fracture dialog is modal")
         _assert(window.isVisible(), "main window remains visible")
         dialog.piece_count_spin.setValue(26)
         dialog.piece_count_spin.editingFinished.emit()
@@ -386,7 +386,7 @@ def _run_fracture_preview_interactive_smoke(context: SmokeContext) -> dict[str, 
             name=SMOKE_SCENARIO_FRACTURE_PREVIEW_INTERACTIVE,
             checks=(
                 "initial.result",
-                "dialog.non_modal",
+                "dialog.modal",
                 "window.visible",
                 "branch_count.update",
                 "height_bias.update",
@@ -422,7 +422,7 @@ def _run_fracture_preview_rapid_settings_smoke(context: SmokeContext) -> dict[st
         )
         dialog = window._fracture_preview_dialog
         _assert(dialog is not None, "fracture dialog exists")
-        _assert(not dialog.isModal(), "fracture dialog is non-modal")
+        _assert(dialog.isModal(), "fracture dialog is modal")
         _assert(window.isVisible(), "main window remains visible")
 
         for index in range(10):
@@ -615,7 +615,7 @@ def _run_proxy_preview_smoke(context: SmokeContext) -> dict[str, Any]:
         )
         dialog = window._proxy_preview_dialog
         _assert(dialog is not None, "proxy dialog exists")
-        _assert(not dialog.isModal(), "proxy dialog is non-modal")
+        _assert(dialog.isModal(), "proxy dialog is modal")
         _assert(window.isVisible(), "main window remains visible")
         _assert(dialog.current_proxy is not None, "proxy result exists")
         _assert(dialog.viewport.has_mesh(), "proxy viewport has mesh")
@@ -629,7 +629,7 @@ def _run_proxy_preview_smoke(context: SmokeContext) -> dict[str, Any]:
             _assert(milestone in trace_text, f"trace contains {milestone}")
         return _passed(
             name=SMOKE_SCENARIO_PROXY_PREVIEW,
-            checks=("dialog.result", "dialog.non_modal", "window.visible", "viewport.mesh"),
+            checks=("dialog.result", "dialog.modal", "window.visible", "viewport.mesh"),
         )
     finally:
         _close_window(window)

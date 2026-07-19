@@ -539,6 +539,43 @@ Related files:
 - `src/xml_to_usda/qt_ui/proxy_preview.py`
 - `src/xml_to_usda/qt_ui/fracture_preview.py`
 
+## Decision: First-launch tutorial prompt stays inside the main shell
+
+Status: Active
+
+Decision:
+The tutorial prompt is a regular child `QFrame` of `MainWindow`, positioned
+under the `How to use` button. It is never a Qt `Tool`, popup, or native
+top-level window.
+
+Consequences:
+The callout uses main-window coordinates and cannot appear outside a restored
+non-maximized shell. Closing it persists immediately for the current build.
+The prompt resets only when the persisted build signature changes, so every
+new package can be checked once without repeating during later launches of
+that same build.
+
+Related files:
+- `src/xml_to_usda/qt_ui/window.py`
+- `src/xml_to_usda/qt_ui/persistence.py`
+
+## Decision: Viewport previews are modal to the main shell
+
+Status: Active
+
+Decision:
+All operational viewport previews use Qt `WindowModal` ownership through the
+shared preview shell. A preview stays above the SpeedAssembly main window and
+blocks its controls until the preview is closed.
+
+Consequences:
+Preview dialogs must not use popup dismissal behavior or be configured
+individually as non-modal. The modality is scoped to this application window;
+it does not force the preview above unrelated desktop applications.
+
+Related files:
+- `src/xml_to_usda/qt_ui/preview_shell.py`
+
 ## Decision: FBX Prototype Preview loads the selected payload directly
 
 Status: Active

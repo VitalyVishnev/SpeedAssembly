@@ -157,6 +157,28 @@ Evidence labels:
   Spruce interactive and rapid-settings smoke. A worker crash or retry fails
   the gate.
 
+### CR-011 - Intermittent cross-process access violations after fresh-worker isolation
+
+- Date: 2026-07-19
+- Status/evidence: Open / Strong external context, application-local cause unverified
+- Signature: the GUI runtime log records two Big Spruce Detailed Cuts requests
+  at 03:58 and 03:59 with neither a result nor a handled worker error. Historic
+  Windows Error Reporting records also contain access violations in the former
+  `XMLtoUSDAConverter.exe`/`python310.dll`, standalone Python, PowerShell, and
+  `AppXSvc`/`msxml6.dll`; WER retains older `0x3B` and LiveKernelEvent 141
+  reports as additional system-context evidence.
+- Boundary: unknown for the current request. The old
+  `xml_to_usda_fracture_preview_server_*` artifacts belong to the retired
+  persistent-worker executable, not the current one-request-worker build.
+- Class: Unclassified external/system context.
+- Cause: Unverified. There are no WHEA hardware-error events in the preceding
+  14 days, so RAM/CPU failure is not established. A driver, injected process,
+  stale executable, or an application-native defect remain possible.
+- Fix/workaround: no code change claimed. On the next reproduction, retain the
+  exact executable path/build ID, worker stderr, and matching WER Event 1000/
+  1001 before assigning a process boundary. Test the current packaged
+  `SpeedAssembly.exe`, not a retained `XMLtoUSDAConverter.exe`.
+
 ## System rules derived from the incidents
 
 1. Keep heavy/native geometry in crash-isolated workers; when a native backend
@@ -171,3 +193,6 @@ Evidence labels:
    evidence and keep repeated failure fail-loud.
 5. Do not mark a native crash resolved from a passing unit test alone; require
    the packaged boundary that previously failed.
+6. Keep system-level evidence separate from an application-local root cause:
+   unrelated-process access violations are diagnostic context, not proof that
+   the converter is fixed or at fault.

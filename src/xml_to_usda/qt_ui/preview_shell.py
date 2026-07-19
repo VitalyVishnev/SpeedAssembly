@@ -85,9 +85,9 @@ class PreviewShellDialog(QDialog):
 
 
 def configure_preview_dialog(dialog: QDialog, *, owner: QWidget, stylesheet: str) -> None:
-    dialog.setWindowFlag(Qt.WindowType.Window, True)
-    dialog.setWindowModality(Qt.WindowModality.NonModal)
-    dialog.setModal(False)
+    dialog.setParent(owner, dialog.windowFlags() | Qt.WindowType.Window)
+    dialog.setWindowModality(Qt.WindowModality.WindowModal)
+    dialog.setModal(True)
     dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
     owner.destroyed.connect(dialog.close)
     dialog.setStyleSheet(stylesheet)
