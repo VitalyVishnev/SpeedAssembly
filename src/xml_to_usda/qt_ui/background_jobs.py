@@ -542,7 +542,7 @@ class QtBackgroundJobsController:
                 self._window._set_wind_json_running(False)
                 self._window._report_error(
                     "Wind JSON generation failed",
-                    payload.get("message", "Unknown error."),
+                    payload.get("message") or "Wind JSON worker returned an error payload without a message.",
                     details=self._deps.format_wind_error(payload),
                     status="Wind JSON generation failed.",
                 )

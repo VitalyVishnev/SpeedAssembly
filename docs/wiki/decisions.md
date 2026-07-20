@@ -800,9 +800,10 @@ Group order is bottom-up like layer stacks: group 0/trunks are the bottom layer
 and `+` inserts new manual groups above all existing layers. Auto Hierarchy must
 not read XML generator labels; it uses SpeedTree/file joint ordering plus the
 explicit `Continue line` policy visible only in Auto mode. Missing coverage,
-duplicate external joint names, missing skeletons, and unavailable import
-backends fail loudly. Wind Preview JSON export uses the existing Dynamic Wind
-JSON schema and output-path derivation rather than introducing a new schema.
+duplicate external joint names, missing skeletons, missing or unreadable joint
+transforms, and unavailable import backends fail loudly. Wind Preview JSON
+export uses the existing Dynamic Wind JSON schema and output-path derivation
+rather than introducing a new schema.
 The right panel uses one global settings scroll; Layers is the only nested
 scroll, resizes vertically through a local handle even when the global scrollbar
 is visible, and owns compact `+`/`-` manual-layer actions. Wind Preview opens

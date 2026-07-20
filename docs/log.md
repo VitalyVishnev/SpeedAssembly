@@ -479,3 +479,9 @@ Major moves:
   historical WER also showed unrelated-process access violations. No
   application-local cause or code fix is claimed; next reproduction must retain
   the active executable path/build and matching worker/Windows evidence.
+
+## 2026-07-21 - Fail-loud fallback cleanup
+
+- Limited parallel FBX material partition fallback to process/OS infrastructure failures and made the sequential retry visible as a runtime warning; programming and payload errors now propagate.
+- Rejected external USD skeletons with missing or unreadable joint transforms instead of fabricating identity or zero-position joints.
+- Replaced the generic Wind JSON worker fallback message and updated two stale implementation comments.

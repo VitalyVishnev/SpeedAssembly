@@ -968,8 +968,8 @@ class MainWindow(QWidget):
         self._refresh_preset_selector()
 
         # Convert/Cancel intentionally lives on one shared button so the action
-        # column stays compact. The gear segment is a separate future-facing mode
-        # selector, not a second execute button.
+        # column stays compact. The gear segment selects the conversion mode; it
+        # is not a second execute button.
         self.convert_button = QPushButton("Convert to USDA", self)
         self.convert_button.setObjectName("SplitActionMainButton")
         self.convert_button.clicked.connect(self._handle_convert_button_clicked)

@@ -330,8 +330,10 @@ def _joints_from_usd_skeleton(skeleton) -> tuple[Joint, ...]:
         transforms = tuple(skeleton.GetRestTransformsAttr().Get() or ())
         accumulate_parent = True
     if len(transforms) != len(joint_paths):
-        transforms = tuple(Matrix4d.identity() for _joint in joint_paths)
-        accumulate_parent = False
+        raise WindPreviewError(
+            "external_skeleton_missing_joint_transforms: "
+            f"expected {len(joint_paths)} bind or rest transforms, found {len(transforms)}"
+        )
     positions = _usd_joint_positions(joint_paths, transforms, accumulate_parent=accumulate_parent)
     return tuple(
         Joint(
@@ -387,8 +389,10 @@ def _usd_transform_translation(transform: object) -> Vector3:
     try:
         row = transform[3]
         return Vector3(float(row[0]), float(row[1]), float(row[2]))
-    except Exception:
-        return Vector3(0.0, 0.0, 0.0)
+    except Exception as exc:
+        raise WindPreviewError(
+            f"external_skeleton_invalid_joint_transform: unsupported transform value {type(transform).__name__}"
+        ) from exc
 
 
 def _validate_unique_joint_names(skeleton) -> None:

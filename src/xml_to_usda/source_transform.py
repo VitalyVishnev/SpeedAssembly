@@ -163,8 +163,8 @@ def build_source_transform(
     up_axis_hint: str | None,
     mesh_nodes: tuple[ET.Element, ...] | None = None,
 ) -> SourceTransform:
-    # Phase 1 importer contract now assumes SpeedTree XML exports are authored in meters.
-    # We keep the USDA stage in meters as well, so no unit rescale should be applied here.
+    # Supported SpeedTree XML exports are authored in meters. The USDA stage
+    # stays in meters as well, so no unit rescale is applied here.
     source_units = "m"
     source_up_axis = _normalize_up_axis(up_axis_hint) or _infer_up_axis_from_mesh_orientation(
         mesh_nodes if mesh_nodes is not None else root.findall(".//Meshes/Mesh")

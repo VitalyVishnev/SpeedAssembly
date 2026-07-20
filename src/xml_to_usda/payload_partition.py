@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import warnings
 from array import array
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from multiprocessing import shared_memory
 
@@ -49,8 +51,12 @@ def partition_fbx_material_faces(
             cpu_profile=cpu_profile,
             cancel_event=cancel_event,
         )
-    except Exception:
-        # Stability wins over speed for huge jobs.
+    except (OSError, BrokenProcessPool) as exc:
+        warnings.warn(
+            f"Parallel FBX material partition failed; retrying sequentially: {exc}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
         return _partition_fbx_material_faces_sequential(payload)
 
 

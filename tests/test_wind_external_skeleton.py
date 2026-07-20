@@ -95,6 +95,33 @@ def test_external_usd_skeleton_preview_reads_usdskel_without_mesh(monkeypatch, t
     assert [segment.child_token for segment in preview.viewport_scene.bone_segments] == ["Root/Branch", "Root/Branch/Tip"]
 
 
+@pytest.mark.parametrize(
+    ("bind_transforms", "error_code"),
+    [
+        ((), "external_skeleton_missing_joint_transforms"),
+        ((object(),), "external_skeleton_invalid_joint_transform"),
+    ],
+)
+def test_external_usd_skeleton_rejects_unusable_joint_transforms(
+    monkeypatch,
+    tmp_path: Path,
+    bind_transforms,
+    error_code: str,
+) -> None:
+    usd_path = tmp_path / "invalid-transforms.usda"
+    usd_path.write_text("#usda 1.0", encoding="utf-8")
+    fake_skeleton_data = _FakeUsdSkeletonData(joints=("Root",), bind_transforms=bind_transforms)
+    fake_usd = types.SimpleNamespace(Stage=types.SimpleNamespace(Open=lambda _path: _FakeUsdStage(fake_skeleton_data)))
+    fake_usdskel = types.SimpleNamespace(Skeleton=_FakeUsdSkeleton)
+    fake_pxr = types.ModuleType("pxr")
+    fake_pxr.Usd = fake_usd
+    fake_pxr.UsdSkel = fake_usdskel
+    monkeypatch.setitem(sys.modules, "pxr", fake_pxr)
+
+    with pytest.raises(WindPreviewError, match=error_code):
+        load_external_skeleton_preview(ExternalSkeletonPreviewRequest(str(usd_path)))
+
+
 def test_external_text_usda_skeleton_choices_do_not_autopick_largest_without_pxr(monkeypatch, tmp_path: Path) -> None:
     usd_path = tmp_path / "tree.usda"
     usd_path.write_text(
