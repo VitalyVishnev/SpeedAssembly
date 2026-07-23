@@ -185,6 +185,18 @@ QCheckBox {{
     font-size: 11px;
     color: rgba(0, 0, 0, 190);
 }}
+QToolButton#SettingsSectionToggle {{
+    background: transparent;
+    border: 0px;
+    color: rgba(0, 0, 0, 190);
+    font-weight: 700;
+    min-height: 22px;
+    padding: 1px 0px;
+    text-align: left;
+}}
+QToolButton#SettingsSectionToggle:hover {{
+    color: rgba(63, 143, 197, 220);
+}}
 QFrame#LayerResizeHandle {{
     background: rgba(0, 0, 0, 70);
     min-height: 6px;

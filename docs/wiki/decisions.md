@@ -423,7 +423,7 @@ Context:
 The old automatic fill could refine trunk chains and synthetic face regions, producing visibly unnatural trunk shredding on simple trees.
 
 Decision:
-Treat `target_piece_count` as operator-facing Auto Branches / Branch Count. Automatic V1 cuts may add a stump piece, separate independent root-level stems, and detach branch bases ranked by skeleton path length with optional height bias. Stump and separated stems are counted outside Branch Count. Manual pinned cuts still run first and may cut trunks explicitly. Detailed Cuts change only Cut Surface geometry; they must not change selected bones or piece structure.
+Treat `target_piece_count` as operator-facing Auto Branches / Branch Count. Automatic V1 cuts may add a stump piece, separate independent root-level stems, and detach branch bases ranked by skeleton path length with optional height bias. Stump and separated stems are counted outside Branch Count. Manual pinned cuts still run first and may cut trunks explicitly. Automatic branch cuts use one configurable physical-bone offset (5–95%, default 30%) in flat and Detailed paths. Detailed Cuts change only Cut Surface geometry; they must not change selected bones or piece structure.
 
 Reasoning:
 Length-first branch detachment better matches the perceived weak points of vehicle impact and nearby blast workflows while preserving manual control for exceptional cuts.

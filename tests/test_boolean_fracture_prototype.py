@@ -14,6 +14,7 @@ from xml_to_usda.boolean_fracture_prototype import (
     BooleanMultiPrototypeSettings,
     build_boolean_cut_prototype,
     build_synthetic_boolean_cylinder_model,
+    boolean_multi_settings_from_fracture,
     prepare_boolean_fracture_source,
     prepare_boolean_cut_prototype,
     prepare_boolean_multi_prototype,
@@ -216,6 +217,14 @@ def test_multi_prototype_assembles_independent_real_tree_cuts() -> None:
     assert len(result.pieces) == 4
     assert len({cut.diagnostics.selected_component_index for cut in result.cuts}) == 3
     assert all(piece.meshes for piece in result.pieces)
+
+
+def test_detailed_cuts_use_the_fracture_auto_branch_cut_offset() -> None:
+    settings = boolean_multi_settings_from_fracture(
+        FractureSettings(target_piece_count=2, auto_branch_cut_offset=0.62)
+    )
+
+    assert settings.auto_branch_cut_offset == 0.62
 
 
 def test_big_spruce_cut_selects_the_dominant_bone_shell_when_a_child_twig_crosses_the_plane() -> None:

@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSlider,
     QSpinBox,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -41,7 +42,7 @@ from ..fracture_preview_service import (
     FracturePreviewResult,
     FracturePreviewSettings,
 )
-from ..fracture_service import FractureSettings
+from ..fracture_service import MAX_AUTO_BRANCH_CUT_OFFSET, MIN_AUTO_BRANCH_CUT_OFFSET, FractureSettings
 from ..fracture_viewport_scene import build_fracture_viewport_scene
 from ..models import Color4, GeometryBuffer, Quaternion, UdimMode, Vector3
 from ..viewport_scene import ViewportScene
@@ -95,6 +96,38 @@ class FractureRenderPayload:
     vertex_components: np.ndarray
     min_point: Vector3
     max_point: Vector3
+
+
+class _CollapsibleSettingsSection(QFrame):
+    """Compact settings group with a stable header and hideable contents."""
+
+    def __init__(self, title: str, *, expanded: bool, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setObjectName("FractureSettingsSection")
+        section_layout = QVBoxLayout(self)
+        section_layout.setContentsMargins(0, 0, 0, 0)
+        section_layout.setSpacing(5)
+
+        self.toggle = QToolButton(self)
+        self.toggle.setObjectName("SettingsSectionToggle")
+        self.toggle.setText(title)
+        self.toggle.setCheckable(True)
+        self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        self.toggle.setChecked(expanded)
+        section_layout.addWidget(self.toggle)
+
+        self.content = QWidget(self)
+        self.content_layout = QVBoxLayout(self.content)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(5)
+        section_layout.addWidget(self.content)
+        self.toggle.toggled.connect(self._set_expanded)
+        self._set_expanded(expanded)
+
+    def _set_expanded(self, expanded: bool) -> None:
+        self.content.setVisible(expanded)
+        self.toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
 
 
 class FracturePreviewDialog(PreviewShellDialog):
@@ -163,7 +196,35 @@ class FracturePreviewDialog(PreviewShellDialog):
         mode_label.setStyleSheet("font-weight: 700; color: #2b3032;")
         settings_layout.addWidget(mode_label)
 
-        _add_group_header(settings_layout, settings_panel, "Fracture Plan")
+        self.preview_geometry_section = _CollapsibleSettingsSection(
+            "Preview Geometry", expanded=True, parent=settings_content
+        )
+        self.automatic_cuts_section = _CollapsibleSettingsSection(
+            "Automatic Cuts", expanded=True, parent=settings_content
+        )
+        self.cut_surface_section = _CollapsibleSettingsSection(
+            "Cut Surface", expanded=False, parent=settings_content
+        )
+        self.viewport_section = _CollapsibleSettingsSection("Viewport", expanded=True, parent=settings_content)
+        self.collision_section = _CollapsibleSettingsSection("Collision", expanded=False, parent=settings_content)
+        self.manual_cuts_section = _CollapsibleSettingsSection("Manual Cuts", expanded=False, parent=settings_content)
+        for section in (
+            self.preview_geometry_section,
+            self.automatic_cuts_section,
+            self.cut_surface_section,
+            self.viewport_section,
+            self.collision_section,
+            self.manual_cuts_section,
+        ):
+            settings_layout.addWidget(section)
+
+        automatic_cuts_layout = self.automatic_cuts_section.content_layout
+        preview_geometry_layout = self.preview_geometry_section.content_layout
+        cut_surface_layout = self.cut_surface_section.content_layout
+        viewport_layout = self.viewport_section.content_layout
+        collision_layout = self.collision_section.content_layout
+        manual_cuts_layout = self.manual_cuts_section.content_layout
+
         self.piece_count_slider, self.piece_count_spin = _build_int_slider_row(
             settings_panel,
             minimum=0,
@@ -178,10 +239,9 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.piece_count_slider,
             self.piece_count_spin,
         )
-        settings_layout.addWidget(self.branch_count_label)
-        settings_layout.addLayout(_slider_row(self.piece_count_slider, self.piece_count_spin))
+        automatic_cuts_layout.addWidget(self.branch_count_label)
+        automatic_cuts_layout.addLayout(_slider_row(self.piece_count_slider, self.piece_count_spin))
 
-        _add_group_header(settings_layout, settings_panel, "Preview Mesh")
         self.polycount_slider, self.polycount_spin = _build_int_slider_row(
             settings_panel,
             minimum=1,
@@ -196,8 +256,8 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.polycount_slider,
             self.polycount_spin,
         )
-        settings_layout.addWidget(preview_polycount_label)
-        settings_layout.addLayout(_slider_row(self.polycount_slider, self.polycount_spin))
+        preview_geometry_layout.addWidget(preview_polycount_label)
+        preview_geometry_layout.addLayout(_slider_row(self.polycount_slider, self.polycount_spin))
 
         self.branch_prune_slider, self.branch_prune_spin = _build_branch_prune_slider_row(
             settings_panel,
@@ -210,8 +270,8 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.branch_prune_slider,
             self.branch_prune_spin,
         )
-        settings_layout.addWidget(branch_prune_label)
-        settings_layout.addLayout(_slider_row(self.branch_prune_slider, self.branch_prune_spin))
+        preview_geometry_layout.addWidget(branch_prune_label)
+        preview_geometry_layout.addLayout(_slider_row(self.branch_prune_slider, self.branch_prune_spin))
 
         self.base_priority_slider, self.base_priority_spin = _build_float_slider_row(
             settings_panel,
@@ -228,8 +288,8 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.base_priority_slider,
             self.base_priority_spin,
         )
-        settings_layout.addWidget(base_priority_label)
-        settings_layout.addLayout(_slider_row(self.base_priority_slider, self.base_priority_spin))
+        preview_geometry_layout.addWidget(base_priority_label)
+        preview_geometry_layout.addLayout(_slider_row(self.base_priority_slider, self.base_priority_spin))
 
         self.branch_height_bias_slider, self.branch_height_bias_spin = _build_float_slider_row(
             settings_panel,
@@ -246,13 +306,48 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.branch_height_bias_slider,
             self.branch_height_bias_spin,
         )
-        branch_height_bias_hint = QLabel("Lower    Even    Upper", settings_panel)
-        branch_height_bias_hint.setObjectName("MutedLabel")
-        settings_layout.addWidget(branch_height_bias_label)
-        settings_layout.addLayout(_slider_row(self.branch_height_bias_slider, self.branch_height_bias_spin))
-        settings_layout.addWidget(branch_height_bias_hint)
+        branch_height_bias_hint_host = QWidget(settings_panel)
+        branch_height_bias_hint_layout = QGridLayout(branch_height_bias_hint_host)
+        branch_height_bias_hint_layout.setContentsMargins(0, 0, 0, 0)
+        branch_height_bias_hint_layout.setHorizontalSpacing(0)
+        for column in range(3):
+            branch_height_bias_hint_layout.setColumnStretch(column, 1)
+        for column, text, alignment in (
+            (0, "Lower", Qt.AlignmentFlag.AlignLeft),
+            (1, "Even", Qt.AlignmentFlag.AlignHCenter),
+            (2, "Upper", Qt.AlignmentFlag.AlignRight),
+        ):
+            hint = QLabel(text, branch_height_bias_hint_host)
+            hint.setObjectName("MutedLabel")
+            branch_height_bias_hint_layout.addWidget(hint, 0, column, alignment=alignment)
+        branch_height_bias_hint_row = QHBoxLayout()
+        branch_height_bias_hint_row.setContentsMargins(0, 0, 0, 0)
+        branch_height_bias_hint_row.setSpacing(0)
+        branch_height_bias_hint_row.addWidget(branch_height_bias_hint_host, 1)
+        branch_height_bias_hint_row.addSpacing(self.branch_height_bias_spin.width() + 8)
+        automatic_cuts_layout.addWidget(branch_height_bias_label)
+        automatic_cuts_layout.addLayout(_slider_row(self.branch_height_bias_slider, self.branch_height_bias_spin))
+        automatic_cuts_layout.addLayout(branch_height_bias_hint_row)
 
-        _add_group_header(settings_layout, settings_panel, "Viewport")
+        self.auto_branch_cut_offset_slider, self.auto_branch_cut_offset_spin = _build_float_slider_row(
+            settings_panel,
+            minimum=MIN_AUTO_BRANCH_CUT_OFFSET,
+            maximum=MAX_AUTO_BRANCH_CUT_OFFSET,
+            value=float(self._settings.fracture.auto_branch_cut_offset),
+            step=0.01,
+            scale=100,
+        )
+        auto_branch_cut_offset_label = QLabel("Cut From Branch Start", settings_panel)
+        set_tooltip(
+            "Automatic cut position along the physical branch, measured from its start. "
+            "0.30 means 30% along the branch. Applies to both flat and Detailed Cuts.",
+            auto_branch_cut_offset_label,
+            self.auto_branch_cut_offset_slider,
+            self.auto_branch_cut_offset_spin,
+        )
+        automatic_cuts_layout.addWidget(auto_branch_cut_offset_label)
+        automatic_cuts_layout.addLayout(_slider_row(self.auto_branch_cut_offset_slider, self.auto_branch_cut_offset_spin))
+
         self.exploded_view_slider, self.exploded_view_spin = _build_float_slider_row(
             settings_panel,
             minimum=0.0,
@@ -268,8 +363,8 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.exploded_view_slider,
             self.exploded_view_spin,
         )
-        settings_layout.addWidget(exploded_view_label)
-        settings_layout.addLayout(_slider_row(self.exploded_view_slider, self.exploded_view_spin))
+        viewport_layout.addWidget(exploded_view_label)
+        viewport_layout.addLayout(_slider_row(self.exploded_view_slider, self.exploded_view_spin))
 
         self.color_strength_slider, self.color_strength_spin = _build_float_slider_row(
             settings_panel,
@@ -286,8 +381,8 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.color_strength_slider,
             self.color_strength_spin,
         )
-        settings_layout.addWidget(piece_color_label)
-        settings_layout.addLayout(_slider_row(self.color_strength_slider, self.color_strength_spin))
+        viewport_layout.addWidget(piece_color_label)
+        viewport_layout.addLayout(_slider_row(self.color_strength_slider, self.color_strength_spin))
 
         self.show_bones_check = QCheckBox("Show Bones", settings_panel)
         self.hide_repeated_parts_check = QCheckBox("Hide Repeated Parts", settings_panel)
@@ -466,25 +561,23 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.reset_cuts_button = QPushButton("Reset Cuts", settings_panel)
         self.reset_cuts_button.clicked.connect(self._reset_manual_cuts)
         self.reset_cuts_button.setToolTip("Clears manual cuts. Fewer cuts lets auto-fill decide; more manual cuts pins split sites.")
-        settings_layout.addWidget(self.show_bones_check)
-        settings_layout.addWidget(self.hide_repeated_parts_check)
-        _add_group_header(settings_layout, settings_panel, "Output Pieces")
-        settings_layout.addWidget(self.detailed_cut_check)
-        settings_layout.addWidget(self.detailed_cut_intensity_label)
-        settings_layout.addLayout(_slider_row(self.detailed_cut_intensity_slider, self.detailed_cut_intensity_spin))
-        settings_layout.addWidget(self.detailed_cut_scale_label)
-        settings_layout.addLayout(_slider_row(self.detailed_cut_scale_slider, self.detailed_cut_scale_spin))
-        settings_layout.addWidget(self.detailed_cut_density_label)
-        settings_layout.addLayout(_slider_row(self.detailed_cut_density_slider, self.detailed_cut_density_spin))
-        settings_layout.addWidget(self.detailed_cut_bend_label)
-        settings_layout.addLayout(_slider_row(self.detailed_cut_bend_slider, self.detailed_cut_bend_spin))
-        settings_layout.addWidget(self.generate_caps_check)
-        settings_layout.addWidget(self.override_caps_material_check)
-        settings_layout.addWidget(self.caps_material_row)
-        settings_layout.addWidget(self.stump_piece_check)
-        settings_layout.addWidget(self.separate_stems_check)
-        _add_group_header(settings_layout, settings_panel, "Collision")
-        settings_layout.addWidget(self.collision_check)
+        viewport_layout.addWidget(self.show_bones_check)
+        viewport_layout.addWidget(self.hide_repeated_parts_check)
+        automatic_cuts_layout.addWidget(self.stump_piece_check)
+        automatic_cuts_layout.addWidget(self.separate_stems_check)
+        cut_surface_layout.addWidget(self.detailed_cut_check)
+        cut_surface_layout.addWidget(self.detailed_cut_intensity_label)
+        cut_surface_layout.addLayout(_slider_row(self.detailed_cut_intensity_slider, self.detailed_cut_intensity_spin))
+        cut_surface_layout.addWidget(self.detailed_cut_scale_label)
+        cut_surface_layout.addLayout(_slider_row(self.detailed_cut_scale_slider, self.detailed_cut_scale_spin))
+        cut_surface_layout.addWidget(self.detailed_cut_density_label)
+        cut_surface_layout.addLayout(_slider_row(self.detailed_cut_density_slider, self.detailed_cut_density_spin))
+        cut_surface_layout.addWidget(self.detailed_cut_bend_label)
+        cut_surface_layout.addLayout(_slider_row(self.detailed_cut_bend_slider, self.detailed_cut_bend_spin))
+        cut_surface_layout.addWidget(self.generate_caps_check)
+        cut_surface_layout.addWidget(self.override_caps_material_check)
+        cut_surface_layout.addWidget(self.caps_material_row)
+        collision_layout.addWidget(self.collision_check)
         self.collision_mode_label = QLabel("Collision Mode", settings_panel)
         self.convex_vertices_label = QLabel("Convex Vertices", settings_panel)
         self.sphere_scale_label = QLabel("Sphere Scale", settings_panel)
@@ -533,37 +626,37 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.collision_opacity_slider,
             self.collision_opacity_spin,
         )
-        settings_layout.addWidget(self.collision_mode_label)
-        settings_layout.addWidget(self.collision_mode_button_row)
-        settings_layout.addWidget(self.collision_include_parts_check)
-        settings_layout.addWidget(self.convex_vertices_label)
-        settings_layout.addLayout(_slider_row(self.convex_vertices_slider, self.convex_vertices_spin))
-        settings_layout.addWidget(self.sphere_scale_label)
-        settings_layout.addLayout(_slider_row(self.sphere_scale_slider, self.sphere_scale_spin))
-        settings_layout.addWidget(self.capsule_simplify_label)
-        settings_layout.addLayout(_slider_row(self.capsule_simplify_slider, self.capsule_simplify_spin))
-        settings_layout.addWidget(self.capsule_scale_label)
-        settings_layout.addLayout(_slider_row(self.capsule_scale_slider, self.capsule_scale_spin))
+        collision_layout.addWidget(self.collision_mode_label)
+        collision_layout.addWidget(self.collision_mode_button_row)
+        collision_layout.addWidget(self.collision_include_parts_check)
+        collision_layout.addWidget(self.convex_vertices_label)
+        collision_layout.addLayout(_slider_row(self.convex_vertices_slider, self.convex_vertices_spin))
+        collision_layout.addWidget(self.sphere_scale_label)
+        collision_layout.addLayout(_slider_row(self.sphere_scale_slider, self.sphere_scale_spin))
+        collision_layout.addWidget(self.capsule_simplify_label)
+        collision_layout.addLayout(_slider_row(self.capsule_simplify_slider, self.capsule_simplify_spin))
+        collision_layout.addWidget(self.capsule_scale_label)
+        collision_layout.addLayout(_slider_row(self.capsule_scale_slider, self.capsule_scale_spin))
         self.capsule_tuning_label = QLabel(
             "Capsule Fine Tune (temporary): tune these against UE behavior; stable values will move into code.",
             settings_panel,
         )
         self.capsule_tuning_label.setWordWrap(True)
         self.capsule_tuning_label.setObjectName("MutedLabel")
-        settings_layout.addWidget(self.capsule_tuning_label)
-        settings_layout.addWidget(self.capsule_scale_by_length_label)
-        settings_layout.addLayout(_slider_row(self.capsule_scale_by_length_slider, self.capsule_scale_by_length_spin))
-        settings_layout.addWidget(self.collision_opacity_label)
-        settings_layout.addLayout(_slider_row(self.collision_opacity_slider, self.collision_opacity_spin))
-        settings_layout.addWidget(self.reset_cuts_button)
+        collision_layout.addWidget(self.capsule_tuning_label)
+        collision_layout.addWidget(self.capsule_scale_by_length_label)
+        collision_layout.addLayout(_slider_row(self.capsule_scale_by_length_slider, self.capsule_scale_by_length_spin))
+        collision_layout.addWidget(self.collision_opacity_label)
+        collision_layout.addLayout(_slider_row(self.collision_opacity_slider, self.collision_opacity_spin))
 
         self.cut_list_label = QLabel("Cuts", settings_panel)
         self.cut_list_host = QWidget(settings_panel)
         self.cut_list_layout = QVBoxLayout(self.cut_list_host)
         self.cut_list_layout.setContentsMargins(0, 0, 0, 0)
         self.cut_list_layout.setSpacing(4)
-        settings_layout.addWidget(self.cut_list_label)
-        settings_layout.addWidget(self.cut_list_host)
+        manual_cuts_layout.addWidget(self.cut_list_label)
+        manual_cuts_layout.addWidget(self.cut_list_host)
+        manual_cuts_layout.addWidget(self.reset_cuts_button)
 
         self.export_button = QPushButton("Export Fracture Pieces", settings_panel)
         self.export_button.clicked.connect(self._on_export_requested)
@@ -590,6 +683,8 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.base_priority_spin.editingFinished.connect(self._emit_settings_changed)
         self.branch_height_bias_slider.sliderReleased.connect(self._emit_settings_changed)
         self.branch_height_bias_spin.editingFinished.connect(self._emit_settings_changed)
+        self.auto_branch_cut_offset_slider.sliderReleased.connect(self._emit_settings_changed)
+        self.auto_branch_cut_offset_spin.editingFinished.connect(self._emit_settings_changed)
         self.exploded_view_spin.valueChanged.connect(self._handle_exploded_view_changed)
         self.exploded_view_slider.valueChanged.connect(
             lambda raw: self._handle_exploded_view_changed(float(raw) / 100.0)
@@ -639,6 +734,7 @@ class FracturePreviewDialog(PreviewShellDialog):
                 force_stump_piece=self.stump_piece_check.isChecked(),
                 separate_stems=self.separate_stems_check.isChecked(),
                 branch_height_bias=float(self.branch_height_bias_spin.value()),
+                auto_branch_cut_offset=float(self.auto_branch_cut_offset_spin.value()),
                 detailed_cuts_enabled=self.detailed_cut_check.isChecked(),
                 detailed_cut_intensity=float(self.detailed_cut_intensity_spin.value()),
                 detailed_cut_scale=float(self.detailed_cut_scale_spin.value()),
@@ -709,6 +805,8 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.base_priority_spin,
             self.branch_height_bias_slider,
             self.branch_height_bias_spin,
+            self.auto_branch_cut_offset_slider,
+            self.auto_branch_cut_offset_spin,
             self.show_bones_check,
             self.generate_caps_check,
             self.detailed_cut_check,
@@ -761,6 +859,10 @@ class FracturePreviewDialog(PreviewShellDialog):
             self.base_priority_spin.setValue(float(settings.base_mesh_priority))
             self.branch_height_bias_slider.setValue(int(round(float(settings.fracture.branch_height_bias) * 100)))
             self.branch_height_bias_spin.setValue(float(settings.fracture.branch_height_bias))
+            self.auto_branch_cut_offset_slider.setValue(
+                int(round(float(settings.fracture.auto_branch_cut_offset) * 100))
+            )
+            self.auto_branch_cut_offset_spin.setValue(float(settings.fracture.auto_branch_cut_offset))
             self.generate_caps_check.setChecked(settings.fracture.generate_caps)
             self.detailed_cut_check.setChecked(settings.fracture.detailed_cuts_enabled)
             self.detailed_cut_intensity_slider.setValue(int(round(float(settings.fracture.detailed_cut_intensity) * 10)))
@@ -1115,19 +1217,6 @@ def _build_int_slider_row(
     slider.valueChanged.connect(lambda raw: _sync_int_spin(spin, raw, step))
     spin.editingFinished.connect(lambda: _sync_int_slider(slider, spin.value()))
     return slider, spin
-
-
-def _add_group_header(layout, parent, title: str) -> None:
-    line = QFrame(parent)
-    line.setFrameShape(QFrame.Shape.HLine)
-    line.setFrameShadow(QFrame.Shadow.Plain)
-    label = QLabel(title, parent)
-    label.setObjectName("MutedLabel")
-    label.setStyleSheet("font-weight: 700;")
-    layout.addSpacing(6)
-    layout.addWidget(line)
-    layout.addSpacing(4)
-    layout.addWidget(label)
 
 
 def _build_float_slider_row(

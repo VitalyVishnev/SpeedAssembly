@@ -60,7 +60,11 @@ def _joint(name: str, source_id: int, parent: str | None, y: float, group: int) 
     )
 
 
-def _base_mesh_for_joint_faces(joint_indices: tuple[int, ...]) -> MeshData:
+def _base_mesh_for_joint_faces(
+    joint_indices: tuple[int, ...],
+    *,
+    face_ys: tuple[float, ...] | None = None,
+) -> MeshData:
     points: list[Vector3] = []
     face_vertex_counts: list[int] = []
     face_vertex_indices: list[int] = []
@@ -68,11 +72,12 @@ def _base_mesh_for_joint_faces(joint_indices: tuple[int, ...]) -> MeshData:
     for face_index, joint_index in enumerate(joint_indices):
         first_point = len(points)
         x = float(face_index)
+        y = 0.0 if face_ys is None else face_ys[face_index]
         points.extend(
             (
-                Vector3(x, 0.0, 0.0),
-                Vector3(x + 0.4, 0.0, 0.0),
-                Vector3(x, 0.4, 0.0),
+                Vector3(x, y, 0.0),
+                Vector3(x + 0.4, y, 0.0),
+                Vector3(x, y + 0.4, 0.0),
             )
         )
         face_vertex_counts.append(3)
@@ -174,7 +179,7 @@ def _tree() -> TreeAsset:
         metadata=ExportMetadata(source_path="tree.xml", source_version=None),
         materials=(),
         source_objects=(),
-        base_mesh=_base_mesh_for_joint_faces((0, 1, 2, 3, 4)),
+        base_mesh=_base_mesh_for_joint_faces((0, 1, 2, 3, 4), face_ys=(0.0, 1.0, 2.0, 1.1, 1.5)),
         skeleton=skeleton,
         assembly_parts=(
             _repeated_part("TopLeaves", "bone_002"),
@@ -208,6 +213,34 @@ def _simple_segment_trunk() -> TreeAsset:
         skeleton=skeleton,
         assembly_parts=(),
     )
+
+
+def _automatic_branch_segment_tree() -> TreeAsset:
+    skeleton = (
+        _joint("root", 0, None, 0.0, 0),
+        _joint("trunk", 1, "root", 20.0, 0),
+        _joint("branch", 2, "root", 10.0, 1),
+    )
+    return TreeAsset(
+        metadata=ExportMetadata(source_path="automatic_branch.xml", source_version=None),
+        materials=(),
+        source_objects=(),
+        base_mesh=_base_mesh_for_joint_faces((0, 2, 2, 2), face_ys=(0.0, 2.0, 5.0, 8.0)),
+        skeleton=skeleton,
+        assembly_parts=(),
+    )
+
+
+def test_auto_branch_cut_offset_changes_flat_piece_ownership() -> None:
+    tree = _automatic_branch_segment_tree()
+
+    near_start = plan_fracture(tree, FractureSettings(target_piece_count=1, auto_branch_cut_offset=0.30))
+    near_end = plan_fracture(tree, FractureSettings(target_piece_count=1, auto_branch_cut_offset=0.70))
+
+    assert near_start.selected_cut_sites[0].kind == "auto_segment"
+    assert near_start.selected_cut_sites[0].segment_t == 0.30
+    assert tuple(piece.base_face_indices for piece in near_start.pieces) == ((0, 1), (2, 3))
+    assert tuple(piece.base_face_indices for piece in near_end.pieces) == ((0, 1, 2), (3,))
 
 
 def test_manual_fracturing_auto_fill_keeps_root_first_and_assigns_repeated_parts_by_skeleton_owner() -> None:
@@ -499,12 +532,7 @@ def test_stump_piece_uses_first_main_axis_child_joint_not_lowest_face_centroid()
     assert tuple(piece.base_face_indices for piece in plan.pieces) == ((0, 1), (2, 3))
 
 
-def test_joint_only_fracturing_does_not_compute_face_centroids(monkeypatch) -> None:
-    def fail_centroids(_model):
-        raise AssertionError("Joint-only fracture planning must not scan base face centroids.")
-
-    monkeypatch.setattr(fracture_service, "_base_face_centroids", fail_centroids)
-
+def test_automatic_branch_cuts_use_segment_ownership() -> None:
     plan = plan_fracture(
         _tree(),
         FractureSettings(
@@ -515,7 +543,7 @@ def test_joint_only_fracturing_does_not_compute_face_centroids(monkeypatch) -> N
     )
 
     assert plan.actual_piece_count == 4
-    assert plan.selected_cut_sites[0].joint_token == "bone_001"
+    assert all(cut.kind == "auto_segment" for cut in plan.selected_cut_sites[1:])
 
 
 def test_manual_pinned_cuts_use_skeleton_order_and_auto_fill_after_pins() -> None:

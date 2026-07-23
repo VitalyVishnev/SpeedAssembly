@@ -14,6 +14,9 @@ import time
 import numpy as np
 
 from .fracture_service import (
+    DEFAULT_AUTO_BRANCH_CUT_OFFSET,
+    MAX_AUTO_BRANCH_CUT_OFFSET,
+    MIN_AUTO_BRANCH_CUT_OFFSET,
     FractureCutSite,
     FracturePlan,
     FractureError,
@@ -125,6 +128,7 @@ class BooleanMultiPrototypeSettings:
     force_stump_piece: bool = False
     separate_stems: bool = False
     branch_height_bias: float = 0.0
+    auto_branch_cut_offset: float = DEFAULT_AUTO_BRANCH_CUT_OFFSET
     pinned_cut_joint_tokens: tuple[str, ...] = ()
     cap_material_id: int | None = None
 
@@ -142,6 +146,11 @@ class BooleanMultiPrototypeSettings:
         ).validated()
         if not -1.0 <= float(self.branch_height_bias) <= 1.0:
             raise FractureError("Boolean multi prototype branch height bias must be between -1 and 1.")
+        if not MIN_AUTO_BRANCH_CUT_OFFSET <= float(self.auto_branch_cut_offset) <= MAX_AUTO_BRANCH_CUT_OFFSET:
+            raise FractureError(
+                "Boolean multi prototype automatic branch cut offset must be between "
+                f"{MIN_AUTO_BRANCH_CUT_OFFSET:.2f} and {MAX_AUTO_BRANCH_CUT_OFFSET:.2f}."
+            )
         if isinstance(self.pinned_cut_joint_tokens, str) or not isinstance(self.pinned_cut_joint_tokens, tuple):
             raise FractureError("Boolean multi prototype pinned cuts must be a tuple of tokens.")
         if any(not isinstance(token, str) or not token.strip() for token in self.pinned_cut_joint_tokens):
@@ -721,6 +730,7 @@ def prepare_boolean_multi_prototype(
             force_stump_piece=settings.force_stump_piece,
             separate_stems=settings.separate_stems,
             branch_height_bias=settings.branch_height_bias,
+            auto_branch_cut_offset=settings.auto_branch_cut_offset,
             pinned_cut_joint_tokens=settings.pinned_cut_joint_tokens,
         ),
         analysis_cache=context.analysis_cache,
@@ -811,6 +821,7 @@ def boolean_multi_settings_from_fracture(
         force_stump_piece=settings.force_stump_piece,
         separate_stems=settings.separate_stems,
         branch_height_bias=settings.branch_height_bias,
+        auto_branch_cut_offset=settings.auto_branch_cut_offset,
         pinned_cut_joint_tokens=settings.pinned_cut_joint_tokens,
         cap_material_id=cap_material_id,
     )
@@ -2155,7 +2166,7 @@ def _cut_frame(model: CanonicalTreeModel, cut_site) -> _CutFrame:
         bind_end = child.bind_end_translate
         if bind_end is not None and np.linalg.norm(_vector(bind_end) - child_point) > _EPSILON:
             end = _vector(bind_end)
-            offset = 0.30 if cut_site.reason == "auto_branch_length" else 0.02
+            offset = DEFAULT_AUTO_BRANCH_CUT_OFFSET if cut_site.reason == "auto_branch_length" else 0.02
             origin = child_point + (end - child_point) * offset
             normal = _unit(end - child_point, cut_site.joint_token)
         else:

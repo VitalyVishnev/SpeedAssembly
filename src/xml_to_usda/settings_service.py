@@ -472,6 +472,16 @@ def _parse_fracture_preview_settings(raw_value) -> FracturePreviewSettings:
                     _coerce_float(fracture_payload.get("branch_height_bias"), fracture.branch_height_bias),
                 ),
             ),
+            auto_branch_cut_offset=max(
+                0.05,
+                min(
+                    0.95,
+                    _coerce_float(
+                        fracture_payload.get("auto_branch_cut_offset"),
+                        fracture.auto_branch_cut_offset,
+                    ),
+                ),
+            ),
             detailed_cuts_enabled=_coerce_bool(
                 fracture_payload.get("detailed_cuts_enabled"),
                 fracture.detailed_cuts_enabled,
@@ -724,6 +734,7 @@ def _serialize_fracture_preview_settings(settings: FracturePreviewSettings) -> d
             "force_stump_piece": bool(settings.fracture.force_stump_piece),
             "separate_stems": bool(settings.fracture.separate_stems),
             "branch_height_bias": round(float(settings.fracture.branch_height_bias), 4),
+            "auto_branch_cut_offset": round(float(settings.fracture.auto_branch_cut_offset), 4),
             "detailed_cuts_enabled": bool(settings.fracture.detailed_cuts_enabled),
             "detailed_cut_intensity": round(float(settings.fracture.detailed_cut_intensity), 4),
             "detailed_cut_scale": round(float(settings.fracture.detailed_cut_scale), 4),

@@ -11,8 +11,9 @@
 
 `pytest` runs Core and Integration by default, excluding `stress` and
 `packaged`; the package-build gate runs those contract tests before building
-and then owns the frozen-runtime smoke. Markers are assigned
-centrally in `tests/conftest.py`; a test has one execution layer.
+and then owns the frozen-runtime smoke. Markers are assigned centrally in
+`tests/conftest.py`; a test has one primary execution layer, while `stress` is
+an additional opt-in marker.
 
 ## System contract map
 
@@ -40,7 +41,7 @@ cause.
 ## 2026-07-17 baseline audit
 
 - Historical collection before the policy audit: 735 tests.
-- Current collection: 525 tests: 423 Core, 72 Integration, 26 Packaged contracts, and 4 explicit stress tests. The default 495-test Core + Integration suite completed in 40.10 s locally.
+- Current collection: 531 primary-layer tests: 430 Core, 75 Integration, and 26 Packaged contracts; 4 Core/Integration tests also carry the explicit `stress` marker. The default Core + Integration selection contains 501 tests. Runtime has not been remeasured in this maintenance pass.
 - The Fracture follow-up restored only three missing user contracts: latest-only Qt worker delivery, smooth fallback normals, and close focus/zoom. Real-source Detailed export and Boolean cases run in Integration; Big Spruce remains explicit stress.
 - Slowest cases: Big Spruce pipeline smoke (3.62 s), Qt restored-path/wind refresh (2.67 s), Qt adjustment dialogs (2.11–2.64 s), Big Spruce dominant-shell cut (2.10 s), and Simple Tree/three-trunk fracture workflows (0.69–1.60 s).
 - Removed duplicate categories: sample-specific cache coverage, repeated Qt control/layout assertions, Qt copies of backend geometry checks, superseded compatibility facades, and duplicate real-tree fracture permutations. Each retained layer still has a contract-map row.

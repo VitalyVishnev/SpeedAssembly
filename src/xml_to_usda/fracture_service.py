@@ -24,6 +24,9 @@ _LEGACY_METHODS = {
 }
 _MIN_MANUAL_SEGMENT_CUT_SEPARATION = 0.02
 _MIN_AUTO_BRANCH_LENGTH = 0.05
+DEFAULT_AUTO_BRANCH_CUT_OFFSET = 0.30
+MIN_AUTO_BRANCH_CUT_OFFSET = 0.05
+MAX_AUTO_BRANCH_CUT_OFFSET = 0.95
 
 
 class FractureError(ValueError):
@@ -40,6 +43,7 @@ class FractureSettings:
     force_stump_piece: bool = False
     separate_stems: bool = False
     branch_height_bias: float = 0.0
+    auto_branch_cut_offset: float = DEFAULT_AUTO_BRANCH_CUT_OFFSET
     detailed_cuts_enabled: bool = True
     detailed_cut_intensity: float = 20.0
     detailed_cut_scale: float = 0.65
@@ -162,6 +166,7 @@ def plan_fracture(
         skeleton_max_y=analysis_cache.skeleton_max_y,
         separate_stems=resolved_settings.separate_stems,
         branch_height_bias=resolved_settings.branch_height_bias,
+        auto_branch_cut_offset=resolved_settings.auto_branch_cut_offset,
     )
 
     selected: list[FractureCutSite] = _manual_cut_sites(resolved_settings, graph, subtree_base_face_counts)
@@ -189,7 +194,7 @@ def plan_fracture(
             if stump_cut.joint_token in excluded_cut_tokens:
                 rejected.append(stump_cut)
                 continue
-            if any(cut.joint_token == stump_cut.joint_token for cut in selected):
+            if any(_cut_site_anchor(cut) == _cut_site_anchor(stump_cut) for cut in selected):
                 continue
             if candidate_validator is not None and not candidate_validator(stump_cut):
                 rejected.append(stump_cut)
@@ -212,7 +217,7 @@ def plan_fracture(
         if cut_site.joint_token in excluded_cut_tokens:
             rejected.append(cut_site)
             continue
-        if any(existing.joint_token == cut_site.joint_token for existing in selected):
+        if any(_cut_site_anchor(existing) == _cut_site_anchor(cut_site) for existing in selected):
             continue
         if candidate_validator is not None and not candidate_validator(cut_site):
             rejected.append(cut_site)
@@ -239,7 +244,7 @@ def plan_fracture(
         if cut_site.joint_token in excluded_cut_tokens:
             rejected.append(cut_site)
             continue
-        if any(existing.joint_token == cut_site.joint_token for existing in selected):
+        if any(_cut_site_anchor(existing) == _cut_site_anchor(cut_site) for existing in selected):
             continue
         if automatic_branch_count >= resolved_settings.target_piece_count:
             break
@@ -398,6 +403,11 @@ def _validate_settings(settings: FractureSettings) -> None:
         raise FractureError(f"Fracture separate_stems must be a bool, got {type(settings.separate_stems).__name__}.")
     if not -1.0 <= float(settings.branch_height_bias) <= 1.0:
         raise FractureError("Fracture branch_height_bias must be between -1 and 1.")
+    if not MIN_AUTO_BRANCH_CUT_OFFSET <= float(settings.auto_branch_cut_offset) <= MAX_AUTO_BRANCH_CUT_OFFSET:
+        raise FractureError(
+            "Fracture automatic branch cut offset must be between "
+            f"{MIN_AUTO_BRANCH_CUT_OFFSET:.2f} and {MAX_AUTO_BRANCH_CUT_OFFSET:.2f}."
+        )
 
 
 def _manual_cut_sites(
@@ -483,8 +493,12 @@ def _ordered_cut_sites_for_settings(
 
 
 def _cut_site_sort_key(cut_site: FractureCutSite, graph: _SkeletonGraph) -> tuple[int, float, str]:
-    anchor = cut_site.child_joint_token or cut_site.joint_token
+    anchor = _cut_site_anchor(cut_site)
     return (graph.index_by_name.get(anchor, len(graph.joints)), cut_site.segment_t or -1.0, cut_site.joint_token)
+
+
+def _cut_site_anchor(cut_site: FractureCutSite) -> str:
+    return cut_site.child_joint_token or cut_site.joint_token
 
 
 def _validate_fracture_source(model: CanonicalTreeModel) -> None:
@@ -602,6 +616,7 @@ def _candidate_cut_sites(
     skeleton_max_y: float,
     separate_stems: bool,
     branch_height_bias: float,
+    auto_branch_cut_offset: float,
 ) -> tuple[tuple[FractureCutSite, ...], tuple[FractureCutSite, ...], tuple[ValidationIssue, ...]]:
     stem_cut_sites = _stem_cut_sites(
         graph,
@@ -617,6 +632,7 @@ def _candidate_cut_sites(
         skeleton_min_y=skeleton_min_y,
         skeleton_max_y=skeleton_max_y,
         branch_height_bias=branch_height_bias,
+        auto_branch_cut_offset=auto_branch_cut_offset,
     )
     return stem_cut_sites, branch_cut_sites, ()
 
@@ -655,6 +671,7 @@ def _length_ranked_branch_base_candidates(
     skeleton_min_y: float,
     skeleton_max_y: float,
     branch_height_bias: float,
+    auto_branch_cut_offset: float,
 ) -> tuple[FractureCutSite, ...]:
     stem_axis_tokens = {token for axis in stem_axes for token in axis}
     candidates = [
@@ -679,7 +696,17 @@ def _length_ranked_branch_base_candidates(
             token,
         )
     )
-    return tuple(FractureCutSite(joint_token=token, kind="joint", reason="auto_branch_length") for token in candidates)
+    return tuple(
+        FractureCutSite(
+            joint_token=token,
+            kind="auto_segment",
+            reason="auto_branch_length",
+            parent_joint_token=graph.joint_by_name[token].parent,
+            child_joint_token=token,
+            segment_t=auto_branch_cut_offset,
+        )
+        for token in candidates
+    )
 
 
 def _is_branch_base_candidate(graph: _SkeletonGraph, token: str, stem_axis_tokens: set[str]) -> bool:
@@ -808,7 +835,7 @@ def _build_pieces(
     for joint in graph.joints:
         joint_tokens_by_owner[owner_by_joint[joint.name]].append(joint.name)
 
-    segment_cut_sites = [cut_site for cut_site in selected_cut_sites if cut_site.kind == "manual_segment"]
+    segment_cut_sites = [cut_site for cut_site in selected_cut_sites if cut_site.segment_t is not None]
     face_centroids = _base_face_centroids(model) if segment_cut_sites else ()
     for face_index, joint_token in enumerate(base_face_owner_by_index):
         if joint_token is None:
@@ -921,7 +948,7 @@ def _spatial_segment_cut_owner(
     current_depth = _owner_anchor_depth(graph, current_owner, selected_cut_sites)
     best: tuple[int, str] | None = None
     for cut_site in selected_cut_sites:
-        if cut_site.kind != "manual_segment":
+        if cut_site.segment_t is None:
             continue
         parent = cut_site.parent_joint_token
         child = cut_site.child_joint_token

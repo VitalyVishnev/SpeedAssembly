@@ -485,3 +485,21 @@ Major moves:
 - Limited parallel FBX material partition fallback to process/OS infrastructure failures and made the sequential retry visible as a runtime warning; programming and payload errors now propagate.
 - Rejected external USD skeletons with missing or unreadable joint transforms instead of fabricating identity or zero-position joints.
 - Replaced the generic Wind JSON worker fallback message and updated two stale implementation comments.
+
+## 2026-07-23 - Wiki maintenance
+
+- Verified wiki navigation and current pytest collection; no broken local links found.
+- Updated the test collection counts in `docs/wiki/testing.md` and linked the crash ledger and test policy from the project overview.
+- Runtime duration remains unverified because this pass collected tests only.
+
+## 2026-07-23 - Fracture Preview control hierarchy
+
+- Reorganized Fracture Preview controls into collapsible task-oriented groups;
+  no settings contract or tooltip text changed.
+- Kept Preview Geometry and Automatic Cuts open by default; Cut Surface,
+  Collision, and Manual Cuts can stay out of the active parameter list.
+
+## 2026-07-23 - Shared automatic branch cut position
+
+- Added persisted `Cut From Branch Start` (5–95%, default 30%) to Fracture Preview.
+- The shared fracture plan now applies this physical-bone offset to flat and Detailed Cuts, so both paths split at the same automatic cut site; Detailed noise only changes the surface shape around that site.

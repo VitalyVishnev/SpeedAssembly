@@ -137,6 +137,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
                 preserve_trunk_bias=0.25,
                 separate_stems=True,
                 branch_height_bias=-0.5,
+                auto_branch_cut_offset=0.43,
                 detailed_cuts_enabled=True,
                 detailed_cut_intensity=20.0,
                 detailed_cut_scale=1.25,
@@ -187,6 +188,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert payload["fracture_preview_settings"]["fracture"]["target_piece_count"] == 0
     assert payload["fracture_preview_settings"]["fracture"]["separate_stems"] is True
     assert payload["fracture_preview_settings"]["fracture"]["branch_height_bias"] == -0.5
+    assert payload["fracture_preview_settings"]["fracture"]["auto_branch_cut_offset"] == 0.43
     assert payload["fracture_preview_settings"]["fracture"]["detailed_cuts_enabled"] is True
     assert payload["fracture_preview_settings"]["fracture"]["detailed_cut_intensity"] == 20.0
     assert payload["fracture_preview_settings"]["fracture"]["detailed_cut_scale"] == 1.25

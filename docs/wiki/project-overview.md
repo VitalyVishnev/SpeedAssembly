@@ -18,8 +18,10 @@ The maintained memory split is:
 - [Architecture](architecture.md)
 - [Decisions](decisions.md)
 - [Known Bugs](known-bugs.md)
+- [Encountered Crashes](encountered-crashes.md)
 - [Experiments](experiments.md)
 - [Glossary](glossary.md)
+- [Test Policy](testing.md)
 
 Current working assumptions:
 

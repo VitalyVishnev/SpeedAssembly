@@ -24,7 +24,7 @@ Main systems:
 - `src/xml_to_usda/cache_maintenance.py` - bounded runtime cache maintenance for job leftovers, FBX payloads, source-model caches, Proxy Source Projection caches, legacy Fracture Preview cache files, and stale cache temp files.
 - `src/xml_to_usda/proxy_mesh_service.py`, `src/xml_to_usda/fracture_service.py`, and related workers - companion workflows.
 - `src/xml_to_usda/qem_simplification.py` - shared topology-preserving `fast-simplification` QEM backend used by Proxy Mesh and Fracture Preview diagnostic geometry.
-- `src/xml_to_usda/fracture_geometry.py` - deep Fracture Geometry module shared by preview and export; owns subtree-local Cut Surfaces, deterministic noisy clipping, attribute interpolation, intersection-loop caps, and manual cross-section snapping. Cut planning and Repeated Part attachment ownership stay outside geometry.
+- `src/xml_to_usda/fracture_geometry.py` - deep Fracture Geometry module shared by preview and export; owns subtree-local Cut Surfaces, deterministic noisy clipping, attribute interpolation, intersection-loop caps, and manual cross-section snapping. Cut planning supplies the shared automatic physical-bone offset, so flat and Detailed Cuts start at the same site. Repeated Part attachment ownership stays outside geometry.
 - `src/xml_to_usda/boolean_fracture_prototype.py` - connectivity-first Manifold Boolean backend used by production Detailed Cuts and the standalone prototype viewers. A source context prepares analysis, triangulation, and connectivity once; prepared cut sessions own closed solids and cache their last result. Independent components build separately. Cuts sharing one shell split the current parent region sequentially in Fracture Plan order, preserving distinct cap provenance and final piece ownership. Multi-cut replans reuse unchanged independent sessions/results by exact cut-site identity.
 - `src/xml_to_usda/qt_ui/boolean_prototype.py` - standalone `boolean-prototype` stage viewer and `boolean-multi-prototype` whole-tree piece viewer.
 - `src/xml_to_usda/fracture_worker_subprocess.py` - crash-isolated Fracture Preview and export worker protocol. Detailed Cuts run in one fresh worker per request so native Boolean state cannot outlive a result.
@@ -101,8 +101,10 @@ buffers rather than logical instance-expanded geometry.
 The Wind Preview right panel is the compact-control reference for every
 viewport dialog. Proxy Mesh, Fracture, and Prototype Preview reuse its shared
 dropdown/popup styling, wide adjustable panel geometry, and vertically
-scrollable settings structure. Fracture retains its parameter-wheel filter so
-wheel input scrolls settings rather than changing an unfocused value.
+scrollable settings structure. Fracture groups controls into collapsible
+Preview Geometry, Automatic Cuts, Cut Surface, Viewport, Collision, and Manual
+Cuts sections. It retains its parameter-wheel filter so wheel input scrolls
+settings rather than changing an unfocused value.
 The Wind, Geometry, and Materials tabs on the main shell reuse the same
 compact controls inside their existing rounded cards. UDIM tile IDs are styled
 as explicit editable fields rather than passive numeric labels.
