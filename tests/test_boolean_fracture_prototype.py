@@ -21,7 +21,7 @@ from xml_to_usda.boolean_fracture_prototype import (
 )
 from xml_to_usda.canonical_loader import load_source_tree_model
 from xml_to_usda.fracture_service import FractureSettings, plan_fracture
-from xml_to_usda.models import Joint, Matrix4d, Vector3
+from xml_to_usda.models import InstanceBinding, Joint, Matrix4d, Quaternion, RepeatedPartInstance, Vector3
 
 
 def _build(*, intensity: float = 0.35, chip_scale: float = 0.65, density: int = 12):
@@ -89,6 +89,71 @@ def test_zero_intensity_is_flat_and_noise_is_one_sided_toward_child() -> None:
     noisy_heights = [point.y for point in _referenced_points(noisy.cutter_surface)]
     assert min(noisy_heights) >= 0.0
     assert max(noisy_heights) > 0.0
+
+
+def test_detailed_cut_reassigns_only_its_child_subtree_instances_from_built_cutter_surface(monkeypatch) -> None:
+    model = build_synthetic_boolean_cylinder_model()
+    root, child = model.skeleton
+    sibling = Joint(
+        name="sibling",
+        source_id=2,
+        parent=root.name,
+        bind_transform=Matrix4d.from_translation(Vector3(2.0, 0.0, 0.0)),
+        rest_transform=Matrix4d.from_translation(Vector3(2.0, 0.0, 0.0)),
+        bind_end_transform=Matrix4d.from_translation(Vector3(2.0, 4.0, 0.0)),
+    )
+
+    def part(name: str, joint_token: str, y: float, *, x: float = 0.0) -> RepeatedPartInstance:
+        return RepeatedPartInstance(
+            name=name,
+            prototype_key="prototype",
+            position=Vector3(x, y, 0.0),
+            orientation=Quaternion(1.0, 0.0, 0.0, 0.0),
+            scale=Vector3(1.0, 1.0, 1.0),
+            binding=InstanceBinding(joint_tokens=(joint_token,), weights=(1.0,)),
+            source_object_id=None,
+            source_mesh_id=1,
+        )
+
+    model = replace(
+        model,
+        skeleton=(root, child, sibling),
+        assembly_parts=(
+            part("child_before_noise_surface", child.name, 0.04),
+            part("child_after_noise_surface", child.name, 1.0),
+            part("unrelated_sibling", sibling.name, 0.04),
+            part("child_outside_cutter_projection", child.name, 0.04, x=10.0),
+        ),
+    )
+    settings = BooleanMultiPrototypeSettings(
+        auto_branch_count=0,
+        intensity=0.8,
+        chip_scale=0.65,
+        remesh_density=8,
+        pinned_cut_joint_tokens=(SYNTHETIC_CYLINDER_CUT_TOKEN,),
+    )
+    build_calls = 0
+    original_build_cutter = prototype_module._build_cutter
+
+    def counted_build_cutter(*args, **kwargs):
+        nonlocal build_calls
+        build_calls += 1
+        return original_build_cutter(*args, **kwargs)
+
+    monkeypatch.setattr(prototype_module, "_build_cutter", counted_build_cutter)
+
+    session = prepare_boolean_multi_prototype(model, settings)
+    result = session.build(settings)
+
+    assert build_calls == 1
+    assert result.plan.pieces[0].repeated_part_indices == (0, 2)
+    assert result.plan.pieces[1].repeated_part_indices == (1, 3)
+
+    flat_result = session.build(replace(settings, intensity=0.0))
+
+    assert build_calls == 2
+    assert flat_result.plan.pieces[0].repeated_part_indices == (2,)
+    assert flat_result.plan.pieces[1].repeated_part_indices == (0, 1, 3)
 
 
 def test_density_only_changes_tessellation_and_chip_scale_changes_shape() -> None:

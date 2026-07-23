@@ -182,8 +182,8 @@ def _tree() -> TreeAsset:
         base_mesh=_base_mesh_for_joint_faces((0, 1, 2, 3, 4), face_ys=(0.0, 1.0, 2.0, 1.1, 1.5)),
         skeleton=skeleton,
         assembly_parts=(
-            _repeated_part("TopLeaves", "bone_002"),
-            _repeated_part("BranchLeaves", "bone_004"),
+            replace(_repeated_part("TopLeaves", "bone_002"), position=Vector3(0.0, 2.0, 0.0)),
+            replace(_repeated_part("BranchLeaves", "bone_004"), position=Vector3(0.0, 1.8, 0.0)),
         ),
     )
 
@@ -243,7 +243,25 @@ def test_auto_branch_cut_offset_changes_flat_piece_ownership() -> None:
     assert tuple(piece.base_face_indices for piece in near_end.pieces) == ((0, 1, 2), (3,))
 
 
-def test_manual_fracturing_auto_fill_keeps_root_first_and_assigns_repeated_parts_by_skeleton_owner() -> None:
+def test_flat_cut_assigns_only_bound_child_instances_by_cut_plane() -> None:
+    tree = replace(
+        _automatic_branch_segment_tree(),
+        assembly_parts=(
+            replace(_repeated_part("BeforeCut", "branch"), position=Vector3(0.0, 2.0, 0.0)),
+            replace(_repeated_part("AfterCut", "branch"), position=Vector3(0.0, 5.0, 0.0)),
+            replace(_repeated_part("Unrelated", "trunk"), position=Vector3(0.0, 8.0, 0.0)),
+        ),
+    )
+
+    plan = plan_fracture(tree, FractureSettings(target_piece_count=1, auto_branch_cut_offset=0.30))
+
+    assert tuple(piece.repeated_part_names for piece in plan.pieces) == (
+        ("BeforeCut", "Unrelated"),
+        ("AfterCut",),
+    )
+
+
+def test_manual_fracturing_auto_fill_keeps_root_first_and_assigns_repeated_parts_by_cut_owner() -> None:
     plan = plan_fracture(
         _tree(),
         FractureSettings(

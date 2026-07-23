@@ -22,6 +22,8 @@ from .fracture_service import (
     FractureError,
     FractureSettings,
     _build_fracture_plan_cache,
+    _is_ancestor_or_self,
+    _repeated_part_joint_token,
     plan_fracture,
     source_bone_segment_positions,
 )
@@ -327,6 +329,19 @@ class _BuiltCutter:
     safe_limit: float
     noise_limit: _NoiseLimit
     seconds: float
+
+
+@dataclass(frozen=True, slots=True)
+class _ProjectedCutterSurface:
+    origin: np.ndarray
+    normal: np.ndarray
+    tangent: np.ndarray
+    bitangent: np.ndarray
+    triangle_uv: np.ndarray
+    triangle_heights: np.ndarray
+    denominators: np.ndarray
+    min_height: float
+    max_height: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -697,6 +712,15 @@ class BooleanMultiPrototypeSession:
         resolved_cut_results = tuple(result for result in cut_results if result is not None)
         if len(resolved_cut_results) != len(self._cut_sessions):
             raise FractureError("Boolean multi prototype did not build every selected cut.")
+        resolved_plan = _resolve_repeated_part_ownership(
+            self._source_context.model,
+            self.plan,
+            self._source_context.analysis_cache.graph,
+            self._cut_sites,
+            self._cut_sessions,
+            resolved_cut_results,
+            self._parent_piece_indices,
+        )
         pieces = tuple(
             BooleanMultiPrototypePiece(
                 index=piece.index,
@@ -705,11 +729,11 @@ class BooleanMultiPrototypeSession:
                 meshes=tuple(meshes_by_piece[piece.index]),
                 color=_PIECE_COLORS[piece.index % len(_PIECE_COLORS)],
             )
-            for piece in self.plan.pieces
+            for piece in resolved_plan.pieces
         )
         timings.append(("assemble_pieces", time.perf_counter() - started))
         result = BooleanMultiPrototypeResult(
-            plan=self.plan,
+            plan=resolved_plan,
             pieces=pieces,
             cut_sites=self._cut_sites,
             cuts=resolved_cut_results,
@@ -718,6 +742,178 @@ class BooleanMultiPrototypeSession:
         self._last_settings = settings
         self._last_result = result
         return result
+
+
+def _resolve_repeated_part_ownership(
+    model: CanonicalTreeModel,
+    plan: FracturePlan,
+    graph,
+    cut_sites: tuple[FractureCutSite, ...],
+    cut_sessions: tuple[BooleanCutPrototypeSession, ...],
+    cut_results: tuple[BooleanCutPrototypeResult, ...],
+    parent_piece_indices: tuple[int, ...],
+) -> FracturePlan:
+    if not model.repeated_parts or not cut_sites:
+        return plan
+
+    owner_by_part: dict[int, int] = {}
+    for piece in plan.pieces:
+        for part_index in piece.repeated_part_indices:
+            if part_index in owner_by_part:
+                raise FractureError(f"Repeated Part {part_index} belongs to more than one Fracture Piece.")
+            owner_by_part[part_index] = piece.index
+    if len(owner_by_part) != len(model.repeated_parts):
+        raise FractureError("Detailed fracture plan does not assign every Repeated Part to one Fracture Piece.")
+
+    child_piece_by_cut = {
+        piece.cut_joint_token: piece.index
+        for piece in plan.pieces
+        if piece.cut_joint_token is not None
+    }
+    child_piece_indices = tuple(child_piece_by_cut[cut_site.joint_token] for cut_site in cut_sites)
+    parent_by_piece = {
+        child_piece_index: parent_piece_index
+        for child_piece_index, parent_piece_index in zip(child_piece_indices, parent_piece_indices)
+    }
+    parts_by_piece = {
+        piece.index: set(piece.repeated_part_indices)
+        for piece in plan.pieces
+    }
+    descendant_pieces_by_cut = tuple(
+        tuple(
+            piece.index
+            for piece in plan.pieces
+            if _piece_descends_from(piece.index, child_piece_index, parent_by_piece)
+        )
+        for child_piece_index in child_piece_indices
+    )
+    joint_by_part = tuple(_repeated_part_joint_token(part, graph) for part in model.repeated_parts)
+    cut_order = sorted(
+        range(len(cut_sites)),
+        key=lambda index: graph.depth_by_name[cut_sites[index].child_joint_token or cut_sites[index].joint_token],
+        reverse=True,
+    )
+
+    for cut_index in cut_order:
+        cut_site = cut_sites[cut_index]
+        child_joint = cut_site.child_joint_token or cut_site.joint_token
+        parent_piece = parent_piece_indices[cut_index]
+        related_parts = tuple(
+            part_index
+            for part_index in sorted(
+                part_index
+                for piece_index in descendant_pieces_by_cut[cut_index]
+                for part_index in parts_by_piece[piece_index]
+            )
+            if _is_ancestor_or_self(graph, child_joint, joint_by_part[part_index])
+        )
+        if not related_parts:
+            continue
+        projection = _project_cutter_surface(
+            cut_results[cut_index].cutter_surface,
+            cut_sessions[cut_index]._prepared.frame,
+        )
+        for part_index in related_parts:
+            child_side = _point_is_on_cutter_child_side(model.repeated_parts[part_index].position, projection)
+            if child_side is False:
+                current_piece = owner_by_part[part_index]
+                parts_by_piece[current_piece].remove(part_index)
+                parts_by_piece[parent_piece].add(part_index)
+                owner_by_part[part_index] = parent_piece
+
+    indices_by_piece = {piece.index: [] for piece in plan.pieces}
+    for part_index in range(len(model.repeated_parts)):
+        indices_by_piece[owner_by_part[part_index]].append(part_index)
+    return replace(
+        plan,
+        pieces=tuple(
+            replace(
+                piece,
+                repeated_part_indices=tuple(indices_by_piece[piece.index]),
+                repeated_part_names=tuple(model.repeated_parts[index].name for index in indices_by_piece[piece.index]),
+            )
+            for piece in plan.pieces
+        ),
+    )
+
+
+def _piece_descends_from(piece_index: int, ancestor_piece_index: int, parent_by_piece: dict[int, int]) -> bool:
+    current: int | None = piece_index
+    while current is not None:
+        if current == ancestor_piece_index:
+            return True
+        current = parent_by_piece.get(current)
+    return False
+
+
+def _project_cutter_surface(mesh: MeshData, frame: _CutFrame) -> _ProjectedCutterSurface:
+    if not mesh.points or not mesh.face_vertex_counts:
+        raise FractureError("Detailed fracture cutter surface is empty.")
+    if any(vertex_count != 3 for vertex_count in mesh.face_vertex_counts):
+        raise FractureError("Detailed fracture cutter surface must remain triangular.")
+    vertices = np.asarray(tuple((point.x, point.y, point.z) for point in mesh.points), dtype=np.float64)
+    triangles = np.asarray(mesh.face_vertex_indices, dtype=np.int64).reshape((-1, 3))
+    local = vertices - frame.origin
+    uv = np.column_stack((local @ frame.tangent, local @ frame.bitangent))
+    heights = local @ frame.normal
+    triangle_uv = uv[triangles]
+    triangle_heights = heights[triangles]
+    a = triangle_uv[:, 0]
+    b = triangle_uv[:, 1]
+    c = triangle_uv[:, 2]
+    denominators = (b[:, 1] - c[:, 1]) * (a[:, 0] - c[:, 0]) + (c[:, 0] - b[:, 0]) * (
+        a[:, 1] - c[:, 1]
+    )
+    if np.any(np.abs(denominators) <= _EPSILON):
+        raise FractureError("Detailed fracture cutter surface contains a degenerate projected triangle.")
+    return _ProjectedCutterSurface(
+        origin=frame.origin,
+        normal=frame.normal,
+        tangent=frame.tangent,
+        bitangent=frame.bitangent,
+        triangle_uv=triangle_uv,
+        triangle_heights=triangle_heights,
+        denominators=denominators,
+        min_height=float(np.min(heights)),
+        max_height=float(np.max(heights)),
+    )
+
+
+def _point_is_on_cutter_child_side(
+    position: Vector3,
+    surface: _ProjectedCutterSurface,
+) -> bool | None:
+    offset = _vector(position) - surface.origin
+    axial = float(offset @ surface.normal)
+    if axial <= surface.min_height + _EPSILON:
+        return False
+    if axial > surface.max_height + _EPSILON:
+        return True
+
+    u = float(offset @ surface.tangent)
+    v = float(offset @ surface.bitangent)
+    a = surface.triangle_uv[:, 0]
+    b = surface.triangle_uv[:, 1]
+    c = surface.triangle_uv[:, 2]
+    w0 = (
+        (b[:, 1] - c[:, 1]) * (u - c[:, 0])
+        + (c[:, 0] - b[:, 0]) * (v - c[:, 1])
+    ) / surface.denominators
+    w1 = (
+        (c[:, 1] - a[:, 1]) * (u - c[:, 0])
+        + (a[:, 0] - c[:, 0]) * (v - c[:, 1])
+    ) / surface.denominators
+    w2 = 1.0 - w0 - w1
+    inside = np.flatnonzero((w0 >= -_EPSILON) & (w1 >= -_EPSILON) & (w2 >= -_EPSILON))
+    if not len(inside):
+        return None
+    triangle_index = int(inside[0])
+    height = float(
+        w0[triangle_index] * surface.triangle_heights[triangle_index, 0]
+        + w1[triangle_index] * surface.triangle_heights[triangle_index, 1]
+        + w2[triangle_index] * surface.triangle_heights[triangle_index, 2]
+    )
+    return axial > height + _EPSILON
 
 
 def prepare_boolean_multi_prototype(

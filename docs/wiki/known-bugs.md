@@ -8,6 +8,10 @@ The former Big Spruce cache regression triggered `0xC0000005` in Python while
 the generic worker-payload encoder serialized the model. The normal cache
 contract now uses Simple Tree, so the default suite remains stable; this does
 not prove generic full-model caching is safe at Big Spruce scale.
+During 2026-07-24 profiling, one default-cache Big Spruce load reconstructed a
+`Vector3` where the planner expected its face-owner tuple; a clean XML load
+with source caching disabled passed immediately. This strengthens the cache
+boundary concern but does not identify a new fracture-ownership cause.
 
 Keep Big Spruce validation in an explicit stress/packaged run. The likely next
 step is to replace generic full-model JSON caching only if it is required by a
@@ -33,6 +37,25 @@ Related files:
 - `src/xml_to_usda/boolean_fracture_prototype.py`
 - `src/xml_to_usda/fracture_preview_service.py`
 - `src/xml_to_usda/fracture_export_service.py`
+
+## Limitation: Detailed Repeated Part pivots outside a cutter projection keep skeleton ownership
+
+Status: Deliberate fallback
+
+Detailed ownership evaluates only Repeated Parts in the current cut's child
+subtree. If an eligible instance pivot projects inside the built cutter
+triangles, the exact barycentric surface height decides parent versus child.
+Some foliage pivots lie outside the finite Base Mesh cutter projection; no
+geometric side exists there, so they retain skeleton ownership.
+
+Do not extend ownership from the nearest cutter edge or a global noise field:
+the Big Spruce reproduction moved 230 parts instead of the 88 supported by the
+actual cutter triangles. If an outside-projection visual defect remains, the
+next step is an explicit source attachment-point contract.
+
+Related files:
+- `src/xml_to_usda/boolean_fracture_prototype.py`
+- `tests/test_boolean_fracture_prototype.py`
 
 This page stores current bugs, limitations, and validation gaps. It should stay focused on dangerous or still-open issues.
 

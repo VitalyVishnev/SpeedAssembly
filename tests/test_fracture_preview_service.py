@@ -97,11 +97,17 @@ def _strip_mesh(
     )
 
 
-def _repeated_part(name: str, joint_token: str, *, prototype_key: str = "Mesh_1") -> RepeatedPartInstance:
+def _repeated_part(
+    name: str,
+    joint_token: str,
+    *,
+    position_y: float,
+    prototype_key: str = "Mesh_1",
+) -> RepeatedPartInstance:
     return RepeatedPartInstance(
         name=name,
         prototype_key=prototype_key,
-        position=Vector3(0.0, 0.0, 0.0),
+        position=Vector3(0.0, position_y, 0.0),
         orientation=Quaternion(1.0, 0.0, 0.0, 0.0),
         scale=Vector3(1.0, 1.0, 1.0),
         binding=InstanceBinding(joint_tokens=(joint_token,), weights=(1.0,)),
@@ -137,7 +143,10 @@ def _tree_with_repeated_branch_count(count: int) -> TreeAsset:
             _joint("bone_003", 3, "bone_001", 1.4, 1),
             _joint("bone_004", 4, "bone_003", 1.8, 2),
         ),
-        assembly_parts=tuple(_repeated_part(f"Branch_{index:03d}", "bone_004") for index in range(count)),
+        assembly_parts=tuple(
+            _repeated_part(f"Branch_{index:03d}", "bone_004", position_y=1.8)
+            for index in range(count)
+        ),
         prototypes=(_prototype("Mesh_1", "BranchCluster", 120),),
     )
 
@@ -160,8 +169,8 @@ def _tree() -> TreeAsset:
             _joint("bone_004", 4, "bone_003", 1.8, 2),
         ),
         assembly_parts=(
-            _repeated_part("TopLeaves", "bone_002"),
-            _repeated_part("BranchLeaves", "bone_004"),
+            _repeated_part("TopLeaves", "bone_002", position_y=2.0),
+            _repeated_part("BranchLeaves", "bone_004", position_y=1.8),
         ),
         prototypes=(_prototype("Mesh_1", "LeafCluster", 3),),
     )
@@ -185,8 +194,8 @@ def _tree_with_mixed_repeated_prototypes() -> TreeAsset:
             _joint("bone_004", 4, "bone_003", 1.8, 2),
         ),
         assembly_parts=(
-            _repeated_part("SmallBranch", "bone_002", prototype_key="Mesh_small"),
-            _repeated_part("LargeBranch", "bone_004", prototype_key="Mesh_large"),
+            _repeated_part("SmallBranch", "bone_002", position_y=2.0, prototype_key="Mesh_small"),
+            _repeated_part("LargeBranch", "bone_004", position_y=1.8, prototype_key="Mesh_large"),
         ),
         prototypes=(
             _prototype("Mesh_small", "SmallBranchCluster", 100),
@@ -476,10 +485,15 @@ def test_fracture_preview_repeated_instance_count_reduces_per_prototype_budget()
     heavy_instance_tree = replace(
         tree,
         assembly_parts=(
-            _repeated_part("SmallBranch", "bone_002", prototype_key="Mesh_small"),
+            _repeated_part("SmallBranch", "bone_002", position_y=2.0, prototype_key="Mesh_small"),
         )
         + tuple(
-            _repeated_part(f"LargeBranch_{index:02d}", "bone_004", prototype_key="Mesh_large")
+            _repeated_part(
+                f"LargeBranch_{index:02d}",
+                "bone_004",
+                position_y=1.8,
+                prototype_key="Mesh_large",
+            )
             for index in range(10)
         ),
     )

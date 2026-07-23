@@ -942,6 +942,17 @@ def _build_pieces(
     for part_index, part in enumerate(model.repeated_parts):
         joint_token = _repeated_part_joint_token(part, graph)
         owner = owner_by_joint[joint_token]
+        while owner is not None:
+            parent_side_owner = _segment_parent_side_owner(
+                part.position,
+                owner,
+                segment_cut_by_token,
+                segment_projection_by_token,
+                owner_by_joint,
+            )
+            if parent_side_owner == owner:
+                break
+            owner = parent_side_owner
         repeated_indices_by_owner[owner].append(part_index)
         repeated_names_by_owner[owner].append(part.name)
 
@@ -974,7 +985,7 @@ def _build_pieces(
 
 
 def _segment_parent_side_owner(
-    face_centroid: Vector3,
+    position: Vector3,
     current_owner: str | None,
     segment_cut_by_token: dict[str, FractureCutSite],
     segment_projection_by_token: dict[str, tuple[float, float, float, float, float, float, float]],
@@ -988,7 +999,7 @@ def _segment_parent_side_owner(
     segment_t = cut_site.segment_t
     if parent is None or child is None or segment_t is None:
         return current_owner
-    projected_t = _project_point_with_data(face_centroid, segment_projection_by_token[cut_site.joint_token])
+    projected_t = _project_point_with_data(position, segment_projection_by_token[cut_site.joint_token])
     if projected_t < segment_t:
         return owner_by_joint[parent]
     return current_owner

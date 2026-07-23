@@ -184,6 +184,13 @@ Evidence labels:
   the failing boundary, and the operator reported regular instability in other
   computer workloads. This remains system-context evidence, not an
   application-local root cause; no speculative code change was made.
+- 2026-07-24 observation: one combined pytest process completed the Boolean
+  tests, then raised `0xC0000005` in `normalizer._read_float_list` while loading
+  XML for a later Fracture Preview test. The exact test passed in a fresh
+  process, followed by 56 non-Boolean and 19 Boolean fracture tests. This is
+  consistent with the existing native/system instability signatures but does
+  not identify whether retained native state or the unstable host caused it;
+  no ownership-code workaround was added.
 
 ## System rules derived from the incidents
 

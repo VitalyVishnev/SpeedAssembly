@@ -65,6 +65,20 @@ Production Boolean geometry preserves source-side normals and uses an unconditio
 
 Fracture Piece ownership resolves the deepest selected cut by one parent-chain walk per skeleton joint. Do not restore the previous selected-cuts × joints × ancestry scan; the same shared planner serves Preview, Export, and Boolean preparation.
 
+Repeated Part ownership starts from skeleton binding, then applies only the
+selected segment cuts on that binding's ancestor chain. Flat cuts classify the
+instance pivot with the existing physical-bone projection and `segment_t`
+plane already used for Base Mesh ownership; unrelated sibling cuts are never
+evaluated. A pivot behind several nested cuts may climb through those parent
+pieces in order.
+
+Detailed ownership continues from that flat result only after the corresponding
+Boolean cutter exists. The instance pivot is classified against the
+already-built triangular cutter surface by barycentric height; no second cutter
+or noise field may be generated. Nested cuts resolve deepest-first. If the
+pivot projection does not intersect that specific cutter surface, retain the
+flat ownership instead of borrowing a nearby edge or another branch's surface.
+
 An automatic branch cut may claim a face dominated by its immediate parent
 only when at least one positive skin influence belongs to that cut's child
 subtree. Centroid projection still decides which side of the cut contains that

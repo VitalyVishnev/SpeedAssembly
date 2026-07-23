@@ -99,11 +99,11 @@ def _strip_mesh(
     )
 
 
-def _repeated_part(name: str, joint_token: str) -> RepeatedPartInstance:
+def _repeated_part(name: str, joint_token: str, *, position_y: float) -> RepeatedPartInstance:
     return RepeatedPartInstance(
         name=name,
         prototype_key="Mesh_1",
-        position=Vector3(0.0, 0.0, 0.0),
+        position=Vector3(0.0, position_y, 0.0),
         orientation=Quaternion(1.0, 0.0, 0.0, 0.0),
         scale=Vector3(1.0, 1.0, 1.0),
         binding=InstanceBinding(joint_tokens=(joint_token,), weights=(1.0,)),
@@ -135,8 +135,8 @@ def _resolved_tree() -> ResolvedAssemblyModel:
             _joint("bone_004", 4, "bone_003", 1.8, 2),
         ),
         assembly_parts=(
-            _repeated_part("TopLeaves", "bone_002"),
-            _repeated_part("BranchLeaves", "bone_004"),
+            _repeated_part("TopLeaves", "bone_002", position_y=2.0),
+            _repeated_part("BranchLeaves", "bone_004", position_y=1.8),
         ),
         prototypes=(
             Prototype(

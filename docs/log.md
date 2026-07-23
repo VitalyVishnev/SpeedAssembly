@@ -536,3 +536,24 @@ Major moves:
 - Scaled the Fracture Preview exploded-view vertical offset by the fixed
   multiplier `0.2`, keeping pieces visually separated mostly sideways without
   adding another UI setting.
+
+## 2026-07-24 - Cutter-aware Repeated Part ownership
+
+- Detailed Cuts now reassign an atomic Repeated Part to the parent piece when
+  its pivot lies behind the already-built triangular Boolean cutter surface.
+- Candidate work is isolated by skeleton child subtree and Fracture Piece
+  ancestry; nested cuts resolve deepest-first and sibling bindings are never
+  spatially tested.
+- Reused the existing cutter mesh without rebuilding noise or Boolean state.
+  Pivots outside that cutter's projection keep skeleton ownership.
+- The exact 36-branch Big Spruce case moved 88 of 3,613 parts, preserved every
+  instance exactly once, and retained 38 pieces / 37 cuts.
+
+## 2026-07-24 - Flat-cut Repeated Part ownership
+
+- Flat segment cuts now classify only skeleton-related Repeated Part pivots
+  against the existing physical-bone `segment_t` plane.
+- Nested ownership can climb through related parent cuts; unrelated sibling
+  cuts are not evaluated.
+- The 36-branch Big Spruce case moved 26 of 3,613 parts in flat mode, while
+  Detailed mode retained its expected total of 88 cutter-supported moves.

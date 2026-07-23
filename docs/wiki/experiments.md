@@ -6,7 +6,7 @@ Status: production integrated; broad real-tree and UE runtime validation remains
 
 The `boolean-prototype` command isolates one whole connected branch before any face-ownership split, closes its oriented boundary loops, and splits it with a closed triangular-lattice cutter displaced by one-sided deterministic fractal noise. `manifold3d` provenance removes temporary source closures while retaining cutter-derived caps. Requested amplitude is uniformly limited before the next physical terminal, branch, or bend above `Max Bend Angle`. Exact source-triangle provenance transfers UV0/UV1, colors, material sections, and skinning; caps receive planar UVs and nearest boundary-ring attributes. Its viewer can regenerate the same source in place with editable cut/noise controls while the deterministic seed remains fixed. The synthetic open-cylinder case, Simple Tree `bone_086`, and Big Spruce `bone_508` pass locally.
 
-The `boolean-multi-prototype` command prepares source analysis/triangulation/connectivity once and assembles untouched faces, parent stubs, and detached branches by Fracture Plan ownership. Independent components build separately. Same-shell cuts split their current parent region sequentially with distinct cap provenance; this covers the real SimpleTree stump-plus-branch case without overlapping geometry. Structural `auto_stem_length` pieces reuse already disconnected source shells. Collision, Repeated Parts, export, and any external process pool remain separate work.
+The `boolean-multi-prototype` command prepares source analysis/triangulation/connectivity once and assembles untouched faces, parent stubs, and detached branches by Fracture Plan ownership. Independent components build separately. Same-shell cuts split their current parent region sequentially with distinct cap provenance; this covers the real SimpleTree stump-plus-branch case without overlapping geometry. Structural `auto_stem_length` pieces reuse already disconnected source shells. Collision and export remain downstream consumers; any external process pool remains separate work.
 
 Big Spruce `bone_033` exposed a disconnected descendant twig crossing the same
 plane with three transition faces owned by the cut bone. The production selector
@@ -42,6 +42,16 @@ exact reported Big Spruce settings retained 38 pieces and all 36 requested
 automatic branches while reducing foreign parent-face assignments from 422 to
 zero. A full Detailed Boolean build at Intensity 33.9, Cut Scale 0.64, and Cut
 Detail 8 completed with 38 non-empty pieces and 37 cuts including the stump.
+
+Detailed Repeated Part ownership was compared on the same 36-branch Big Spruce
+case. The existing flat physical-bone planes moved 26 child-owned instances;
+this is now the shared planner baseline. A maximum-amplitude plane moved 200,
+while the existing triangular cutter surfaces supported 88 total parent-side
+moves while preserving all 3,613 instances exactly once. Reusing the actual
+cutter surface added about 0.155 s under `cProfile`; point-side work itself was
+about 0.014 s. Extending a cutter from its nearest projected edge was rejected
+because it moved 230 parts, including descendant pivots for which that spatial
+calculation was not justified.
 
 This page stores rejected, superseded, or otherwise non-current approaches that still matter because they explain why the present contract exists.
 
