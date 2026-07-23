@@ -469,6 +469,68 @@ def test_manual_segment_face_ownership_uses_physical_child_bone() -> None:
     assert tuple(piece.base_face_indices for piece in plan.pieces) == ((0, 1, 4), (2, 3))
 
 
+def test_auto_branch_cut_only_claims_parent_faces_influenced_by_its_child_subtree() -> None:
+    root = _joint("root", 0, None, 0.0, 0)
+    branch = Joint(
+        name="branch",
+        source_id=1,
+        parent="root",
+        generator_level=1,
+        bind_transform=Matrix4d.from_translation(Vector3(0.0, 1.0, 0.0)),
+        rest_transform=Matrix4d.from_translation(Vector3(0.0, 10.0, 0.0)),
+        bind_end_transform=Matrix4d.from_translation(Vector3(0.0, 10.0, 0.0)),
+    )
+    sibling = Joint(
+        name="sibling",
+        source_id=2,
+        parent="root",
+        generator_level=1,
+        bind_transform=Matrix4d.from_translation(Vector3(4.0, 1.0, 0.0)),
+        rest_transform=Matrix4d.from_translation(Vector3(4.0, 8.0, 0.0)),
+        bind_end_transform=Matrix4d.from_translation(Vector3(4.0, 8.0, 0.0)),
+    )
+    mesh = _vertical_strip_mesh((1.0, 7.0, 8.0, 7.0, 8.0), joint_index=0)
+    face_influences = (
+        ((0, 0), (1.0, 0.0)),
+        ((0, 1), (0.6, 0.4)),
+        ((1, 1), (1.0, 0.0)),
+        ((0, 2), (0.6, 0.4)),
+        ((2, 2), (1.0, 0.0)),
+    )
+    mesh = replace(
+        mesh,
+        skel_joint_indices=tuple(
+            joint
+            for (joints, _weights) in face_influences
+            for _point in range(3)
+            for joint in joints
+        ),
+        skel_joint_weights=tuple(
+            weight
+            for (_joints, weights) in face_influences
+            for _point in range(3)
+            for weight in weights
+        ),
+        skel_element_size=2,
+    )
+    tree = TreeAsset(
+        metadata=ExportMetadata(source_path="sibling-collars.xml", source_version=None),
+        materials=(),
+        source_objects=(),
+        base_mesh=mesh,
+        skeleton=(root, branch, sibling),
+        assembly_parts=(),
+    )
+
+    plan = plan_fracture(
+        tree,
+        FractureSettings(target_piece_count=1, auto_branch_cut_offset=0.5),
+    )
+
+    assert tuple(cut.child_joint_token for cut in plan.selected_cut_sites) == ("sibling",)
+    assert tuple(piece.base_face_indices for piece in plan.pieces) == ((0, 1, 2), (3, 4))
+
+
 def test_manual_segment_cuts_on_same_edge_must_not_be_too_close() -> None:
     with pytest.raises(FractureError, match="same skeleton edge must be at least 0.02 apart"):
         plan_fracture(

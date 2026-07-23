@@ -65,6 +65,14 @@ Production Boolean geometry preserves source-side normals and uses an unconditio
 
 Fracture Piece ownership resolves the deepest selected cut by one parent-chain walk per skeleton joint. Do not restore the previous selected-cuts × joints × ancestry scan; the same shared planner serves Preview, Export, and Boolean preparation.
 
+An automatic branch cut may claim a face dominated by its immediate parent
+only when at least one positive skin influence belongs to that cut's child
+subtree. Centroid projection still decides which side of the cut contains that
+eligible transition face. Parent-only faces and collars influenced by a sibling
+stay with the parent regardless of their projection along the selected branch.
+The planner derives this eligibility once per source face and shares it between
+flat and Detailed paths.
+
 Why: preview and export need one deterministic topology, attribute, collision, and Repeated Part ownership contract; the diagnostic viewer should expose that implementation rather than define a second one.
 
 ## Decision: Manual cut `t` is measured on the physical child bone
@@ -429,7 +437,7 @@ Reasoning:
 Length-first branch detachment better matches the perceived weak points of vehicle impact and nearby blast workflows while preserving manual control for exceptional cuts.
 
 Consequences:
-`preserve_trunk_bias` remains settings-compatible but is no longer an operator-facing V1 control. Preview skeleton segments must use the same realtime exploded offset as their owning pieces.
+`preserve_trunk_bias` remains settings-compatible but is no longer an operator-facing V1 control. Preview skeleton segments must use the same realtime exploded offset as their owning pieces. Fracture Preview scales the vertical component of that offset by the fixed factor `0.2`; this is viewport behavior, not an operator setting.
 
 Related files:
 - `src/xml_to_usda/fracture_service.py`

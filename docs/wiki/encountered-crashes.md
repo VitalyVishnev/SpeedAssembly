@@ -178,6 +178,12 @@ Evidence labels:
   exact executable path/build ID, worker stderr, and matching WER Event 1000/
   1001 before assigning a process boundary. Test the current packaged
   `SpeedAssembly.exe`, not a retained `XMLtoUSDAConverter.exe`.
+- 2026-07-24 observation: an interactive `python.exe` process displayed a
+  null-address write error after Fracture Preview had already logged a complete
+  38-piece viewport result. No dump, WER event, or surviving process identified
+  the failing boundary, and the operator reported regular instability in other
+  computer workloads. This remains system-context evidence, not an
+  application-local root cause; no speculative code change was made.
 
 ## System rules derived from the incidents
 

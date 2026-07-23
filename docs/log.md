@@ -503,3 +503,36 @@ Major moves:
 
 - Added persisted `Cut From Branch Start` (5–95%, default 30%) to Fracture Preview.
 - The shared fracture plan now applies this physical-bone offset to flat and Detailed Cuts, so both paths split at the same automatic cut site; Detailed noise only changes the surface shape around that site.
+
+## 2026-07-24 - Detailed fracture hot-path optimization
+
+- Reused per-plan face centroids, O(1) skeleton ancestry, per-bone segment-cut
+  filters, source seed bytes, and material lookup state; skipped unused
+  result-face normal calculations.
+- Local 11-cut Big Spruce preparation fell to a 1.49 s median and Detailed
+  regeneration to 0.835 s while the geometry signature remained unchanged.
+- Removed a measured Perlin-gradient cache because its small gain did not
+  justify the extra dictionary work.
+- Updated synthetic preview/export face placement to exercise the current
+  physical-bone automatic cut contract.
+
+## 2026-07-24 - Automatic branch ownership isolation
+
+- Fixed automatic segment cuts claiming parent-owned collars from sibling
+  branches when their centroids projected beyond the selected branch cut.
+- Parent-dominated transition faces now cross an automatic cut only when their
+  skin binding includes the selected child subtree; flat and Detailed paths use
+  the same cached decision.
+- Added a mixed-weight sibling-collar regression and audited 318 automatic cuts
+  across 12 real-sample/settings runs with no cross-subtree assignments.
+- The exact Big Spruce Detailed settings completed with 38 non-empty pieces,
+  36 automatic cuts, and one stump cut.
+- Recorded a standalone `python.exe` null-write dialog as unverified
+  system-context evidence because no dump/WER/process boundary was available
+  and the computer is independently unstable.
+
+## 2026-07-24 - Flatter Fracture exploded view
+
+- Scaled the Fracture Preview exploded-view vertical offset by the fixed
+  multiplier `0.2`, keeping pieces visually separated mostly sideways without
+  adding another UI setting.

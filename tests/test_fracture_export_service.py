@@ -64,7 +64,12 @@ def _joint(name: str, source_id: int, parent: str | None, y: float, group: int) 
     )
 
 
-def _strip_mesh(name: str, joint_indices: tuple[int, ...]) -> MeshData:
+def _strip_mesh(
+    name: str,
+    joint_indices: tuple[int, ...],
+    *,
+    face_ys: tuple[float, ...] | None = None,
+) -> MeshData:
     points: list[Vector3] = []
     face_vertex_counts: list[int] = []
     face_vertex_indices: list[int] = []
@@ -72,11 +77,12 @@ def _strip_mesh(name: str, joint_indices: tuple[int, ...]) -> MeshData:
     for face_index, joint_index in enumerate(joint_indices):
         first_point = len(points)
         x = float(face_index)
+        y = 0.0 if face_ys is None else face_ys[face_index]
         points.extend(
             (
-                Vector3(x, 0.0, 0.0),
-                Vector3(x + 0.4, 0.0, 0.0),
-                Vector3(x, 0.4, 0.0),
+                Vector3(x, y, 0.0),
+                Vector3(x + 0.4, y, 0.0),
+                Vector3(x, y + 0.4, 0.0),
             )
         )
         face_vertex_counts.append(3)
@@ -116,7 +122,11 @@ def _resolved_tree() -> ResolvedAssemblyModel:
         metadata=metadata,
         materials=(),
         source_objects=(),
-        base_mesh=_strip_mesh("Base", (0, 1, 2, 3, 4)),
+        base_mesh=_strip_mesh(
+            "Base",
+            (0, 1, 2, 3, 4),
+            face_ys=(0.0, 0.8, 2.0, 1.2, 1.6),
+        ),
         skeleton=(
             _joint("root", 0, None, 0.0, 0),
             _joint("bone_001", 1, "root", 1.0, 0),

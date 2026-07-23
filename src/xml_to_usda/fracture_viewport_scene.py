@@ -22,6 +22,7 @@ from .viewport_scene import (
 
 CUT_MARKER_COLOR = Color4(1.0, 0.92, 0.52, 1.0)
 COLLISION_COLOR = Color4(0.35, 0.86, 1.0, 0.25)
+EXPLODE_HEIGHT_MULTIPLIER = 0.2
 
 
 def build_fracture_viewport_scene(
@@ -257,7 +258,7 @@ def _average_vector(points: tuple[Vector3, ...]) -> Vector3:
 
 def _explode_direction(center: Vector3, global_center: Vector3) -> Vector3:
     x = center.x - global_center.x
-    y = max(0.0, center.y - global_center.y)
+    y = max(0.0, center.y - global_center.y) * EXPLODE_HEIGHT_MULTIPLIER
     z = center.z - global_center.z
     length = math.sqrt(x * x + y * y + z * z)
     if length <= 1e-8:

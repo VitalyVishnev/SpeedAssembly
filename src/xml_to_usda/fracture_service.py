@@ -94,12 +94,15 @@ class _SkeletonGraph:
     children_by_name: dict[str, tuple[str, ...]]
     roots: tuple[str, ...]
     depth_by_name: dict[str, int]
+    preorder_by_name: dict[str, int]
+    subtree_end_by_name: dict[str, int]
 
 
 @dataclass(frozen=True)
 class _FracturePlanCache:
     graph: _SkeletonGraph
     base_face_owner_by_index: tuple[str | None, ...]
+    base_face_auto_children_by_index: tuple[frozenset[str], ...]
     subtree_base_face_counts: dict[str, int]
     main_axis: tuple[str, ...]
     stem_axes: tuple[tuple[str, ...], ...]
@@ -132,7 +135,8 @@ def source_bone_segment_positions(joint: Joint, parent: Joint | None) -> tuple[V
 def base_face_owner_tokens(model: CanonicalTreeModel) -> tuple[str | None, ...]:
     """Return the planner's dominant skeleton owner for each Base Mesh face."""
     _validate_fracture_source(model)
-    return _base_face_owner_by_index(model, _build_skeleton_graph(model.skeleton))
+    owners, _auto_children = _base_face_bindings_by_index(model, _build_skeleton_graph(model.skeleton))
+    return owners
 
 
 def plan_fracture(
@@ -154,6 +158,7 @@ def plan_fracture(
 
     graph = analysis_cache.graph
     base_face_owner_by_index = analysis_cache.base_face_owner_by_index
+    base_face_auto_children_by_index = analysis_cache.base_face_auto_children_by_index
     subtree_base_face_counts = analysis_cache.subtree_base_face_counts
     main_axis = analysis_cache.main_axis
     stem_cut_sites, branch_cut_sites, candidate_diagnostics = _candidate_cut_sites(
@@ -180,12 +185,27 @@ def plan_fracture(
         if resolved_settings.force_stump_piece
         else ()
     )
+    face_centroids = (
+        _base_face_centroids(model)
+        if any(
+            cut_site.segment_t is not None
+            for cut_site in (
+                *selected,
+                *stump_cut_sites,
+                *stem_cut_sites,
+                *(branch_cut_sites if resolved_settings.target_piece_count else ()),
+            )
+        )
+        else ()
+    )
     pieces = _build_pieces(
         model,
         graph,
         base_face_owner_by_index,
+        base_face_auto_children_by_index,
         _ordered_cut_sites_for_settings(selected, graph),
         output_stem=resolved_settings.output_stem,
+        face_centroids=face_centroids,
     )
     _raise_for_empty_manual_cut_pieces(selected, pieces)
 
@@ -204,8 +224,10 @@ def plan_fracture(
                 model,
                 graph,
                 base_face_owner_by_index,
+                base_face_auto_children_by_index,
                 trial_selected,
                 output_stem=resolved_settings.output_stem,
+                face_centroids=face_centroids,
             )
             if len(trial_pieces) == len(selected) + 2 and all(piece.base_face_indices for piece in trial_pieces):
                 selected = trial_selected
@@ -227,8 +249,10 @@ def plan_fracture(
             model,
             graph,
             base_face_owner_by_index,
+            base_face_auto_children_by_index,
             trial_selected,
             output_stem=resolved_settings.output_stem,
+            face_centroids=face_centroids,
         )
         if (
             len(trial_pieces) == len(selected) + 2
@@ -256,8 +280,10 @@ def plan_fracture(
             model,
             graph,
             base_face_owner_by_index,
+            base_face_auto_children_by_index,
             trial_selected,
             output_stem=resolved_settings.output_stem,
+            face_centroids=face_centroids,
         )
         if (
             len(trial_pieces) == len(selected) + 2
@@ -324,13 +350,14 @@ def plan_fracture(
 
 def _build_fracture_plan_cache(model: CanonicalTreeModel) -> _FracturePlanCache:
     graph = _build_skeleton_graph(model.skeleton)
-    base_face_owner_by_index = _base_face_owner_by_index(model, graph)
+    base_face_owner_by_index, base_face_auto_children_by_index = _base_face_bindings_by_index(model, graph)
     subtree_base_face_counts = _subtree_base_face_counts(graph, base_face_owner_by_index)
     main_axis = _select_main_axis(graph)
     ys = tuple(joint.rest_translate.y for joint in graph.joints)
     return _FracturePlanCache(
         graph=graph,
         base_face_owner_by_index=base_face_owner_by_index,
+        base_face_auto_children_by_index=base_face_auto_children_by_index,
         subtree_base_face_counts=subtree_base_face_counts,
         main_axis=main_axis,
         stem_axes=_select_stem_axes(graph, subtree_base_face_counts),
@@ -559,13 +586,28 @@ def _build_skeleton_graph(skeleton: tuple[Joint, ...]) -> _SkeletonGraph:
     if not roots:
         raise FractureError("Skeleton hierarchy has no root joint.")
 
+    preorder_by_name: dict[str, int] = {}
+    subtree_end_by_name: dict[str, int] = {}
+
+    def index_subtree(name: str) -> None:
+        preorder_by_name[name] = len(preorder_by_name)
+        for child_name in children_by_name[name]:
+            index_subtree(child_name)
+        subtree_end_by_name[name] = len(preorder_by_name)
+
+    sorted_roots = tuple(sorted(roots))
+    for root in sorted_roots:
+        index_subtree(root)
+
     return _SkeletonGraph(
         joints=skeleton,
         joint_by_name=joint_by_name,
         index_by_name=index_by_name,
         children_by_name=children_by_name,
-        roots=tuple(sorted(roots)),
+        roots=sorted_roots,
         depth_by_name=depth_by_name,
+        preorder_by_name=preorder_by_name,
+        subtree_end_by_name=subtree_end_by_name,
     )
 
 
@@ -815,9 +857,11 @@ def _build_pieces(
     model: CanonicalTreeModel,
     graph: _SkeletonGraph,
     base_face_owner_by_index: tuple[str | None, ...],
+    base_face_auto_children_by_index: tuple[frozenset[str], ...],
     selected_cut_sites: list[FractureCutSite],
     *,
     output_stem: str,
+    face_centroids: tuple[Vector3 | None, ...],
 ) -> tuple[FracturePiece, ...]:
     selected_tokens = tuple(cut_site.joint_token for cut_site in selected_cut_sites)
     owner_by_joint = _selected_cut_owner_by_joint(graph, selected_cut_sites)
@@ -836,7 +880,22 @@ def _build_pieces(
         joint_tokens_by_owner[owner_by_joint[joint.name]].append(joint.name)
 
     segment_cut_sites = [cut_site for cut_site in selected_cut_sites if cut_site.segment_t is not None]
-    face_centroids = _base_face_centroids(model) if segment_cut_sites else ()
+    segment_cut_by_token = {cut_site.joint_token: cut_site for cut_site in segment_cut_sites}
+    segment_projection_by_token = {
+        cut_site.joint_token: _segment_projection_data(
+            *source_bone_segment_positions(
+                graph.joint_by_name[cut_site.child_joint_token],
+                graph.joint_by_name[cut_site.parent_joint_token],
+            )
+        )
+        for cut_site in segment_cut_sites
+        if cut_site.child_joint_token is not None and cut_site.parent_joint_token is not None
+    }
+    segment_cuts_by_face_binding: dict[tuple[str, frozenset[str]], tuple[FractureCutSite, ...]] = {}
+    owner_depth_by_token = {
+        owner: _owner_anchor_depth(graph, owner, selected_cut_sites)
+        for owner in (None, *selected_tokens)
+    }
     for face_index, joint_token in enumerate(base_face_owner_by_index):
         if joint_token is None:
             continue
@@ -847,18 +906,36 @@ def _build_pieces(
             if face_centroid is None:
                 continue
             owner = _segment_parent_side_owner(
-                graph,
                 face_centroid,
                 owner,
-                segment_cut_sites,
+                segment_cut_by_token,
+                segment_projection_by_token,
                 owner_by_joint,
             )
+            auto_children = base_face_auto_children_by_index[face_index]
+            binding_key = (joint_token, auto_children)
+            if binding_key not in segment_cuts_by_face_binding:
+                segment_cuts_by_face_binding[binding_key] = tuple(
+                    cut_site
+                    for cut_site in segment_cut_sites
+                    if cut_site.child_joint_token is not None
+                    and (
+                        _is_ancestor_or_self(graph, cut_site.child_joint_token, joint_token)
+                        or (
+                            cut_site.parent_joint_token == joint_token
+                            and (
+                                cut_site.reason != "auto_branch_length"
+                                or cut_site.child_joint_token in auto_children
+                            )
+                        )
+                    )
+                )
             segment_owner = _spatial_segment_cut_owner(
                 graph,
                 face_centroid,
-                joint_token,
-                owner,
-                segment_cut_sites,
+                owner_depth_by_token[owner],
+                segment_cuts_by_face_binding[binding_key],
+                segment_projection_by_token,
             )
         face_indices_by_owner[segment_owner or owner].append(face_index)
 
@@ -897,27 +974,23 @@ def _build_pieces(
 
 
 def _segment_parent_side_owner(
-    graph: _SkeletonGraph,
     face_centroid: Vector3,
     current_owner: str | None,
-    segment_cut_sites: list[FractureCutSite],
+    segment_cut_by_token: dict[str, FractureCutSite],
+    segment_projection_by_token: dict[str, tuple[float, float, float, float, float, float, float]],
     owner_by_joint: dict[str, str | None],
 ) -> str | None:
-    for cut_site in segment_cut_sites:
-        if current_owner != cut_site.joint_token:
-            continue
-        parent = cut_site.parent_joint_token
-        child = cut_site.child_joint_token
-        segment_t = cut_site.segment_t
-        if parent is None or child is None or segment_t is None:
-            continue
-        segment_start, segment_end = source_bone_segment_positions(
-            graph.joint_by_name[child],
-            graph.joint_by_name[parent],
-        )
-        projected_t = _project_point_to_segment_t(face_centroid, segment_start, segment_end)
-        if projected_t < segment_t:
-            return owner_by_joint[parent]
+    cut_site = segment_cut_by_token.get(current_owner or "")
+    if cut_site is None:
+        return current_owner
+    parent = cut_site.parent_joint_token
+    child = cut_site.child_joint_token
+    segment_t = cut_site.segment_t
+    if parent is None or child is None or segment_t is None:
+        return current_owner
+    projected_t = _project_point_with_data(face_centroid, segment_projection_by_token[cut_site.joint_token])
+    if projected_t < segment_t:
+        return owner_by_joint[parent]
     return current_owner
 
 
@@ -940,31 +1013,19 @@ def _selected_cut_owner_by_joint(
 
 def _spatial_segment_cut_owner(
     graph: _SkeletonGraph,
-    face_centroid,
-    face_owner_joint_token: str,
-    current_owner: str | None,
-    selected_cut_sites: list[FractureCutSite],
+    face_centroid: Vector3,
+    current_depth: int,
+    segment_cut_sites: tuple[FractureCutSite, ...],
+    segment_projection_by_token: dict[str, tuple[float, float, float, float, float, float, float]],
 ) -> str | None:
-    current_depth = _owner_anchor_depth(graph, current_owner, selected_cut_sites)
     best: tuple[int, str] | None = None
-    for cut_site in selected_cut_sites:
-        if cut_site.segment_t is None:
-            continue
+    for cut_site in segment_cut_sites:
         parent = cut_site.parent_joint_token
         child = cut_site.child_joint_token
         segment_t = cut_site.segment_t
         if parent is None or child is None or segment_t is None:
             continue
-        if not (
-            _is_ancestor_or_self(graph, child, face_owner_joint_token)
-            or face_owner_joint_token == parent
-        ):
-            continue
-        segment_start, segment_end = source_bone_segment_positions(
-            graph.joint_by_name[child],
-            graph.joint_by_name[parent],
-        )
-        projected_t = _project_point_to_segment_t(face_centroid, segment_start, segment_end)
+        projected_t = _project_point_with_data(face_centroid, segment_projection_by_token[cut_site.joint_token])
         if projected_t < segment_t:
             continue
         depth = graph.depth_by_name[child]
@@ -993,12 +1054,9 @@ def _owner_anchor_depth(
 
 
 def _is_ancestor_or_self(graph: _SkeletonGraph, ancestor: str, joint_token: str) -> bool:
-    current: str | None = joint_token
-    while current is not None:
-        if current == ancestor:
-            return True
-        current = graph.joint_by_name[current].parent
-    return False
+    ancestor_index = graph.preorder_by_name[ancestor]
+    joint_index = graph.preorder_by_name[joint_token]
+    return ancestor_index <= joint_index < graph.subtree_end_by_name[ancestor]
 
 
 def _base_face_centroids(model: CanonicalTreeModel) -> tuple[Vector3 | None, ...]:
@@ -1021,13 +1079,32 @@ def _base_face_centroids(model: CanonicalTreeModel) -> tuple[Vector3 | None, ...
 
 
 def _project_point_to_segment_t(point: Vector3, parent: Vector3, child: Vector3) -> float:
+    return _project_point_with_data(point, _segment_projection_data(parent, child))
+
+
+def _segment_projection_data(
+    parent: Vector3,
+    child: Vector3,
+) -> tuple[float, float, float, float, float, float, float]:
     dx = child.x - parent.x
     dy = child.y - parent.y
     dz = child.z - parent.z
     length_squared = dx * dx + dy * dy + dz * dz
     if length_squared <= 0.0:
         raise FractureError("Manual fracture segment cut references a zero-length skeleton edge.")
-    return ((point.x - parent.x) * dx + (point.y - parent.y) * dy + (point.z - parent.z) * dz) / length_squared
+    return parent.x, parent.y, parent.z, dx, dy, dz, 1.0 / length_squared
+
+
+def _project_point_with_data(
+    point: Vector3,
+    projection: tuple[float, float, float, float, float, float, float],
+) -> float:
+    parent_x, parent_y, parent_z, dx, dy, dz, inverse_length_squared = projection
+    return (
+        (point.x - parent_x) * dx
+        + (point.y - parent_y) * dy
+        + (point.z - parent_z) * dz
+    ) * inverse_length_squared
 
 
 def _raise_for_empty_manual_cut_pieces(
@@ -1062,7 +1139,10 @@ def _renumber_pieces(pieces: tuple[FracturePiece, ...], *, output_stem: str) -> 
     )
 
 
-def _base_face_owner_by_index(model: CanonicalTreeModel, graph: _SkeletonGraph) -> tuple[str | None, ...]:
+def _base_face_bindings_by_index(
+    model: CanonicalTreeModel,
+    graph: _SkeletonGraph,
+) -> tuple[tuple[str | None, ...], tuple[frozenset[str], ...]]:
     mesh = model.base_mesh
     if mesh is None:
         raise FractureError("Fracture planning requires a base mesh.")
@@ -1075,45 +1155,82 @@ def _base_face_owner_by_index(model: CanonicalTreeModel, graph: _SkeletonGraph) 
     if mesh.skel_joint_weights and len(mesh.skel_joint_weights) < expected_joint_slots:
         raise FractureError("Base mesh skinning weight count is smaller than point count.")
 
-    point_owner_tokens = tuple(_point_owner_token(model, graph, point_index) for point_index in range(len(mesh.points)))
+    point_bindings = tuple(_point_binding_tokens(model, graph, point_index) for point_index in range(len(mesh.points)))
     face_owner_tokens: list[str | None] = []
+    face_auto_children: list[frozenset[str]] = []
     cursor = 0
     for face_index, vertex_count in enumerate(mesh.face_vertex_counts):
         if vertex_count < 0:
             raise FractureError(f"Base mesh face {face_index} has invalid vertex count {vertex_count}.")
         if vertex_count == 0:
             face_owner_tokens.append(None)
+            face_auto_children.append(frozenset())
             continue
         face_indices = mesh.face_vertex_indices[cursor : cursor + vertex_count]
         if len(face_indices) != vertex_count:
             raise FractureError(f"Base mesh face {face_index} is missing face vertex indices.")
         cursor += vertex_count
         for point_index in face_indices:
-            if point_index < 0 or point_index >= len(point_owner_tokens):
+            if point_index < 0 or point_index >= len(point_bindings):
                 raise FractureError(f"Base mesh face {face_index} references point {point_index} outside the mesh.")
-        face_owner_tokens.append(_majority_token(tuple(point_owner_tokens[index] for index in face_indices), face_index))
+        owner = _majority_token(tuple(point_bindings[index][0] for index in face_indices), face_index)
+        face_owner_tokens.append(owner)
+        face_auto_children.append(
+            frozenset(
+                child
+                for index in face_indices
+                for token in point_bindings[index][1]
+                if (child := _child_below(graph, owner, token)) is not None
+            )
+        )
     if cursor != len(mesh.face_vertex_indices):
         raise FractureError("Base mesh has trailing face vertex indices that are not referenced by face counts.")
-    return tuple(face_owner_tokens)
+    return tuple(face_owner_tokens), tuple(face_auto_children)
 
 
-def _point_owner_token(model: CanonicalTreeModel, graph: _SkeletonGraph, point_index: int) -> str:
+def _point_binding_tokens(
+    model: CanonicalTreeModel,
+    graph: _SkeletonGraph,
+    point_index: int,
+) -> tuple[str, frozenset[str]]:
     mesh = model.base_mesh
     if mesh is None:
         raise FractureError("Fracture planning requires a base mesh.")
     start = point_index * mesh.skel_element_size
     best_slot = 0
+    influence_tokens: set[str] = set()
     if mesh.skel_joint_weights:
         best_weight = mesh.skel_joint_weights[start]
-        for slot in range(1, mesh.skel_element_size):
+        for slot in range(mesh.skel_element_size):
             weight = mesh.skel_joint_weights[start + slot]
             if weight > best_weight:
                 best_weight = weight
                 best_slot = slot
+            if weight <= 0.0:
+                continue
+            joint_index = mesh.skel_joint_indices[start + slot]
+            if joint_index < 0 or joint_index >= len(graph.joints):
+                raise FractureError(f"Base mesh point {point_index} references skeleton joint index {joint_index}.")
+            influence_tokens.add(graph.joints[joint_index].name)
     joint_index = mesh.skel_joint_indices[start + best_slot]
     if joint_index < 0 or joint_index >= len(graph.joints):
         raise FractureError(f"Base mesh point {point_index} references skeleton joint index {joint_index}.")
-    return graph.joints[joint_index].name
+    owner_token = graph.joints[joint_index].name
+    if not mesh.skel_joint_weights:
+        influence_tokens.add(owner_token)
+    return owner_token, frozenset(influence_tokens)
+
+
+def _child_below(graph: _SkeletonGraph, ancestor: str, joint_token: str) -> str | None:
+    current = joint_token
+    while current != ancestor:
+        parent = graph.joint_by_name[current].parent
+        if parent == ancestor:
+            return current
+        if parent is None:
+            return None
+        current = parent
+    return None
 
 
 def _majority_token(tokens: tuple[str, ...], face_index: int) -> str:

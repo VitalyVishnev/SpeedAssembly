@@ -186,6 +186,9 @@ class BooleanFractureSourceContext:
     source_face_indices: np.ndarray
     source_corner_slots: np.ndarray
     components: tuple[np.ndarray, ...]
+    seed_payload: tuple[bytes, bytes]
+    material_by_face: dict[int, int]
+    default_material: int
     preparation_timings: tuple[tuple[str, float], ...]
 
 
@@ -358,6 +361,8 @@ class _PreparedBooleanCut:
     seed: int
     original: _TaggedMesh
     closed: _TaggedMesh
+    material_by_face: dict[int, int]
+    default_material: int
     original_shell: MeshData
     closed_solid: MeshData
     preparation_timings: tuple[tuple[str, float], ...]
@@ -425,6 +430,16 @@ def prepare_boolean_fracture_source(
         source_face_indices=source_face_indices,
         source_corner_slots=source_corner_slots,
         components=components,
+        seed_payload=(
+            vertices.astype("<f8", copy=False).tobytes(),
+            np.asarray(mesh.face_vertex_indices, dtype="<u4").tobytes(),
+        ),
+        material_by_face={
+            int(face_index): int(section.material_id)
+            for section in mesh.sections
+            for face_index in section.face_indices
+        },
+        default_material=0 if mesh.sections else -1,
         preparation_timings=tuple(timings),
     )
 
@@ -471,7 +486,7 @@ def prepare_boolean_cut_prototype(
     triangles = context.triangles
     source_face_indices = context.source_face_indices
     source_corner_slots = context.source_corner_slots
-    seed = _source_seed(mesh, cut_token)
+    seed = _source_seed(context.seed_payload, cut_token)
 
     started = time.perf_counter()
     components = context.components
@@ -566,8 +581,18 @@ def prepare_boolean_cut_prototype(
         seed=seed,
         original=original,
         closed=closed,
+        material_by_face=context.material_by_face,
+        default_material=context.default_material,
         original_shell=_attributed_mesh_data(
-            "BooleanOriginalShell", original, mesh, triangles, source_face_indices, source_corner_slots, frame
+            "BooleanOriginalShell",
+            original,
+            mesh,
+            triangles,
+            source_face_indices,
+            source_corner_slots,
+            frame,
+            material_by_face=context.material_by_face,
+            default_material=context.default_material,
         ),
         closed_solid=_mesh_data("BooleanClosedSolid", closed, source_color=_ORIGINAL_COLOR),
         preparation_timings=tuple(timings),
@@ -1021,6 +1046,8 @@ def _build_prepared_boolean_cut(
         prepared.source_face_indices,
         prepared.source_corner_slots,
         prepared.frame,
+        material_by_face=prepared.material_by_face,
+        default_material=prepared.default_material,
         cap_material_id=settings.cap_material_id,
     )
     child_result = _attributed_mesh_data(
@@ -1031,6 +1058,8 @@ def _build_prepared_boolean_cut(
         prepared.source_face_indices,
         prepared.source_corner_slots,
         prepared.frame,
+        material_by_face=prepared.material_by_face,
+        default_material=prepared.default_material,
         cap_material_id=settings.cap_material_id,
     )
     timings.append(("transfer_attributes", time.perf_counter() - started))
@@ -1215,6 +1244,8 @@ def _build_sequential_component(
             base.source_face_indices,
             base.source_corner_slots,
             base.frame,
+            material_by_face=base.material_by_face,
+            default_material=base.default_material,
             cap_frames=cap_frames,
             cap_material_id=settings.cap_material_id,
         )
@@ -1773,6 +1804,8 @@ def _attributed_mesh_data(
     source_corner_slots: np.ndarray,
     frame: _CutFrame,
     *,
+    material_by_face: dict[int, int],
+    default_material: int,
     source_color: Color4 = _SOURCE_COLOR,
     cap_frames: dict[int, _CutFrame] | None = None,
     cap_material_id: int | None = None,
@@ -1792,13 +1825,6 @@ def _attributed_mesh_data(
         and len(source.skel_joint_indices) >= len(source.points) * skin_size
         and len(source.skel_joint_weights) >= len(source.points) * skin_size
     )
-    material_by_face = {
-        int(face_index): int(section.material_id)
-        for section in source.sections
-        for face_index in section.face_indices
-    }
-    default_material = 0 if source.sections else -1
-
     resolved_cap_frames = cap_frames or {2: frame}
     cap_tags = frozenset(resolved_cap_frames)
     scale = max(float(np.ptp(result.vertices, axis=0).max()), 1.0)
@@ -1848,7 +1874,11 @@ def _attributed_mesh_data(
         source_face = int(source_face_indices[source_triangle_index])
         material_id = material_by_face.get(source_face, default_material)
         face_materials[face_index] = material_id
-        result_face_normal = _triangle_normal(result.vertices[triangle])
+        result_face_normal = (
+            None
+            if point_normals or face_varying_normals
+            else _triangle_normal(result.vertices[triangle])
+        )
         for local_corner, result_vertex_index in enumerate(triangle):
             expanded_index = face_index * 3 + local_corner
             point = result.vertices[int(result_vertex_index)]
@@ -1878,6 +1908,7 @@ def _attributed_mesh_data(
                 )
                 normals[expanded_index] = _interpolate_normal(source_normals, barycentric)
             else:
+                assert result_face_normal is not None
                 normals[expanded_index] = result_face_normal
             if use_skinning:
                 skinning[expanded_index] = _interpolate_skinning(source, source_point_indices, barycentric)
@@ -2213,12 +2244,11 @@ def _signed_area(points: np.ndarray) -> float:
     )
 
 
-def _source_seed(mesh: MeshData, cut_token: str) -> int:
+def _source_seed(seed_payload: tuple[bytes, bytes], cut_token: str) -> int:
     digest = hashlib.sha256()
     digest.update(cut_token.encode("utf-8"))
-    for point in mesh.points:
-        digest.update(np.asarray((point.x, point.y, point.z), dtype="<f8").tobytes())
-    digest.update(np.asarray(mesh.face_vertex_indices, dtype="<u4").tobytes())
+    for payload in seed_payload:
+        digest.update(payload)
     return int.from_bytes(digest.digest()[:8], "little")
 
 

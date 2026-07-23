@@ -25,8 +25,9 @@ Status: Partially verified
 Detailed Cuts are integrated into Fracture Preview and export, retain Repeated
 Parts by skeleton attachment, author transferred/cap normals, and feed the
 existing collision builders. Automated coverage includes synthetic geometry,
-SimpleTree, multi-stem stump cuts, and packaged stability smoke. Broader visual
-validation across unrelated SpeedTree assets and Unreal import remains pending.
+SimpleTree, multi-stem stump cuts, sibling-collar ownership, a three-sample
+ownership matrix, and packaged stability smoke. Broader visual validation
+across unrelated SpeedTree assets and Unreal import remains pending.
 
 Related files:
 - `src/xml_to_usda/boolean_fracture_prototype.py`
@@ -258,11 +259,14 @@ transfer work.
 
 Current behavior:
 Preview reuses prepared source/cut sessions and export uses the same final mesh
-contract. Local Big Spruce profiling still identifies cutter noise generation
-and attribute transfer as the main regeneration costs; the Boolean operation
-itself is comparatively small. Outer multi-process execution remains disabled
-until it demonstrates at least 25% speedup without excessive RSS or packaged
-native instability.
+contract. A local 11-cut Big Spruce pass at Intensity 20 / Cut Detail 8 reduced
+prepared-session setup from an observed 5.60 s to a 1.49 s five-run median and
+regeneration from a 1.70 s three-run median to a 0.835 s five-run median. Three
+fresh-process Fracture Preview runs completed in 3.30–3.47 s. Cutter noise
+generation and attribute transfer remain the main regeneration costs; the
+Boolean operation itself is comparatively small. Outer multi-process execution
+remains disabled until it demonstrates at least 25% speedup without excessive
+RSS or packaged native instability.
 
 Do not repeat:
 Do not enable a thread pool around Python bindings: the binding does not release

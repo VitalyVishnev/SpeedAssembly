@@ -204,7 +204,7 @@ def test_fracture_collision_draw_call_uses_piece_explode_direction() -> None:
         preview.pieces[1],
         base_mesh=_mesh(
             "branch_shifted",
-            points=(10.0, 0.0, 0.0, 11.0, 0.0, 0.0, 10.0, 1.0, 0.0),
+            points=(10.0, 10.0, 0.0, 11.0, 10.0, 0.0, 10.0, 11.0, 0.0),
             counts=(3,),
             indices=(0, 1, 2),
         ),
@@ -220,6 +220,7 @@ def test_fracture_collision_draw_call_uses_piece_explode_direction() -> None:
     collision_draw = next(draw for draw in scene.draw_calls if draw.visibility_group == "collision")
 
     assert collision_draw.explode_direction.x > 0.0
+    assert collision_draw.explode_direction.y == pytest.approx(collision_draw.explode_direction.x * 0.2)
 
 
 def test_exploded_view_does_not_send_lower_pieces_below_grid() -> None:

@@ -2,7 +2,7 @@
 
 ## Experiment: Connectivity-first Manifold Boolean fracture
 
-Status: prototype implemented; production integration unverified.
+Status: production integrated; broad real-tree and UE runtime validation remains open.
 
 The `boolean-prototype` command isolates one whole connected branch before any face-ownership split, closes its oriented boundary loops, and splits it with a closed triangular-lattice cutter displaced by one-sided deterministic fractal noise. `manifold3d` provenance removes temporary source closures while retaining cutter-derived caps. Requested amplitude is uniformly limited before the next physical terminal, branch, or bend above `Max Bend Angle`. Exact source-triangle provenance transfers UV0/UV1, colors, material sections, and skinning; caps receive planar UVs and nearest boundary-ring attributes. Its viewer can regenerate the same source in place with editable cut/noise controls while the deterministic seed remains fixed. The synthetic open-cylinder case, Simple Tree `bone_086`, and Big Spruce `bone_508` pass locally.
 
@@ -17,6 +17,31 @@ branches, height bias from -1 to +1, stump, and separate-stem variants completed
 Big Spruce profiling showed that the former `select_component` timing mostly measured repeated planning rather than component selection: two `plan_fracture` calls consumed about 2.9 s under `cProfile`, while `_select_component` itself consumed about 35 ms. A prepared one-cut session reduced repeated `bone_508`, Density 8 regeneration to a 56 ms median. The shared planner owner lookup reduced the normal 11-cut Big Spruce plan from 122 ms to 90 ms and a 64-cut stress plan from 1695 ms to 481 ms. The sequential 11-cut Big Spruce multi session at Intensity 20 / Density 8 prepared in about 1.31 s and regenerated in about 0.88 s locally. These are local measurements, not cross-machine guarantees.
 
 Exact-site/result reuse reduced adding a Big Spruce stump to an already built 11-cut session to about 353 ms of replan/slicing plus 99 ms for the new stump Boolean; the 11 unchanged branch results were reused. On SimpleTree, a four-cut plan containing a stump and branch on the same shell completed sequential geometry in about 192 ms locally.
+
+After automatic branch cuts moved to physical segment positions, a 2026-07-24
+Big Spruce pass at 11 cuts, Intensity 20, and Cut Detail 8 observed 5.60 s
+preparation and a 1.70 s three-run regeneration median before optimization.
+Caching face centroids per plan, using DFS ancestry intervals, prefiltering
+segment cuts per source bone, hashing one prebuilt source-byte payload, reusing
+the source material lookup, and skipping unused result-face normals reduced
+preparation to a 1.49 s five-run median and regeneration to a 0.835 s five-run
+median. Three fresh-process Fracture Preview runs completed in 3.30–3.47 s
+(3.32 s median). The points/indices/normals/UV signature remained unchanged.
+A per-cutter Perlin-gradient dictionary was measured, produced only a
+noise-level improvement, and was removed.
+
+The 2026-07-24 Big Spruce ownership reproduction found 422 parent-dominated
+faces assigned to automatic child pieces even though none had skin influence
+from the corresponding child subtree. They were disconnected sibling collars
+whose centroids happened to project beyond another branch's cut plane. After
+binding-gated ownership, a 12-run matrix across all three local SpeedTree
+samples, 7-64 requested branches, 15-80% cut offsets, both height-bias
+directions, stump, and separate-stem modes checked 318 automatic cuts and
+133,764 assigned face observations with zero cross-subtree violations. The
+exact reported Big Spruce settings retained 38 pieces and all 36 requested
+automatic branches while reducing foreign parent-face assignments from 422 to
+zero. A full Detailed Boolean build at Intensity 33.9, Cut Scale 0.64, and Cut
+Detail 8 completed with 38 non-empty pieces and 37 cuts including the stump.
 
 This page stores rejected, superseded, or otherwise non-current approaches that still matter because they explain why the present contract exists.
 
