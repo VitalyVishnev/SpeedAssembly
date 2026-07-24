@@ -557,3 +557,16 @@ Major moves:
   cuts are not evaluated.
 - The 36-branch Big Spruce case moved 26 of 3,613 parts in flat mode, while
   Detailed mode retained its expected total of 88 cutter-supported moves.
+
+## 2026-07-24 - Boolean outer-parallel prototype rejected
+
+- Prototyped process execution only across independent connectivity components;
+  nested cuts on one shell remained sequential and reused the production
+  Boolean implementation.
+- Verified exact parent/child/cutter meshes and diagnostics across sequential,
+  1/2/4-process, batched-process, and 1/2/4/8-thread variants.
+- On 37 independent Big Spruce cuts, sequential took 6.81-6.88 s; two
+  processes took 6.99-7.34 s and four took 7.92-8.05 s while increasing
+  child peak RSS. Twelve-cut and thread variants were also slower.
+- Removed the prototype instead of adding a dormant runtime subsystem. The
+  production Detailed Boolean path remains sequential.

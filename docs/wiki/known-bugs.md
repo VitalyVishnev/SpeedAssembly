@@ -287,13 +287,19 @@ prepared-session setup from an observed 5.60 s to a 1.49 s five-run median and
 regeneration from a 1.70 s three-run median to a 0.835 s five-run median. Three
 fresh-process Fracture Preview runs completed in 3.30–3.47 s. Cutter noise
 generation and attribute transfer remain the main regeneration costs; the
-Boolean operation itself is comparatively small. Outer multi-process execution
-remains disabled until it demonstrates at least 25% speedup without excessive
-RSS or packaged native instability.
+Boolean operation itself is comparatively small. A 2026-07-24 Windows
+spawn-based prototype kept exact cut meshes and diagnostics but failed the
+speed gate: at 37 independent cuts, sequential took 6.81-6.88 s, two processes
+took 6.99-7.34 s, and four took 7.92-8.05 s before final assembly. At 12 cuts
+the process pool was substantially slower. Estimated child peak RSS was about
+382-403 MiB for two processes and 577-751 MiB for four. Production therefore
+remains sequential.
 
 Do not repeat:
 Do not enable a thread pool around Python bindings: the binding does not release
-the GIL and the wheel already uses internal oneTBB parallelism.
+the GIL and the wheel already uses internal oneTBB parallelism. The measured
+2/4/8-thread variants were equal or slower. Do not retry a spawn process pool
+without first removing its cold-start and serialization boundary.
 
 Related files:
 - `src/xml_to_usda/boolean_fracture_prototype.py`

@@ -1,5 +1,35 @@
 # Experiments
 
+## Experiment: Outer parallel execution for independent Boolean components
+
+Status: Rejected on the current Windows spawn/oneTBB runtime.
+
+The available parallel unit is one connectivity component, not one arbitrary
+cut. Cuts on the same shell remain sequential. Big Spruce provided 12 and 37
+independent Boolean component groups for the measured 11- and 36-branch plans
+with a stump.
+
+Three prototypes reused the production Boolean implementation: per-cut process
+jobs, workers initialized from one read-only source context, and larger
+per-worker batches initialized from the model plus analysis cache. Every
+returned parent/child/cutter `MeshData` and diagnostic value matched the
+sequential result exactly. The prepared full 36-branch session serialized to
+about 27.6 MiB and took about 0.7-0.8 s to pickle/unpickle per worker, before
+native work.
+
+End-to-end-favorable measurements still failed the 25% gate. At 37 independent
+cuts, sequential took 6.81-6.88 s. Two spawned processes took 6.99-7.34 s
+across three batched runs; four took 7.92-8.05 s. At 12 cuts, sequential took
+2.78 s versus 4.00 s with two processes. Estimated child peak RSS was about
+382-403 MiB for two processes and 577-751 MiB for four. A shared-memory
+thread prototype also failed: 2/4/8 threads took 6.96/6.85/7.17 s against a
+6.81 s sequential baseline.
+
+Keep the sequential backend. Windows process startup, model transport, result
+transport, and oneTBB oversubscription erase the independent-cut gain. Revisit
+only after a material runtime change such as a zero-copy worker boundary or a
+different Boolean backend; do not retain a dormant parallel subsystem.
+
 ## Experiment: Connectivity-first Manifold Boolean fracture
 
 Status: production integrated; broad real-tree and UE runtime validation remains open.

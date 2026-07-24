@@ -53,7 +53,14 @@ planned child piece. Equal strongest evidence remains an explicit error.
 
 Requested noise amplitude is scaled uniformly, never hard-clamped per lattice vertex, to the first physical skeleton terminal, real branch, or local bend above the operator threshold. One lattice edge is reserved before that limiter. Source-derived Boolean faces carry exact source-triangle provenance for barycentric UV, color, material, and skin-weight transfer. Cutter caps use planar cutter-space UVs, inherit the boundary-ring material and attributes, and remain explicitly tagged.
 
-The multi-cut prototype stays sequential. Do not add an outer thread pool: the wheel already has internal oneTBB and the Python binding does not release the GIL. A process pool is allowed only after the documented 1/2/4-process speed, RSS, determinism, and packaged-stability gate.
+The multi-cut prototype stays sequential. Do not add an outer thread pool: the
+wheel already has internal oneTBB and the Python binding does not release the
+GIL. A Windows spawn-based process pool was also rejected after the documented
+1/2/4-process gate: even 37 independent cuts did not beat the sequential
+end-to-end path, while worker RSS scaled with process count. Reconsider only if
+the runtime boundary changes enough to remove model/session serialization and
+cold worker startup; repeat speed, RSS, exact-result, and packaged-stability
+gates before production use.
 
 Interactive Boolean regeneration must use explicit prepared sessions scoped to its window/job. Base Mesh analysis, triangulation, and connectivity are shared once per source context; boundary closure, provenance, and the closed branch Manifold are immutable per cut. Noise controls rebuild only cutters and complementary results. A changed cut plan creates a new multi session. Do not use a global model cache.
 
