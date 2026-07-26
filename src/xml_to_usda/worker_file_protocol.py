@@ -40,10 +40,14 @@ _WORKER_PAYLOAD_MODULES = (
     "xml_to_usda.part_preview_service",
     "xml_to_usda.part_preview_worker_subprocess",
     "xml_to_usda.wind_preview_service",
+    "xml_to_usda.wind_service",
     "xml_to_usda.wind_external_skeleton",
     "xml_to_usda.wind_preview_worker_subprocess",
     "xml_to_usda.wind_viewport_scene",
     "xml_to_usda.viewport_scene",
+    "xml_to_usda.discovery_service",
+    "xml_to_usda.settings_service",
+    "xml_to_usda.source_discovery_worker_subprocess",
 )
 _ALLOWED_CLASS_CACHE: dict[str, tuple[object, type]] = {}
 

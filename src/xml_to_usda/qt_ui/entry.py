@@ -7,6 +7,7 @@ import ctypes
 import json
 import multiprocessing
 import sys
+import traceback
 from importlib.resources import files
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from ..worker_commands import (
     FRACTURE_WORKER_COMMAND,
     PART_PREVIEW_WORKER_COMMAND,
     PROXY_MESH_WORKER_COMMAND,
+    SOURCE_DISCOVERY_WORKER_COMMAND,
     WIND_PREVIEW_WORKER_COMMAND,
 )
 from .smoke import SMOKE_COMMAND
@@ -75,6 +77,11 @@ def main(argv: list[str] | None = None) -> int:
 
         request_path = argv[argv.index("--request") + 1] if "--request" in argv else ""
         return run_wind_preview_worker_request_file(request_path)
+    if argv and argv[0] == SOURCE_DISCOVERY_WORKER_COMMAND:
+        from ..source_discovery_worker_subprocess import run_source_discovery_worker_request_file
+
+        request_path = argv[argv.index("--request") + 1] if "--request" in argv else ""
+        return run_source_discovery_worker_request_file(request_path)
     if argv and argv[0] == SMOKE_COMMAND:
         from .smoke import run_smoke_cli
 
@@ -101,37 +108,51 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    from .dependencies import build_default_dependencies
-    from .persistence import load_ui_shell_state, load_ui_theme_overrides
-    from .theme import ThemeOverrides, load_bundled_theme, merge_theme
-    from .window import MainWindow
+    try:
+        from .dependencies import build_default_dependencies
+        from .persistence import load_ui_shell_state, load_ui_theme_overrides
+        from .theme import ThemeOverrides, load_bundled_theme, merge_theme
+        from .window import MainWindow
 
-    build_info_path = default_build_info_path()
-    current_help_prompt_signature = _current_help_prompt_build_signature(build_info_path)
-    state = load_ui_shell_state(current_build_signature=current_help_prompt_signature)
-    theme_name = args.theme or state.theme_name
-    base_theme = load_bundled_theme(theme_name)
-    theme_overrides = load_ui_theme_overrides()
-    if theme_overrides.theme_name != theme_name and theme_overrides.payload:
-        theme_overrides = ThemeOverrides(theme_name=theme_name, payload=theme_overrides.payload)
-    theme = merge_theme(base_theme, theme_overrides)
-    deps = build_default_dependencies()
-    configure_windows_taskbar_identity()
-    app = QApplication.instance() or QApplication(sys.argv[:1])
-    app.setApplicationName("SpeedAssembly")
-    app.setWindowIcon(QIcon(application_icon_path()))
-    window = MainWindow(
-        theme,
-        state,
-        dependencies=deps,
-        base_theme=base_theme,
-        theme_overrides=theme_overrides,
-        build_signature=current_help_prompt_signature,
-    )
-    window.show()
-    if args.smoke_exit_ms > 0:
-        QTimer.singleShot(args.smoke_exit_ms, app.quit)
-    return app.exec()
+        build_info_path = default_build_info_path()
+        current_help_prompt_signature = _current_help_prompt_build_signature(build_info_path)
+        state = load_ui_shell_state(current_build_signature=current_help_prompt_signature)
+        theme_name = args.theme or state.theme_name
+        base_theme = load_bundled_theme(theme_name)
+        theme_overrides = load_ui_theme_overrides()
+        if theme_overrides.theme_name != theme_name and theme_overrides.payload:
+            theme_overrides = ThemeOverrides(theme_name=theme_name, payload=theme_overrides.payload)
+        theme = merge_theme(base_theme, theme_overrides)
+        deps = build_default_dependencies()
+        configure_windows_taskbar_identity()
+        app = QApplication.instance() or QApplication(sys.argv[:1])
+        app.setApplicationName("SpeedAssembly")
+        app.setWindowIcon(QIcon(application_icon_path()))
+        window = MainWindow(
+            theme,
+            state,
+            dependencies=deps,
+            base_theme=base_theme,
+            theme_overrides=theme_overrides,
+            build_signature=current_help_prompt_signature,
+        )
+        window.show()
+        if args.smoke_exit_ms > 0:
+            QTimer.singleShot(args.smoke_exit_ms, app.quit)
+        return app.exec()
+    except Exception:
+        _append_bootstrap_failure(traceback.format_exc())
+        raise
+
+
+def _append_bootstrap_failure(formatted_traceback: str) -> None:
+    try:
+        log_path = Path.home() / ".xml_to_usda" / "gui_runtime.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"\nGUI bootstrap failure\n{formatted_traceback.rstrip()}\n")
+    except OSError:
+        pass
 
 
 def _current_help_prompt_build_signature(build_info_path: Path | None) -> str:

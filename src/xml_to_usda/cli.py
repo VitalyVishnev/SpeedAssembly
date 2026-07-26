@@ -24,6 +24,10 @@ from .pipeline import generate_wind_json, inspect_source
 from .prototype_sources import fbx_import_read_options_for_material_mode, load_prototype_source_configs_from_json
 from .proxy_mesh_worker_subprocess import PROXY_MESH_WORKER_COMMAND, run_proxy_mesh_worker_request_file
 from .runtime_paths import resolve_runtime_paths
+from .source_discovery_worker_subprocess import (
+    SOURCE_DISCOVERY_WORKER_COMMAND,
+    run_source_discovery_worker_request_file,
+)
 from .udim_settings import load_udim_material_settings_from_json
 from .wind_preview_worker_subprocess import WIND_PREVIEW_WORKER_COMMAND, run_wind_preview_worker_request_file
 from .xml_reader import render_inspect_report
@@ -109,6 +113,8 @@ def build_parser() -> argparse.ArgumentParser:
     part_preview_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
     wind_preview_worker_parser = subparsers.add_parser(WIND_PREVIEW_WORKER_COMMAND, help=argparse.SUPPRESS)
     wind_preview_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
+    source_discovery_worker_parser = subparsers.add_parser(SOURCE_DISCOVERY_WORKER_COMMAND, help=argparse.SUPPRESS)
+    source_discovery_worker_parser.add_argument("--request", required=True, help=argparse.SUPPRESS)
     return parser
 
 
@@ -136,6 +142,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_part_preview_worker_request_file(args.request)
     if args.command == WIND_PREVIEW_WORKER_COMMAND:
         return run_wind_preview_worker_request_file(args.request)
+    if args.command == SOURCE_DISCOVERY_WORKER_COMMAND:
+        return run_source_discovery_worker_request_file(args.request)
     runtime_paths = resolve_runtime_paths()
     _report_cache_maintenance_summary(sweep_application_cache(runtime_paths))
 

@@ -52,6 +52,7 @@ from ..cache_maintenance import (
     sweep_application_cache,
 )
 from ..diagnostics_bundle import build_diagnostics_bundle_request, export_diagnostics_bundle
+from ..discovery_service import SourceDiscoveryRequest, SourceDiscoveryResult
 from ..fbx_payload_cache import (
     FbxPayloadCacheSummary,
     clear_fbx_payload_cache,
@@ -673,6 +674,7 @@ class GlobalSettingsDialog(QDialog):
 
 
 class MainWindow(QWidget):
+    ASYNC_SOURCE_DISCOVERY_THRESHOLD_BYTES = 5 * 1024 * 1024
     ASYNC_WIND_REFRESH_THRESHOLD_BYTES = 5 * 1024 * 1024
     ASYNC_CONVERSION_THRESHOLD_BYTES = 5 * 1024 * 1024
     EDGE_RESIZE_MARGIN = 14
@@ -2014,6 +2016,8 @@ class MainWindow(QWidget):
         if not input_path or not Path(input_path).exists():
             self._source_refresh_timer.stop()
             return
+        if self._background_jobs.source_discovery_running:
+            return
         if self._conversion_running or self._wind_refresh_running or self._wind_json_running:
             return
         self._source_refresh_timer.start()
@@ -2071,9 +2075,11 @@ class MainWindow(QWidget):
     def _reload_input_dependent_tabs(self) -> None:
         input_path = self.source_input.text().strip()
         if not input_path:
+            self._background_jobs.cancel_source_discovery()
             self._clear_input_dependent_tabs()
             return
         if not Path(input_path).exists():
+            self._background_jobs.cancel_source_discovery()
             self._clear_input_dependent_tabs("Selected XML path is unavailable.")
             return
 
@@ -2089,19 +2095,21 @@ class MainWindow(QWidget):
             if not wind_records:
                 wind_records = dict(active_preset.wind_group_settings)
 
+        if self._should_discover_source_async(input_path):
+            self._clear_input_dependent_tabs("Inspecting large XML in an isolated worker...")
+            self._background_jobs.start_source_discovery(
+                SourceDiscoveryRequest(
+                    input_path=input_path,
+                    base_persisted_records=base_records,
+                    part_persisted_records=part_records,
+                )
+            )
+            return
+
+        self._background_jobs.cancel_source_discovery()
         try:
             prototype_discovery = self._deps.discover_part_prototype_rows(input_path, persisted_records=part_records)
-            self.geometry_panel.load(prototype_discovery)
             base_discovery = self._deps.discover_base_material_rows(input_path, persisted_records=base_records)
-            self.materials_panel.load(
-                input_path=input_path,
-                base_persisted_records=base_records,
-                part_persisted_records=part_records,
-                geometry_snapshot=self.geometry_panel.current_snapshot(),
-                cpu_profile=self._operator_state.cpu_profile,
-                base_discovery=base_discovery,
-                part_discovery=prototype_discovery,
-            )
         except Exception as exc:
             self._clear_input_dependent_tabs("Selected XML file could not be loaded.")
             self._set_status("Input discovery failed.")
@@ -2113,6 +2121,71 @@ class MainWindow(QWidget):
             )
             return
 
+        self._apply_source_discovery(
+            input_path=input_path,
+            base_records=base_records,
+            part_records=part_records,
+            wind_records=wind_records,
+            base_discovery=base_discovery,
+            prototype_discovery=prototype_discovery,
+        )
+
+    def _should_discover_source_async(self, input_path: str) -> bool:
+        try:
+            return Path(input_path).stat().st_size >= self.ASYNC_SOURCE_DISCOVERY_THRESHOLD_BYTES
+        except OSError:
+            return False
+
+    def _handle_source_discovery_result(self, result: SourceDiscoveryResult) -> None:
+        if result.input_path != self.source_input.text().strip():
+            return
+        base_records = load_base_material_records(self._operator_snapshot)
+        part_records = load_part_source_records(self._operator_snapshot)
+        wind_records = load_wind_group_records(self._operator_snapshot)
+        active_preset = self._active_preset()
+        if active_preset is not None:
+            if not base_records:
+                base_records = active_preset.base_material_settings
+            if not part_records:
+                part_records = active_preset.part_mesh_settings
+            if not wind_records:
+                wind_records = dict(active_preset.wind_group_settings)
+        self._apply_source_discovery(
+            input_path=result.input_path,
+            base_records=base_records,
+            part_records=part_records,
+            wind_records=wind_records,
+            base_discovery=result.base,
+            prototype_discovery=result.prototypes,
+        )
+        self._set_status("Source rows loaded.")
+        self._maybe_auto_refresh_wind_groups()
+
+    def _handle_source_discovery_error(self, message: str) -> None:
+        self._clear_input_dependent_tabs("Large XML inspection failed. See Log for details.")
+        self._set_status("Input discovery failed.")
+        self._append_log(f"Input discovery failed\n{message}")
+
+    def _apply_source_discovery(
+        self,
+        *,
+        input_path: str,
+        base_records,
+        part_records,
+        wind_records,
+        base_discovery,
+        prototype_discovery,
+    ) -> None:
+        self.geometry_panel.load(prototype_discovery)
+        self.materials_panel.load(
+            input_path=input_path,
+            base_persisted_records=base_records,
+            part_persisted_records=part_records,
+            geometry_snapshot=self.geometry_panel.current_snapshot(),
+            cpu_profile=self._operator_state.cpu_profile,
+            base_discovery=base_discovery,
+            part_discovery=prototype_discovery,
+        )
         self.wind_panel.set_persisted_settings(wind_records)
         self.wind_panel.clear("Click Refresh Wind Groups to inspect wind settings.")
 
@@ -2209,6 +2282,8 @@ class MainWindow(QWidget):
             self._report_error("Missing input", message)
         elif message == "Select an output USDA path.":
             self._report_error("Missing output", message)
+        elif message.startswith("Cannot convert until Unreal material paths are assigned"):
+            self._report_error("Missing material assignments", message)
         else:
             self._report_error("Invalid material path", message)
 
@@ -2226,7 +2301,7 @@ class MainWindow(QWidget):
             is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
             async_threshold_bytes=self.ASYNC_WIND_REFRESH_THRESHOLD_BYTES,
         )
-        self._background_jobs.start_wind_refresh(plan.request)
+        self._background_jobs.start_wind_refresh(plan.request, run_async=plan.run_async)
 
     def run_generate_wind_json(self) -> None:
         self._source_refresh_timer.stop()

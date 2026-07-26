@@ -55,6 +55,14 @@ class QtBackgroundJobsController:
         self._conversion_thread: threading.Thread | None = None
 
         self._wind_refresh_thread: threading.Thread | None = None
+        self._wind_refresh_process_job = PreviewProcessJob(
+            name="wind_refresh",
+            start_process=lambda request, _settings: self._deps.start_wind_preview_process(request),
+            drain_queue=self._deps.drain_process_queue,
+            close_queue=self._deps.close_process_queue,
+            trace_payload=self._wind_preview_trace_payload,
+            trace=self._trace_worker,
+        )
         self._wind_json_thread: threading.Thread | None = None
         self._wind_preview_retry_count = 0
         self._wind_preview_job = PreviewProcessJob(
@@ -114,6 +122,15 @@ class QtBackgroundJobsController:
             trace=self._trace_worker,
             pending_start_delay_seconds=0.2,
         )
+        self._source_discovery_job = PreviewProcessJob(
+            name="source_discovery",
+            start_process=lambda request, _settings: self._deps.start_source_discovery_process(request),
+            drain_queue=self._deps.drain_process_queue,
+            close_queue=self._deps.close_process_queue,
+            trace_payload=self._source_discovery_trace_payload,
+            trace=self._trace_worker,
+            pending_start_delay_seconds=0.2,
+        )
 
     @property
     def conversion_running(self) -> bool:
@@ -124,7 +141,10 @@ class QtBackgroundJobsController:
 
     @property
     def wind_refresh_running(self) -> bool:
-        return self._wind_refresh_thread is not None and self._wind_refresh_thread.is_alive()
+        return bool(
+            (self._wind_refresh_thread is not None and self._wind_refresh_thread.is_alive())
+            or self._wind_refresh_process_job.has_process
+        )
 
     @property
     def wind_json_running(self) -> bool:
@@ -156,6 +176,10 @@ class QtBackgroundJobsController:
     @property
     def part_preview_running(self) -> bool:
         return self._part_preview_job.has_process
+
+    @property
+    def source_discovery_running(self) -> bool:
+        return self._source_discovery_job.has_process
 
     def start_conversion(self, *, request: ConversionRequest, run_async: bool) -> None:
         if self.conversion_running:
@@ -227,7 +251,7 @@ class QtBackgroundJobsController:
             self._conversion_cancel_event.set()
         self._window._set_status("Cancelling conversion...")
 
-    def start_wind_refresh(self, request) -> None:
+    def start_wind_refresh(self, request, *, run_async: bool = False) -> None:
         if self.wind_refresh_running:
             self._window._set_status("Wind group inspection already running...")
             return
@@ -237,6 +261,24 @@ class QtBackgroundJobsController:
             "Inspecting wind groups.\n"
             "The PySide6 shell keeps the UI responsive while generator levels are analyzed."
         )
+        if run_async:
+            try:
+                self._wind_refresh_process_job.start_latest(request, True)
+            except Exception as exc:
+                self._wind_refresh_process_job.close()
+                self._window._set_wind_refresh_running(False)
+                self._handle_wind_refresh_error(
+                    _WindErrorPayload(
+                        primary={
+                            "type": type(exc).__name__,
+                            "message": str(exc),
+                            "traceback": traceback.format_exc(),
+                        }
+                    )
+                )
+                return
+            self._ensure_polling()
+            return
         self._wind_refresh_thread = threading.Thread(
             target=self._run_wind_refresh_worker,
             kwargs={"request": request},
@@ -423,6 +465,20 @@ class QtBackgroundJobsController:
             return
         self._ensure_polling()
 
+    def start_source_discovery(self, request) -> None:
+        self._window._set_status("Inspecting large XML in an isolated worker...")
+        try:
+            self._source_discovery_job.start_latest(request, True)
+        except Exception as exc:
+            self._source_discovery_job.close()
+            self._window._handle_source_discovery_error(str(exc))
+            return
+        self._ensure_polling()
+
+    def cancel_source_discovery(self) -> None:
+        if self._source_discovery_job.has_process or self._source_discovery_job.has_pending:
+            self._source_discovery_job.cancel_running(clear_pending=True)
+
     def cancel_fracture_preview(self) -> None:
         self._fracture_preview_job.cancel_running(clear_pending=True)
         self._window._update_action_state()
@@ -497,6 +553,10 @@ class QtBackgroundJobsController:
             self._part_preview_job.cancel_running(clear_pending=True)
         if self._wind_preview_job.has_process:
             self._wind_preview_job.cancel_running(clear_pending=True)
+        if self._wind_refresh_process_job.has_process:
+            self._wind_refresh_process_job.cancel_running(clear_pending=True)
+        if self._source_discovery_job.has_process:
+            self._source_discovery_job.cancel_running(clear_pending=True)
         self.close_conversion_process()
         self.close_proxy_mesh_process()
         self.close_proxy_preview_process()
@@ -504,6 +564,8 @@ class QtBackgroundJobsController:
         self.close_fracture_preview_process()
         self.close_part_preview_process()
         self.close_wind_preview_process()
+        self.close_wind_refresh_process()
+        self.close_source_discovery_process()
 
     def _ensure_polling(self) -> None:
         if not self._poll_timer.isActive():
@@ -561,6 +623,19 @@ class QtBackgroundJobsController:
                 elif event_name == "result":
                     self._conversion_result_received = True
                     self._handle_conversion_job_result(payload)
+
+        if self._drain_wind_refresh_process_queue():
+            keep_polling = True
+
+        if self._wind_refresh_process_job.running:
+            keep_polling = True
+        elif self._wind_refresh_process_job.has_process and not self._wind_refresh_process_job.result_received:
+            if self._drain_wind_refresh_process_queue():
+                keep_polling = True
+            if self._wind_refresh_process_job.has_process and not self._wind_refresh_process_job.result_received:
+                self._handle_wind_refresh_process_crash()
+                if self._wind_refresh_process_job.has_process:
+                    keep_polling = True
 
         if self._conversion_process is not None and self._conversion_process.is_alive():
             keep_polling = True
@@ -666,6 +741,23 @@ class QtBackgroundJobsController:
                 self._part_preview_job.start_pending_if_any()
             keep_polling = True
 
+        if self._drain_source_discovery_queue():
+            keep_polling = True
+
+        if self._source_discovery_job.running:
+            keep_polling = True
+        elif self._source_discovery_job.has_process and not self._source_discovery_job.result_received:
+            if self._drain_source_discovery_queue():
+                keep_polling = True
+            if self._source_discovery_job.has_process and not self._source_discovery_job.result_received:
+                self._handle_source_discovery_process_crash()
+                if self._source_discovery_job.has_process:
+                    keep_polling = True
+        elif self._source_discovery_job.has_pending:
+            if self._source_discovery_job.has_ready_pending:
+                self._source_discovery_job.start_pending_if_any()
+            keep_polling = True
+
         if (
             self.wind_refresh_running
             or self.wind_json_running
@@ -675,6 +767,7 @@ class QtBackgroundJobsController:
             or self.fracture_export_running
             or self.fracture_preview_running
             or self.part_preview_running
+            or self.source_discovery_running
         ):
             keep_polling = True
 
@@ -696,6 +789,48 @@ class QtBackgroundJobsController:
             elif event_name == "result":
                 self._handle_wind_preview_result(payload)
         return received_event
+
+    def _drain_wind_refresh_process_queue(self) -> bool:
+        received_event = False
+        for event_name, payload in self._wind_refresh_process_job.drain():
+            received_event = True
+            if event_name == "error_traceback":
+                continue
+            if event_name == "error":
+                message = str(payload)
+                formatted_traceback = self._wind_refresh_process_job.error_traceback or ""
+                if not self._wind_refresh_process_job.finish_current():
+                    self._window._set_wind_refresh_running(False)
+                    self._handle_wind_refresh_error(
+                        _WindErrorPayload(
+                            primary={
+                                "type": "RuntimeError",
+                                "message": message,
+                                "traceback": formatted_traceback,
+                            }
+                        )
+                    )
+            elif event_name == "result":
+                if not self._wind_refresh_process_job.finish_current():
+                    self._window._set_wind_refresh_running(False)
+                    self._window._handle_wind_data_loaded(payload, used_retry=False)
+        return received_event
+
+    def _handle_wind_refresh_process_crash(self) -> None:
+        crash = self._wind_refresh_process_job.crash()
+        message = f"Wind inspection worker crashed unexpectedly (exit code {crash.exit_code})."
+        formatted_traceback = crash.error_traceback or ""
+        if not self._wind_refresh_process_job.finish_current():
+            self._window._set_wind_refresh_running(False)
+            self._handle_wind_refresh_error(
+                _WindErrorPayload(
+                    primary={
+                        "type": "RuntimeError",
+                        "message": message,
+                        "traceback": formatted_traceback,
+                    }
+                )
+            )
 
     def _drain_fracture_preview_queue(self) -> bool:
         received_event = False
@@ -744,6 +879,31 @@ class QtBackgroundJobsController:
             elif event_name == "result":
                 self._handle_part_preview_result(payload)
         return received_event
+
+    def _drain_source_discovery_queue(self) -> bool:
+        received_event = False
+        for event_name, payload in self._source_discovery_job.drain():
+            received_event = True
+            if event_name == "error_traceback":
+                continue
+            if event_name == "error":
+                message = str(payload)
+                if self._source_discovery_job.error_traceback:
+                    message = f"{message}\n\n{self._source_discovery_job.error_traceback}"
+                if not self._source_discovery_job.finish_current():
+                    self._window._handle_source_discovery_error(message)
+            elif event_name == "result":
+                if not self._source_discovery_job.finish_current():
+                    self._window._handle_source_discovery_result(payload)
+        return received_event
+
+    def _handle_source_discovery_process_crash(self) -> None:
+        crash = self._source_discovery_job.crash()
+        message = f"Source discovery worker crashed unexpectedly (exit code {crash.exit_code})."
+        if crash.error_traceback:
+            message = f"{message}\n\n{crash.error_traceback}"
+        if not self._source_discovery_job.finish_current():
+            self._window._handle_source_discovery_error(message)
 
     def _handle_wind_refresh_error(self, payload: _WindErrorPayload) -> None:
         self._window._clear_pending_generate_after_refresh()
@@ -1270,6 +1430,12 @@ class QtBackgroundJobsController:
     def close_wind_preview_process(self) -> None:
         self._wind_preview_job.close()
 
+    def close_wind_refresh_process(self) -> None:
+        self._wind_refresh_process_job.close()
+
+    def close_source_discovery_process(self) -> None:
+        self._source_discovery_job.close()
+
     def _trace_worker(self, kind: str, worker: str, data: dict[str, object] | None = None) -> None:
         if hasattr(self._window, "_trace"):
             self._window._trace(kind, worker=worker, data=data or {})
@@ -1311,6 +1477,12 @@ class QtBackgroundJobsController:
         if request is not None:
             payload["input_path"] = getattr(request, "input_path", "")
         return payload
+
+    def _source_discovery_trace_payload(self, request, settings, job_id: int) -> dict[str, object]:
+        return {
+            "preview_job_id": job_id,
+            "input_path": str(getattr(request, "input_path", "")),
+        }
 
     def _fracture_preview_trace_payload(self, request, settings, job_id: int) -> dict[str, object]:
         payload: dict[str, object] = {

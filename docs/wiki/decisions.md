@@ -344,6 +344,43 @@ Related files:
 - `docs/raw/DECISIONS.md`
 - `docs/raw/workflow_status.md`
 
+## Decision: Conversion preflight requires every discovered Unreal material assignment
+
+Status: Active
+
+The USDA conversion worker must not start while a discovered Base Mesh material
+row or a required inline Part material row is blank. `single_material` requires
+Single, `vertex_color_split` requires Black and White, and `material_slots`
+requires every discovered slot. Reused Unreal Part assets keep their own
+materials and are exempt; Proxy Mesh remains a separate workflow.
+
+This check belongs in application request planning so GUI and CLI callers share
+one launch boundary and no Runtime Job is created for an incomplete material
+contract.
+
+Related files:
+- `src/xml_to_usda/conversion_service.py`
+- `src/xml_to_usda/qt_ui/window.py`
+
+## Decision: Known transient FBX binding failures reduce helper concurrency
+
+Status: Active
+
+Prototype FBX imports still start at the requested helper concurrency. If the
+Autodesk binding reports the observed transient
+`FbxVector2.__getitem__(): not enough arguments` failure, keep completed
+payloads and retry only the remaining FBX tasks with one fewer helper. At one
+helper the same failure remains fail-loud.
+
+This is narrower than retrying arbitrary Python or payload errors. The
+WorldTree evidence showed both HIGH FBX files overlap in the failing run, while
+the same `SM_BigBranch_02_HIGH.fbx` completed sequentially with 16,813,048
+points and 21,029,320 triangles.
+
+Related files:
+- `src/xml_to_usda/fbx_import_supervisor.py`
+- `tests/test_fbx_prototype_sources.py`
+
 ## Decision: Large GUI jobs run outside the UI process
 
 Status: Active
@@ -352,15 +389,19 @@ Context:
 Heavy conversions were unstable when too much FBX or USDA work happened inside the UI shell.
 
 Decision:
-Run large conversions in a dedicated worker subprocess and keep the UI shell out of the heavy native path.
+Run large conversions in a dedicated worker subprocess and keep the UI shell out of the heavy native path. Source-row discovery and Wind group inspection for XML files at or above 5 MiB follow the same rule, including a restored input at application startup.
 
 Reasoning:
-Process isolation keeps the interface responsive and contains native failures.
+Process isolation keeps the interface responsive and contains native failures. A restored 148.5 MB WorldTree must not be parsed synchronously before the main window is shown.
 
 Consequences:
-Packaged smoke and stability gates stay required for the worker path.
+Packaged smoke and stability gates stay required for the worker path. GUI startup must also avoid importing the Autodesk FBX SDK merely to define discovery helpers; FBX is loaded lazily only when an FBX-backed action needs it. Bootstrap Python exceptions are appended to the persistent GUI runtime log before being re-raised.
 
 Related files:
+- `src/xml_to_usda/discovery_service.py`
+- `src/xml_to_usda/source_discovery_worker_subprocess.py`
+- `src/xml_to_usda/qt_ui/entry.py`
+- `src/xml_to_usda/qt_ui/window.py`
 - `docs/raw/workflow_status.md`
 - `docs/raw/troubleshooting.md`
 
@@ -629,8 +670,12 @@ case and can make a preview crash look like an export-contract failure.
 Consequences:
 FBX Prototype Preview stays isolated from the UI process, keeps strict
 vertex-color validation for `vertex_color_split`, and reuses the bounded FBX
-payload cache. It does not redefine exported instance transforms, attachment,
-or skeletal binding.
+payload cache. Node transforms are read once and applied with equivalent
+row-vector arithmetic instead of calling the unstable FBX `MultT` binding for
+every control point. The viewport receives at most 50,000 evenly sampled source
+faces for oversized prototypes; source/export triangle counts remain exact and
+export geometry is unchanged. It does not redefine exported instance
+transforms, attachment, or skeletal binding.
 
 Related files:
 - `src/xml_to_usda/part_preview_service.py`

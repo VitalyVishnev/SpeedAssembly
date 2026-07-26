@@ -134,7 +134,13 @@ class PartPrototypePreviewDialog(PreviewShellDialog):
         self.viewport.set_mesh(result.mesh, tint_alpha=tint_alpha)
         self.editor.set_material_colors(result.material_colors)
         self.editor.set_triangle_prediction_base(result.source_section_triangle_counts)
-        self.status_label.setText("")
+        if result.preview_limited:
+            self.status_label.setText(
+                f"Viewport sampled {result.displayed_triangle_count:,} representative triangles; "
+                "export geometry is unchanged."
+            )
+        else:
+            self.status_label.setText("")
 
     def _preview_request(self, value: PartSourceMaterialValue) -> PartPrototypePreviewRequest:
         return PartPrototypePreviewRequest(

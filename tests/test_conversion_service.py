@@ -278,14 +278,16 @@ def test_prepare_conversion_plan_forces_async_for_fbx_override(tmp_path: Path) -
     assert plan.request.cleanup_policy == CleanupPolicy.PRESERVE_FOR_DEBUGGING
 
 
-def test_prepare_conversion_plan_marks_explicit_contract_for_udim_only_part_row() -> None:
+def test_prepare_conversion_plan_marks_explicit_contract_for_udim_part_row() -> None:
     config = PrototypeSourceConfig(
         source_key="Mesh_1",
         source_name="Twig_01",
         mode=PrototypeSourceMode.XML_MESH,
         fbx_material_mode=FbxMaterialMode.VERTEX_COLOR_SPLIT,
+        black_material_path="/Game/TreeParts/M_Leaves.M_Leaves",
         black_material_udim_mode=UdimMode.WRITE_SECONDARY_UV_OFFSET,
         black_material_udim_id=1028,
+        white_material_path="/Game/TreeParts/M_Bark.M_Bark",
         white_material_udim_mode=UdimMode.SHIFT_PRIMARY_UV,
         white_material_udim_id=1003,
     )
@@ -390,6 +392,40 @@ def test_prepare_conversion_plan_rejects_invalid_material_paths_with_current_mes
             ),
             async_threshold_bytes=1_000_000_000,
         )
+
+
+def test_prepare_conversion_plan_rejects_unassigned_material_rows_before_launch() -> None:
+    with pytest.raises(ValueError) as exc_info:
+        prepare_conversion_plan(
+            input_path=str(SIMPLE_TREE_01),
+            output_path="out.usda",
+            cpu_profile=CpuProfile.BALANCED,
+            cleanup_policy=CleanupPolicy.EPHEMERAL,
+            material_policy=MaterialPolicy.SOURCE_MATERIALS,
+            bark_material_path=None,
+            leaves_material_path=None,
+            single_material_path=None,
+            base_material_overrides=(
+                BaseMaterialOverride(source_id=1, source_name="Bark", ue_asset_path=None),
+            ),
+            prototype_source_configs=(
+                PrototypeSourceConfig(
+                    source_key="Mesh_1",
+                    source_name="BigBranch",
+                    mode=PrototypeSourceMode.FBX_FILE,
+                    fbx_path=str(SIMPLE_TREE_01),
+                    fbx_material_mode=FbxMaterialMode.VERTEX_COLOR_SPLIT,
+                    black_material_path="/Game/TreeParts/M_Leaves.M_Leaves",
+                    white_material_path=None,
+                ),
+            ),
+            async_threshold_bytes=1_000_000_000,
+        )
+
+    message = str(exc_info.value)
+    assert message.startswith("Cannot convert until Unreal material paths are assigned for:")
+    assert "Base Mesh Bark" in message
+    assert "Part BigBranch: White" in message
 
 
 def test_prepare_conversion_plan_rejects_missing_input_and_output_with_current_messages() -> None:

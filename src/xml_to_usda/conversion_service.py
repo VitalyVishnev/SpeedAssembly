@@ -80,6 +80,10 @@ def prepare_conversion_plan(
         base_material_overrides,
         prototype_source_configs,
     )
+    _validate_required_material_assignments(
+        base_material_overrides=base_material_overrides,
+        prototype_source_configs=prototype_source_configs,
+    )
     if use_explicit_material_contract:
         _validate_explicit_material_contract(
             base_material_overrides=base_material_overrides,
@@ -206,6 +210,50 @@ def _validate_explicit_material_contract(
         for label, value in (("Black", config.black_material_path), ("White", config.white_material_path)):
             if value and not is_valid_unreal_asset_path(normalize_unreal_asset_path(value)):
                 raise ValueError(f"{label} material path for {source_name} must start with /Game/.")
+
+
+def _validate_required_material_assignments(
+    *,
+    base_material_overrides: tuple[BaseMaterialOverride, ...],
+    prototype_source_configs: tuple[PrototypeSourceConfig, ...],
+) -> None:
+    missing = [
+        f"Base Mesh {override.source_name or f'Material_{override.source_id}'}"
+        for override in base_material_overrides
+        if not override.ue_asset_path
+    ]
+    for config in prototype_source_configs:
+        if config.mode == PrototypeSourceMode.UNREAL_ASSET:
+            continue
+        source_name = config.source_name or config.source_key
+        if config.fbx_material_mode == FbxMaterialMode.SINGLE_MATERIAL:
+            if not config.single_material_path:
+                missing.append(f"Part {source_name}: Single")
+            continue
+        if config.fbx_material_mode == FbxMaterialMode.MATERIAL_SLOTS:
+            missing.extend(
+                f"Part {source_name}: slot {override.slot_name}"
+                for override in config.fbx_material_slot_overrides
+                if not override.ue_asset_path
+            )
+            continue
+        if config.mode == PrototypeSourceMode.FBX_FILE or any(
+            (
+                config.black_material_path,
+                config.white_material_path,
+                config.has_active_udim_settings(),
+            )
+        ):
+            if not config.black_material_path:
+                missing.append(f"Part {source_name}: Black")
+            if not config.white_material_path:
+                missing.append(f"Part {source_name}: White")
+    if missing:
+        raise ValueError(
+            "Cannot convert until Unreal material paths are assigned for: "
+            + "; ".join(missing)
+            + "."
+        )
 
 
 def _should_run_async(

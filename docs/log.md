@@ -570,3 +570,31 @@ Major moves:
   child peak RSS. Twelve-cut and thread variants were also slower.
 - Removed the prototype instead of adding a dormant runtime subsystem. The
   production Detailed Boolean path remains sequential.
+
+## 2026-07-27 - WorldTree conversion preflight and FBX recovery
+
+- Blocked USDA conversion before worker launch when discovered Base Mesh or
+  inline Part material rows lack required Unreal paths; Unreal asset references
+  and Proxy Mesh remain exempt.
+- Confirmed `SM_BigBranch_02_HIGH.fbx` is readable sequentially at 16,813,048
+  points / 21,029,320 triangles after the paired HIGH import produced
+  `FbxVector2.__getitem__(): not enough arguments`.
+- Added a narrow lower-concurrency retry for that transient Autodesk binding
+  signature while preserving completed FBX payloads.
+- Replaced per-control-point FBX `MultT` calls with equivalent matrix
+  coefficient arithmetic after frozen Part Preview reproduced an invalid
+  `FbxVector4` dispatch on the HIGH branch.
+- Limited oversized Part Preview viewport payloads to 50,000 evenly sampled
+  faces while retaining exact source/export counts and untouched export
+  geometry.
+- Removed the eager Autodesk FBX import from normal GUI bootstrap.
+- Moved source-row discovery for XML files at or above 5 MiB into a
+  file-backed crash-isolated worker; restored WorldTree startup now constructs
+  the window before parsing and serializes Wind refresh behind discovery.
+- Routed large-file Wind group inspection through the existing isolated Wind
+  worker instead of a GUI-process Python thread.
+- Added persistent bootstrap traceback logging and regression coverage for a
+  restored large input.
+- Verified the packaged shell with the real restored WorldTree: isolated source
+  discovery and Wind inspection both returned, then the timed GUI exited
+  normally.

@@ -1,5 +1,40 @@
 # Known Bugs
 
+## Bug: Restored very large XML could destabilize GUI startup
+
+Status: Mitigated; packaged validation passed, operator validation pending
+
+Symptoms:
+With the 148.5 MB `WorldTree.xml` persisted as the default input, repeated
+launches either stopped after the `app.start` trace event or failed during
+module import with `'builtin_function_or_method' object has no attribute
+'GenericAlias'`.
+
+Confirmed boundary:
+The shell synchronously ran two full XML discovery scans before showing the
+window. Importing the discovery facade also eagerly imported the native
+Autodesk FBX SDK even though normal XML startup did not need it. No matching
+SpeedAssembly Application Error or WER record identified the final failing
+instruction, so the exact corruption source remains unverified.
+
+Current behavior:
+XML discovery and Wind inspection at or above 5 MiB run in fresh file-backed
+workers; latest input wins and Wind auto-refresh waits for discovery. Autodesk FBX
+loads only for an actual FBX-backed action. Python bootstrap failures are now
+persisted in `gui_runtime.log`. A source-mode WorldTree startup constructed the
+window in 0.421 s, returned one material row plus two prototype rows, then
+loaded six Wind groups in 8.64 s total without running either source scan in
+the GUI process.
+The packaged executable reproduced the same sequence: source discovery
+completed in 4.42 s, isolated Wind inspection completed 2.56 s later with six
+groups, and the timed shell exited normally.
+
+Related files:
+- `src/xml_to_usda/discovery_service.py`
+- `src/xml_to_usda/source_discovery_worker_subprocess.py`
+- `src/xml_to_usda/qt_ui/background_jobs.py`
+- `src/xml_to_usda/qt_ui/window.py`
+
 ## Bug: Generic source-model caching can crash while serializing a very large tree
 
 Status: Open
@@ -171,10 +206,19 @@ Symptoms:
 A prototype row switched to `FBX file` fails before USDA is written.
 
 Likely cause:
-Missing Autodesk FBX SDK bindings, a non-rigid FBX, unreadable mesh payloads, missing vertex colors, or an SDK vertex-color access error.
+Missing Autodesk FBX SDK bindings, a non-rigid FBX, unreadable mesh payloads,
+missing vertex colors, an SDK vertex-color access error, or transient binding
+instability while several exceptionally large FBX payloads overlap. Frozen
+Preview also reproduced an invalid `MultT(FbxVector4)` dispatch after repeated
+per-control-point calls on a HIGH WorldTree branch.
 
 Current workaround:
-Use a rigid FBX with readable polygon mesh data and vertex colors. Strict `vertex_color_split` retries once in a fresh worker process before surfacing the final error.
+Use a rigid FBX with readable polygon mesh data and vertex colors. The observed
+WorldTree `FbxVector2.__getitem__(): not enough arguments` failure now retries
+only the remaining payloads at lower helper concurrency. A repeat at one helper
+still surfaces normally. Per-point Preview/import transforms no longer call
+`MultT`; oversized Part Preview display geometry is sampled to 50,000 faces
+without changing export geometry.
 
 Do not repeat:
 Do not treat XML `LOD/@Filename` as the replacement source.

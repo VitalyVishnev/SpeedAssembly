@@ -94,6 +94,7 @@ def test_qt_fracture_controller_delivers_only_latest_settings_without_killing_ac
         start_proxy_mesh_process=lambda *_args, **_kwargs: None,
         start_fracture_preview_process=start_fracture_preview,
         start_part_preview_process=lambda *_args: None,
+        start_source_discovery_process=lambda *_args: None,
         drain_process_queue=drain,
         close_process_queue=lambda _queue: None,
     )

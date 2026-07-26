@@ -191,6 +191,48 @@ Evidence labels:
   consistent with the existing native/system instability signatures but does
   not identify whether retained native state or the unstable host caused it;
   no ownership-code workaround was added.
+- 2026-07-27 observation: PyInstaller analysis repeatedly lost its Python
+  process without traceback at different stdlib hooks (`pickle`, then `heapq`)
+  with 52 GB memory available. The unchanged package gate passed twice when
+  the build process inherited one-core affinity. This is additional host
+  instability evidence; no product runtime workaround was added.
+
+### CR-012 - Eager Autodesk import failed during packaged GUI bootstrap
+
+- Date: 2026-07-27
+- Status/evidence: Mitigated; packaged startup passed / Strong boundary, exact corruption source unverified
+- Signature: PyInstaller reported `'builtin_function_or_method' object has no
+  attribute 'GenericAlias'` while importing `qt_ui.window` line 100 and the
+  Materials/Geometry panels.
+- Boundary: frozen GUI bootstrap before `MainWindow` construction.
+- Class: `PACKAGE-NATIVE`
+- Cause/fix: the panels imported `discovery_service`, which eagerly imported
+  the Autodesk FBX extension although startup only needed XML discovery.
+  FBX import is now lazy and occurs only for FBX material-slot inspection.
+  Bootstrap exceptions are appended to `gui_runtime.log` before re-raising.
+- Regression gate: importing `qt_ui.panels` leaves `fbx` absent from
+  `sys.modules`; packaged startup completed with restored WorldTree state.
+
+### CR-013 - Restored WorldTree was parsed synchronously before window show
+
+- Date: 2026-07-27
+- Status/evidence: Mitigated; packaged WorldTree passed / Strong boundary, final crash instruction unverified
+- Signature: repeated launches with restored `WorldTree.xml` recorded only
+  `app.start`, then disappeared without a handled error or matching
+  SpeedAssembly WER event.
+- Boundary: GUI process during `_reload_input_dependent_tabs`.
+- Class: Unclassified GUI startup / process pressure.
+- Cause/fix: the 148.5 MB XML received two full synchronous discovery passes
+  before the window was shown, followed by Wind inspection in a GUI-process
+  thread. Inputs at or above 5 MiB now use fresh file-backed discovery and Wind
+  workers; the GUI opens first and the reads stay sequential. A source-mode
+  reproduction constructed the window in 0.421 s, returned one material row,
+  two prototype rows, and six Wind groups in 8.64 s total.
+- Packaged gate: source discovery returned after 4.42 s, isolated Wind
+  inspection returned 2.56 s later, and the timed shell exited normally.
+- Regression gate: Qt startup test forbids synchronous discovery for a large
+  restored input; real source and packaged WorldTree startup must both return
+  the expected rows without GUI termination.
 
 ## System rules derived from the incidents
 

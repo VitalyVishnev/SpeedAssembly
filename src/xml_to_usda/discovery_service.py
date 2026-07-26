@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from .fbx_adapter import inspect_fbx_material_slots
 from .models import CpuProfile, FbxMaterialMode, PrototypeSourceMode, UdimMode
 from .settings_service import (
     BaseMaterialSettingRecord,
@@ -74,6 +73,34 @@ class PrototypeRowSpec:
 class PrototypeDiscovery:
     summary: str
     rows: tuple[PrototypeRowSpec, ...]
+
+
+@dataclass(frozen=True)
+class SourceDiscoveryRequest:
+    input_path: str
+    base_persisted_records: tuple[BaseMaterialSettingRecord, ...] = ()
+    part_persisted_records: tuple[PartSourceSettingRecord, ...] = ()
+
+
+@dataclass(frozen=True)
+class SourceDiscoveryResult:
+    input_path: str
+    base: BaseMaterialDiscovery
+    prototypes: PrototypeDiscovery
+
+
+def discover_source_rows(request: SourceDiscoveryRequest) -> SourceDiscoveryResult:
+    return SourceDiscoveryResult(
+        input_path=request.input_path,
+        base=discover_base_material_rows(
+            request.input_path,
+            persisted_records=request.base_persisted_records,
+        ),
+        prototypes=discover_part_prototype_rows(
+            request.input_path,
+            persisted_records=request.part_persisted_records,
+        ),
+    )
 
 
 def discover_base_material_rows(
@@ -225,6 +252,10 @@ def _inspect_fbx_material_slots_cached(
     resolved_fbx_path: str,
     cpu_profile_value: str,
 ):
+    # FBX is native and expensive to import. Keep it out of normal GUI startup;
+    # only Material Slots inspection needs this backend.
+    from .fbx_adapter import inspect_fbx_material_slots
+
     return inspect_fbx_material_slots(
         resolved_fbx_path,
         cpu_profile=CpuProfile(cpu_profile_value),

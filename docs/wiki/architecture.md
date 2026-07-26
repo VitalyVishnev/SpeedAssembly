@@ -21,6 +21,7 @@ Main systems:
 - `src/xml_to_usda/conversion_service.py` and `src/xml_to_usda/conversion_orchestrator.py` - normalize caller intent and run conversions.
 - `src/xml_to_usda/qt_ui/` - supported PySide6 shell and preview adapters.
 - `src/xml_to_usda/fbx_adapter.py` and `src/xml_to_usda/fbx_import_supervisor.py` - Autodesk FBX integration and helper process control.
+- `src/xml_to_usda/discovery_service.py` and `src/xml_to_usda/source_discovery_worker_subprocess.py` - lightweight material/prototype row discovery; XML files at or above 5 MiB are inspected outside the GUI process.
 - `src/xml_to_usda/cache_maintenance.py` - bounded runtime cache maintenance for job leftovers, FBX payloads, source-model caches, Proxy Source Projection caches, legacy Fracture Preview cache files, and stale cache temp files.
 - `src/xml_to_usda/proxy_mesh_service.py`, `src/xml_to_usda/fracture_service.py`, and related workers - companion workflows.
 - `src/xml_to_usda/qem_simplification.py` - shared topology-preserving `fast-simplification` QEM backend used by Proxy Mesh and Fracture Preview diagnostic geometry.
@@ -132,6 +133,12 @@ This screenshot loop is a design preflight, not final validation. Keep the
 packaged smoke/build gate for completed UI changes.
 
 5. Runtime wrappers handle worker isolation, cleanup, packaging, and diagnostics.
+
+The main shell never imports Autodesk FBX solely to build its XML discovery
+panels. FBX loading is lazy at the actual FBX action boundary. Restored large
+XML inputs are shown immediately, discovered in a fresh file-backed worker,
+then inspected for Wind groups in the existing isolated Wind worker; the
+source reads do not overlap.
 
 Testing has four separate execution boundaries: Core (synthetic deterministic
 contracts), Integration (source/worker/Qt workflows), Packaged (frozen EXE and

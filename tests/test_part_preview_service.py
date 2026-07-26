@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from array import array
+from dataclasses import replace
 from types import SimpleNamespace
 
+import xml_to_usda.part_preview_service as part_preview_service_module
 from xml_to_usda.models import (
     CompactMeshSection,
     FbxMaterialMode,
@@ -65,6 +67,53 @@ def test_part_preview_material_colors_are_stable_per_material_section(monkeypatc
     first_color = tuple(result.mesh.vertex_color_components[:4])
     second_face_color = tuple(result.mesh.vertex_color_components[12:16])
     assert first_color != second_face_color
+
+
+def test_part_preview_samples_oversized_geometry_without_changing_export_prediction(monkeypatch) -> None:
+    source_mesh = replace(
+        _preview_mesh(),
+        vertex_color_components=array(
+            "f",
+            (
+                0.0, 0.0, 0.0, 1.0,
+                0.0, 0.0, 0.0, 1.0,
+                0.0, 0.0, 0.0, 1.0,
+                1.0, 1.0, 1.0, 1.0,
+                1.0, 1.0, 1.0, 1.0,
+                1.0, 1.0, 1.0, 1.0,
+            ),
+        ),
+    )
+    prototype = Prototype(
+        identity=PrototypeIdentity(source_key="Mesh_1", prim_name="Twig"),
+        mesh=None,
+        geometry_payload=source_mesh,
+        source_key="Mesh_1",
+        source_mesh_id=1,
+        source_name="Twig",
+    )
+    monkeypatch.setattr(part_preview_service_module, "MAX_PART_PREVIEW_DISPLAY_FACES", 1)
+    monkeypatch.setattr(
+        part_preview_service_module,
+        "load_resolved_assembly_model",
+        lambda *_args, **_kwargs: (None, SimpleNamespace(authoring_model=SimpleNamespace(prototypes=(prototype,), materials=()))),
+    )
+
+    result = build_part_prototype_preview(
+        PartPrototypePreviewRequest(
+            input_path="tree.xml",
+            source_key="Mesh_1",
+            source_name="Twig",
+            prototype_source_config=PrototypeSourceConfig(source_key="Mesh_1", source_name="Twig"),
+        ),
+        PartPrototypePreviewSettings(display_mode=PartPreviewDisplayMode.VERTEX_COLORS),
+    )
+
+    assert result.preview_limited is True
+    assert result.source_triangle_count == 2
+    assert result.displayed_triangle_count == 1
+    assert result.predicted_export_triangle_count == 2
+    assert result.mesh.vertex_color_count == result.mesh.point_count == 3
 
 
 def test_part_preview_loads_source_geometry_without_export_simplification(monkeypatch) -> None:

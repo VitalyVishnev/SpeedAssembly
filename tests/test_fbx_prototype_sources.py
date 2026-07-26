@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from xml_to_usda.cli import main as cli_main
-from xml_to_usda.fbx_adapter import FbxImportError, load_fbx_geometry
+from xml_to_usda.fbx_adapter import (
+    FbxImportError,
+    _fbx_point_transform_coefficients,
+    _transform_control_point,
+    load_fbx_geometry,
+)
 from xml_to_usda.fbx_import_supervisor import FbxImportTask, _NativeHelperCrash
 from xml_to_usda.fbx_payload_cache import FbxPayloadCacheResult
 from xml_to_usda.fbx_worker_subprocess import (
@@ -19,7 +24,7 @@ from xml_to_usda.fbx_worker_subprocess import (
 from xml_to_usda.models import CpuProfile, FbxMaterialMode, PrototypeSourceConfig, PrototypeSourceMode, Vector3
 from xml_to_usda.pipeline import convert_file, load_canonical_model
 from xml_to_usda.prototype_sources import load_prototype_source_configs_from_json
-from xml_to_usda.worker_file_protocol import WORKER_TOKEN_ENV, read_worker_payload
+from xml_to_usda.worker_file_protocol import WORKER_TOKEN_ENV, read_worker_payload, write_error_payload
 
 
 def _write_fbx_json_payload(
@@ -69,6 +74,26 @@ def _write_fbx_json_payload(
     payload_path = tmp_path / file_name
     payload_path.write_text(json.dumps(payload), encoding="utf-8")
     return payload_path
+
+
+def test_fbx_control_points_use_matrix_coefficients_without_native_multt() -> None:
+    class _Transform:
+        rows = (
+            (2.0, 0.0, 0.0, 0.0),
+            (0.0, 3.0, 0.0, 0.0),
+            (0.0, 0.0, 4.0, 0.0),
+            (10.0, 20.0, 30.0, 1.0),
+        )
+
+        def Get(self, row: int, column: int) -> float:
+            return self.rows[row][column]
+
+        def MultT(self, _vector):
+            raise AssertionError("FBX MultT must not run in the per-point loop")
+
+    coefficients = _fbx_point_transform_coefficients(_Transform())
+
+    assert _transform_control_point(coefficients, (1.0, 2.0, 3.0, 1.0)) == (12.0, 26.0, 42.0)
 
 
 def test_load_prototype_source_configs_from_json_reads_fbx_and_unreal_modes(tmp_path: Path) -> None:
@@ -435,6 +460,38 @@ def test_fbx_import_supervisor_retries_remaining_tasks_with_lower_concurrency(
 
     assert worker_counts == [2, 1]
     assert results == {0: "payload-0", 1: "payload-1"}
+
+
+def test_fbx_import_supervisor_treats_vector_binding_failure_as_retryable(
+    tmp_path: Path,
+) -> None:
+    import xml_to_usda.fbx_import_supervisor as supervisor_module
+
+    error_path = tmp_path / "error.json"
+    write_error_payload(
+        error_path,
+        message="FbxVector2.__getitem__(): not enough arguments",
+        formatted_traceback="TypeError: FbxVector2.__getitem__(): not enough arguments",
+    )
+    task = FbxImportTask(
+        task_id=1,
+        display_name="SM_BigBranch_02_HIGH",
+        prototype_name="SM_BigBranch_02_HIGH",
+        fbx_path="second.fbx",
+        cpu_profile=CpuProfile.BALANCED,
+    )
+    helper = supervisor_module._RunningHelper(
+        process=object(),
+        task=task,
+        request_path=tmp_path / "request.json",
+        result_path=tmp_path / "result.json",
+        error_path=error_path,
+    )
+
+    with pytest.raises(_NativeHelperCrash) as exc_info:
+        supervisor_module._finalize_helper(helper, exit_code=1)
+
+    assert exc_info.value.remaining_tasks == (task,)
 
 
 def test_fbx_part_source_restores_authored_instance_scale_without_xml_original_scale_multiplier(tmp_path: Path) -> None:

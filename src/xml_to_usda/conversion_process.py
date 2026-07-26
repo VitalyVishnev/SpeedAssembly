@@ -53,6 +53,13 @@ from .proxy_mesh_worker_subprocess import (
     write_proxy_mesh_worker_request,
 )
 from .runtime_error_mode import suppress_windows_native_error_dialogs
+from .source_discovery_worker_subprocess import (
+    SOURCE_DISCOVERY_WORKER_COMMAND,
+    SourceDiscoveryWorkerRequest,
+    read_source_discovery_worker_error,
+    read_source_discovery_worker_result,
+    write_source_discovery_worker_request,
+)
 from .worker_file_protocol import (
     cleanup_file,
     create_temp_path,
@@ -249,6 +256,43 @@ def start_wind_preview_process(request: object, settings=None):
     return (
         _SubprocessWorkerProcess(process),
         _WindPreviewWorkerQueue(
+            request_path=request_path,
+            result_path=result_path,
+            error_path=error_path,
+            stderr_path=stderr_path,
+        ),
+        _SubprocessCancelEvent(process),
+    )
+
+
+def start_source_discovery_process(request):
+    suppress_windows_native_error_dialogs()
+    request_path = _create_source_discovery_temp_path(".request.json")
+    result_path = _create_source_discovery_temp_path(".result.json")
+    error_path = _create_source_discovery_temp_path(".error.json")
+    stderr_path = _create_source_discovery_temp_path(".stderr.log")
+    worker_token = new_worker_token()
+    write_source_discovery_worker_request(
+        request_path,
+        SourceDiscoveryWorkerRequest(
+            request=request,
+            result_path=str(result_path),
+            error_path=str(error_path),
+            worker_token=worker_token,
+        ),
+    )
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    with stderr_path.open("wb") as stderr_handle:
+        process = subprocess.Popen(
+            resolve_worker_command(SOURCE_DISCOVERY_WORKER_COMMAND, request_path),
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_handle,
+            creationflags=creation_flags,
+            env=worker_env(worker_token),
+        )
+    return (
+        _SubprocessWorkerProcess(process),
+        _SourceDiscoveryWorkerQueue(
             request_path=request_path,
             result_path=result_path,
             error_path=error_path,
@@ -607,6 +651,34 @@ class _WindPreviewWorkerQueue:
                 pass
 
 
+@dataclass
+class _SourceDiscoveryWorkerQueue:
+    request_path: Path
+    result_path: Path
+    error_path: Path
+    stderr_path: Path
+    delivered: bool = False
+
+    def drain(self) -> list[tuple[str, object]]:
+        if self.delivered:
+            return []
+        if self.error_path.exists():
+            self.delivered = True
+            message, formatted_traceback = read_source_discovery_worker_error(self.error_path)
+            return [("error_traceback", formatted_traceback), ("error", message)]
+        if not self.result_path.exists():
+            return []
+        self.delivered = True
+        return [("result", read_source_discovery_worker_result(self.result_path))]
+
+    def close(self) -> None:
+        for path in (self.request_path, self.result_path, self.error_path, self.stderr_path):
+            try:
+                cleanup_file(path)
+            except Exception:
+                pass
+
+
 def _create_proxy_temp_path(suffix: str) -> Path:
     return _create_temp_path("xml_to_usda_proxy_", suffix)
 
@@ -625,6 +697,10 @@ def _create_part_preview_temp_path(suffix: str) -> Path:
 
 def _create_wind_preview_temp_path(suffix: str) -> Path:
     return _create_temp_path("xml_to_usda_wind_preview_", suffix)
+
+
+def _create_source_discovery_temp_path(suffix: str) -> Path:
+    return _create_temp_path("xml_to_usda_source_discovery_", suffix)
 
 
 def _create_temp_path(prefix: str, suffix: str) -> Path:

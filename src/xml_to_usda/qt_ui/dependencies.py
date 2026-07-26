@@ -20,6 +20,7 @@ class QtUiDependencies:
     start_fracture_preview_process: object
     start_part_preview_process: object
     start_wind_preview_process: object
+    start_source_discovery_process: object
     close_process_queue: object
     drain_process_queue: object
     convert_request: object
@@ -57,6 +58,7 @@ def build_default_dependencies() -> QtUiDependencies:
         start_part_preview_process,
         start_proxy_mesh_process,
         start_wind_preview_process,
+        start_source_discovery_process,
     )
     from ..conversion_service import prepare_conversion_plan
     from ..discovery_service import (
@@ -92,6 +94,7 @@ def build_default_dependencies() -> QtUiDependencies:
         start_fracture_preview_process=start_fracture_preview_process,
         start_part_preview_process=start_part_preview_process,
         start_wind_preview_process=start_wind_preview_process,
+        start_source_discovery_process=start_source_discovery_process,
         close_process_queue=close_process_queue,
         drain_process_queue=drain_process_queue,
         convert_request=convert_request,

@@ -20,6 +20,7 @@ from .fbx_payload_cache import FbxPayloadCacheOptions, load_fbx_payload_from_cac
 from .geometry_buffers import geometry_buffer_from_mesh
 from .models import (
     Color4,
+    CompactMeshSection,
     ConversionMode,
     CpuProfile,
     GeometryBuffer,
@@ -32,6 +33,9 @@ from .models import (
 from .prototype_sources import fbx_import_read_options_for_material_mode
 from .prototype_simplification import predicted_simplified_triangle_count, simplify_geometry_buffer
 from .viewport_scene import geometry_triangle_count
+
+
+MAX_PART_PREVIEW_DISPLAY_FACES = 50_000
 
 
 class PartPreviewDisplayMode(str, Enum):
@@ -74,6 +78,7 @@ class PartPrototypePreviewResult:
     predicted_export_triangle_count: int = 0
     source_section_triangle_counts: tuple[int, ...] = ()
     material_colors: tuple[PartMaterialPreviewColor, ...] = ()
+    preview_limited: bool = False
 
 
 def build_part_prototype_preview(
@@ -186,11 +191,26 @@ def _preview_result_from_payload(
     config = request.prototype_source_config
     source_triangle_count = geometry_triangle_count(source_payload)
     source_section_triangle_counts = _section_triangle_counts(source_payload)
-    payload = (
-        simplify_geometry_buffer(source_payload, config.simplification_percent, cancel_event=cancel_event)
-        if config.simplification_percent < 100
-        else source_payload
+    predicted_export_triangle_count = _predicted_export_triangle_count(
+        source_payload,
+        config.simplification_percent,
+        source_triangle_count=source_triangle_count,
     )
+    preview_limited = source_payload.face_count > MAX_PART_PREVIEW_DISPLAY_FACES
+    if preview_limited:
+        payload = _sample_geometry_faces(
+            source_payload,
+            max_faces=min(MAX_PART_PREVIEW_DISPLAY_FACES, max(1, predicted_export_triangle_count)),
+            cancel_event=cancel_event,
+        )
+    elif config.simplification_percent < 100:
+        payload = simplify_geometry_buffer(
+            source_payload,
+            config.simplification_percent,
+            cancel_event=cancel_event,
+        )
+    else:
+        payload = source_payload
     material_colors = _material_color_legend(payload, material_specs)
     display_mode = PartPreviewDisplayMode(settings.display_mode)
     if display_mode == PartPreviewDisplayMode.MATERIAL_COLORS:
@@ -206,12 +226,148 @@ def _preview_result_from_payload(
         mesh=display_mesh,
         source_triangle_count=source_triangle_count,
         displayed_triangle_count=geometry_triangle_count(display_mesh),
-        predicted_export_triangle_count=predicted_simplified_triangle_count(
-            source_payload,
-            config.simplification_percent,
-        ),
+        predicted_export_triangle_count=predicted_export_triangle_count,
         source_section_triangle_counts=source_section_triangle_counts,
         material_colors=material_colors,
+        preview_limited=preview_limited,
+    )
+
+
+def _predicted_export_triangle_count(
+    mesh: GeometryBuffer,
+    percent: int,
+    *,
+    source_triangle_count: int,
+) -> int:
+    if mesh.face_count <= MAX_PART_PREVIEW_DISPLAY_FACES:
+        return predicted_simplified_triangle_count(mesh, percent)
+    if source_triangle_count <= 0:
+        return 0
+    resolved_percent = max(0, min(100, int(percent)))
+    if resolved_percent >= 100:
+        return source_triangle_count
+    return max(1, round(source_triangle_count * resolved_percent / 100.0))
+
+
+def _sample_geometry_faces(
+    mesh: GeometryBuffer,
+    *,
+    max_faces: int,
+    cancel_event=None,
+) -> GeometryBuffer:
+    source_face_count = mesh.face_count
+    target_face_count = min(source_face_count, max(1, int(max_faces)))
+    if target_face_count >= source_face_count:
+        return mesh
+
+    selected_faces = tuple(
+        index * source_face_count // target_face_count
+        for index in range(target_face_count)
+    )
+    selected_source_to_output: dict[int, int] = {}
+    point_map: dict[int, int] = {}
+    point_components = array("f")
+    face_vertex_counts = array("i")
+    face_vertex_indices = array("i")
+    normal_components = array("f")
+    uv_components = array("f")
+    secondary_uv_components = array("f")
+    vertex_color_components = array("f")
+    skel_joint_indices = array("i")
+    skel_joint_weights = array("f")
+
+    source_corner_count = len(mesh.face_vertex_indices)
+    normals_by_point = len(mesh.normal_components) == mesh.point_count * 3
+    normals_by_corner = len(mesh.normal_components) == source_corner_count * 3
+    uvs_by_corner = len(mesh.uv_components) == source_corner_count * 2
+    secondary_uvs_by_corner = len(mesh.secondary_uv_components) == source_corner_count * 2
+    colors_by_point = len(mesh.vertex_color_components) >= mesh.point_count * 4
+    skel_by_point = mesh.skel_element_size > 0 and (
+        len(mesh.skel_joint_indices) >= mesh.point_count * mesh.skel_element_size
+        and len(mesh.skel_joint_weights) >= mesh.point_count * mesh.skel_element_size
+    )
+
+    selected_position = 0
+    source_corner_offset = 0
+    for source_face_index, raw_count in enumerate(mesh.face_vertex_counts):
+        count = int(raw_count)
+        if source_face_index % 100_000 == 0 and cancel_event is not None:
+            if getattr(cancel_event, "is_set", lambda: False)():
+                raise ValueError("Part preview sampling was cancelled.")
+        if source_face_index != selected_faces[selected_position]:
+            source_corner_offset += count
+            continue
+
+        output_face_index = len(face_vertex_counts)
+        selected_source_to_output[source_face_index] = output_face_index
+        face_vertex_counts.append(count)
+        for local_corner in range(count):
+            source_corner = source_corner_offset + local_corner
+            source_point = int(mesh.face_vertex_indices[source_corner])
+            output_point = point_map.get(source_point)
+            if output_point is None:
+                output_point = len(point_map)
+                point_map[source_point] = output_point
+                point_offset = source_point * 3
+                point_components.extend(mesh.point_components[point_offset:point_offset + 3])
+                if normals_by_point:
+                    normal_components.extend(mesh.normal_components[point_offset:point_offset + 3])
+                if colors_by_point:
+                    color_offset = source_point * 4
+                    vertex_color_components.extend(mesh.vertex_color_components[color_offset:color_offset + 4])
+                if skel_by_point:
+                    skel_offset = source_point * mesh.skel_element_size
+                    skel_joint_indices.extend(
+                        mesh.skel_joint_indices[skel_offset:skel_offset + mesh.skel_element_size]
+                    )
+                    skel_joint_weights.extend(
+                        mesh.skel_joint_weights[skel_offset:skel_offset + mesh.skel_element_size]
+                    )
+            face_vertex_indices.append(output_point)
+            if normals_by_corner:
+                normal_offset = source_corner * 3
+                normal_components.extend(mesh.normal_components[normal_offset:normal_offset + 3])
+            if uvs_by_corner:
+                uv_offset = source_corner * 2
+                uv_components.extend(mesh.uv_components[uv_offset:uv_offset + 2])
+            if secondary_uvs_by_corner:
+                uv_offset = source_corner * 2
+                secondary_uv_components.extend(mesh.secondary_uv_components[uv_offset:uv_offset + 2])
+
+        source_corner_offset += count
+        selected_position += 1
+        if selected_position >= target_face_count:
+            break
+
+    sections = tuple(
+        CompactMeshSection(
+            material_id=section.material_id,
+            face_indices=array(
+                "i",
+                (
+                    selected_source_to_output[int(source_face)]
+                    for source_face in section.face_indices
+                    if int(source_face) in selected_source_to_output
+                ),
+            ),
+        )
+        for section in mesh.sections
+    )
+    return GeometryBuffer(
+        name=mesh.name,
+        point_components=point_components,
+        face_vertex_counts=face_vertex_counts,
+        face_vertex_indices=face_vertex_indices,
+        normal_components=normal_components,
+        uv_components=uv_components,
+        secondary_uv_components=secondary_uv_components,
+        vertex_color_components=vertex_color_components,
+        vertex_color_warning=mesh.vertex_color_warning,
+        fbx_material_slots=mesh.fbx_material_slots,
+        sections=tuple(section for section in sections if section.face_indices),
+        skel_joint_indices=skel_joint_indices,
+        skel_joint_weights=skel_joint_weights,
+        skel_element_size=mesh.skel_element_size if skel_joint_indices else 0,
     )
 
 

@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .runtime_error_mode import suppress_windows_native_error_dialogs
+from .models import DynamicWindData
+from .wind_service import WindInspectionRequest, inspect_wind_groups
 from .wind_preview_service import WindPreviewRequest, WindPreviewResult, generate_wind_preview_from_request
 from .worker_commands import WIND_PREVIEW_WORKER_COMMAND
 from .worker_file_protocol import (
@@ -29,7 +31,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class WindPreviewWorkerRequest:
-    request: WindPreviewRequest | ExternalSkeletonPreviewRequest | ExternalSkeletonChoicesRequest
+    request: WindPreviewRequest | WindInspectionRequest | ExternalSkeletonPreviewRequest | ExternalSkeletonChoicesRequest
     result_path: str
     error_path: str
     worker_token: str
@@ -46,11 +48,11 @@ def read_wind_preview_worker_request(path: str | Path) -> WindPreviewWorkerReque
     return payload
 
 
-def read_wind_preview_worker_result(path: str | Path) -> WindPreviewResult | ExternalSkeletonChoicesResult:
+def read_wind_preview_worker_result(path: str | Path) -> WindPreviewResult | DynamicWindData | ExternalSkeletonChoicesResult:
     from .wind_external_skeleton import ExternalSkeletonChoicesResult
 
     payload = read_worker_payload(path)
-    if not isinstance(payload, (WindPreviewResult, ExternalSkeletonChoicesResult)):
+    if not isinstance(payload, (WindPreviewResult, DynamicWindData, ExternalSkeletonChoicesResult)):
         raise TypeError("Invalid Wind Preview worker result payload.")
     return payload
 
@@ -66,6 +68,8 @@ def run_wind_preview_worker_request_file(path: str | Path) -> int:
         validate_worker_token(request.worker_token)
         if isinstance(request.request, WindPreviewRequest):
             result = generate_wind_preview_from_request(request.request)
+        elif isinstance(request.request, WindInspectionRequest):
+            result = inspect_wind_groups(request.request)
         else:
             from .wind_external_skeleton import (
                 ExternalSkeletonChoicesRequest,

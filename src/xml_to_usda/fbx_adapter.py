@@ -112,11 +112,11 @@ class AutodeskFbxBackend(FbxBackend):
                 if mesh.GetDeformerCount() > 0:
                     raise FbxImportError("Skinned FBX files are not supported for Assembly Part import.")
 
-                transform = node.EvaluateGlobalTransform()
+                transform_coefficients = _fbx_point_transform_coefficients(node.EvaluateGlobalTransform())
                 control_points = mesh.GetControlPoints()
                 local_point_count = mesh.GetControlPointsCount()
                 for point_index in range(local_point_count):
-                    control_point = _transform_control_point(fbx, transform, control_points[point_index])
+                    control_point = _transform_control_point(transform_coefficients, control_points[point_index])
                     point_components.extend((float(control_point[0]), float(control_point[1]), float(control_point[2])))
 
                 mesh_color_components = [0.0] * (local_point_count * 4) if read_vertex_colors else []
@@ -658,21 +658,41 @@ def _load_scene(fbx_module, sdk_manager, scene, fbx_path: str) -> bool:
         importer.Destroy()
 
 
-def _transform_control_point(fbx_module, transform, control_point):
+def _fbx_point_transform_coefficients(transform) -> tuple[float, ...]:
+    try:
+        return tuple(
+            float(transform.Get(row, column))
+            for column in range(3)
+            for row in range(4)
+        )
+    except Exception as exc:
+        raise FbxImportError("Autodesk FBX SDK failed while reading a node transform matrix.") from exc
+
+
+def _transform_control_point(transform_coefficients: tuple[float, ...], control_point):
+    x = float(control_point[0])
+    y = float(control_point[1])
+    z = float(control_point[2])
     try:
         w = float(control_point[3])
     except (IndexError, TypeError):
         w = 1.0
-    vector = fbx_module.FbxVector4(
-        float(control_point[0]),
-        float(control_point[1]),
-        float(control_point[2]),
-        w,
+    (
+        m00,
+        m10,
+        m20,
+        m30,
+        m01,
+        m11,
+        m21,
+        m31,
+        m02,
+        m12,
+        m22,
+        m32,
+    ) = transform_coefficients
+    return (
+        x * m00 + y * m10 + z * m20 + w * m30,
+        x * m01 + y * m11 + z * m21 + w * m31,
+        x * m02 + y * m12 + z * m22 + w * m32,
     )
-    try:
-        return transform.MultT(vector)
-    except TypeError as exc:
-        raise FbxImportError(
-            "Autodesk FBX SDK matrix transform call failed while reading control points. "
-            "This usually indicates a Python binding mismatch in the installed FBX SDK."
-        ) from exc
