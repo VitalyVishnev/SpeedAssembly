@@ -70,7 +70,7 @@
       </Triangles>
       <LeafReferences Material="2">
         <X>0.05</X>
-        <Y>2.45</Y>
+        <Y>0.45</Y>
         <Z>0.0</Z>
         <Scale>0.95</Scale>
         <RotAxisX>1</RotAxisX>
@@ -97,7 +97,7 @@
       </Triangles>
       <LeafReferences Material="2">
         <X>0.02</X>
-        <Y>3.2</Y>
+        <Y>0.2</Y>
         <Z>0.02</Z>
         <Scale>1.1</Scale>
         <RotAxisX>0</RotAxisX>

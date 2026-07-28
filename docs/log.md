@@ -598,3 +598,35 @@ Major moves:
 - Verified the packaged shell with the real restored WorldTree: isolated source
   discovery and Wind inspection both returned, then the timed GUI exited
   normally.
+
+## 2026-07-28 - Object-local Repeated Part transforms
+
+- Corrected mesh-bearing Object `LeafReferences` to receive the same `Abs*`
+  translation as their sibling mesh points in canonical and Proxy source paths.
+- Kept zero-transform hosts unchanged and made the unresolved non-mesh,
+  non-zero-transform shape fail loudly.
+- Invalidated canonical source-model and Proxy Source Projection caches after
+  the normalization semantic changed.
+- Updated the branch-level fixture to use local source coordinates and retained
+  its expected world positions through explicit assertions.
+- Reproduced both Willow samples: canonical/proxy positions matched exactly;
+  the original tree's false near-origin instances dropped from 7,894 to zero,
+  while the shortened tree remained at zero.
+- Full regression suite passed: 515 tests, 30 deselected.
+- Clean package build passed 26 packaged contract tests and both bundled
+  high-risk smoke checks.
+
+## 2026-07-28 - Optional Proxy base-mesh vertex fusion
+
+- Added a persisted `Fuse Base Mesh Vertices` control beside Base Mesh Priority;
+  it is disabled by default and uses a fixed one-millimeter threshold.
+- Kept existing small-component pruning ahead of the weld, then removed
+  weld-degenerate faces before QEM.
+- On the original Willow base path, the enabled option reduced post-QEM
+  connected components from 1,914 to 1,533 and faces from 35,738 to 34,385 at
+  the same 1,648-face requested base budget.
+- Added intent-level service, settings round-trip, and worker breadcrumb
+  coverage; visually checked the direct Qt dialog before packaging.
+- Full regression suite passed: 516 tests, 30 deselected.
+- Clean package build passed 26 packaged contract tests and both bundled
+  high-risk smoke checks.

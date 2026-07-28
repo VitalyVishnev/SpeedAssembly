@@ -128,6 +128,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
             bounds_inflation=1.4,
             density_resolution=96,
             base_mesh_priority=0.22,
+            fuse_base_mesh_vertices=True,
             branch_prune_aggression=0.61,
         ),
         fracture_preview_settings=FracturePreviewSettings(
@@ -184,6 +185,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert payload["proxy_mesh_settings"]["bounds_inflation"] == 1.4
     assert payload["proxy_mesh_settings"]["density_resolution"] == 96
     assert payload["proxy_mesh_settings"]["base_mesh_priority"] == 0.22
+    assert payload["proxy_mesh_settings"]["fuse_base_mesh_vertices"] is True
     assert payload["proxy_mesh_settings"]["branch_prune_aggression"] == 0.61
     assert payload["fracture_preview_settings"]["fracture"]["target_piece_count"] == 0
     assert payload["fracture_preview_settings"]["fracture"]["separate_stems"] is True

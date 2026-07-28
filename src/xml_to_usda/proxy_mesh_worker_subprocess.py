@@ -77,6 +77,7 @@ def run_proxy_mesh_worker_request_file(path: str | Path) -> int:
                 "preview.generate.start",
                 final_polycount=request.settings.final_polycount,
                 density_resolution=request.settings.density_resolution,
+                fuse_base_mesh_vertices=request.settings.fuse_base_mesh_vertices,
                 branch_prune_aggression=request.settings.branch_prune_aggression,
                 method=request.settings.method,
             )
@@ -89,6 +90,7 @@ def run_proxy_mesh_worker_request_file(path: str | Path) -> int:
                 "export.generate.start",
                 final_polycount=request.settings.final_polycount,
                 density_resolution=request.settings.density_resolution,
+                fuse_base_mesh_vertices=request.settings.fuse_base_mesh_vertices,
                 branch_prune_aggression=request.settings.branch_prune_aggression,
                 method=request.settings.method,
             )

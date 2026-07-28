@@ -143,6 +143,38 @@ Related files:
 - `docs/raw/speedtree_mapping.md`
 - `docs/raw/DECISIONS.md`
 
+## Decision: Mesh-bearing Object LeafReferences use Object-local positions
+
+Status: Active
+
+Observed SpeedTree Raw XML may place `LeafReferences` beside the enclosing
+Object's `Points` and `Triangles`. In that shape, both mesh points and repeated
+part positions are Object-local and must receive the same `Object/@Abs*`
+translation during normalization. Apply this once in the shared Repeated Part
+builder used by canonical conversion and Proxy Source Projection; do not infer
+position space from hierarchy depth, Object names, instance count, or bounds.
+
+An Object with zero `Abs*` remains unchanged. A non-mesh LeafReferences host
+with non-zero `Abs*` is currently ambiguous and must fail loudly until a real
+SpeedTree export establishes its transform contract. Source-model and Proxy
+Source Projection cache schema versions must change with this normalization
+semantic so stale positions cannot survive an application update.
+
+Evidence:
+
+- `SK_Willow_Assembly_12.xml` contains 1,086 mesh-bearing hosts with non-zero
+  `Abs*` and 7,894 local repeated-part positions.
+- Object-local LeafReferences bounds match their sibling local mesh bounds;
+  applying `Abs*` aligns both in world space.
+- The shortened Willow, Simple Tree, and three-trunk samples have zero `Abs*`
+  on their non-mesh LeafReferences hosts and remain unchanged.
+
+Related files:
+- `src/xml_to_usda/normalizer.py`
+- `src/xml_to_usda/proxy_source_projection.py`
+- `src/xml_to_usda/canonical_loader.py`
+- `tests/data/leafrefs_on_branch_levels.xml`
+
 ## Decision: Resolved assembly is the seam between source facts and operator intent
 
 Status: Active
@@ -1035,3 +1067,29 @@ Related files:
 - `src/xml_to_usda/boolean_fracture_prototype.py`
 - `src/xml_to_usda/fracture_preview_service.py`
 - `src/xml_to_usda/fracture_export_service.py`
+
+## Decision: Proxy base-mesh vertex fusion is opt-in and post-prune
+
+Status: Active
+
+Context:
+Some SpeedTree generators emit a visually continuous trunk as separate,
+near-coincident base-mesh sections. QEM preserves their disconnected seams and
+can saturate above its requested triangle budget.
+
+Decision:
+Proxy Mesh exposes `Fuse Base Mesh Vertices`, disabled by default. When enabled,
+the density-field path deterministically welds base-mesh points within `0.001`
+stage meters and removes faces made degenerate by the weld. Existing
+connected-component pruning runs first, so welding does not change which small
+branches that control removes. QEM runs after the weld.
+
+Consequences:
+Existing trees retain their previous output unless the operator enables the
+option. The fixed one-millimeter threshold is intentionally narrow and is not a
+general remeshing or Boolean-union operation.
+
+Related files:
+- `src/xml_to_usda/proxy_mesh_service.py`
+- `src/xml_to_usda/qt_ui/proxy_preview.py`
+- `src/xml_to_usda/settings_service.py`

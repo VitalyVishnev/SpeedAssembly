@@ -543,6 +543,11 @@ def test_leaf_references_on_multiple_branch_levels_preserve_deeper_hierarchy_and
     assert len(model.base_tree_parts) == 4
     assert [part.source_object_id for part in model.assembly_parts] == ["1", "3", "4"]
     assert [part.bind_joint for part in model.assembly_parts] == ["root", "bone_002", "bone_003"]
+    assert [part.position for part in model.assembly_parts] == [
+        Vector3(0.0, 0.8, 0.0),
+        Vector3(0.05, 2.45, 0.0),
+        Vector3(0.02, 3.2, 0.02),
+    ]
     assert not any(issue.severity == "error" for issue in diagnostics)
 
 

@@ -442,6 +442,10 @@ def _parse_proxy_mesh_settings(raw_value) -> ProxyMeshSettings:
         bounds_inflation=max(0.01, _coerce_float(raw_value.get("bounds_inflation"), defaults.bounds_inflation)),
         density_resolution=min(MAX_PROXY_DENSITY_RESOLUTION, density_resolution),
         base_mesh_priority=max(0.0, min(1.0, base_mesh_priority)),
+        fuse_base_mesh_vertices=_coerce_bool(
+            raw_value.get("fuse_base_mesh_vertices"),
+            defaults.fuse_base_mesh_vertices,
+        ),
         branch_prune_aggression=max(0.0, min(1.0, branch_prune_aggression)),
     )
 
@@ -721,6 +725,7 @@ def _serialize_proxy_mesh_settings(settings: ProxyMeshSettings) -> dict[str, obj
         "bounds_inflation": round(float(settings.bounds_inflation), 4),
         "density_resolution": int(settings.density_resolution),
         "base_mesh_priority": round(float(settings.base_mesh_priority), 4),
+        "fuse_base_mesh_vertices": bool(settings.fuse_base_mesh_vertices),
         "branch_prune_aggression": round(float(settings.branch_prune_aggression), 4),
     }
 

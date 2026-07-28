@@ -305,12 +305,11 @@ def _extract_object_records(
                 leaf_ref_nodes.append(child)
             elif tag == "Spine" and spine_node is None:
                 spine_node = child
+        abs_translate = _object_abs_translate(obj, source_transform)
+        has_mesh_payload = points_node is not None and bool(triangles_nodes)
         if object_id is not None:
             parent_id = attrib.get("ParentID")
             to_stage = source_transform.point_components_to_stage
-            abs_x = _parse_float_value(attrib.get("AbsX"))
-            abs_y = _parse_float_value(attrib.get("AbsY"))
-            abs_z = _parse_float_value(attrib.get("AbsZ"))
             rel_x = _parse_float_value(attrib.get("RelX"))
             rel_y = _parse_float_value(attrib.get("RelY"))
             rel_z = _parse_float_value(attrib.get("RelZ"))
@@ -337,11 +336,7 @@ def _extract_object_records(
                     object_id=object_id,
                     parent_id=parent_id,
                     name=attrib.get("Name", f"Object_{object_id}"),
-                    abs_translate=to_stage(
-                        abs_x if abs_x is not None else 0.0,
-                        abs_y if abs_y is not None else 0.0,
-                        abs_z if abs_z is not None else 0.0,
-                    ),
+                    abs_translate=abs_translate,
                     rel_translate=to_stage(
                         rel_x if rel_x is not None else 0.0,
                         rel_y if rel_y is not None else 0.0,
@@ -356,6 +351,11 @@ def _extract_object_records(
         if not leaf_ref_nodes:
             continue
 
+        position_offset = _leaf_reference_position_offset(
+            obj,
+            source_transform,
+            has_mesh_payload=has_mesh_payload,
+        )
         for leaf_ref_node in leaf_ref_nodes:
             payload = _read_leaf_reference_payload(obj, leaf_ref_node, messages, material_ids, source_transform)
             if payload.count == 0:
@@ -369,6 +369,7 @@ def _extract_object_records(
                         name=f"AssemblyPart_{len(assembly_parts):04d}",
                         source_object_id=object_id,
                         source_transform=source_transform,
+                        position_offset=position_offset,
                     )
                 )
     return _ObjectExtractionResult(
@@ -759,15 +760,25 @@ def _build_leaf_reference_instance(
     name: str,
     source_object_id: str | None,
     source_transform: SourceTransform,
+    position_offset: Vector3,
 ) -> RepeatedPartInstance:
     source_bone_id = payload.bone_ids[index] if index < len(payload.bone_ids) else None
     source_mesh_id = payload.mesh_ids[index] if index < len(payload.mesh_ids) else None
     prototype_key = f"Mesh_{source_mesh_id}" if source_mesh_id is not None else "LeafPrototype"
     uniform_scale = payload.scales[index] if index < len(payload.scales) else 1.0
+    local_position = source_transform.point_components_to_stage(
+        payload.xs[index],
+        payload.ys[index],
+        payload.zs[index],
+    )
     return RepeatedPartInstance(
         name=name,
         prototype_key=prototype_key,
-        position=source_transform.point_components_to_stage(payload.xs[index], payload.ys[index], payload.zs[index]),
+        position=Vector3(
+            local_position.x + position_offset.x,
+            local_position.y + position_offset.y,
+            local_position.z + position_offset.z,
+        ),
         orientation=_leaf_reference_orientation_to_stage(
             source_transform,
             Vector3(
@@ -784,6 +795,32 @@ def _build_leaf_reference_instance(
         source_material_id=payload.source_material_id,
         source_bone_ids=(source_bone_id,) if source_bone_id is not None else (),
         mesh_lod=payload.mesh_lods[index] if index < len(payload.mesh_lods) else None,
+    )
+
+
+def _object_abs_translate(obj: ET.Element, source_transform: SourceTransform) -> Vector3:
+    return source_transform.point_components_to_stage(
+        _parse_float_value(obj.attrib.get("AbsX")) or 0.0,
+        _parse_float_value(obj.attrib.get("AbsY")) or 0.0,
+        _parse_float_value(obj.attrib.get("AbsZ")) or 0.0,
+    )
+
+
+def _leaf_reference_position_offset(
+    obj: ET.Element,
+    source_transform: SourceTransform,
+    *,
+    has_mesh_payload: bool,
+) -> Vector3:
+    offset = _object_abs_translate(obj, source_transform)
+    if offset == Vector3(0.0, 0.0, 0.0):
+        return offset
+    if has_mesh_payload:
+        return offset
+    object_name = obj.attrib.get("Name", obj.attrib.get("ID", "?"))
+    raise ValueError(
+        f"LeafReferences[{object_name}] has a non-zero Object Abs transform but no sibling "
+        "Points/Triangles payload; its position space cannot be determined safely."
     )
 
 

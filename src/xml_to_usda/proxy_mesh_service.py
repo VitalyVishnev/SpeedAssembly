@@ -9,6 +9,7 @@ the main vegetation export contract.
 
 from __future__ import annotations
 
+import math
 from array import array
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,7 @@ from .qem_simplification import QemSimplificationError, simplify_geometry_buffer
 
 
 DEFAULT_PROXY_POLYCOUNT = 5000
+BASE_MESH_FUSE_THRESHOLD_METERS = 0.001
 MAX_PROXY_DENSITY_RESOLUTION = 256
 PROXY_METHOD_DENSITY_FIELD = "density_field"
 PROXY_METHOD_INSTANCE_BOUNDS = "instance_bounds"
@@ -39,6 +41,7 @@ class ProxyMeshSettings:
     bounds_inflation: float = 1.0
     density_resolution: int = 64
     base_mesh_priority: float = 0.33
+    fuse_base_mesh_vertices: bool = False
     branch_prune_aggression: float = DEFAULT_BRANCH_PRUNE_AGGRESSION
 
 
@@ -325,21 +328,99 @@ def _base_proxy_geometry_buffer(
     mesh = model.base_mesh
     if mesh is None:
         raise ProxyMeshError("Proxy base mesh is missing.")
-    if not has_foliage:
-        return _mesh_to_geometry_buffer(mesh, name="BaseProxyMesh")
-    face_indices = select_large_connected_face_indices(
-        mesh,
-        aggression=settings.branch_prune_aggression,
+    if has_foliage:
+        face_indices = select_large_connected_face_indices(
+            mesh,
+            aggression=settings.branch_prune_aggression,
+        )
+        if face_indices is not None:
+            mesh = _mesh_faces_to_mesh_data(mesh, face_indices, name="BaseProxyMesh")
+    if settings.fuse_base_mesh_vertices:
+        mesh = _fuse_mesh_vertices(mesh, threshold=BASE_MESH_FUSE_THRESHOLD_METERS)
+    return _mesh_to_geometry_buffer(mesh, name="BaseProxyMesh")
+
+
+def _fuse_mesh_vertices(mesh: MeshData, *, threshold: float) -> MeshData:
+    """Weld nearby base-mesh points without changing the canonical source mesh."""
+    if threshold <= 0.0:
+        raise ProxyMeshError("Proxy base mesh fuse threshold must be greater than zero.")
+
+    inverse_threshold = 1.0 / threshold
+    threshold_squared = threshold * threshold
+    cells: dict[tuple[int, int, int], list[int]] = {}
+    fused_points: list[Vector3] = []
+    source_to_fused: list[int] = []
+
+    for point in mesh.points:
+        if not all(math.isfinite(value) for value in (point.x, point.y, point.z)):
+            raise ProxyMeshError(f"Mesh {mesh.name} contains non-finite point coordinates.")
+        cell = (
+            math.floor(point.x * inverse_threshold),
+            math.floor(point.y * inverse_threshold),
+            math.floor(point.z * inverse_threshold),
+        )
+        fused_index: int | None = None
+        for x_offset in (-1, 0, 1):
+            for y_offset in (-1, 0, 1):
+                for z_offset in (-1, 0, 1):
+                    neighbor = (cell[0] + x_offset, cell[1] + y_offset, cell[2] + z_offset)
+                    for candidate_index in cells.get(neighbor, ()):
+                        candidate = fused_points[candidate_index]
+                        distance_squared = (
+                            (point.x - candidate.x) ** 2
+                            + (point.y - candidate.y) ** 2
+                            + (point.z - candidate.z) ** 2
+                        )
+                        if distance_squared <= threshold_squared and (
+                            fused_index is None or candidate_index < fused_index
+                        ):
+                            fused_index = candidate_index
+        if fused_index is None:
+            fused_index = len(fused_points)
+            fused_points.append(point)
+            cells.setdefault(cell, []).append(fused_index)
+        source_to_fused.append(fused_index)
+
+    fused_face_counts: list[int] = []
+    fused_face_indices: list[int] = []
+    source_offset = 0
+    source_point_count = len(mesh.points)
+    for face_index, count in enumerate(mesh.face_vertex_counts):
+        count = int(count)
+        end = source_offset + count
+        if count < 0 or end > len(mesh.face_vertex_indices):
+            raise ProxyMeshError(f"Mesh {mesh.name} face {face_index} has invalid vertex indices.")
+        face: list[int] = []
+        for source_index in mesh.face_vertex_indices[source_offset:end]:
+            source_index = int(source_index)
+            if source_index < 0 or source_index >= source_point_count:
+                raise ProxyMeshError(
+                    f"Mesh {mesh.name} face {face_index} references point {source_index} outside the mesh."
+                )
+            fused_index = source_to_fused[source_index]
+            if not face or face[-1] != fused_index:
+                face.append(fused_index)
+        if len(face) > 1 and face[0] == face[-1]:
+            face.pop()
+        if len(set(face)) >= 3:
+            fused_face_counts.append(len(face))
+            fused_face_indices.extend(face)
+        source_offset = end
+    if source_offset != len(mesh.face_vertex_indices):
+        raise ProxyMeshError(f"Mesh {mesh.name} has trailing face vertex indices.")
+
+    return MeshData(
+        name=mesh.name,
+        points=tuple(fused_points),
+        face_vertex_counts=tuple(fused_face_counts),
+        face_vertex_indices=tuple(fused_face_indices),
     )
-    if face_indices is None:
-        return _mesh_to_geometry_buffer(mesh, name="BaseProxyMesh")
-    return _mesh_faces_to_geometry_buffer(mesh, face_indices, name="BaseProxyMesh")
 
 
-def _mesh_faces_to_geometry_buffer(mesh: MeshData, face_indices: tuple[int, ...], *, name: str) -> GeometryBuffer:
-    points = array("f")
-    face_counts = array("i")
-    face_vertex_indices = array("i")
+def _mesh_faces_to_mesh_data(mesh: MeshData, face_indices: tuple[int, ...], *, name: str) -> MeshData:
+    points: list[Vector3] = []
+    face_counts: list[int] = []
+    face_vertex_indices: list[int] = []
     original_to_new_point: dict[int, int] = {}
     face_set = set(face_indices)
     offset = 0
@@ -354,16 +435,16 @@ def _mesh_faces_to_geometry_buffer(mesh: MeshData, face_indices: tuple[int, ...]
             new_point_index = original_to_new_point.get(source_point_index)
             if new_point_index is None:
                 point = mesh.points[source_point_index]
-                new_point_index = len(points) // 3
+                new_point_index = len(points)
                 original_to_new_point[source_point_index] = new_point_index
-                points.extend((point.x, point.y, point.z))
+                points.append(point)
             face_vertex_indices.append(new_point_index)
         offset = end
-    return GeometryBuffer(
+    return MeshData(
         name=name,
-        point_components=points,
-        face_vertex_counts=face_counts,
-        face_vertex_indices=face_vertex_indices,
+        points=tuple(points),
+        face_vertex_counts=tuple(face_counts),
+        face_vertex_indices=tuple(face_vertex_indices),
     )
 
 

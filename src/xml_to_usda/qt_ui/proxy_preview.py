@@ -13,6 +13,7 @@ from array import array
 from PySide6.QtCore import Qt, QSignalBlocker, QTimer
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFrame,
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
 from ..models import GeometryBuffer
 from ..proxy_viewport_scene import build_proxy_viewport_scene
 from ..proxy_mesh_service import (
+    BASE_MESH_FUSE_THRESHOLD_METERS,
     DEFAULT_PROXY_POLYCOUNT,
     MAX_PROXY_DENSITY_RESOLUTION,
     PROXY_METHOD_DENSITY_FIELD,
@@ -173,6 +175,14 @@ class ProxyPreviewDialog(PreviewShellDialog):
         settings_layout.addWidget(base_priority_label)
         settings_layout.addLayout(_slider_row(self.base_priority_slider, self.base_priority_spin))
 
+        self.fuse_base_mesh_vertices_check = QCheckBox("Fuse Base Mesh Vertices", settings_panel)
+        self.fuse_base_mesh_vertices_check.setChecked(bool(settings.fuse_base_mesh_vertices))
+        set_tooltip(
+            f"Welds base-mesh vertices within {BASE_MESH_FUSE_THRESHOLD_METERS * 1000.0:g} mm before pruning and simplification.",
+            self.fuse_base_mesh_vertices_check,
+        )
+        settings_layout.addWidget(self.fuse_base_mesh_vertices_check)
+
         self.branch_prune_slider, self.branch_prune_spin = _build_branch_prune_slider_row(
             settings_panel,
             value=float(settings.branch_prune_aggression),
@@ -205,6 +215,7 @@ class ProxyPreviewDialog(PreviewShellDialog):
         self.density_resolution_spin.editingFinished.connect(self.regenerate)
         self.base_priority_slider.sliderReleased.connect(self.regenerate)
         self.base_priority_spin.editingFinished.connect(self.regenerate)
+        self.fuse_base_mesh_vertices_check.toggled.connect(lambda _checked: self.regenerate())
         self.branch_prune_slider.sliderReleased.connect(self.regenerate)
         self.branch_prune_spin.editingFinished.connect(self.regenerate)
         QTimer.singleShot(0, self.regenerate)
@@ -220,6 +231,7 @@ class ProxyPreviewDialog(PreviewShellDialog):
             bounds_inflation=float(self.inflation_spin.value()),
             density_resolution=int(self.density_resolution_spin.value()),
             base_mesh_priority=float(self.base_priority_spin.value()),
+            fuse_base_mesh_vertices=self.fuse_base_mesh_vertices_check.isChecked(),
             branch_prune_aggression=float(self.branch_prune_spin.value()),
         )
 

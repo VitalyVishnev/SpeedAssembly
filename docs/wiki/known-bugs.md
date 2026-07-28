@@ -423,6 +423,10 @@ The current fix targets branchy base meshes specifically and does not replace th
 
 Current workaround:
 Keep QEM as the Proxy Mesh backend. Treat percentage-based base-mesh connected-component pruning as a targeted priority rule, not full vegetation-aware proxy zoning. Fracture Preview defaults this control to zero so fracture diagnostics keep complete branch geometry unless the operator intentionally raises it.
+For base meshes made from near-coincident generator sections, enable
+`Fuse Base Mesh Vertices`; it welds at one millimeter after component pruning
+and before QEM. This improves seam continuity but does not guarantee that QEM
+can reach its requested budget on every disconnected source.
 
 Do not repeat:
 Do not treat shell/interior/outside importance, foliage coverage, or lighting usefulness as fully validated.
@@ -485,3 +489,23 @@ Related files:
 - `src/xml_to_usda/udim_resolver.py`
 - `src/xml_to_usda/material_resolver.py`
 - `src/xml_to_usda/assembly_resolution.py`
+
+## Limitation: Non-mesh LeafReferences hosts with non-zero Object transforms are unverified
+
+Status: Fail-loud
+
+The observed real samples establish Object-local `LeafReferences` when the same
+Object carries `Points` and `Triangles`, and establish equivalent local/world
+positions when a non-mesh host has zero `Abs*`. No real sample currently
+establishes the position space of a non-mesh LeafReferences host with non-zero
+`Abs*`.
+
+Current behavior:
+Normalization rejects that ambiguous shape instead of guessing and emitting
+misplaced repeated geometry. The likely next step is to retain the smallest
+real SpeedTree export that demonstrates the missing shape, then extend the
+explicit transform contract from that evidence.
+
+Related files:
+- `src/xml_to_usda/normalizer.py`
+- `src/xml_to_usda/proxy_source_projection.py`

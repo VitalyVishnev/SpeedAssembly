@@ -36,7 +36,9 @@ from .normalizer import (
     _extract_lod_faces,
     _extract_packed_points,
     _extract_packed_triangle_blocks,
+    _leaf_reference_position_offset,
     _mesh_with_original_scale,
+    _object_abs_translate,
     _parse_float_value,
     _read_leaf_reference_payload,
     _select_primary_lod,
@@ -45,7 +47,7 @@ from .source_transform import build_source_transform
 from .xml_reader import packaged_xml_parser_adapter_enabled, read_source_xml
 
 
-PROXY_SOURCE_PROJECTION_CACHE_SCHEMA_VERSION = 1
+PROXY_SOURCE_PROJECTION_CACHE_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -150,6 +152,13 @@ def _extract_proxy_objects(
                     merged_sections[section.material_id].extend(
                         face_offset + face_index for face_index in section.face_indices
                     )
+        if not leaf_ref_nodes:
+            continue
+        position_offset = _leaf_reference_position_offset(
+            obj,
+            source_transform,
+            has_mesh_payload=points_node is not None and bool(triangles_nodes),
+        )
         for leaf_ref_node in leaf_ref_nodes:
             payload = _read_leaf_reference_payload(obj, leaf_ref_node, messages, material_ids, source_transform)
             if payload.count == 0:
@@ -162,6 +171,7 @@ def _extract_proxy_objects(
                         name=f"AssemblyPart_{len(repeated_parts):04d}",
                         source_object_id=object_id,
                         source_transform=source_transform,
+                        position_offset=position_offset,
                     )
                 )
 
@@ -238,14 +248,6 @@ def _build_proxy_prototypes(
             )
         )
     return tuple(prototypes)
-
-
-def _object_abs_translate(obj: ET.Element, source_transform) -> Vector3:
-    return source_transform.point_components_to_stage(
-        _parse_float_value(obj.attrib.get("AbsX")) or 0.0,
-        _parse_float_value(obj.attrib.get("AbsY")) or 0.0,
-        _parse_float_value(obj.attrib.get("AbsZ")) or 0.0,
-    )
 
 
 def _find_first_attr(root: ET.Element, attr_name: str) -> str | None:

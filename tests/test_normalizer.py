@@ -305,6 +305,30 @@ def test_leaf_reference_orientation_preserves_rotation_sense_after_axis_remap() 
     assert orientation.k == pytest.approx(0.0)
 
 
+def test_non_mesh_leaf_reference_host_with_nonzero_abs_transform_fails_loudly() -> None:
+    root = ET.fromstring(
+        """
+        <SpeedTreeRaw>
+            <Objects>
+                <Object ID="1" Name="AmbiguousLeafHost" AbsX="1" AbsY="0" AbsZ="0">
+                    <LeafReferences Material="2" Count="1">
+                        <X>0</X>
+                        <Y>0</Y>
+                        <Z>0</Z>
+                        <Scale>1</Scale>
+                        <MeshID>1</MeshID>
+                    </LeafReferences>
+                </Object>
+            </Objects>
+        </SpeedTreeRaw>
+        """
+    )
+    transform = build_source_transform(root, units_hint=None, up_axis_hint=None)
+
+    with pytest.raises(ValueError, match="position space cannot be determined safely"):
+        _extract_assembly_parts_from_leaf_references(tuple(root.findall(".//Object")), [], transform, {2})
+
+
 def test_normalize_to_canonical_keeps_leaf_reference_scale_as_instance_multiplier() -> None:
     document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)

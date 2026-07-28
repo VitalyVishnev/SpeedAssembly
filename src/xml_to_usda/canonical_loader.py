@@ -43,7 +43,7 @@ from .worker_file_protocol import read_worker_payload, write_worker_payload_atom
 from .xml_reader import analyze_xml, read_source_xml
 
 
-SOURCE_MODEL_CACHE_SCHEMA_VERSION = 7
+SOURCE_MODEL_CACHE_SCHEMA_VERSION = 8
 
 
 class _InvalidSourceModelCache(Exception):

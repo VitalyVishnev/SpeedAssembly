@@ -1541,6 +1541,7 @@ class QtBackgroundJobsController:
                     "bounds_inflation": getattr(settings, "bounds_inflation", None),
                     "density_resolution": getattr(settings, "density_resolution", None),
                     "base_mesh_priority": getattr(settings, "base_mesh_priority", None),
+                    "fuse_base_mesh_vertices": getattr(settings, "fuse_base_mesh_vertices", None),
                     "branch_prune_aggression": getattr(settings, "branch_prune_aggression", None),
                 }
             )

@@ -2798,6 +2798,7 @@ class MainWindow(QWidget):
                 "output_path": request.output_path,
                 "final_polycount": settings.final_polycount,
                 "base_mesh_priority": settings.base_mesh_priority,
+                "fuse_base_mesh_vertices": settings.fuse_base_mesh_vertices,
                 "branch_prune_aggression": settings.branch_prune_aggression,
                 "density_resolution": settings.density_resolution,
             },
