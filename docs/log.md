@@ -630,3 +630,29 @@ Major moves:
 - Full regression suite passed: 516 tests, 30 deselected.
 - Clean package build passed 26 packaged contract tests and both bundled
   high-risk smoke checks.
+
+## 2026-08-02 - Unified main-shell program status
+
+- Replaced the separate material/runtime cards and tab summary lines with one
+  opaque, scrollable `Program Status` card.
+- Routed conversion telemetry into five visible stages and routed Discovery,
+  Wind, Proxy, Fracture, and Part Preview lifecycles through the same card.
+- Kept the concise mode/material/XML counts in the card while moving full paths
+  and runtime configuration into the conversion-start log.
+- Retained `MainWindow.status_label` as a compatibility alias and added focused
+  Qt coverage for progress, stage grouping, summaries, and terminal states.
+- Full regression suite passed: 525 tests, 30 deselected.
+- Package build passed 26 packaged contract tests, Detailed Cuts stability
+  smoke, and Fracture worker recovery smoke.
+
+## 2026-08-02 - Fast source-backed UI previews
+
+- Added `build_qt_gui_exe.cmd -Quick`, which import-checks the current source
+  and writes an isolated source-backed preview launcher without running
+  PyInstaller, packaged contracts, release ZIP assembly, or smoke.
+- Kept the full Package gate for frozen/native/importer/runtime risk and release
+  validation, while low-risk UI iteration now uses relevant tests plus Quick.
+- Measured Quick at 1.07 seconds versus 180.3 seconds for the full Package gate
+  on the same workspace state.
+- Verified 14 focused packaging-script contracts, 26 packaged contracts, the
+  release EXE/ZIP, Detailed Cuts stability smoke, and worker recovery smoke.

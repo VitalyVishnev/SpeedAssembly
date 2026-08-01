@@ -92,7 +92,7 @@ Rules:
 - Keep side effects at the edges. Keep core transformation logic deterministic and inspectable.
 - Minimize hidden mutable state.
 - If Goal is active, do not finish goal after first iteration.
-- After all code changes run build: "$ & '.\scripts\build_qt_gui_exe.cmd' -Package"; packaged high-risk smoke is part of this gate. If `-SkipSmoke` is used, report the reason explicitly.
+- After code changes, choose the build gate by risk. Use `& '.\scripts\build_qt_gui_exe.cmd' -Quick` after relevant tests for UI-only layout, styling, copy, and other small low-risk shell changes; it is a source-backed unvalidated preview, not a release. Use `& '.\scripts\build_qt_gui_exe.cmd' -Package` for backend/importer-facing behavior, worker/process/cache lifecycle, FBX/USD/OpenGL/native paths, packaging/hooks/dependencies, packaged-only failures or native crashes, and before a release. After an ordinary defect found in Quick, iterate with relevant tests plus Quick and run Package once the fix is ready; use Package for each candidate only when the defect is frozen-runtime-specific or native. If `-SkipSmoke` is used, report the reason explicitly.
 - Don't use unnecessary words, talk short and professional.
 - Не делай костыли, сделай сразу систему так, чтобы работала. Чтобы не пришлось переделывать.
 - Переиспользуй готовые решения, которые есть в проекте, не изобретай велосипед.

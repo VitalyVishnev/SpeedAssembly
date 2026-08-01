@@ -110,6 +110,14 @@ The Wind, Geometry, and Materials tabs on the main shell reuse the same
 compact controls inside their existing rounded cards. UDIM tile IDs are styled
 as explicit editable fields rather than passive numeric labels.
 
+The main shell keeps one `ProgramStatusCard` beside those tabs. It consumes the
+existing `ConversionTelemetry` directly, groups backend phases into five
+operator-facing conversion stages, and represents other background jobs as a
+compact current operation. The same card owns the short XML/material/mode
+summary; detailed runtime settings and full paths remain in their owning tabs,
+Settings, and the conversion-start log. `MainWindow.status_label` remains an
+alias to the card's message label for packaged and adapter compatibility.
+
 For visual UI iteration, use direct PySide screenshots before packaging. Start
 a `QApplication` from `.venv310`, construct the target dialog/widget with a
 small fixture or fake result, call `show()` and `app.processEvents()`, then save

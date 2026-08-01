@@ -35,7 +35,13 @@ def test_release_bundle_packages_exe_examples_and_help_assets(tmp_path: Path) ->
 def test_qt_package_script_builds_release_zip() -> None:
     script_text = Path("scripts/build_qt_gui_exe.ps1").read_text(encoding="utf-8")
 
+    assert "[switch]$Quick" in script_text
     assert "[switch]$SkipSmoke" in script_text
+    assert "dist-preview" in script_text
+    assert "SpeedAssembly_preview.cmd" in script_text
+    assert "Quick preview import check failed." in script_text
+    assert "This source-backed preview skips PyInstaller" in script_text
+    assert ".venv310\\Scripts\\pythonw.exe" in script_text
     assert "xml_to_usda.release_bundle" in script_text
     assert "SpeedAssembly_release.zip" in script_text
     assert "XMLtoUSDAWorker.exe" in script_text

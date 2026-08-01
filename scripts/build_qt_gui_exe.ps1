@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [switch]$Package,
+    [switch]$Quick,
     [switch]$Clean,
     [switch]$OpenOutput,
     [switch]$SkipBootstrap,
@@ -10,6 +11,16 @@ param(
 $ErrorActionPreference = 'Stop'
 $env:PYTHONNOUSERSITE = '1'
 $env:PYTHONUSERBASE = Join-Path (Join-Path $PSScriptRoot '..') '.pyinstaller-userbase'
+
+if ($Package -and $Quick) {
+    throw 'Choose either -Quick or -Package, not both.'
+}
+if (-not $Package -and -not $Quick) {
+    throw 'Choose -Quick for a source-backed UI preview or -Package for the full release gate.'
+}
+if ($SkipSmoke -and -not $Package) {
+    throw '-SkipSmoke is valid only with -Package.'
+}
 
 function Get-VenvExecutable([string]$RepoRoot) {
     $pythonExe = Join-Path $RepoRoot '.venv310\Scripts\python.exe'
@@ -104,11 +115,12 @@ function Write-BuildInfo(
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $launcherScript = Join-Path $repoRoot 'scripts\launch_qt_gui.py'
-$distPath = Join-Path $repoRoot 'dist-next'
+$distPath = Join-Path $repoRoot $(if ($Quick) { 'dist-preview' } else { 'dist-next' })
 $buildPath = Join-Path $repoRoot 'build-next'
 $qtUiSourceRoot = Join-Path $repoRoot 'src\xml_to_usda\qt_ui'
 $qtUiStagingRoot = Join-Path $buildPath 'qt_ui_data'
 $exePath = Join-Path $distPath 'SpeedAssembly.exe'
+$previewLauncherPath = Join-Path $distPath 'SpeedAssembly_preview.cmd'
 $distWorkerExePath = Join-Path $distPath 'XMLtoUSDAWorker.exe'
 $iconPath = Join-Path $repoRoot 'src\xml_to_usda\qt_ui\assets\Icon.ico'
 $hooksPath = Join-Path $repoRoot 'hooks'
@@ -117,7 +129,8 @@ Push-Location $repoRoot
 try {
     $pythonExe = Get-VenvExecutable -RepoRoot $repoRoot
     if (-not $SkipBootstrap) {
-        & $pythonExe -s -c "import PySide6, PyInstaller" 2>$null
+        $bootstrapCheck = if ($Quick) { 'import PySide6' } else { 'import PySide6, PyInstaller' }
+        & $pythonExe -s -c $bootstrapCheck 2>$null
         if ($LASTEXITCODE -ne 0) {
             Write-Host 'Installing UI-next build dependencies into .venv310 ...'
             & $pythonExe -s -m pip install -e '.[dev,ui-next]'
@@ -130,8 +143,27 @@ try {
     if ($Clean -and (Test-Path $distPath)) {
         Remove-Item -Recurse -Force $distPath
     }
-    if ($Clean -and (Test-Path $buildPath)) {
+    if ($Clean -and $Package -and (Test-Path $buildPath)) {
         Remove-Item -Recurse -Force $buildPath
+    }
+
+    if ($Quick) {
+        & $pythonExe -s -c "from xml_to_usda.qt_ui.entry import main" 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Quick preview import check failed.'
+        }
+        New-Item -ItemType Directory -Force -Path $distPath | Out-Null
+        @(
+            '@echo off',
+            'set "SPEEDASSEMBLY_PREVIEW_ROOT=%~dp0.."',
+            'start "" "%SPEEDASSEMBLY_PREVIEW_ROOT%\.venv310\Scripts\pythonw.exe" "%SPEEDASSEMBLY_PREVIEW_ROOT%\scripts\launch_qt_gui.py"'
+        ) | Set-Content -LiteralPath $previewLauncherPath -Encoding ASCII
+        Write-Host "Quick preview ready: $previewLauncherPath"
+        Write-Host 'This source-backed preview skips PyInstaller, packaged contracts, release ZIP, and smoke.'
+        if ($OpenOutput) {
+            Invoke-Item $distPath
+        }
+        return
     }
 
     if ($Package) {

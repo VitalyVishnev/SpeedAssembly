@@ -231,10 +231,6 @@ class WindTabPanel(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(12)
 
-        self.summary_label = QLabel("Click Refresh Wind Groups to inspect wind settings.", self)
-        self.summary_label.setWordWrap(True)
-        outer.addWidget(self.summary_label)
-
         controls = QFrame(self)
         controls.setObjectName("PanelCard")
         controls_layout = QGridLayout(controls)
@@ -284,8 +280,7 @@ class WindTabPanel(QWidget):
     def set_persisted_settings(self, settings: dict[str, WindGroupSettingRecord]) -> None:
         self._persisted_settings = dict(settings)
 
-    def clear(self, message: str = "Click Refresh Wind Groups to inspect wind settings.") -> None:
-        self.summary_label.setText(message)
+    def clear(self) -> None:
         self._rows.clear()
         _rebuild_scroll_layout(self.scroll_layout)
 
@@ -305,9 +300,7 @@ class WindTabPanel(QWidget):
         self._rows.clear()
         _rebuild_scroll_layout(self.scroll_layout)
         if not groups:
-            self.summary_label.setText("No skeleton joints found.")
             return
-        self.summary_label.setText(f"Loaded {len(groups)} wind group(s).")
         for group in groups:
             card = QFrame(self.scroll_container)
             card.setObjectName("PanelCard")
@@ -506,10 +499,6 @@ class GeometryTabPanel(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(12)
 
-        self.summary_label = QLabel("Select an XML file to load repeated branch prototypes.", self)
-        self.summary_label.setWordWrap(True)
-        outer.addWidget(self.summary_label)
-
         actions_card = QFrame(self)
         actions_card.setObjectName("PanelCard")
         actions_layout = QGridLayout(actions_card)
@@ -539,15 +528,13 @@ class GeometryTabPanel(QWidget):
         self.scroll.setWidget(self.scroll_container)
         outer.addWidget(self.scroll, 1)
 
-    def clear(self, message: str = "Select an XML file to load repeated branch prototypes.") -> None:
-        self.summary_label.setText(message)
+    def clear(self) -> None:
         self._rows.clear()
         _rebuild_scroll_layout(self.scroll_layout)
 
     def load(self, discovery) -> None:
         self._rows.clear()
         _rebuild_scroll_layout(self.scroll_layout)
-        self.summary_label.setText(discovery.summary)
         if not discovery.rows:
             return
         for spec in discovery.rows:
@@ -783,17 +770,12 @@ class MaterialsTabPanel(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(12)
 
-        self.summary_label = QLabel("Select an XML file to load material settings.", self)
-        self.summary_label.setWordWrap(True)
-        outer.addWidget(self.summary_label)
-
         self.scroll = _make_scroll_area(self)
         self.scroll_container, self.scroll_layout = _make_scroll_host(self)
         self.scroll.setWidget(self.scroll_container)
         outer.addWidget(self.scroll, 1)
 
-    def clear(self, message: str = "Select an XML file to load material settings.") -> None:
-        self.summary_label.setText(message)
+    def clear(self) -> None:
         self._base_rows.clear()
         self._part_rows.clear()
         _rebuild_scroll_layout(self.scroll_layout)
@@ -819,8 +801,6 @@ class MaterialsTabPanel(QWidget):
         self._geometry_snapshot = dict(geometry_snapshot)
         self._cpu_profile = cpu_profile
         _rebuild_scroll_layout(self.scroll_layout)
-
-        self.summary_label.setText(f"{base_discovery.summary} {part_discovery.summary}".strip())
 
         self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, self._build_base_materials_card(base_discovery))
         self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, self._build_part_materials_card(part_discovery))

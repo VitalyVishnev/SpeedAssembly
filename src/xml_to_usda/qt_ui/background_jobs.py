@@ -181,6 +181,38 @@ class QtBackgroundJobsController:
     def source_discovery_running(self) -> bool:
         return self._source_discovery_job.has_process
 
+    def _begin_status_activity(self, title: str, message: str) -> None:
+        handler = getattr(self._window, "_begin_status_activity", None)
+        if handler is not None:
+            handler(title, message)
+        else:
+            self._window._set_status(message)
+
+    def _begin_conversion_status(self, message: str) -> None:
+        handler = getattr(self._window, "_begin_conversion_status", None)
+        if handler is not None:
+            handler(message)
+        else:
+            self._window._set_status(message)
+
+    def _finish_status_activity(self, outcome: str, message: str) -> None:
+        handler = getattr(self._window, "_finish_status_activity", None)
+        if handler is not None:
+            handler(outcome, message)
+        else:
+            self._window._set_status(message)
+
+    def _set_status_telemetry(self, telemetry: ConversionTelemetry) -> None:
+        handler = getattr(self._window, "_set_conversion_telemetry", None)
+        if handler is not None:
+            handler(telemetry)
+        else:
+            self._window._set_status(format_telemetry_status(telemetry))
+
+    def _conversion_log_context(self, request: ConversionRequest) -> str:
+        handler = getattr(self._window, "_conversion_status_log_context", None)
+        return str(handler(request)) if handler is not None else ""
+
     def start_conversion(self, *, request: ConversionRequest, run_async: bool) -> None:
         if self.conversion_running:
             self._window._report_error("Conversion running", "A conversion is already running.")
@@ -190,10 +222,13 @@ class QtBackgroundJobsController:
         self._conversion_error_traceback = None
         self._last_conversion_telemetry = None
         self._window._set_conversion_running(True)
-        self._window._set_status("Preparing conversion job...")
+        self._begin_conversion_status("Preparing conversion job...")
+        context = self._conversion_log_context(request)
+        context_suffix = f"\n\n{context}" if context else ""
         self._window._set_log(
             "Starting conversion.\n"
             "The PySide6 shell keeps the UI responsive while backend services normalize XML, import FBX, and write USDA."
+            f"{context_suffix}"
         )
         if run_async:
             try:
@@ -256,7 +291,7 @@ class QtBackgroundJobsController:
             self._window._set_status("Wind group inspection already running...")
             return
         self._window._set_wind_refresh_running(True)
-        self._window._set_status("Inspecting wind groups...")
+        self._begin_status_activity("Inspecting Wind", "Inspecting wind groups...")
         self._window._append_log(
             "Inspecting wind groups.\n"
             "The PySide6 shell keeps the UI responsive while generator levels are analyzed."
@@ -317,7 +352,7 @@ class QtBackgroundJobsController:
             self._window._set_status("Wind JSON generation already running...")
             return
         self._window._set_wind_json_running(True)
-        self._window._set_status("Generating Dynamic Wind JSON...")
+        self._begin_status_activity("Generating Wind JSON", "Generating Dynamic Wind JSON...")
         self._wind_json_thread = threading.Thread(
             target=self._run_wind_json_worker,
             kwargs={"request": request},
@@ -346,7 +381,7 @@ class QtBackgroundJobsController:
         if self.wind_preview_running:
             self._window._set_status("Wind Preview generation already running...")
             return
-        self._window._set_status("Preparing Wind Preview...")
+        self._begin_status_activity("Wind Preview", "Preparing Wind Preview...")
         if hasattr(self._window, "_handle_wind_preview_loading"):
             self._window._handle_wind_preview_loading("Preparing wind preview...")
         self._wind_preview_retry_count = 0
@@ -368,7 +403,7 @@ class QtBackgroundJobsController:
         self._proxy_mesh_request = request
         self._proxy_mesh_settings = settings
         self._proxy_mesh_retry_count = 0
-        self._window._set_status("Generating Proxy Mesh...")
+        self._begin_status_activity("Generating Proxy Mesh", "Generating Proxy Mesh...")
         if not self._start_proxy_mesh_process(request, settings):
             return
         self._window._update_action_state()
@@ -383,7 +418,7 @@ class QtBackgroundJobsController:
         self._proxy_mesh_request = request
         self._proxy_mesh_settings = proxy.settings
         self._proxy_mesh_retry_count = 0
-        self._window._set_status("Writing Proxy Mesh...")
+        self._begin_status_activity("Writing Proxy Mesh", "Writing Proxy Mesh...")
         self._proxy_mesh_thread = threading.Thread(
             target=self._run_generated_proxy_mesh_export_worker,
             kwargs={"request": request, "proxy": proxy},
@@ -399,7 +434,7 @@ class QtBackgroundJobsController:
             return
         if not self.proxy_preview_running:
             self._proxy_preview_retry_count = 0
-        self._window._set_status("Generating Proxy Preview...")
+        self._begin_status_activity("Proxy Preview", "Generating Proxy Preview...")
         if hasattr(self._window, "_handle_proxy_preview_loading"):
             self._window._handle_proxy_preview_loading("Generating...")
         try:
@@ -425,7 +460,7 @@ class QtBackgroundJobsController:
         self._fracture_export_result_received = False
         self._fracture_export_request = request
         self._fracture_export_settings = settings
-        self._window._set_status("Writing Fracture USDA pieces...")
+        self._begin_status_activity("Fracture Export", "Writing Fracture USDA pieces...")
         try:
             process, message_queue, cancel_event = self._deps.start_fracture_export_process(request, settings)
         except Exception as exc:
@@ -442,7 +477,7 @@ class QtBackgroundJobsController:
     def start_fracture_preview(self, request, settings) -> None:
         if not self.fracture_preview_running:
             self._fracture_preview_retry_count = 0
-        self._window._set_status("Generating Fracture Preview...")
+        self._begin_status_activity("Fracture Preview", "Generating Fracture Preview...")
         try:
             start_result = self._fracture_preview_job.start_latest(request, settings)
         except Exception as exc:
@@ -455,6 +490,7 @@ class QtBackgroundJobsController:
         self._ensure_polling()
 
     def start_part_preview(self, request, settings) -> None:
+        self._begin_status_activity("Part Preview", "Generating Part Preview...")
         if hasattr(self._window, "_handle_part_preview_loading"):
             self._window._handle_part_preview_loading("Generating preview...")
         try:
@@ -466,7 +502,7 @@ class QtBackgroundJobsController:
         self._ensure_polling()
 
     def start_source_discovery(self, request) -> None:
-        self._window._set_status("Inspecting large XML in an isolated worker...")
+        self._begin_status_activity("Inspecting XML", "Inspecting large XML in an isolated worker...")
         try:
             self._source_discovery_job.start_latest(request, True)
         except Exception as exc:
@@ -924,7 +960,7 @@ class QtBackgroundJobsController:
 
     def _handle_conversion_telemetry(self, telemetry: ConversionTelemetry) -> None:
         self._last_conversion_telemetry = telemetry
-        self._window._set_status(format_telemetry_status(telemetry))
+        self._set_status_telemetry(telemetry)
 
     def _handle_async_process_crash(self) -> None:
         exit_code = self._conversion_process.exitcode if self._conversion_process is not None else None
@@ -971,7 +1007,7 @@ class QtBackgroundJobsController:
             if error_traceback:
                 log_message = f"{log_message}\n\n{error_traceback}"
             if job_result.cancelled:
-                self._window._set_status(status)
+                self._finish_status_activity("cancelled", status)
                 self._window._set_log(log_message)
             else:
                 self._window._report_error(
@@ -984,7 +1020,7 @@ class QtBackgroundJobsController:
 
         result = job_result.result
         if result is None:
-            self._window._set_status("Conversion cancelled.")
+            self._finish_status_activity("cancelled", "Conversion cancelled.")
             self._window._set_log("Conversion cancelled before a result was produced.")
             return
 
@@ -994,11 +1030,11 @@ class QtBackgroundJobsController:
         )
         self._window._set_log(format_conversion_results((result,), resolved_request))
         if result.usda_document is None:
-            self._window._set_status("Conversion finished with errors.")
+            self._finish_status_activity("error", "Conversion finished with errors.")
             self._window._append_log("Conversion finished without a USDA document. See diagnostics above.")
             return
 
-        self._window._set_status(f"Wrote USDA to {result.output_path}")
+        self._finish_status_activity("success", f"Wrote USDA to {result.output_path}")
         self._window._show_info("Conversion complete", f"Wrote USDA to {result.output_path}")
 
     def _handle_proxy_mesh_process_crash(self) -> None:

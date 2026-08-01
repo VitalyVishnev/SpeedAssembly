@@ -272,6 +272,7 @@ def build_stylesheet(theme: ResolvedTheme) -> str:
     title_preset_height = int(theme.chrome.get("title_preset_height", window_button_size))
     tab_min_width = int(theme.layout.get("tab_min_width", 120))
     button_fill_disabled = palette["button_fill_disabled"]
+    danger_fill = palette["danger_fill"]
     danger_fill_soft = palette["danger_fill_soft"]
 
     return f"""
@@ -297,7 +298,69 @@ QLabel#StatusLabel {{
     color: {window_text};
     font-size: {theme.font_sizes['body']}px;
     font-weight: 600;
-    padding: 6px 4px;
+    padding: 2px 0px;
+}}
+QScrollArea#ProgramStatusScroll,
+QWidget#ProgramStatusHost {{
+    background: transparent;
+    border: none;
+}}
+QLabel#ProgramStatusTitle {{
+    color: {card_text};
+    font-size: {theme.font_sizes['body']}px;
+    font-weight: 700;
+}}
+QLabel#ProgramStatusState {{
+    color: {card_text};
+    font-size: {theme.font_sizes['title']}px;
+    font-weight: 700;
+}}
+QLabel#ProgramStatusIndicator {{
+    min-width: 14px;
+    max-width: 14px;
+    font-size: {theme.font_sizes['title']}px;
+    font-weight: 700;
+}}
+QLabel#ProgramStatusIndicator[statusState="ready"] {{ color: {muted_text}; }}
+QLabel#ProgramStatusIndicator[statusState="working"],
+QLabel#ProgramStatusIndicator[statusState="success"] {{ color: {accent_fill}; }}
+QLabel#ProgramStatusIndicator[statusState="error"] {{ color: {danger_fill}; }}
+QLabel#ProgramStatusIndicator[statusState="cancelled"] {{ color: {muted_text}; }}
+QLabel#ProgramStatusSectionTitle {{
+    color: {muted_text};
+    font-size: {theme.font_sizes['small']}px;
+    font-weight: 700;
+    padding-top: 8px;
+}}
+QLabel#ProgramStatusSummary {{
+    color: {card_text};
+    font-size: {theme.font_sizes['small']}px;
+    padding: 4px 0px;
+}}
+QLabel#ProgramStatusStep {{
+    color: {muted_text};
+    font-size: {theme.font_sizes['small']}px;
+    padding: 2px 0px;
+}}
+QLabel#ProgramStatusStep[stepState="active"] {{
+    color: {card_text};
+    font-weight: 700;
+}}
+QLabel#ProgramStatusStep[stepState="complete"] {{ color: {accent_fill}; }}
+QLabel#ProgramStatusStep[stepState="failed"] {{
+    color: {danger_fill};
+    font-weight: 700;
+}}
+QProgressBar#ProgramStatusProgress {{
+    background: {input_fill};
+    border: none;
+    border-radius: 3px;
+    min-height: 6px;
+    max-height: 6px;
+}}
+QProgressBar#ProgramStatusProgress::chunk {{
+    background: {accent_fill};
+    border-radius: 3px;
 }}
 QLabel#TitleLabel {{
     color: {titlebar_text};

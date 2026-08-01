@@ -14,6 +14,7 @@ build/
 build-next/
 dist/
 dist-next/
+dist-preview/
 XMLtoUSDAConverter.spec
 PyI_*.spec
 _pyi_*.py

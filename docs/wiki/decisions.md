@@ -40,6 +40,23 @@ multi-stem/stump behavior. Big Spruce is not a general regression fixture: use
 it only for measured scale/performance or packaged stress. See
 [Test Policy](testing.md) for the contract map and commands.
 
+## Decision: Fast UI previews are source-backed and separate from releases
+
+Status: Active
+
+Low-risk UI iteration uses `build_qt_gui_exe.cmd -Quick` after relevant tests.
+It performs an import check and writes the source-backed launcher
+`dist-preview/SpeedAssembly_preview.cmd`. It deliberately skips PyInstaller,
+packaged contracts, the release ZIP, and smoke, so it must never be treated as
+evidence about frozen behavior or as `dist-next/SpeedAssembly.exe`.
+
+The full `-Package` gate remains mandatory for importer-facing/backend work,
+worker and cache lifecycle, FBX/USD/OpenGL/native boundaries, packaging or
+dependency changes, packaged-only failures, native crashes, and releases.
+Ordinary UI defects iterate in Quick and receive one full Package gate after
+the fix; defects unique to frozen/native execution validate each candidate with
+Package.
+
 ## Decision: Detailed Boolean Fracture is the production cut backend
 
 The connectivity-first physical Boolean now serves Detailed Cuts in preview and export; the standalone prototype commands remain diagnostic viewers for the same backend.
@@ -1022,6 +1039,34 @@ Related files:
 - `src/xml_to_usda/qt_ui/`
 - `tests/test_qt_wind_preview_dialog.py`
 - `docs/wiki/architecture.md`
+
+## Decision: Main-shell status is one telemetry-backed card
+
+Status: Active
+
+Context:
+Two narrow runtime/material cards and free text above the main tabs split one
+workflow across three visual areas and placed transient text directly over the
+blurred background.
+
+Decision:
+Use one opaque, internally scrollable `ProgramStatusCard` for current state,
+message, progress, conversion stages, and the compact source/configuration
+summary. Map the existing conversion phases to Prepare, Normalize XML, Resolve
+Geometry, Resolve Materials, and Write USDA; keep FBX detail in the current
+message. Other background jobs use the same card without a staged list. Success
+resets after five seconds; error and cancellation persist until the next action.
+
+Consequences:
+Backend telemetry and request models remain unchanged. Full material paths and
+runtime choices stay in their owning controls and are copied to the conversion-
+start log. The legacy `MainWindow.status_label` name remains an alias to the
+card's primary message label.
+
+Related files:
+- `src/xml_to_usda/qt_ui/status_card.py`
+- `src/xml_to_usda/qt_ui/background_jobs.py`
+- `src/xml_to_usda/qt_ui/window.py`
 
 ## Decision: Fracture Geometry is one deep preview/export module
 

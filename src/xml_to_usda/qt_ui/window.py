@@ -110,6 +110,7 @@ from .fracture_preview import FracturePreviewDialog
 from .part_preview import PartPrototypePreviewDialog
 from .preview_shell import configure_preview_dialog, focus_preview_dialog
 from .proxy_preview import ProxyPreviewDialog
+from .status_card import ProgramStatusCard
 from .wind_preview import WindPreviewDialog
 from .theme import (
     ResolvedTheme,
@@ -1068,27 +1069,14 @@ class MainWindow(QWidget):
 
         left_column = QVBoxLayout()
         self._left_column_layout = left_column
-        left_column.setSpacing(spacing)
-        self.materials_card_label = QLabel("", self)
-        self.materials_card_label.setWordWrap(True)
-        self.materials_card_label.setObjectName("MutedLabel")
-        self.materials_card = self._build_info_card("Loaded operator material defaults", self.materials_card_label)
-        left_column.addWidget(self.materials_card)
-
-        self.runtime_card_label = QLabel("", self)
-        self.runtime_card_label.setWordWrap(True)
-        self.runtime_card_label.setObjectName("MutedLabel")
-        self.runtime_card = self._build_info_card("Current release runtime state", self.runtime_card_label)
-        left_column.addWidget(self.runtime_card)
-        left_column.addStretch(1)
+        left_column.setSpacing(0)
+        self.program_status_card = ProgramStatusCard(self)
+        self.status_label = self.program_status_card.status_label
+        left_column.addWidget(self.program_status_card, 1)
 
         right_column = QVBoxLayout()
         self._right_column_layout = right_column
         right_column.setSpacing(spacing)
-        self.status_label = QLabel("SpeedAssembly is ready.", self)
-        self.status_label.setObjectName("StatusLabel")
-        self.status_label.setWordWrap(True)
-        right_column.addWidget(self.status_label, 0)
 
         self.wind_panel = WindTabPanel(
             on_change=self._handle_tab_state_changed,
@@ -1323,17 +1311,6 @@ class MainWindow(QWidget):
             return
         self._set_status(f"Preset exported: {path}")
 
-    def _build_info_card(self, title: str, content_label: QLabel) -> QWidget:
-        card = QFrame(self)
-        card.setObjectName("PanelCard")
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(18, 18, 18, 18)
-        title_label = QLabel(title, card)
-        title_label.setStyleSheet("font-weight: 600;")
-        layout.addWidget(title_label)
-        layout.addWidget(content_label)
-        return card
-
     def _load_window_assets(self, theme: ResolvedTheme) -> WindowAssets:
         noise_asset = str(theme.glass.get("noise_asset", ""))
         noise_pixmap = QPixmap()
@@ -1442,8 +1419,7 @@ class MainWindow(QWidget):
         self.wind_panel.refresh_button.setFixedSize(refresh_width, refresh_height)
 
         left_column_width = int(self._theme.layout.get("left_column_width", 280))
-        self.materials_card.setFixedWidth(left_column_width)
-        self.runtime_card.setFixedWidth(left_column_width)
+        self.program_status_card.setFixedWidth(left_column_width)
         self.tabs.setMinimumHeight(int(self._theme.layout.get("tabs_min_height", 440)))
         self.panel.setMinimumHeight(int(self._theme.layout.get("panel_min_height", 680)))
         for layout in (
@@ -1658,26 +1634,25 @@ class MainWindow(QWidget):
         self._append_log(f"Cache maintenance warning: failed path(s)\n{formatted}")
 
     def _refresh_state_cards(self) -> None:
-        policy = self._operator_state.material_policy.value
+        mode = next((label for key, label, _supported in CONVERSION_MODES if key == self._conversion_mode), self._conversion_mode)
+        policy = self._operator_state.material_policy.value.replace("_", " ").title()
         if self._operator_state.material_policy.value == "single_material":
-            material_detail = f"single: {self._operator_state.single_material_path or '<none>'}"
+            material_path = self._operator_state.single_material_path or "not set"
+            material_name = material_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            materials = f"{policy} · {material_name}"
+            materials_tooltip = material_path
         else:
-            material_detail = (
-                f"bark: {self._operator_state.bark_material_path or '<none>'}\n"
-                f"leaves: {self._operator_state.leaves_material_path or '<none>'}"
+            bark = "set" if self._operator_state.bark_material_path else "not set"
+            leaves = "set" if self._operator_state.leaves_material_path else "not set"
+            materials = f"{policy} · Bark {bark} · Leaves {leaves}"
+            materials_tooltip = (
+                f"Bark: {self._operator_state.bark_material_path or '<none>'}\n"
+                f"Leaves: {self._operator_state.leaves_material_path or '<none>'}"
             )
-        self.materials_card_label.setText(f"Policy: {policy}\n{material_detail}")
-
-        prototype_count = len(self.geometry_panel.current_snapshot()) if self.geometry_panel.has_rows() else 0
-        wind_state = "loaded" if self._current_dynamic_wind is not None else "not loaded"
-        self.runtime_card_label.setText(
-            f"CPU profile: {self._operator_state.cpu_profile.value}\n"
-            f"Preserve temp files: {self._operator_state.preserve_temp_files}\n"
-            f"Conversion mode: {self._conversion_mode}\n"
-            f"Ground cover: {self._operator_state.is_ground_cover}\n"
-            f"Gust attenuation: {self._operator_state.gust_attenuation:.2f}\n"
-            f"Prototype rows: {prototype_count}\n"
-            f"Wind groups: {wind_state}"
+        self.program_status_card.set_summary(
+            mode=mode,
+            materials=materials,
+            materials_tooltip=materials_tooltip,
         )
 
     def _update_action_state(self) -> None:
@@ -1722,7 +1697,48 @@ class MainWindow(QWidget):
         self.run_conversion()
 
     def _set_status(self, text: str) -> None:
-        self.status_label.setText(text)
+        self.program_status_card.set_passive_message(text)
+
+    def _begin_status_activity(self, title: str, message: str) -> None:
+        self.program_status_card.begin_activity(title, message)
+
+    def _begin_conversion_status(self, message: str) -> None:
+        self.program_status_card.begin_conversion(message)
+
+    def _set_conversion_telemetry(self, telemetry) -> None:
+        self.program_status_card.set_conversion_telemetry(telemetry)
+
+    def _finish_status_activity(self, outcome: str, message: str) -> None:
+        self.program_status_card.finish(outcome, message)
+
+    def _conversion_status_log_context(self, request: ConversionRequest) -> str:
+        wind_state = "loaded" if self._current_dynamic_wind is not None else "not loaded"
+        lines = [
+            f"Conversion mode: {request.conversion_mode.value}",
+            f"CPU profile: {request.cpu_profile.value}",
+            f"Cleanup policy: {request.cleanup_policy.value}",
+            f"Material policy: {request.material_policy.value}",
+            f"Ground cover: {self._operator_state.is_ground_cover}",
+            f"Gust attenuation: {self._operator_state.gust_attenuation:.2f}",
+            f"Prototype rows: {len(request.prototype_source_configs)}",
+            f"Wind groups: {wind_state}",
+        ]
+        if request.single_material_path:
+            lines.append(f"Single material: {request.single_material_path}")
+        if request.bark_material_path or request.leaves_material_path:
+            lines.extend(
+                (
+                    f"Bark material: {request.bark_material_path or '<none>'}",
+                    f"Leaves material: {request.leaves_material_path or '<none>'}",
+                )
+            )
+        for override in request.base_material_overrides:
+            lines.append(f"Base material {override.source_name}: {override.ue_asset_path or '<none>'}")
+        for config in request.prototype_source_configs:
+            source = config.asset_path if config.mode.value == "unreal_asset" else config.fbx_path
+            name = config.source_name or config.source_key
+            lines.append(f"Prototype {name}: {config.mode.value} -> {source or '<XML>'}")
+        return "\n".join(lines)
 
     def _set_log(self, text: str) -> None:
         self._log_text = text.strip()
@@ -1940,7 +1956,7 @@ class MainWindow(QWidget):
         details: str | None = None,
         status: str | None = None,
     ) -> None:
-        self._set_status(status or title)
+        self._finish_status_activity("error", status or title)
         self._append_log(details or message)
         QMessageBox.critical(self, title, message)
 
@@ -1951,6 +1967,11 @@ class MainWindow(QWidget):
         self._operator_state = replace(self._operator_state, input_path=normalized_text)
         input_changed = normalized_text != previous_input
         if input_changed:
+            if normalized_text:
+                self.program_status_card.begin_activity("Inspecting XML", "Inspecting selected XML...")
+            else:
+                self.program_status_card.set_ready("Select an XML file to begin.")
+            self.program_status_card.set_summary(source="Inspecting XML..." if normalized_text else "No XML selected")
             self._current_dynamic_wind = None
             self._proxy_mesh_preview_result = None
             self._proxy_mesh_preview_input_path = ""
@@ -2077,10 +2098,13 @@ class MainWindow(QWidget):
         if not input_path:
             self._background_jobs.cancel_source_discovery()
             self._clear_input_dependent_tabs()
+            self.program_status_card.set_summary(source="No XML selected")
             return
         if not Path(input_path).exists():
             self._background_jobs.cancel_source_discovery()
-            self._clear_input_dependent_tabs("Selected XML path is unavailable.")
+            self._clear_input_dependent_tabs()
+            self.program_status_card.set_summary(source="Selected XML is unavailable")
+            self._finish_status_activity("error", "Selected XML path is unavailable.")
             return
 
         base_records = load_base_material_records(self._operator_snapshot)
@@ -2096,7 +2120,7 @@ class MainWindow(QWidget):
                 wind_records = dict(active_preset.wind_group_settings)
 
         if self._should_discover_source_async(input_path):
-            self._clear_input_dependent_tabs("Inspecting large XML in an isolated worker...")
+            self._clear_input_dependent_tabs()
             self._background_jobs.start_source_discovery(
                 SourceDiscoveryRequest(
                     input_path=input_path,
@@ -2111,8 +2135,9 @@ class MainWindow(QWidget):
             prototype_discovery = self._deps.discover_part_prototype_rows(input_path, persisted_records=part_records)
             base_discovery = self._deps.discover_base_material_rows(input_path, persisted_records=base_records)
         except Exception as exc:
-            self._clear_input_dependent_tabs("Selected XML file could not be loaded.")
-            self._set_status("Input discovery failed.")
+            self._clear_input_dependent_tabs()
+            self.program_status_card.set_summary(source="XML inspection failed")
+            self._finish_status_activity("error", "Input discovery failed.")
             self._append_log(
                 "Input discovery failed\n"
                 f"input_path={input_path}\n"
@@ -2129,6 +2154,7 @@ class MainWindow(QWidget):
             base_discovery=base_discovery,
             prototype_discovery=prototype_discovery,
         )
+        self._finish_status_activity("success", "Source rows loaded.")
 
     def _should_discover_source_async(self, input_path: str) -> bool:
         try:
@@ -2158,12 +2184,13 @@ class MainWindow(QWidget):
             base_discovery=result.base,
             prototype_discovery=result.prototypes,
         )
-        self._set_status("Source rows loaded.")
+        self._finish_status_activity("success", "Source rows loaded.")
         self._maybe_auto_refresh_wind_groups()
 
     def _handle_source_discovery_error(self, message: str) -> None:
-        self._clear_input_dependent_tabs("Large XML inspection failed. See Log for details.")
-        self._set_status("Input discovery failed.")
+        self._clear_input_dependent_tabs()
+        self.program_status_card.set_summary(source="XML inspection failed")
+        self._finish_status_activity("error", "Input discovery failed.")
         self._append_log(f"Input discovery failed\n{message}")
 
     def _apply_source_discovery(
@@ -2176,6 +2203,15 @@ class MainWindow(QWidget):
         base_discovery,
         prototype_discovery,
     ) -> None:
+        base_count = len(base_discovery.rows)
+        prototype_count = len(prototype_discovery.rows)
+        instance_count = sum(int(row.instance_count) for row in prototype_discovery.rows)
+        self.program_status_card.set_summary(
+            source=(
+                f"{base_count} material slot(s) · {prototype_count} prototype(s) · "
+                f"{instance_count:,} instance(s)"
+            )
+        )
         self.geometry_panel.load(prototype_discovery)
         self.materials_panel.load(
             input_path=input_path,
@@ -2187,17 +2223,12 @@ class MainWindow(QWidget):
             part_discovery=prototype_discovery,
         )
         self.wind_panel.set_persisted_settings(wind_records)
-        self.wind_panel.clear("Click Refresh Wind Groups to inspect wind settings.")
+        self.wind_panel.clear()
 
-    def _clear_input_dependent_tabs(self, message: str | None = None) -> None:
-        if message is None:
-            self.wind_panel.clear()
-            self.geometry_panel.clear()
-            self.materials_panel.clear()
-            return
-        self.wind_panel.clear(message)
-        self.geometry_panel.clear(message)
-        self.materials_panel.clear(message)
+    def _clear_input_dependent_tabs(self) -> None:
+        self.wind_panel.clear()
+        self.geometry_panel.clear()
+        self.materials_panel.clear()
 
     def browse_input(self) -> None:
         previous_input = self._operator_state.input_path
@@ -2474,10 +2505,12 @@ class MainWindow(QWidget):
     def _handle_part_preview_result(self, result) -> None:
         if self._part_preview_dialog is not None:
             self._part_preview_dialog.set_preview(result)
+        self._finish_status_activity("success", "Part Preview ready.")
 
     def _handle_part_preview_error_message(self, message: str) -> None:
         if self._part_preview_dialog is not None:
             self._part_preview_dialog.set_error(message)
+        self._finish_status_activity("error", "Part Preview failed.")
 
     def open_fracture_preview_dialog(self) -> None:
         self._source_refresh_timer.stop()
@@ -2652,7 +2685,7 @@ class MainWindow(QWidget):
             error_message = str(exc).strip() or type(exc).__name__
             runtime_log_path = self._runtime_paths.settings_dir / "gui_runtime.log"
             dialog.set_error(f"Preview viewport failed: {error_message}\nDebug log: {runtime_log_path}")
-            self._set_status("Fracture Preview viewport failed.")
+            self._finish_status_activity("error", "Fracture Preview viewport failed.")
             focus_preview_dialog(dialog)
             return
         viewport_mesh = dialog.viewport_mesh
@@ -2679,7 +2712,10 @@ class MainWindow(QWidget):
                     "logical_triangles": viewport_mesh.triangle_count,
                 },
             )
-        self._set_status(f"Fracture Preview ready: {preview.plan.actual_piece_count} piece(s).")
+        self._finish_status_activity(
+            "success",
+            f"Fracture Preview ready: {preview.plan.actual_piece_count} piece(s).",
+        )
         focus_preview_dialog(dialog)
 
     def _handle_fracture_preview_error_message(self, message: str) -> None:
@@ -2812,7 +2848,7 @@ class MainWindow(QWidget):
     def _handle_proxy_preview_result(self, proxy: ProxyMeshResult) -> None:
         input_path = self.source_input.text().strip()
         self._cache_proxy_preview_result(input_path, proxy)
-        self._set_status("Proxy Preview ready.")
+        self._finish_status_activity("success", "Proxy Preview ready.")
         self._trace(
             "job.result",
             job="proxy_preview",
@@ -2852,7 +2888,7 @@ class MainWindow(QWidget):
     def _handle_proxy_preview_error_message(self, message: str) -> None:
         self._trace("scene.error", job="proxy_preview", message=message)
         self._record_proxy_preview_error(message)
-        self._set_status("Proxy Preview failed.")
+        self._finish_status_activity("error", "Proxy Preview failed.")
         if self._proxy_preview_dialog is not None:
             self._proxy_preview_dialog.set_error(message)
 
@@ -2864,6 +2900,7 @@ class MainWindow(QWidget):
     ) -> None:
         if self._background_jobs.proxy_preview_running:
             self._background_jobs.cancel_proxy_mesh_preview()
+            self._finish_status_activity("cancelled", "Proxy Preview cancelled.")
         self._apply_proxy_preview_state(input_path, settings, proxy)
 
     def run_generate_proxy_mesh(self) -> None:
@@ -2958,13 +2995,13 @@ class MainWindow(QWidget):
         self._schedule_operator_state_save()
 
     def _handle_proxy_mesh_export_result(self, result) -> None:
-        self._set_status(f"Wrote Proxy Mesh USDA to {result.output_path}")
+        self._finish_status_activity("success", f"Wrote Proxy Mesh USDA to {result.output_path}")
         self._append_log(f"Proxy Mesh complete\nWrote Proxy Mesh USDA to {result.output_path}")
 
     def _handle_fracture_export_result(self, result) -> None:
         output_count = len(result.outputs)
         output_lines = "\n".join(output.output_path for output in result.outputs)
-        self._set_status(f"Wrote {output_count} Fracture USDA piece(s).")
+        self._finish_status_activity("success", f"Wrote {output_count} Fracture USDA piece(s).")
         self._append_log(
             f"Fracture export complete\n"
             f"Pieces: {result.plan.actual_piece_count}\n"
@@ -3019,7 +3056,7 @@ class MainWindow(QWidget):
     def _handle_wind_data_loaded(self, dynamic_wind, *, used_retry: bool) -> None:
         self._current_dynamic_wind = dynamic_wind
         self.wind_panel.rebuild(dynamic_wind.simulation_groups)
-        self._set_status(f"Loaded {len(dynamic_wind.simulation_groups)} wind groups.")
+        self._finish_status_activity("success", f"Loaded {len(dynamic_wind.simulation_groups)} wind groups.")
         summary = format_wind_group_summary(dynamic_wind)
         if used_retry:
             summary = f"{summary}\n\nBackground worker failed once and succeeded on retry."
@@ -3035,7 +3072,7 @@ class MainWindow(QWidget):
             self.open_wind_preview_dialog()
 
     def _handle_wind_json_result(self, result) -> None:
-        self._set_status(f"Wrote Dynamic Wind JSON to {result.output_path}")
+        self._finish_status_activity("success", f"Wrote Dynamic Wind JSON to {result.output_path}")
         self._set_log(format_wind_json_result(result))
         self._append_log(f"Wind JSON complete\nWrote Dynamic Wind JSON to {result.output_path}")
 
@@ -3052,11 +3089,11 @@ class MainWindow(QWidget):
             if load_request is not None:
                 self._background_jobs.start_wind_preview(load_request)
             else:
-                self._set_status(f"Wind Preview found {len(result.choices)} skeleton(s).")
+                self._finish_status_activity("success", f"Wind Preview found {len(result.choices)} skeleton(s).")
             return
         dialog = self._wind_preview_dialog
         if dialog is not None and not dialog.isVisible():
-            self._set_status(f"Wind Preview ready: {len(result.groups)} group(s).")
+            self._finish_status_activity("success", f"Wind Preview ready: {len(result.groups)} group(s).")
             return
         if dialog is None:
             dialog = WindPreviewDialog(
@@ -3077,7 +3114,7 @@ class MainWindow(QWidget):
             dialog.set_error(message)
             self._report_error("Wind Preview failed", message, status="Wind Preview failed.")
             return
-        self._set_status(f"Wind Preview ready: {len(result.groups)} group(s).")
+        self._finish_status_activity("success", f"Wind Preview ready: {len(result.groups)} group(s).")
         self._trace(
             "scene.ready",
             job="wind_preview",
@@ -3104,7 +3141,7 @@ class MainWindow(QWidget):
                 message="Wind Preview session autosave failed",
                 data={"settings_path": str(self._operator_settings_path), "error": str(exc)},
             )
-            self._set_status("Wind Preview opened. Session autosave failed.")
+            self._finish_status_activity("error", "Wind Preview opened. Session autosave failed.")
 
     def _handle_wind_preview_error_message(self, message: str) -> None:
         self._trace("scene.error", job="wind_preview", message=message)

@@ -4,6 +4,7 @@
 
 | Layer | Command | Scope |
 | --- | --- | --- |
+| Preview build | `scripts\\build_qt_gui_exe.cmd -Quick` | Source-backed UI review; no PyInstaller, packaged contracts, ZIP, or smoke. |
 | Core | `scripts\\run_tests.cmd Core` | Fast deterministic contracts and synthetic fixtures. |
 | Integration | `scripts\\run_tests.cmd Integration` | XML source workflows, workers, and Qt transport/lifecycle. |
 | Packaged | `scripts/build_qt_gui_exe.cmd -Package` | Packaged contract tests, then frozen EXE worker/cache/viewport smoke. |
@@ -14,6 +15,14 @@
 and then owns the frozen-runtime smoke. Markers are assigned centrally in
 `tests/conftest.py`; a test has one primary execution layer, while `stress` is
 an additional opt-in marker.
+
+Quick writes `dist-preview/SpeedAssembly_preview.cmd`, which launches the
+current source tree through `.venv310` after an import check. It is a manual
+preview artifact, not a standalone build or validation layer. Use it after
+relevant tests for low-risk UI iteration. Package remains required for
+frozen/native/runtime boundaries and before release. A normal UI defect found
+in Quick stays on the Quick loop until fixed, followed by one full Package gate;
+a packaged-only or native defect stays on Package validation.
 
 ## System contract map
 
