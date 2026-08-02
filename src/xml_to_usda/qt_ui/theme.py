@@ -209,6 +209,7 @@ def build_ui_palette(theme: ResolvedTheme) -> dict[str, str]:
         "chrome_control_fill": _css_color(str(theme.colors.get("chrome_control_fill", theme.colors["input_fill"]))),
         "chrome_control_hover_fill": _css_color(str(theme.colors.get("chrome_control_hover_fill", control_hover_source))),
         "danger_fill": _css_color(str(theme.colors["danger_fill"])),
+        "success_fill": _css_color(str(theme.colors.get("success_fill", "#3F7D4A"))),
         "danger_fill_soft": _with_alpha(str(theme.colors["danger_fill"]), 0.78),
         "log_fill": _css_color(str(theme.colors["log_fill"])),
         "card_fill": _css_color(str(theme.colors["card_fill"])),
@@ -271,8 +272,10 @@ def build_stylesheet(theme: ResolvedTheme) -> str:
     title_preset_width = int(theme.chrome.get("title_preset_width", 136))
     title_preset_height = int(theme.chrome.get("title_preset_height", window_button_size))
     tab_min_width = int(theme.layout.get("tab_min_width", 120))
+    tab_content_gap = int(theme.spacing["section_gap"])
     button_fill_disabled = palette["button_fill_disabled"]
     danger_fill = palette["danger_fill"]
+    success_fill = palette["success_fill"]
     danger_fill_soft = palette["danger_fill_soft"]
 
     return f"""
@@ -322,32 +325,44 @@ QLabel#ProgramStatusIndicator {{
     font-weight: 700;
 }}
 QLabel#ProgramStatusIndicator[statusState="ready"] {{ color: {muted_text}; }}
-QLabel#ProgramStatusIndicator[statusState="working"],
-QLabel#ProgramStatusIndicator[statusState="success"] {{ color: {accent_fill}; }}
-QLabel#ProgramStatusIndicator[statusState="error"] {{ color: {danger_fill}; }}
-QLabel#ProgramStatusIndicator[statusState="cancelled"] {{ color: {muted_text}; }}
+QLabel#ProgramStatusIndicator[statusState="working"] {{ color: {accent_fill}; }}
+QLabel#ProgramStatusIndicator[statusState="success"],
+QLabel#ProgramStatusState[statusState="success"] {{ color: {success_fill}; }}
+QLabel#ProgramStatusIndicator[statusState="error"],
+QLabel#ProgramStatusState[statusState="error"] {{ color: {danger_fill}; }}
+QLabel#ProgramStatusIndicator[statusState="cancelled"],
+QLabel#ProgramStatusState[statusState="cancelled"] {{ color: {muted_text}; }}
 QLabel#ProgramStatusSectionTitle {{
-    color: {muted_text};
+    color: {card_text};
     font-size: {theme.font_sizes['small']}px;
     font-weight: 700;
-    padding-top: 8px;
+    border-top: 1px solid {card_border};
+    padding-top: 12px;
 }}
 QLabel#ProgramStatusSummary {{
     color: {card_text};
     font-size: {theme.font_sizes['small']}px;
-    padding: 4px 0px;
+    padding: 3px 0px 5px 0px;
 }}
-QLabel#ProgramStatusStep {{
+QLabel#ProgramStatusStep,
+QLabel#ProgramStatusStepMarker {{
     color: {muted_text};
     font-size: {theme.font_sizes['small']}px;
     padding: 2px 0px;
 }}
-QLabel#ProgramStatusStep[stepState="active"] {{
+QLabel#ProgramStatusStepMarker {{
+    min-width: 14px;
+    max-width: 14px;
+}}
+QLabel#ProgramStatusStep[stepState="active"],
+QLabel#ProgramStatusStepMarker[stepState="active"] {{
     color: {card_text};
     font-weight: 700;
 }}
-QLabel#ProgramStatusStep[stepState="complete"] {{ color: {accent_fill}; }}
-QLabel#ProgramStatusStep[stepState="failed"] {{
+QLabel#ProgramStatusStep[stepState="complete"],
+QLabel#ProgramStatusStepMarker[stepState="complete"] {{ color: {success_fill}; }}
+QLabel#ProgramStatusStep[stepState="failed"],
+QLabel#ProgramStatusStepMarker[stepState="failed"] {{
     color: {danger_fill};
     font-weight: 700;
 }}
@@ -766,6 +781,7 @@ QComboBox#InteractiveCombo::down-arrow {{
 QTabWidget::pane {{
     border: none;
     background: transparent;
+    margin-top: {tab_content_gap}px;
 }}
 QTabBar::tab {{
     background: {tab_fill};

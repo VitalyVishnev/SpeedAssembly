@@ -1056,6 +1056,10 @@ summary. Map the existing conversion phases to Prepare, Normalize XML, Resolve
 Geometry, Resolve Materials, and Write USDA; keep FBX detail in the current
 message. Other background jobs use the same card without a staged list. Success
 resets after five seconds; error and cancellation persist until the next action.
+Use semantic terminal colors: green for success/completed stages and red for
+errors. Working indicators rotate inside fixed-width marker columns so status
+text never shifts. Compact long paths to their basename in the card while
+retaining the complete value in the tooltip and log.
 
 Consequences:
 Backend telemetry and request models remain unchanged. Full material paths and

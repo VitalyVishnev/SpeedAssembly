@@ -15,6 +15,7 @@
     "chrome_control_fill": "#E0DCE5E8",
     "chrome_control_hover_fill": "#BF8C4E",
     "danger_fill": "#A65233",
+    "success_fill": "#3F7D4A",
     "titlebar_fill": "#DCE5E8",
     "titlebar_text": "#13130F",
     "log_fill": "#DCE5E8",

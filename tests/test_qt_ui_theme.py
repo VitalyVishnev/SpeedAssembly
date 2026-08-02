@@ -10,6 +10,7 @@ pytestmark = pytest.mark.qt
 from xml_to_usda.qt_ui.theme import (
     ThemeOverrides,
     bake_theme_payload,
+    build_ui_palette,
     build_stylesheet,
     compute_cover_source_rect,
     compute_screen_scale,
@@ -28,6 +29,7 @@ def test_default_theme_assets_resolve() -> None:
     assert theme.name == "default"
     assert Path(resolve_theme_asset(theme, theme.background_image)).exists()
     assert Path(resolve_theme_asset(theme, theme.background_blur_image)).exists()
+    assert build_ui_palette(theme)["success_fill"] == "#3F7D4A"
 
 
 def test_theme_geometry_scales_and_crops_with_readability_bounds() -> None:

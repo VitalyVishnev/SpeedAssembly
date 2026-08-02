@@ -656,3 +656,14 @@ Major moves:
   on the same workspace state.
 - Verified 14 focused packaging-script contracts, 26 packaged contracts, the
   release EXE/ZIP, Detailed Cuts stability smoke, and worker recovery smoke.
+
+## 2026-08-02 - Program Status readability polish
+
+- Changed successful states and completed conversion stages to semantic green;
+  errors now consistently use red state text.
+- Replaced width-changing pulse markers with a rotating indicator in a fixed
+  marker column, keeping operation and stage text stationary.
+- Made Current Setup headings explicit, split dense source counts across lines,
+  and compacted long result paths to filenames while preserving full tooltips.
+- Restored the visual gap between the Wind/Geometry/Materials tabs and their
+  content panels without reintroducing the removed summary text.

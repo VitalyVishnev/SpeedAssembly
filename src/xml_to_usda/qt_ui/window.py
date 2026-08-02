@@ -1639,12 +1639,12 @@ class MainWindow(QWidget):
         if self._operator_state.material_policy.value == "single_material":
             material_path = self._operator_state.single_material_path or "not set"
             material_name = material_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-            materials = f"{policy} · {material_name}"
+            materials = f"{policy}\n{material_name}"
             materials_tooltip = material_path
         else:
             bark = "set" if self._operator_state.bark_material_path else "not set"
             leaves = "set" if self._operator_state.leaves_material_path else "not set"
-            materials = f"{policy} · Bark {bark} · Leaves {leaves}"
+            materials = f"{policy}\nBark: {bark} · Leaves: {leaves}"
             materials_tooltip = (
                 f"Bark: {self._operator_state.bark_material_path or '<none>'}\n"
                 f"Leaves: {self._operator_state.leaves_material_path or '<none>'}"
@@ -2208,8 +2208,9 @@ class MainWindow(QWidget):
         instance_count = sum(int(row.instance_count) for row in prototype_discovery.rows)
         self.program_status_card.set_summary(
             source=(
-                f"{base_count} material slot(s) · {prototype_count} prototype(s) · "
-                f"{instance_count:,} instance(s)"
+                f"Base slots: {base_count}\n"
+                f"Prototypes: {prototype_count}\n"
+                f"Instances: {instance_count:,}"
             )
         )
         self.geometry_panel.load(prototype_discovery)
