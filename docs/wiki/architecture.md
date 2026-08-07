@@ -50,6 +50,17 @@ Important data flow:
 3. Validation checks source, resolution, and authoring invariants in order.
 4. USDA authoring emits the importer-facing scene shape.
 
+Canonical normalization keeps its public model unchanged while avoiding hot-path
+allocation churn: immutable source UV values are reused across face corners,
+normal axes are remapped in batches without temporary vectors, scalar packed
+fields use a direct parse path, schema inspection uses plain local maps, and
+cyclic GC is suspended only while the acyclic cold-load graph is built. Keep
+these choices benchmark-backed. On the 9.7 MB Big Spruce sample with source
+cache disabled, an order-balanced one-core comparison reduced the complete
+`read + inspect + normalize + validate` phase from 1.689 s to 1.114 s wall
+median and from 1.648 s to 1.078 s CPU median: 34.0% and 34.6% respectively,
+without changing model output.
+
 Interactive preview flows may stop earlier when they inspect source facts rather
 than authored output. Wind Preview V1 loads canonical XML source facts, derives
 Dynamic Wind groups, and adapts those facts to viewport batches for inspection.

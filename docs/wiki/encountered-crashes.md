@@ -18,6 +18,7 @@ Evidence labels:
 - `GLOBAL-STATE` - process-global mutation crosses tests, threads, or workers.
 - `WORKER-MEMORY` - payload expansion or serialization exhausts a worker.
 - `WORKER-CACHE` - reconstructed cached arrays cross an unstable native/runtime boundary.
+- `WORKER-PROTOCOL` - process completion races with delivery of its final file-backed result.
 - `GPU-LIFECYCLE` - OpenGL work occurs outside Qt's current-context lifecycle.
 - `GPU-PRESSURE` - viewport expansion or command volume overwhelms the render path.
 - `PACKAGE-NATIVE` - frozen dependency/binary composition changes native stability.
@@ -233,6 +234,25 @@ Evidence labels:
 - Regression gate: Qt startup test forbids synchronous discovery for a large
   restored input; real source and packaged WorldTree startup must both return
   the expected rows without GUI termination.
+
+### CR-014 - Successful conversion was reported as an exit-code-zero crash
+
+- Date: 2026-08-08
+- Status/evidence: Resolved / Confirmed
+- Signature: the packaged worker emitted `USDA export completed`, atomically
+  replaced a 15,165,731-byte USDA, and exited with code `0`; the GUI then marked
+  `Write USDA` failed and reported an unexpected worker crash.
+- Boundary: GUI polling of the file-backed Conversion worker result.
+- Class: `WORKER-PROTOCOL`
+- Cause/fix: one poll found no final result while the worker was still writing
+  its temporary payload. The worker published the result and exited before the
+  subsequent liveness check, and the GUI declared a crash without re-reading
+  the queue. A stopped worker now gets one immediate terminal drain before a
+  crash is reported; no retry or timing delay was added.
+- Regression gate: the Qt controller test reproduces the empty-read/publish/
+  exit ordering and requires delivery of the result without a crash. Full
+  regression passed, and ten clean packaged Big-low Conversion runs completed
+  without a crash or retry.
 
 ## System rules derived from the incidents
 

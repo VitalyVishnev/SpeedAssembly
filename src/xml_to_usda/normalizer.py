@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import gc
 import math
 import xml.etree.ElementTree as ET
 from collections import defaultdict
@@ -65,6 +66,23 @@ class _ObjectExtractionResult:
 
 
 def normalize_to_canonical(
+    document,
+    report: ObservedXmlSchemaReport,
+    *,
+    source_nodes: SourceNodeIndex | None = None,
+) -> CanonicalTreeModel:
+    # The canonical model is acyclic; cyclic-GC scans only add overhead while its many immutable values are built.
+    gc_was_enabled = gc.isenabled()
+    if gc_was_enabled:
+        gc.disable()
+    try:
+        return _normalize_to_canonical(document, report, source_nodes=source_nodes)
+    finally:
+        if gc_was_enabled:
+            gc.enable()
+
+
+def _normalize_to_canonical(
     document,
     report: ObservedXmlSchemaReport,
     *,
@@ -356,6 +374,7 @@ def _extract_object_records(
             obj,
             source_transform,
             has_mesh_payload=has_mesh_payload,
+            abs_translate=abs_translate,
         )
         for leaf_ref_node in leaf_ref_nodes:
             payload = _read_leaf_reference_payload(obj, leaf_ref_node, messages, material_ids, source_transform)
@@ -832,8 +851,9 @@ def _leaf_reference_position_offset(
     source_transform: SourceTransform,
     *,
     has_mesh_payload: bool,
+    abs_translate: Vector3 | None = None,
 ) -> Vector3:
-    offset = _object_abs_translate(obj, source_transform)
+    offset = abs_translate if abs_translate is not None else _object_abs_translate(obj, source_transform)
     if offset == Vector3(0.0, 0.0, 0.0):
         return offset
     if has_mesh_payload:
@@ -1131,10 +1151,7 @@ def _extract_packed_normals(
         messages,
         required=[("NormalX", xs), ("NormalY", ys), ("NormalZ", zs)],
     )
-    return [
-        source_transform.axis_to_stage(Vector3(x, y, z))
-        for x, y, z in zip(xs[:count], ys[:count], zs[:count])
-    ]
+    return source_transform.axes_components_to_stage(xs[:count], ys[:count], zs[:count])
 
 
 def _extract_packed_triangles(
@@ -1374,9 +1391,12 @@ def _extract_face_varying_uvs(
             f"packed_array_error: {context} vertex index count {authored_count} does not match face vertex count {face_vertex_count} for UV authoring"
         )
     limit = min(authored_count, face_vertex_count)
+    source_uvs = [Vector2(u, v) for u, v in zip(u_coords, v_coords)]
     if isinstance(authored_indices, range):
-        return [Vector2(u_coords[vertex_index], v_coords[vertex_index]) for vertex_index in authored_indices]
+        return source_uvs
     if limit == face_vertex_count and authored_indices:
+        if min(authored_indices) >= 0 and max(authored_indices) < uv_count:
+            return [source_uvs[vertex_index] for vertex_index in authored_indices]
         uv_coords: list[Vector2] = []
         has_invalid_index = False
         for vertex_index in authored_indices:
@@ -1384,7 +1404,7 @@ def _extract_face_varying_uvs(
                 messages.append(f"packed_array_error: {context} UV vertex index {vertex_index} exceeds texcoord count {uv_count}")
                 has_invalid_index = True
                 continue
-            uv_coords.append(Vector2(u_coords[vertex_index], v_coords[vertex_index]))
+            uv_coords.append(source_uvs[vertex_index])
         if not has_invalid_index:
             return uv_coords
         if len(uv_coords) != face_vertex_count:
@@ -1397,7 +1417,7 @@ def _extract_face_varying_uvs(
         if vertex_index < 0 or vertex_index >= uv_count:
             messages.append(f"packed_array_error: {context} UV vertex index {vertex_index} exceeds texcoord count {uv_count}")
             continue
-        uv_coords.append(Vector2(u_coords[vertex_index], v_coords[vertex_index]))
+        uv_coords.append(source_uvs[vertex_index])
     if len(uv_coords) != len(face_indices):
         messages.append(
             f"packed_array_error: {context} authored UV count {len(uv_coords)} does not match face vertex count {len(face_indices)}"
@@ -1439,7 +1459,7 @@ def _extract_face_varying_normals(
             f"face vertex count {len(face_indices)}"
         )
         return []
-    if any(index < 0 or index >= len(source_normals) for index in authored_indices):
+    if authored_indices and (min(authored_indices) < 0 or max(authored_indices) >= len(source_normals)):
         messages.append(f"packed_array_error: {context} normal vertex index exceeds normal count")
         return []
     return [source_normals[index] for index in authored_indices]
@@ -1642,6 +1662,11 @@ def _read_float_list(raw: str | None) -> list[float]:
         return []
     if "," not in raw:
         tokens = raw.split()
+        if len(tokens) == 1:
+            try:
+                return [float(tokens[0])]
+            except ValueError:
+                return []
         try:
             return [float(token) for token in tokens]
         except ValueError:
@@ -1687,6 +1712,11 @@ def _read_int_list(raw: str | None) -> list[int]:
         return []
     if "," not in raw:
         tokens = raw.split()
+        if len(tokens) == 1:
+            try:
+                return [int(tokens[0])]
+            except ValueError:
+                return []
         try:
             return [int(token) for token in tokens]
         except ValueError:

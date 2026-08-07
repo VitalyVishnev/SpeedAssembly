@@ -76,6 +76,36 @@ class SourceTransform:
             rotated.z * scale,
         )
 
+    def axes_components_to_stage(self, xs, ys, zs) -> list[Vector3]:
+        axes: list[Vector3] = []
+        append = axes.append
+        if self.source_up_axis == self.target_up_axis:
+            for x, y, z in zip(xs, ys, zs):
+                length = math.sqrt(x * x + y * y + z * z)
+                append(Vector3(x / length, y / length, z / length) if length else Vector3(x, y, z))
+            return axes
+        if self.source_up_axis == "Z" and self.target_up_axis == "Y":
+            for x, y, z in zip(xs, ys, zs):
+                remapped_z = -y
+                length = math.sqrt(x * x + z * z + remapped_z * remapped_z)
+                append(
+                    Vector3(x / length, z / length, remapped_z / length)
+                    if length
+                    else Vector3(x, z, remapped_z)
+                )
+            return axes
+        if self.source_up_axis == "Y" and self.target_up_axis == "Z":
+            for x, y, z in zip(xs, ys, zs):
+                remapped_y = -z
+                length = math.sqrt(x * x + remapped_y * remapped_y + y * y)
+                append(
+                    Vector3(x / length, remapped_y / length, y / length)
+                    if length
+                    else Vector3(x, remapped_y, y)
+                )
+            return axes
+        return [self.axis_to_stage(Vector3(x, y, z)) for x, y, z in zip(xs, ys, zs)]
+
     def direction_to_stage(self, direction: Vector3) -> Vector3:
         if self.source_up_axis == self.target_up_axis:
             return direction

@@ -715,3 +715,27 @@ Major moves:
 - Polished the final change set: removed duplicate collision validation and an
   unused skeleton helper, narrowed domain error handling, and made collision
   ownership/imports explicit without changing the UE or UI contracts.
+
+## 2026-08-08 - Faster canonical XML normalization
+
+- Reused immutable source UV values across face corners, batch-remapped normal
+  axes without temporary vectors, added direct scalar packed-value parsing,
+  reused parsed object translations, and removed generator overhead from the
+  hot 4x4 skeleton matrix multiply and mandatory skeleton validation.
+- Reduced schema-inspection bookkeeping and suspended cyclic GC only across the
+  acyclic cold-load phase, restoring the caller's prior state through `finally`.
+- On the 9.7 MB Big Spruce sample with source cache disabled, an order-balanced
+  one-core comparison reduced the complete `read + inspect + normalize +
+  validate` phase from 1.689 s to 1.114 s wall median and from 1.648 s to
+  1.078 s CPU median: 34.0% and 34.6% faster respectively.
+- Passed 546 regression tests, 26 packaged contracts, a fresh release build,
+  Detailed Cuts stability smoke, and Fracture worker recovery smoke.
+
+## 2026-08-08 - Conversion result handoff race
+
+- Fixed a packaged-only false failure where a Conversion worker published its
+  final file result between the GUI's queue drain and process-liveness check.
+- The GUI now performs one terminal drain before classifying a stopped worker
+  as crashed; the regression test preserves the observed exit-code-zero order.
+- Passed 547 regression tests, 26 packaged contracts, the release build and
+  stability smokes, plus 10/10 clean packaged Big-low Conversion worker runs.

@@ -9,6 +9,7 @@ ResolvedAssemblyModel that applies operator intent for authoring.
 from __future__ import annotations
 
 import contextlib
+import gc
 import hashlib
 import os
 import time
@@ -59,6 +60,28 @@ def load_source_tree_model(
     cancel_event=None,
 ) -> tuple[ObservedXmlSchemaReport, CanonicalTreeModel, tuple[ValidationIssue, ...]]:
     """Load one XML source into the source-normalized CanonicalTreeModel."""
+    gc_was_enabled = gc.isenabled()
+    if gc_was_enabled:
+        gc.disable()
+    try:
+        return _load_source_tree_model(
+            input_path,
+            source_cache_enabled=source_cache_enabled,
+            telemetry_callback=telemetry_callback,
+            cancel_event=cancel_event,
+        )
+    finally:
+        if gc_was_enabled:
+            gc.enable()
+
+
+def _load_source_tree_model(
+    input_path: str,
+    *,
+    source_cache_enabled: bool = True,
+    telemetry_callback=None,
+    cancel_event=None,
+) -> tuple[ObservedXmlSchemaReport, CanonicalTreeModel, tuple[ValidationIssue, ...]]:
     started_at = time.perf_counter()
     emit_telemetry(
         telemetry_callback,

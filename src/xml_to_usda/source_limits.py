@@ -134,5 +134,7 @@ def count_packed_values(raw: str | None) -> int:
     if not raw:
         return 0
     if len(raw) <= _PACKED_VALUE_FAST_SPLIT_MAX_CHARS:
+        if "," not in raw:
+            return len(raw.split())
         return len(raw.replace(",", " ").split())
     return sum(1 for _match in _PACKED_VALUE_STREAMING_PATTERN.finditer(raw))

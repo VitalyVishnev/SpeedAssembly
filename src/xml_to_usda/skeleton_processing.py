@@ -236,11 +236,31 @@ def _transform(x_axis: Vector3, y_axis: Vector3, z_axis: Vector3, translate: Vec
 
 
 def _multiply(left: Matrix4d, right: Matrix4d) -> Matrix4d:
-    return Matrix4d(
-        rows=tuple(
-            tuple(sum(left.rows[row][k] * right.rows[k][column] for k in range(4)) for column in range(4))
-            for row in range(4)
+    right_rows = right.rows
+    rows = []
+    for left_row in left.rows:
+        rows.append(
+            (
+                left_row[0] * right_rows[0][0]
+                + left_row[1] * right_rows[1][0]
+                + left_row[2] * right_rows[2][0]
+                + left_row[3] * right_rows[3][0],
+                left_row[0] * right_rows[0][1]
+                + left_row[1] * right_rows[1][1]
+                + left_row[2] * right_rows[2][1]
+                + left_row[3] * right_rows[3][1],
+                left_row[0] * right_rows[0][2]
+                + left_row[1] * right_rows[1][2]
+                + left_row[2] * right_rows[2][2]
+                + left_row[3] * right_rows[3][2],
+                left_row[0] * right_rows[0][3]
+                + left_row[1] * right_rows[1][3]
+                + left_row[2] * right_rows[2][3]
+                + left_row[3] * right_rows[3][3],
+            )
         )
+    return Matrix4d(
+        rows=tuple(rows)
     )
 
 
@@ -345,20 +365,49 @@ def _first_hierarchy_cycle(skeleton: tuple[Joint, ...], joints_by_name: dict[str
 
 
 def _matrix_is_finite(matrix: Matrix4d) -> bool:
-    return all(math.isfinite(value) for row in matrix.rows for value in row)
+    for row in matrix.rows:
+        for value in row:
+            if not math.isfinite(value):
+                return False
+    return True
 
 
 def _matrix_has_shape(matrix: Matrix4d) -> bool:
-    return len(matrix.rows) == 4 and all(len(row) == 4 for row in matrix.rows)
+    rows = matrix.rows
+    return (
+        len(rows) == 4
+        and len(rows[0]) == 4
+        and len(rows[1]) == 4
+        and len(rows[2]) == 4
+        and len(rows[3]) == 4
+    )
 
 
 def _is_rigid_basis(matrix: Matrix4d) -> bool:
-    x_axis, y_axis, z_axis = (_matrix_axis(matrix, index) for index in range(3))
-    if any(abs(_length_squared(axis) - 1.0) > _TRANSFORM_TOLERANCE for axis in (x_axis, y_axis, z_axis)):
+    x_axis, y_axis, z_axis = matrix.rows[:3]
+    if (
+        abs(x_axis[0] * x_axis[0] + x_axis[1] * x_axis[1] + x_axis[2] * x_axis[2] - 1.0)
+        > _TRANSFORM_TOLERANCE
+        or abs(y_axis[0] * y_axis[0] + y_axis[1] * y_axis[1] + y_axis[2] * y_axis[2] - 1.0)
+        > _TRANSFORM_TOLERANCE
+        or abs(z_axis[0] * z_axis[0] + z_axis[1] * z_axis[1] + z_axis[2] * z_axis[2] - 1.0)
+        > _TRANSFORM_TOLERANCE
+    ):
         return False
-    if any(abs(value) > _TRANSFORM_TOLERANCE for value in (_dot(x_axis, y_axis), _dot(x_axis, z_axis), _dot(y_axis, z_axis))):
+    if (
+        abs(x_axis[0] * y_axis[0] + x_axis[1] * y_axis[1] + x_axis[2] * y_axis[2]) > _TRANSFORM_TOLERANCE
+        or abs(x_axis[0] * z_axis[0] + x_axis[1] * z_axis[1] + x_axis[2] * z_axis[2])
+        > _TRANSFORM_TOLERANCE
+        or abs(y_axis[0] * z_axis[0] + y_axis[1] * z_axis[1] + y_axis[2] * z_axis[2])
+        > _TRANSFORM_TOLERANCE
+    ):
         return False
-    if abs(_dot(x_axis, _cross(y_axis, z_axis)) - 1.0) > _TRANSFORM_TOLERANCE:
+    determinant = (
+        x_axis[0] * (y_axis[1] * z_axis[2] - y_axis[2] * z_axis[1])
+        + x_axis[1] * (y_axis[2] * z_axis[0] - y_axis[0] * z_axis[2])
+        + x_axis[2] * (y_axis[0] * z_axis[1] - y_axis[1] * z_axis[0])
+    )
+    if abs(determinant - 1.0) > _TRANSFORM_TOLERANCE:
         return False
     return (
         all(abs(matrix.rows[row][3]) <= _TRANSFORM_TOLERANCE for row in range(3))
@@ -367,11 +416,11 @@ def _is_rigid_basis(matrix: Matrix4d) -> bool:
 
 
 def _matrices_close(left: Matrix4d, right: Matrix4d) -> bool:
-    return all(
-        abs(left.rows[row][column] - right.rows[row][column]) <= _TRANSFORM_TOLERANCE
-        for row in range(4)
-        for column in range(4)
-    )
+    for left_row, right_row in zip(left.rows, right.rows):
+        for left_value, right_value in zip(left_row, right_row):
+            if abs(left_value - right_value) > _TRANSFORM_TOLERANCE:
+                return False
+    return True
 
 
 def _transported_twist_degrees(parent: Matrix4d, child: Matrix4d) -> float | None:

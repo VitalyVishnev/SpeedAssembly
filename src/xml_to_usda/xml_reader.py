@@ -176,26 +176,46 @@ def inspect_xml(document: SourceXmlDocument) -> ObservedXmlSchemaReport:
 
 def analyze_xml(document: SourceXmlDocument) -> SourceXmlAnalysis:
     root = document.tree.getroot()
-    tag_counts: Counter[str] = Counter()
-    attributes_by_tag: dict[str, set[str]] = defaultdict(set)
+    tag_counts: dict[str, int] = {}
+    attributes_by_tag: dict[str, set[str]] = {}
     objects: list[ET.Element] = []
     materials: list[ET.Element] = []
     meshes: list[ET.Element] = []
     bones: list[ET.Element] = []
+    tag_count_get = tag_counts.get
+    attributes_get = attributes_by_tag.get
+    units_hint = root.attrib.get("units")
+    up_axis_hint = root.attrib.get("upAxis") or root.attrib.get("up_axis")
+    nested_units = None
+    nested_up_axis = None
+    nested_up_axis_alt = None
 
     for elem in root.iter():
-        tag_counts[elem.tag] += 1
+        tag = elem.tag
+        attrib = elem.attrib
+        tag_counts[tag] = tag_count_get(tag, 0) + 1
         # Iterate over attribute names directly instead of calling .keys().
         # This is more permissive with mapping-like views and avoids rare
         # descriptor errors observed in packaged/worker execution paths.
-        attributes_by_tag[elem.tag].update(elem.attrib)
-        if elem.tag == "Object":
+        attributes = attributes_get(tag)
+        if attributes is None:
+            attributes = set()
+            attributes_by_tag[tag] = attributes
+        attributes.update(attrib)
+        if units_hint is None and nested_units is None:
+            nested_units = attrib.get("units")
+        if up_axis_hint is None:
+            if nested_up_axis is None:
+                nested_up_axis = attrib.get("upAxis")
+            if nested_up_axis_alt is None:
+                nested_up_axis_alt = attrib.get("up_axis")
+        if tag == "Object":
             objects.append(elem)
-        elif elem.tag == "Material":
+        elif tag == "Material":
             materials.append(elem)
-        elif elem.tag == "Mesh":
+        elif tag == "Mesh":
             meshes.append(elem)
-        elif elem.tag == "Bone":
+        elif tag == "Bone":
             bones.append(elem)
 
     known_sections = {
@@ -217,13 +237,8 @@ def analyze_xml(document: SourceXmlDocument) -> SourceXmlAnalysis:
     )
 
     version = _extract_version(root)
-    units_hint = root.attrib.get("units") or _find_first_attr(root, "units")
-    up_axis_hint = (
-        root.attrib.get("upAxis")
-        or root.attrib.get("up_axis")
-        or _find_first_attr(root, "upAxis")
-        or _find_first_attr(root, "up_axis")
-    )
+    units_hint = units_hint or nested_units
+    up_axis_hint = up_axis_hint or nested_up_axis or nested_up_axis_alt
 
     object_class_counts, hierarchy_depth, spine_object_count, leaf_binding_distribution, leaf_mesh_distribution, leaf_source_object_distribution = _inspect_objects(objects)
 

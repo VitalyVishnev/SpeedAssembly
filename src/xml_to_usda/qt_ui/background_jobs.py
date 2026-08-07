@@ -659,16 +659,8 @@ class QtBackgroundJobsController:
             elif event_name == "proxy_mesh_result":
                 self._proxy_mesh_result_received = True
                 self._handle_proxy_mesh_job_result(payload)
-        if self._conversion_queue is not None:
-            for event_name, payload in self._deps.drain_process_queue(self._conversion_queue):
-                keep_polling = True
-                if event_name == "telemetry":
-                    self._handle_conversion_telemetry(payload)
-                elif event_name == "error_traceback":
-                    self._conversion_error_traceback = str(payload)
-                elif event_name == "result":
-                    self._conversion_result_received = True
-                    self._handle_conversion_job_result(payload)
+        if self._drain_conversion_process_queue():
+            keep_polling = True
 
         if self._drain_wind_refresh_process_queue():
             keep_polling = True
@@ -686,7 +678,10 @@ class QtBackgroundJobsController:
         if self._conversion_process is not None and self._conversion_process.is_alive():
             keep_polling = True
         elif self._conversion_process is not None and not self._conversion_result_received:
-            self._handle_async_process_crash()
+            if self._drain_conversion_process_queue():
+                keep_polling = True
+            if self._conversion_process is not None and not self._conversion_result_received:
+                self._handle_async_process_crash()
         elif self._conversion_thread is not None and self._conversion_thread.is_alive():
             keep_polling = True
 
@@ -909,6 +904,21 @@ class QtBackgroundJobsController:
                 self._handle_proxy_preview_error(str(payload))
             elif event_name == "result":
                 self._handle_proxy_preview_job_result(payload)
+        return received_event
+
+    def _drain_conversion_process_queue(self) -> bool:
+        if self._conversion_queue is None:
+            return False
+        received_event = False
+        for event_name, payload in self._deps.drain_process_queue(self._conversion_queue):
+            received_event = True
+            if event_name == "telemetry":
+                self._handle_conversion_telemetry(payload)
+            elif event_name == "error_traceback":
+                self._conversion_error_traceback = str(payload)
+            elif event_name == "result":
+                self._conversion_result_received = True
+                self._handle_conversion_job_result(payload)
         return received_event
 
     def _drain_part_preview_queue(self) -> bool:

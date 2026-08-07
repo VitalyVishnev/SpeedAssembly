@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QWidget
 
 from xml_to_usda.fracture_preview_service import FracturePreviewSettings, FracturePreviewSourceRequest
 from xml_to_usda.fracture_service import FractureSettings
+from xml_to_usda.models import ConversionJobResult
 from xml_to_usda.qt_ui.background_jobs import QtBackgroundJobsController
 
 
@@ -120,5 +121,51 @@ def test_qt_fracture_controller_delivers_only_latest_settings_without_killing_ac
         assert [settings for _request, settings in starts] == [first_settings, latest_settings]
         assert first_process.terminated is False
         assert first_cancel.was_set is False
+    finally:
+        controller.shutdown()
+
+
+def test_qt_conversion_rechecks_result_after_worker_stops(qtbot) -> None:
+    window = _Window()
+    qtbot.addWidget(window)
+    process = _Process(alive=False)
+    queue = []
+    expected = ConversionJobResult()
+    conversion_drain_count = 0
+
+    def drain(candidate):
+        nonlocal conversion_drain_count
+        if candidate is queue:
+            conversion_drain_count += 1
+            if conversion_drain_count == 1:
+                queue.append(("result", expected))
+                return []
+        events = list(candidate)
+        candidate.clear()
+        return events
+
+    deps = SimpleNamespace(
+        start_wind_preview_process=lambda *_args: None,
+        start_proxy_mesh_process=lambda *_args, **_kwargs: None,
+        start_fracture_preview_process=lambda *_args: None,
+        start_part_preview_process=lambda *_args: None,
+        start_source_discovery_process=lambda *_args: None,
+        drain_process_queue=drain,
+        close_process_queue=lambda _queue: None,
+    )
+    controller = QtBackgroundJobsController(window, deps=deps, runtime_paths=SimpleNamespace())
+    delivered = []
+    crashes = []
+    controller._conversion_process = process
+    controller._conversion_queue = queue
+    controller._handle_conversion_job_result = delivered.append
+    controller._handle_async_process_crash = lambda: crashes.append(True)
+
+    try:
+        controller._poll()
+
+        assert conversion_drain_count == 2
+        assert delivered == [expected]
+        assert crashes == []
     finally:
         controller.shutdown()

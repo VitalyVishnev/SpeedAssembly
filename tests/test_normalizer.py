@@ -269,6 +269,12 @@ def test_source_transform_batch_point_conversion_matches_single_point_conversion
 
     assert batch_points == [Vector3(1.0, 5.0, -3.0), Vector3(2.0, 6.0, -4.0)]
 
+    batch_axes = transform.axes_components_to_stage([1.0, 0.0], [0.0, 0.0], [0.0, 0.0])
+    assert batch_axes == [
+        transform.axis_to_stage(Vector3(1.0, 0.0, 0.0)),
+        transform.axis_to_stage(Vector3(0.0, 0.0, 0.0)),
+    ]
+
 
 def test_leaf_reference_orientation_preserves_rotation_sense_after_axis_remap() -> None:
     root = ET.fromstring(
