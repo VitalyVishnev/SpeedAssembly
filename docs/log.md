@@ -680,3 +680,8 @@ Major moves:
   in the left Program Status card.
 - Passed 530 regression tests, 26 packaged contracts, the release EXE/ZIP
   build, Detailed Cuts stability smoke, and Fracture worker recovery smoke.
+- Added mandatory hierarchy, +X/basis/rest-transform, chain-roll, and
+  base/repeated influence validation to the existing source/authoring gates;
+  no new reference assets were created.
+- Passed 533 regression tests, 26 packaged contracts, a fresh release build,
+  and both packaged stability smokes with the validator enabled.

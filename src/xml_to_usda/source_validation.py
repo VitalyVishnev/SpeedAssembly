@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .models import CanonicalTreeModel, ValidationIssue
+from .skeleton_processing import validate_skeleton
 from .validation_common import metadata_warning_issues
 
 
@@ -27,4 +28,5 @@ def validate_source_model(model: CanonicalTreeModel) -> tuple[ValidationIssue, .
         )
 
     issues.extend(metadata_warning_issues(model.metadata.warnings))
+    issues.extend(validate_skeleton(model.skeleton))
     return tuple(issues)

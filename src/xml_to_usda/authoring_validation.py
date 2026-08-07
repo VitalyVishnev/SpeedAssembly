@@ -9,6 +9,7 @@ from .models import (
     PrototypeStrategy,
     ValidationIssue,
 )
+from .skeleton_processing import validate_skinning
 
 
 SUPPORTED_AUTHORING_MODES = {
@@ -66,6 +67,7 @@ def _validate_skeletal_assembly_model(
     material_ids: set[int],
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
+    issues.extend(validate_skinning(model))
 
     if model.base_mesh is None:
         issues.append(
@@ -94,25 +96,6 @@ def _validate_skeletal_assembly_model(
             )
         issues.extend(_validate_mesh_materials(model.base_mesh, material_ids, "Base Skeletal Tree"))
 
-    if model.materials and model.base_mesh is not None:
-        expected_skinning_size = len(model.base_mesh.points) * model.base_mesh.skel_element_size
-        if len(model.base_mesh.skel_joint_indices) != expected_skinning_size:
-            issues.append(
-                ValidationIssue(
-                    severity="error",
-                    code="invalid_base_mesh_skinning_shape",
-                    message="Base skeletal mesh joint index payload must match the authored point count for vertex interpolation.",
-                )
-            )
-        if len(model.base_mesh.skel_joint_weights) != expected_skinning_size:
-            issues.append(
-                ValidationIssue(
-                    severity="error",
-                    code="invalid_base_mesh_skinning_shape",
-                    message="Base skeletal mesh joint weight payload must match the authored point count for vertex interpolation.",
-                )
-            )
-
     if not model.skeleton:
         issues.append(
             ValidationIssue(
@@ -121,22 +104,6 @@ def _validate_skeletal_assembly_model(
                 message="Skeleton data is required for skeletal nanite assembly export.",
             )
         )
-    elif model.base_mesh is not None and model.base_mesh.skel_joint_indices:
-        skeleton_size = len(model.skeleton)
-        out_of_range = [
-            index for index in model.base_mesh.skel_joint_indices if index < 0 or index >= skeleton_size
-        ]
-        if out_of_range:
-            issues.append(
-                ValidationIssue(
-                    severity="error",
-                    code="invalid_base_mesh_joint_index",
-                    message=(
-                        "Base skeletal mesh contains joint indices outside the authored skeleton range; "
-                        f"found {len(out_of_range)} invalid entries for {skeleton_size} joints."
-                    ),
-                )
-            )
 
     if not model.repeated_parts:
         issues.append(
@@ -248,24 +215,6 @@ def _validate_skeletal_assembly_model(
                         ),
                     )
                 )
-
-    for part in model.repeated_parts:
-        if len(part.binding.joint_tokens) != len(part.binding.weights):
-            issues.append(
-                ValidationIssue(
-                    severity="error",
-                    code="invalid_binding_shape",
-                    message=f"Repeated Part instance {part.name} has mismatched joint and weight counts.",
-                )
-            )
-        if part.binding.weights and abs(sum(part.binding.weights) - 1.0) > 1e-4:
-            issues.append(
-                ValidationIssue(
-                    severity="warning",
-                    code="non_normalized_binding_weights",
-                    message=f"Repeated Part instance {part.name} binding weights sum to {sum(part.binding.weights):g} instead of 1.",
-                )
-            )
 
     return issues
 

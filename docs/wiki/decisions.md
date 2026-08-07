@@ -1170,3 +1170,26 @@ Related files:
 - `src/xml_to_usda/skeleton_processing.py`
 - `src/xml_to_usda/usda_authoring.py`
 - `src/xml_to_usda/qt_ui/panels.py`
+
+## Decision: Skeleton and influence invariants are mandatory export gates
+
+Status: Active
+
+Source validation rejects duplicate joints, missing parents, hierarchy cycles,
+non-finite or non-rigid bases, local +X misalignment, zero-length bones, and
+rest transforms that do not reconstruct absolute bind transforms. Multi-root
+skeletons are valid. A transported-frame roll above 75 degrees is a warning,
+not an error. Missing endpoints remain warnings because older inputs may need
+the documented hierarchy-based direction inference.
+
+Skeletal Assembly authoring validates base-mesh and repeated-Part influence
+widths, array shapes, joint references, finite `[0, 1]` weights, and per-element
+weight sums. If any authored payload uses Dual Skinning, all bound base/repeated
+payloads must use two influences. Diagnostics identify the exact bone, vertex,
+or Part where possible. Errors stop USDA authoring through the existing gate;
+warnings use the existing diagnostics/status/log path.
+
+Related files:
+- `src/xml_to_usda/skeleton_processing.py`
+- `src/xml_to_usda/source_validation.py`
+- `src/xml_to_usda/authoring_validation.py`

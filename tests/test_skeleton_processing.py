@@ -14,7 +14,14 @@ from xml_to_usda.models import (
     TreeAsset,
     Vector3,
 )
-from xml_to_usda.skeleton_processing import _multiply, apply_dual_skinning, orient_skeleton_x
+from xml_to_usda.skeleton_processing import (
+    _multiply,
+    _rigid_inverse,
+    apply_dual_skinning,
+    orient_skeleton_x,
+    validate_skeleton,
+    validate_skinning,
+)
 from xml_to_usda.usda_authoring import _render_base_animation
 
 
@@ -91,3 +98,47 @@ def test_dual_skinning_blends_parent_to_current_joint_along_bone_segment() -> No
     assert tuple(weight for part in result.repeated_parts for weight in part.binding.weights) == pytest.approx(
         (0.0, 1.0, 0.5, 0.5, 1.0, 0.0)
     )
+
+
+def test_skeleton_validation_reports_orientation_rest_and_hierarchy_failures() -> None:
+    source = _model()
+    oriented = orient_skeleton_x(source.skeleton)
+    invalid_root = replace(oriented[0], bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity())
+    invalid_branch = replace(oriented[1], parent="missing", rest_transform=Matrix4d.identity())
+
+    issues = validate_skeleton((invalid_root, invalid_branch))
+    codes = {issue.code for issue in issues}
+
+    assert "invalid_bone_x_axis" in codes
+    assert "missing_skeleton_parent" in codes
+    assert "inconsistent_bone_rest_transform" in codes
+    assert any("'branch'" in issue.message for issue in issues)
+
+    cycle_issues = validate_skeleton((replace(oriented[0], parent="branch"), oriented[1]))
+    assert any(issue.code == "cyclic_skeleton_hierarchy" for issue in cycle_issues)
+
+
+def test_skeleton_validation_warns_for_excessive_chain_twist() -> None:
+    source = _model()
+    root, branch = orient_skeleton_x(source.skeleton)
+    x_axis, y_axis, z_axis = branch.bind_transform.rows[:3]
+    twisted_z = (-y_axis[0], -y_axis[1], -y_axis[2], 0.0)
+    twisted_bind = Matrix4d(rows=(x_axis, z_axis, twisted_z, branch.bind_transform.rows[3]))
+    twisted_rest = _multiply(twisted_bind, _rigid_inverse(root.bind_transform))
+
+    issues = validate_skeleton((root, replace(branch, bind_transform=twisted_bind, rest_transform=twisted_rest)))
+
+    assert any(issue.code == "excessive_bone_twist" and issue.severity == "warning" for issue in issues)
+
+
+def test_skinning_validation_identifies_vertex_weights_and_mixed_binding_widths() -> None:
+    model = apply_dual_skinning(_model())
+    assert model.base_mesh is not None
+    bad_mesh = replace(model.base_mesh, skel_joint_weights=(float("nan"),) + model.base_mesh.skel_joint_weights[1:])
+    bad_part = replace(model.repeated_parts[0], binding=InstanceBinding(("branch",), (1.0,)))
+    invalid = replace(model, base_mesh=bad_mesh, assembly_parts=(bad_part,) + model.repeated_parts[1:])
+
+    issues = validate_skinning(invalid)
+
+    assert any(issue.code == "invalid_base_mesh_joint_weights" and "vertex 0" in issue.message for issue in issues)
+    assert any(issue.code == "inconsistent_dual_skinning_width" and "part_0" in issue.message for issue in issues)
