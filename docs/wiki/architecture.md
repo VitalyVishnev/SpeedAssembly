@@ -58,7 +58,10 @@ the same large source concurrently. External Skeleton loading reads
 FBX or USD/UsdSkel payloads as skeleton-only previews. Source loading, USD
 Skeleton prim enumeration, and scene build run in a file-backed worker process
 so XML/external skeleton faults do not crash the Qt shell. The GUI consumes the
-worker-built initial scene directly. The worker result keeps only the compact
+worker-built initial scene directly. Selecting an external file starts loading
+immediately; a multi-skeleton USD waits only for the operator to select its
+Skeleton prim, then loads without a separate confirmation button. The worker
+result keeps only the compact
 base-mesh viewport scene and skeleton; Repeated Parts are intentionally absent
 because Wind Preview is a skeleton inspection workflow. It does not serialize
 the full CanonicalTreeModel beside the scene. Grouping edits recolor that scene and

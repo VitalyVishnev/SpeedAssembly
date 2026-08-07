@@ -147,13 +147,13 @@ class WindPreviewDialog(PreviewShellDialog):
         settings_layout.addWidget(self.source_mode_combo)
         self.external_path_edit = QLineEdit(settings_panel)
         self.external_path_edit.setPlaceholderText("FBX/USD skeleton path")
+        self.external_path_edit.setReadOnly(True)
         self.external_path_edit.textChanged.connect(lambda _text: self._clear_external_skeleton_choices())
-        self.external_path_edit.editingFinished.connect(self._save_wind_session)
-        set_tooltip("External skeleton file. Mesh geometry is not loaded for this workflow.", self.external_path_edit)
+        set_tooltip("Selected external skeleton file. Use Browse to select and load another file.", self.external_path_edit)
         settings_layout.addWidget(self.external_path_edit)
         self.external_skeleton_combo = QComboBox(settings_panel)
         self.external_skeleton_combo.setFixedHeight(24)
-        self.external_skeleton_combo.currentIndexChanged.connect(lambda _index: self._save_wind_session())
+        self.external_skeleton_combo.currentIndexChanged.connect(lambda _index: self._on_external_skeleton_changed())
         set_tooltip("Skeleton prim to load from this USD file. Shown only when the file contains multiple skeletons.", self.external_skeleton_combo)
         settings_layout.addWidget(self.external_skeleton_combo)
         external_row = QWidget(settings_panel)
@@ -163,11 +163,7 @@ class WindPreviewDialog(PreviewShellDialog):
         self.browse_external_button = QPushButton("Browse", external_row)
         self.browse_external_button.clicked.connect(self.browse_external_path)
         self.browse_external_button.setFixedHeight(24)
-        self.load_external_button = QPushButton("Load", external_row)
-        self.load_external_button.clicked.connect(self.load_external_skeleton)
-        self.load_external_button.setFixedHeight(24)
-        external_layout.addWidget(self.browse_external_button, 0)
-        external_layout.addWidget(self.load_external_button, 1)
+        external_layout.addWidget(self.browse_external_button, 1)
         settings_layout.addWidget(external_row)
         self._external_controls = (self.external_path_edit, self.external_skeleton_combo, external_row)
 
@@ -434,6 +430,7 @@ class WindPreviewDialog(PreviewShellDialog):
         if selected:
             self.external_path_edit.setText(selected)
             self._save_wind_session()
+            self.load_external_skeleton()
 
     def load_external_skeleton(self) -> None:
         path = self.external_path_edit.text().strip()
@@ -482,6 +479,8 @@ class WindPreviewDialog(PreviewShellDialog):
         self._external_skeleton_choice_count = len(choices)
         with QSignalBlocker(self.external_skeleton_combo):
             self.external_skeleton_combo.clear()
+            if len(choices) > 1:
+                self.external_skeleton_combo.addItem("Choose Skeleton prim...", None)
             for choice in choices:
                 self.external_skeleton_combo.addItem(
                     f"{choice.name}  ({choice.joint_count} joints)",
@@ -493,7 +492,7 @@ class WindPreviewDialog(PreviewShellDialog):
             return None
         if len(choices) == 1:
             return ExternalSkeletonPreviewRequest(path, group_count=self._auto_group_count, skeleton_index=choices[0].index)
-        self.summary_label.setText("Choose a Skeleton prim, then press Load.")
+        self.summary_label.setText("Choose a Skeleton prim to load it.")
         self._save_wind_session()
         return None
 
@@ -867,6 +866,11 @@ class WindPreviewDialog(PreviewShellDialog):
     def _on_source_mode_changed(self) -> None:
         self._sync_source_controls()
         self._save_wind_session()
+
+    def _on_external_skeleton_changed(self) -> None:
+        self._save_wind_session()
+        if self.external_skeleton_combo.currentData() is not None:
+            self.load_external_skeleton()
 
     def _clear_external_skeleton_choices(self) -> None:
         self._external_skeleton_choices_path = ""

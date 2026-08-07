@@ -685,3 +685,9 @@ Major moves:
   no new reference assets were created.
 - Passed 533 regression tests, 26 packaged contracts, a fresh release build,
   and both packaged stability smokes with the validator enabled.
+
+## 2026-08-07 - Automatic external skeleton preview loading
+
+- Removed the redundant External Skeleton `Load` button from Wind Preview.
+- Selecting an FBX/USD file now starts loading immediately; multi-skeleton USD
+  files load when the operator selects a Skeleton prim.
