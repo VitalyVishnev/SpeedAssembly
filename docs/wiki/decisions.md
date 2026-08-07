@@ -1143,6 +1143,33 @@ Related files:
 - `src/xml_to_usda/qt_ui/proxy_preview.py`
 - `src/xml_to_usda/settings_service.py`
 
+## Decision: Proxy collision fits Fracturing stem axes
+
+Status: Active
+
+Proxy Mesh collision defaults to one enabled Box fitted from the lower `0.5`
+of the same base-mesh-owned stem axes used by Fracturing. Width `1.0` is the
+largest transverse local AABB span of vertices owned by the selected stem
+segments. Height and Width zero deliberately omit collision.
+
+Multi-stem sources default to one combined PCA-fitted primitive. `One Primitive
+per Stem` instead emits one independently fitted `UBX_` or `UCP_` guide sibling
+per stem. Collision transforms are baked into mesh points because UE ignored
+collision prim transforms in the validated Fracture path. Do not author USD
+Physics APIs on these siblings.
+
+Box and Capsule import as simple collision on the Proxy Static Mesh was manually
+confirmed in UE 5.7.x on 2026-08-08. Proxy Preview retains the fitted collision
+when hidden, so `Generate Collision` On/Off never regenerates Proxy Mesh. Other
+collision fit changes use the collision-only worker action. Guide collision does
+not contribute to camera/grid bounds; the grid stays at the tree pivot.
+
+Related files:
+- `src/xml_to_usda/proxy_collision.py`
+- `src/xml_to_usda/collision_primitives.py`
+- `src/xml_to_usda/proxy_source_projection.py`
+- `src/xml_to_usda/proxy_mesh_service.py`
+
 ## Decision: Local +X and dual skinning are the default skeleton contract
 
 Status: Active
@@ -1193,3 +1220,18 @@ Related files:
 - `src/xml_to_usda/skeleton_processing.py`
 - `src/xml_to_usda/source_validation.py`
 - `src/xml_to_usda/authoring_validation.py`
+
+## Decision: Persist Output together with its Input
+
+Status: Active
+
+The main shell persists the exact Output USDA path currently shown and records
+which Input XML it belongs to. Startup restores that pair only when the Input
+matches; missing or legacy-unpaired output state is regenerated beside the
+Input with the `.usda` suffix. This preserves explicit custom output names
+without allowing an older tree's output path to leak into a newer input.
+
+Related files:
+- `src/xml_to_usda/qt_ui/operator_state.py`
+- `src/xml_to_usda/qt_ui/window.py`
+- `src/xml_to_usda/settings_service.py`

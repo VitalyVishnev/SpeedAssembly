@@ -509,3 +509,17 @@ explicit transform contract from that evidence.
 Related files:
 - `src/xml_to_usda/normalizer.py`
 - `src/xml_to_usda/proxy_source_projection.py`
+
+## Resolved: Proxy Box/Capsule collision imports in UE 5.7.x
+
+Status: Resolved (2026-08-08)
+
+Proxy USDA authors baked `UBX_ProxyMesh_*` or `UCP_ProxyMesh_*` guide siblings.
+Manual UE 5.7.x import confirmed that both variants attach as simple collision
+to the Proxy Static Mesh. Automated tests retain geometry, naming, worker
+transport, and USDA structure coverage. Continue to omit USD Physics APIs.
+
+Related files:
+- `src/xml_to_usda/proxy_collision.py`
+- `src/xml_to_usda/collision_primitives.py`
+- `src/xml_to_usda/proxy_mesh_service.py`

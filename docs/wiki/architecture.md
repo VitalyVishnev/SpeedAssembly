@@ -31,8 +31,17 @@ Main systems:
 - `src/xml_to_usda/fracture_worker_subprocess.py` - crash-isolated Fracture Preview and export worker protocol. Detailed Cuts run in one fresh worker per request so native Boolean state cannot outlive a result.
 - `src/xml_to_usda/qt_ui/preview_jobs.py` - shared latest-request lifecycle for process-backed previews. Each preview type owns at most one active job and one coalesced pending request; settings changes never terminate active native work, and stale results/errors are discarded before the latest request starts.
 - `src/xml_to_usda/wind_preview_service.py`, `src/xml_to_usda/wind_viewport_scene.py`, `src/xml_to_usda/wind_group_stack.py`, and `src/xml_to_usda/wind_external_skeleton.py` - Wind Preview source service, Qt-free viewport scene adapter, manual override stack, and skeleton-only external FBX/USD loading.
-- `src/xml_to_usda/proxy_source_projection.py` - typed Proxy Source Projection loading/cache for Proxy Mesh jobs that need only base geometry, repeated-part transforms, and source prototype geometry.
+- `src/xml_to_usda/proxy_source_projection.py` - typed Proxy Source Projection loading/cache for Proxy Mesh jobs that need base geometry and skin binding, +X-oriented skeleton facts, repeated-part transforms, and source prototype geometry.
+- `src/xml_to_usda/proxy_collision.py` - deterministic Box/Capsule fitting for Proxy Mesh trunk collision using the Fracturing stem-axis contract.
+- `src/xml_to_usda/collision_primitives.py` - shared oriented Box/Capsule mesh builders used by Proxy Mesh and Fracturing.
 - `src/xml_to_usda/mesh_pruning.py` - shared deterministic percentage-based face pruning for preview/proxy workflows that need to drop the smallest disconnected base-mesh islands before their own simplification pass.
+
+Proxy Preview treats render-mesh generation and collision fitting as separate
+worker actions. Collision-only settings reuse the current `ProxyMeshResult`;
+On/Off reuses the retained fitted collision immediately, while fit changes load
+the cached Proxy Source Projection without rerunning voxel extraction or QEM.
+The Proxy viewport frames and places its grid from the render mesh and explicit
+tree pivot, never from guide collision bounds.
 
 Important data flow:
 

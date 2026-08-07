@@ -104,6 +104,7 @@ class ViewportScene:
     bone_segments: tuple[ViewportBoneSegment, ...] = ()
     markers: tuple[ViewportMarker, ...] = ()
     labels: tuple[ViewportLabel, ...] = ()
+    grid_origin: Vector3 | None = None
 
 
 def geometry_triangle_count(mesh: GeometryBuffer) -> int:

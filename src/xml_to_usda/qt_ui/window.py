@@ -62,10 +62,12 @@ from ..fbx_payload_cache import (
 from ..gui_formatters import format_wind_group_summary, format_wind_json_result
 from ..models import CleanupPolicy, ConversionMode, ConversionRequest, OutputMode
 from ..proxy_mesh_service import (
+    ProxyMeshError,
     ProxyMeshResult,
     ProxyMeshSettings,
     ProxyMeshSourceRequest,
     prepare_proxy_mesh_source_request,
+    update_proxy_collision,
 )
 from ..fracture_export_service import FractureCapMaterialSetting, FractureExportRequest
 from ..fracture_preview_service import (
@@ -2051,8 +2053,6 @@ class MainWindow(QWidget):
     def _save_operator_state(self) -> None:
         try:
             state = self._operator_state
-            if state.output_path and state.output_path == self._auto_output_path:
-                state = replace(state, output_path=self._operator_snapshot.last_output_path)
             self._operator_snapshot = save_nested_input_settings(
                 self._deps,
                 state,
@@ -2826,7 +2826,13 @@ class MainWindow(QWidget):
         self._proxy_mesh_settings = settings
         self.geometry_panel.apply_proxy_settings(settings)
         cached_proxy = self._proxy_preview_result_for_input(input_path)
-        if cached_proxy is not None and cached_proxy.settings != settings:
+        reusable_proxy = None
+        if cached_proxy is not None:
+            try:
+                reusable_proxy = update_proxy_collision(cached_proxy, settings)
+            except ProxyMeshError:
+                reusable_proxy = None
+        if reusable_proxy is None and cached_proxy is not None and cached_proxy.settings != settings:
             self._proxy_mesh_preview_result = None
             self._proxy_mesh_preview_input_path = ""
         self._schedule_operator_state_save()
@@ -2842,9 +2848,39 @@ class MainWindow(QWidget):
                 "fuse_base_mesh_vertices": settings.fuse_base_mesh_vertices,
                 "branch_prune_aggression": settings.branch_prune_aggression,
                 "density_resolution": settings.density_resolution,
+                "collision_enabled": settings.collision.enabled,
+                "collision_mode": settings.collision.mode.value,
             },
         )
+        if reusable_proxy is not None:
+            previous_collision = cached_proxy.settings.collision
+            same_fit = replace(previous_collision, enabled=settings.collision.enabled) == settings.collision
+            zero_size = settings.collision.height_multiplier == 0.0 or settings.collision.width_multiplier == 0.0
+            can_apply_now = (
+                settings.collision == previous_collision
+                or (same_fit and (not settings.collision.enabled or zero_size or bool(cached_proxy.collision_meshes)))
+            )
+            if can_apply_now:
+                if self._background_jobs.proxy_preview_running:
+                    self._background_jobs.cancel_proxy_mesh_preview()
+                self._handle_proxy_preview_result(reusable_proxy)
+                return
+            self._background_jobs.start_proxy_mesh_preview(request, settings, collision_only=True)
+            return
         self._background_jobs.start_proxy_mesh_preview(request, settings)
+
+    def _handle_proxy_collision_preview_result(self, settings: ProxyMeshSettings, collision_meshes) -> None:
+        input_path = self.source_input.text().strip()
+        cached_proxy = self._proxy_preview_result_for_input(input_path)
+        if cached_proxy is None:
+            self._handle_proxy_preview_error_message("Proxy collision finished without a reusable Proxy Mesh.")
+            return
+        try:
+            proxy = update_proxy_collision(cached_proxy, settings, tuple(collision_meshes))
+        except ProxyMeshError as exc:
+            self._handle_proxy_preview_error_message(str(exc))
+            return
+        self._handle_proxy_preview_result(proxy)
 
     def _handle_proxy_preview_loading(self, message: str) -> None:
         if self._proxy_preview_dialog is not None:

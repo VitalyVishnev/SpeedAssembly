@@ -23,7 +23,7 @@ from ..gui_formatters import (
     format_telemetry_status,
 )
 from ..models import ConversionJobResult, ConversionRequest, ConversionTelemetry
-from ..proxy_mesh_service import ProxyMeshJobResult
+from ..proxy_mesh_service import ProxyMeshJobResult, ProxyMeshSettings
 from .preview_jobs import PreviewProcessJob
 
 
@@ -31,6 +31,12 @@ from .preview_jobs import PreviewProcessJob
 class _WindErrorPayload:
     primary: dict[str, str]
     retry: dict[str, str] | None = None
+
+
+@dataclass(frozen=True)
+class _ProxyPreviewWork:
+    settings: ProxyMeshSettings
+    collision_only: bool = False
 
 
 class QtBackgroundJobsController:
@@ -85,10 +91,10 @@ class QtBackgroundJobsController:
         self._proxy_preview_retry_count = 0
         self._proxy_preview_job = PreviewProcessJob(
             name="proxy_preview",
-            start_process=lambda request, settings: self._deps.start_proxy_mesh_process(
+            start_process=lambda request, work: self._deps.start_proxy_mesh_process(
                 request,
-                settings,
-                action="preview",
+                work.settings,
+                action="collision" if work.collision_only else "preview",
             ),
             drain_queue=self._deps.drain_process_queue,
             close_queue=self._deps.close_process_queue,
@@ -428,17 +434,21 @@ class QtBackgroundJobsController:
         self._window._update_action_state()
         self._ensure_polling()
 
-    def start_proxy_mesh_preview(self, request, settings) -> None:
+    def start_proxy_mesh_preview(self, request, settings, *, collision_only: bool = False) -> None:
         if self.proxy_mesh_running:
             self._window._set_status("Proxy Mesh export is already running...")
             return
         if not self.proxy_preview_running:
             self._proxy_preview_retry_count = 0
-        self._begin_status_activity("Proxy Preview", "Generating Proxy Preview...")
+        message = "Updating Proxy collision..." if collision_only else "Generating Proxy Preview..."
+        self._begin_status_activity("Proxy Preview", message)
         if hasattr(self._window, "_handle_proxy_preview_loading"):
-            self._window._handle_proxy_preview_loading("Generating...")
+            self._window._handle_proxy_preview_loading(message)
         try:
-            start_result = self._proxy_preview_job.start_latest(request, settings)
+            start_result = self._proxy_preview_job.start_latest(
+                request,
+                _ProxyPreviewWork(settings=settings, collision_only=collision_only),
+            )
         except Exception as exc:
             self._proxy_preview_job.close()
             self._handle_proxy_preview_error(str(exc))
@@ -1160,14 +1170,14 @@ class QtBackgroundJobsController:
     def _handle_proxy_preview_job_result(self, job_result) -> None:
         error_traceback = self._proxy_preview_job.error_traceback
         request = self._proxy_preview_job.request
-        settings = self._proxy_preview_job.settings
+        work = self._proxy_preview_job.settings
         self._trace_worker("worker.result", "proxy_preview", {"error": bool(job_result.error_message)})
         if job_result.error_message:
             message = str(job_result.error_message)
             if (
                 self._proxy_preview_retry_count < 1
                 and request is not None
-                and settings is not None
+                and work is not None
                 and _is_retryable_proxy_preview_error(message)
             ):
                 self._proxy_preview_retry_count += 1
@@ -1176,7 +1186,7 @@ class QtBackgroundJobsController:
                 if hasattr(self._window, "_handle_proxy_preview_loading"):
                     self._window._handle_proxy_preview_loading("Retrying...")
                 try:
-                    self._proxy_preview_job.start_latest(request, settings)
+                    self._proxy_preview_job.start_latest(request, work)
                 except Exception as exc:
                     self._proxy_preview_job.close()
                     self._handle_proxy_preview_error(str(exc))
@@ -1184,6 +1194,14 @@ class QtBackgroundJobsController:
             if error_traceback:
                 message = f"{message}\n\n{error_traceback}"
             self._handle_proxy_preview_error(message)
+            return
+        collision_meshes = getattr(job_result, "collision_meshes", None)
+        if collision_meshes is not None:
+            if self._proxy_preview_job.finish_current():
+                return
+            self._proxy_preview_retry_count = 0
+            self._window._update_action_state()
+            self._window._handle_proxy_collision_preview_result(work.settings, collision_meshes)
             return
         proxy = getattr(job_result, "proxy", None)
         if proxy is None:
@@ -1570,15 +1588,18 @@ class QtBackgroundJobsController:
                     "cpu_profile": getattr(getattr(request, "cpu_profile", None), "value", ""),
                 }
             )
-        if settings is not None:
+        work = settings
+        proxy_settings = getattr(work, "settings", work)
+        if proxy_settings is not None:
             payload.update(
                 {
-                    "final_polycount": getattr(settings, "final_polycount", None),
-                    "bounds_inflation": getattr(settings, "bounds_inflation", None),
-                    "density_resolution": getattr(settings, "density_resolution", None),
-                    "base_mesh_priority": getattr(settings, "base_mesh_priority", None),
-                    "fuse_base_mesh_vertices": getattr(settings, "fuse_base_mesh_vertices", None),
-                    "branch_prune_aggression": getattr(settings, "branch_prune_aggression", None),
+                    "collision_only": bool(getattr(work, "collision_only", False)),
+                    "final_polycount": getattr(proxy_settings, "final_polycount", None),
+                    "bounds_inflation": getattr(proxy_settings, "bounds_inflation", None),
+                    "density_resolution": getattr(proxy_settings, "density_resolution", None),
+                    "base_mesh_priority": getattr(proxy_settings, "base_mesh_priority", None),
+                    "fuse_base_mesh_vertices": getattr(proxy_settings, "fuse_base_mesh_vertices", None),
+                    "branch_prune_aggression": getattr(proxy_settings, "branch_prune_aggression", None),
                 }
             )
         return payload

@@ -691,3 +691,27 @@ Major moves:
 - Removed the redundant External Skeleton `Load` button from Wind Preview.
 - Selecting an FBX/USD file now starts loading immediately; multi-skeleton USD
   files load when the operator selects a Skeleton prim.
+
+## 2026-08-08 - Automatic Proxy trunk collision
+
+- Added enabled-by-default fitted Box/Capsule collision to Proxy Mesh using the
+  shared Fracturing stem-axis selection contract.
+- Added Height and Width multipliers, combined multi-stem fitting, and optional
+  one-primitive-per-stem output.
+- Extended Proxy Source Projection/cache with +X skeleton and base-mesh skin
+  binding facts, and added translucent collision preview plus `UBX_`/`UCP_`
+  guide siblings in the final proxy USDA.
+- Fixed Proxy Preview remaining on `Generating...` after a successful collision
+  job by converting exported collision `MeshData` to the viewport buffer contract.
+- Fixed startup persistence so Output USDA is saved as an Input/Output pair;
+  legacy unpaired output state is regenerated from the restored Input XML.
+- Confirmed Box and Capsule Proxy collision import in UE 5.7.x.
+- Split Proxy Preview collision fitting from render-mesh generation: On/Off is
+  immediate and fit changes no longer rerun voxel extraction or QEM.
+- Fixed the Proxy grid at the tree pivot and excluded guide collision from
+  viewport framing bounds.
+- Moved the shared oriented Box/Capsule builders out of Fracturing into the
+  collision-primitives module used by both workflows.
+- Polished the final change set: removed duplicate collision validation and an
+  unused skeleton helper, narrowed domain error handling, and made collision
+  ownership/imports explicit without changing the UE or UI contracts.

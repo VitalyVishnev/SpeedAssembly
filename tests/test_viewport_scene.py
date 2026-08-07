@@ -21,8 +21,14 @@ from xml_to_usda.fracture_service import (
     FracturePlan,
 )
 from xml_to_usda.fracture_viewport_scene import build_fracture_viewport_scene
+from xml_to_usda.geometry_buffers import geometry_buffer_to_mesh
 from xml_to_usda.models import Color4, GeometryBuffer, Quaternion, Vector3
-from xml_to_usda.proxy_mesh_service import PROXY_METHOD_DENSITY_FIELD, ProxyMeshResult, ProxyMeshSettings
+from xml_to_usda.proxy_collision import ProxyCollisionSettings
+from xml_to_usda.proxy_mesh_service import (
+    PROXY_METHOD_DENSITY_FIELD,
+    ProxyMeshResult,
+    ProxyMeshSettings,
+)
 from xml_to_usda.proxy_viewport_scene import build_proxy_viewport_scene
 from xml_to_usda.viewport_scene import ViewportDrawCall, ViewportMeshBatch, geometry_bounds, geometry_triangle_count, transformed_draw_bounds
 
@@ -155,6 +161,40 @@ def test_proxy_viewport_scene_is_deterministic() -> None:
     assert [draw.draw_id for draw in first.draw_calls] == ["proxy:mesh:0"]
     assert first.stats.uploaded_triangles == 1
     assert first.stats.logical_triangles == 1
+
+
+def test_proxy_viewport_scene_adds_all_collision_primitives_as_transparent_ghosts() -> None:
+    below_pivot = _mesh(
+        "UCP_ProxyMesh_00",
+        points=(0.0, -3.0, 0.0, 1.0, -3.0, 0.0, 0.0, -2.0, 0.0),
+        counts=(3,),
+        indices=(0, 1, 2),
+    )
+    proxy = ProxyMeshResult(
+        mesh=_triangle_mesh("ProxyMesh"),
+        settings=ProxyMeshSettings(),
+        method=PROXY_METHOD_DENSITY_FIELD,
+        source_instance_count=0,
+        included_base_mesh=True,
+        collision_meshes=(
+            geometry_buffer_to_mesh(below_pivot),
+            geometry_buffer_to_mesh(_triangle_mesh("UBX_ProxyMesh_01")),
+        ),
+    )
+
+    scene = build_proxy_viewport_scene(proxy)
+
+    assert [draw.visibility_group for draw in scene.draw_calls] == ["mesh", "collision", "collision"]
+    assert [draw.tint.a for draw in scene.draw_calls[1:]] == [pytest.approx(0.25), pytest.approx(0.25)]
+    assert scene.stats.draw_call_count == 3
+    assert scene.bounds.min_point.y == pytest.approx(0.0)
+    assert scene.grid_origin == Vector3(0.0, 0.0, 0.0)
+
+    hidden = build_proxy_viewport_scene(
+        replace(proxy, settings=replace(proxy.settings, collision=ProxyCollisionSettings(enabled=False)))
+    )
+    assert [draw.visibility_group for draw in hidden.draw_calls] == ["mesh"]
+    assert hidden.bounds == scene.bounds
 
 
 def test_fracture_viewport_scene_has_stable_ids_stats_and_overlays() -> None:

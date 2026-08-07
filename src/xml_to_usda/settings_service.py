@@ -16,7 +16,12 @@ from .fracture_collision import FractureCollisionMode, FractureCollisionSettings
 from .fracture_preview_service import FracturePreviewSettings
 from .fracture_service import FractureSettings
 from .models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode, UdimMode
-from .proxy_mesh_service import MAX_PROXY_DENSITY_RESOLUTION, PROXY_METHOD_DENSITY_FIELD, ProxyMeshSettings
+from .proxy_collision import ProxyCollisionMode, ProxyCollisionSettings
+from .proxy_mesh_service import (
+    MAX_PROXY_DENSITY_RESOLUTION,
+    PROXY_METHOD_DENSITY_FIELD,
+    ProxyMeshSettings,
+)
 
 
 GUI_SETTINGS_SCHEMA_VERSION = 1
@@ -92,6 +97,7 @@ class GuiPresetRecord:
 class GuiSettingsSnapshot:
     last_input_path: str = ""
     last_output_path: str = ""
+    last_output_input_path: str = ""
     cpu_profile: CpuProfile = CpuProfile.BALANCED
     preserve_temp_files: bool = False
     conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
@@ -147,6 +153,7 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
     return GuiSettingsSnapshot(
         last_input_path=str(payload.get("last_input_path", "")),
         last_output_path=str(payload.get("last_output_path", "")),
+        last_output_input_path=str(payload.get("last_output_input_path", "")),
         cpu_profile=_parse_cpu_profile(payload.get("cpu_profile")),
         preserve_temp_files=bool(payload.get("preserve_temp_files", False)),
         conversion_mode=_parse_conversion_mode(payload.get("conversion_mode")),
@@ -180,6 +187,7 @@ def save_gui_settings(settings_path: str | Path, snapshot: GuiSettingsSnapshot) 
         "schema_version": GUI_SETTINGS_SCHEMA_VERSION,
         "last_input_path": snapshot.last_input_path,
         "last_output_path": snapshot.last_output_path,
+        "last_output_input_path": snapshot.last_output_input_path,
         "conversion_mode": ConversionMode.parse(snapshot.conversion_mode).value,
         "material_policy": snapshot.material_policy.value,
         "bark_material_path": snapshot.bark_material_path,
@@ -439,6 +447,26 @@ def _parse_proxy_mesh_settings(raw_value) -> ProxyMeshSettings:
         defaults.branch_prune_aggression,
     )
     density_resolution = _coerce_positive_int(raw_value.get("density_resolution"), defaults.density_resolution)
+    collision_payload = raw_value.get("collision")
+    collision = defaults.collision
+    if isinstance(collision_payload, dict):
+        try:
+            collision_mode = ProxyCollisionMode(str(collision_payload.get("mode", collision.mode.value)))
+        except ValueError:
+            collision_mode = collision.mode
+        collision = ProxyCollisionSettings(
+            enabled=_coerce_bool(collision_payload.get("enabled"), collision.enabled),
+            mode=collision_mode,
+            height_multiplier=max(
+                0.0,
+                min(1.0, _coerce_float(collision_payload.get("height_multiplier"), collision.height_multiplier)),
+            ),
+            width_multiplier=max(
+                0.0,
+                min(10.0, _coerce_float(collision_payload.get("width_multiplier"), collision.width_multiplier)),
+            ),
+            one_per_stem=_coerce_bool(collision_payload.get("one_per_stem"), collision.one_per_stem),
+        )
     return ProxyMeshSettings(
         method=method,
         final_polycount=_coerce_positive_int(raw_value.get("final_polycount"), defaults.final_polycount),
@@ -450,6 +478,7 @@ def _parse_proxy_mesh_settings(raw_value) -> ProxyMeshSettings:
             defaults.fuse_base_mesh_vertices,
         ),
         branch_prune_aggression=max(0.0, min(1.0, branch_prune_aggression)),
+        collision=collision,
     )
 
 
@@ -730,6 +759,13 @@ def _serialize_proxy_mesh_settings(settings: ProxyMeshSettings) -> dict[str, obj
         "base_mesh_priority": round(float(settings.base_mesh_priority), 4),
         "fuse_base_mesh_vertices": bool(settings.fuse_base_mesh_vertices),
         "branch_prune_aggression": round(float(settings.branch_prune_aggression), 4),
+        "collision": {
+            "enabled": bool(settings.collision.enabled),
+            "mode": settings.collision.mode.value,
+            "height_multiplier": round(float(settings.collision.height_multiplier), 4),
+            "width_multiplier": round(float(settings.collision.width_multiplier), 4),
+            "one_per_stem": bool(settings.collision.one_per_stem),
+        },
     }
 
 

@@ -55,10 +55,15 @@ def load_operator_state(
         snapshot = deps.load_gui_settings(resolved_settings_path)
     except ValueError:
         snapshot = GuiSettingsSnapshot()
+    output_path = (
+        snapshot.last_output_path
+        if snapshot.last_output_input_path == snapshot.last_input_path
+        else ""
+    )
     return (
         OperatorState(
             input_path=snapshot.last_input_path,
-            output_path=snapshot.last_output_path,
+            output_path=output_path,
             cpu_profile=CpuProfile.BALANCED,
             preserve_temp_files=snapshot.preserve_temp_files,
             conversion_mode=snapshot.conversion_mode,
@@ -151,9 +156,12 @@ def save_nested_input_settings(
 
 
 def _operator_snapshot_fields(state: OperatorState, previous_snapshot: GuiSettingsSnapshot) -> dict[str, object]:
+    input_path = state.input_path or previous_snapshot.last_input_path
+    output_path = state.output_path or previous_snapshot.last_output_path
     return {
-        "last_input_path": state.input_path or previous_snapshot.last_input_path,
-        "last_output_path": state.output_path or previous_snapshot.last_output_path,
+        "last_input_path": input_path,
+        "last_output_path": output_path,
+        "last_output_input_path": input_path if state.output_path else previous_snapshot.last_output_input_path,
         "cpu_profile": state.cpu_profile,
         "preserve_temp_files": bool(state.preserve_temp_files),
         "conversion_mode": state.conversion_mode,

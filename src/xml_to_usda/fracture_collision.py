@@ -10,6 +10,7 @@ from itertools import combinations
 
 import numpy as np
 
+from .collision_primitives import build_capsule_collision_mesh
 from .fracture_service import FractureError, FracturePiece
 from .geometry_buffers import iter_face_ranges
 from .models import CanonicalTreeModel, MeshData, Quaternion, StaticCollisionPrimitive, StaticCollisionPrimitiveType, Vector3
@@ -500,7 +501,7 @@ def _capsule_meshes(
         for start, end in _capsule_path_segments(path, settings.capsule_simplify)
     )
     return tuple(
-        _capsule_mesh(f"UCP_{render_mesh_name}_{index:02d}", start, end, radius)
+        build_capsule_collision_mesh(f"UCP_{render_mesh_name}_{index:02d}", start, end, radius)
         for index, (start, end, radius) in enumerate(selected)
     )
 
@@ -578,7 +579,7 @@ def _fallback_capsule_meshes(
     settings: FractureCollisionSettings,
 ) -> tuple[MeshData, ...]:
     return tuple(
-        _capsule_mesh(f"UCP_{render_mesh_name}_{index:02d}", start, end, radius)
+        build_capsule_collision_mesh(f"UCP_{render_mesh_name}_{index:02d}", start, end, radius)
         for index, (start, end, radius) in enumerate(_fallback_capsule_segments(model, piece, settings))
     )
 
@@ -793,65 +794,6 @@ def _sphere_mesh(name: str, center: Vector3, radius: float) -> MeshData:
     return _mesh_from_faces(name, tuple(points), tuple(faces))
 
 
-def _capsule_mesh(name: str, start: Vector3, end: Vector3, radius: float) -> MeshData:
-    axis = _normalize(Vector3(end.x - start.x, end.y - start.y, end.z - start.z))
-    u, v = _basis(axis)
-    segments = 8
-    hemisphere_steps = 3
-    angles = tuple(2.0 * math.pi * index / segments for index in range(segments))
-    rings: list[tuple[Vector3, ...]] = []
-    for step in range(1, hemisphere_steps + 1):
-        phi = -math.pi * 0.5 + step * (math.pi * 0.5 / hemisphere_steps)
-        center = Vector3(
-            start.x + axis.x * math.sin(phi) * radius,
-            start.y + axis.y * math.sin(phi) * radius,
-            start.z + axis.z * math.sin(phi) * radius,
-        )
-        ring_radius = math.cos(phi) * radius
-        rings.append(_capsule_ring(center, u, v, ring_radius, angles))
-    for step in range(0, hemisphere_steps):
-        phi = step * (math.pi * 0.5 / hemisphere_steps)
-        center = Vector3(
-            end.x + axis.x * math.sin(phi) * radius,
-            end.y + axis.y * math.sin(phi) * radius,
-            end.z + axis.z * math.sin(phi) * radius,
-        )
-        ring_radius = math.cos(phi) * radius
-        rings.append(_capsule_ring(center, u, v, ring_radius, angles))
-    bottom = Vector3(start.x - axis.x * radius, start.y - axis.y * radius, start.z - axis.z * radius)
-    top = Vector3(end.x + axis.x * radius, end.y + axis.y * radius, end.z + axis.z * radius)
-    points = [bottom, *(point for ring in rings for point in ring), top]
-    top_index = len(points) - 1
-    faces: list[tuple[int, ...]] = []
-    for segment in range(segments):
-        nxt = (segment + 1) % segments
-        faces.append((0, 1 + segment, 1 + nxt))
-    for ring_index in range(len(rings) - 1):
-        row = 1 + ring_index * segments
-        next_row = row + segments
-        for segment in range(segments):
-            nxt = (segment + 1) % segments
-            faces.append((row + segment, row + nxt, next_row + nxt, next_row + segment))
-    last_row = 1 + (len(rings) - 1) * segments
-    for segment in range(segments):
-        nxt = (segment + 1) % segments
-        faces.append((top_index, last_row + nxt, last_row + segment))
-    return _mesh_from_faces(name, tuple(points), tuple(faces))
-
-
-def _capsule_ring(center: Vector3, u: Vector3, v: Vector3, radius: float, angles: tuple[float, ...]) -> tuple[Vector3, ...]:
-    points = []
-    for theta in angles:
-        points.append(
-            Vector3(
-                center.x + (math.cos(theta) * u.x + math.sin(theta) * v.x) * radius,
-                center.y + (math.cos(theta) * u.y + math.sin(theta) * v.y) * radius,
-                center.z + (math.cos(theta) * u.z + math.sin(theta) * v.z) * radius,
-            )
-        )
-    return tuple(points)
-
-
 def _mesh_from_triangles(name: str, points: np.ndarray, triangles: np.ndarray) -> MeshData:
     return _mesh_from_faces(
         name,
@@ -890,16 +832,6 @@ def _normalize(vector: Vector3) -> Vector3:
     if length <= 0.0:
         return Vector3(0.0, 1.0, 0.0)
     return Vector3(vector.x / length, vector.y / length, vector.z / length)
-
-
-def _basis(axis: Vector3) -> tuple[Vector3, Vector3]:
-    helper = Vector3(1.0, 0.0, 0.0) if abs(axis.x) < 0.8 else Vector3(0.0, 1.0, 0.0)
-    u = _normalize(_cross(axis, helper))
-    return u, _normalize(_cross(axis, u))
-
-
-def _cross(a: Vector3, b: Vector3) -> Vector3:
-    return Vector3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
 
 
 def _np_points(points: tuple[Vector3, ...]) -> np.ndarray:

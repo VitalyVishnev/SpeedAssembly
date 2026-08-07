@@ -40,9 +40,9 @@
 - `Job Workspace` - the per-run temp/cache directory and diagnostics surface.
 - `Conversion Worker` - the subprocess that owns a large conversion outside the UI process.
 - `FBX Helper` - the isolated native Autodesk FBX import helper process.
-- `Proxy Mesh` - a companion Static Mesh USDA asset for collision,
-  distance-field, and lower-cost shadow workflows.
-- `Proxy Source Projection` - the narrow source-facts model used by Proxy Mesh loading: base geometry, repeated-part transforms, and source prototype geometry without full material, skeleton, or authoring resolution state.
+- `Proxy Mesh` - a companion Static Mesh USDA asset with fitted trunk Box/Capsule collision for collision, distance-field, and lower-cost shadow workflows.
+- `Collision Primitive` - an oriented Box, Capsule, Sphere, or Convex collision mesh consumed by Proxy Mesh or Fracturing; Box/Capsule mesh construction is shared while fitting policy remains workflow-specific.
+- `Proxy Source Projection` - the narrow source-facts model used by Proxy Mesh loading: base geometry and skin binding, +X skeleton, repeated-part transforms, and source prototype geometry without full material or authoring resolution state.
 - `Fracturing` - a companion destructibility workflow that outputs root-pivoted static pieces.
 - `Fracture Piece` - one planned destructible tree piece in the fracture workflow.
 - `Cut Surface` - deterministic subtree-local fracture surface perpendicular to a selected skeleton bone. Manual segment cuts use the selected or nearest closed `t`; automatic branch cuts use the configured 5–95% physical-bone offset (default 30%) in both flat and Detailed Cuts.

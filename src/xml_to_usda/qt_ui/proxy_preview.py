@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..models import GeometryBuffer
+from ..proxy_collision import ProxyCollisionMode, ProxyCollisionSettings
 from ..proxy_viewport_scene import build_proxy_viewport_scene
 from ..proxy_mesh_service import (
     BASE_MESH_FUSE_THRESHOLD_METERS,
@@ -197,14 +198,78 @@ class ProxyPreviewDialog(PreviewShellDialog):
         settings_layout.addWidget(branch_prune_label)
         settings_layout.addLayout(_slider_row(self.branch_prune_slider, self.branch_prune_spin))
 
+        _add_group_header(settings_layout, settings_panel, "Collision")
+        self.collision_check = QCheckBox("Generate Collision", settings_panel)
+        self.collision_check.setChecked(bool(settings.collision.enabled))
+        set_tooltip(
+            "On exports one trunk collision primitive; off exports only the visible Proxy Mesh.",
+            self.collision_check,
+        )
+        settings_layout.addWidget(self.collision_check)
+
+        collision_type_label = QLabel("Type", settings_panel)
+        self.collision_type_combo = QComboBox(settings_panel)
+        self.collision_type_combo.addItem("Box", ProxyCollisionMode.BOX.value)
+        self.collision_type_combo.addItem("Capsule", ProxyCollisionMode.CAPSULE.value)
+        self.collision_type_combo.setCurrentIndex(self.collision_type_combo.findData(settings.collision.mode.value))
+        set_tooltip(
+            "Box exports one UBX primitive; Capsule exports one UCP primitive along the fitted trunk axis.",
+            collision_type_label,
+            self.collision_type_combo,
+        )
+        settings_layout.addWidget(collision_type_label)
+        settings_layout.addWidget(self.collision_type_combo)
+
+        self.collision_per_stem_check = QCheckBox("One Primitive per Stem", settings_panel)
+        self.collision_per_stem_check.setChecked(bool(settings.collision.one_per_stem))
+        set_tooltip(
+            "Off fits one primitive around all stems; on exports one independently fitted primitive for each stem.",
+            self.collision_per_stem_check,
+        )
+        settings_layout.addWidget(self.collision_per_stem_check)
+
+        self.collision_height_slider, self.collision_height_spin = _build_float_slider_row(
+            settings_panel,
+            minimum=0.0,
+            maximum=1.0,
+            value=float(settings.collision.height_multiplier),
+            step=0.01,
+            scale=100,
+        )
+        collision_height_label = QLabel("Height", settings_panel)
+        set_tooltip(
+            "Fraction of the main skeleton axis measured upward from the root. Zero omits collision.",
+            collision_height_label,
+            self.collision_height_slider,
+            self.collision_height_spin,
+        )
+        settings_layout.addWidget(collision_height_label)
+        settings_layout.addLayout(_slider_row(self.collision_height_slider, self.collision_height_spin))
+
+        self.collision_width_slider, self.collision_width_spin = _build_float_slider_row(
+            settings_panel,
+            minimum=0.0,
+            maximum=10.0,
+            value=float(settings.collision.width_multiplier),
+            step=0.1,
+            scale=100,
+        )
+        collision_width_label = QLabel("Width", settings_panel)
+        set_tooltip(
+            "Multiplier for the fitted trunk AABB width. One uses the automatic diameter/side; zero omits collision.",
+            collision_width_label,
+            self.collision_width_slider,
+            self.collision_width_spin,
+        )
+        settings_layout.addWidget(collision_width_label)
+        settings_layout.addLayout(_slider_row(self.collision_width_slider, self.collision_width_spin))
+
         self.status_label = QLabel("", settings_panel)
         self.status_label.setWordWrap(True)
         settings_layout.addWidget(self.status_label)
         settings_layout.addStretch(1)
         if initial_proxy is not None:
-            self.status_label.setText(
-                f"{initial_proxy.mesh.face_count} polygons / {initial_proxy.mesh.point_count} points"
-            )
+            self.status_label.setText(_proxy_status_text(initial_proxy))
 
         self.method_combo.currentIndexChanged.connect(lambda _index: self.regenerate())
         self.polycount_slider.sliderReleased.connect(self.regenerate)
@@ -218,6 +283,14 @@ class ProxyPreviewDialog(PreviewShellDialog):
         self.fuse_base_mesh_vertices_check.toggled.connect(lambda _checked: self.regenerate())
         self.branch_prune_slider.sliderReleased.connect(self.regenerate)
         self.branch_prune_spin.editingFinished.connect(self.regenerate)
+        self.collision_check.toggled.connect(lambda _checked: self._collision_settings_changed())
+        self.collision_type_combo.currentIndexChanged.connect(lambda _index: self.regenerate())
+        self.collision_per_stem_check.toggled.connect(lambda _checked: self.regenerate())
+        self.collision_height_slider.sliderReleased.connect(self.regenerate)
+        self.collision_height_spin.editingFinished.connect(self.regenerate)
+        self.collision_width_slider.sliderReleased.connect(self.regenerate)
+        self.collision_width_spin.editingFinished.connect(self.regenerate)
+        self._sync_collision_controls()
         QTimer.singleShot(0, self.regenerate)
 
     @property
@@ -233,6 +306,13 @@ class ProxyPreviewDialog(PreviewShellDialog):
             base_mesh_priority=float(self.base_priority_spin.value()),
             fuse_base_mesh_vertices=self.fuse_base_mesh_vertices_check.isChecked(),
             branch_prune_aggression=float(self.branch_prune_spin.value()),
+            collision=ProxyCollisionSettings(
+                enabled=self.collision_check.isChecked(),
+                mode=ProxyCollisionMode(str(self.collision_type_combo.currentData())),
+                height_multiplier=float(self.collision_height_spin.value()),
+                width_multiplier=float(self.collision_width_spin.value()),
+                one_per_stem=self.collision_per_stem_check.isChecked(),
+            ),
         )
 
     def regenerate(self) -> None:
@@ -265,13 +345,39 @@ class ProxyPreviewDialog(PreviewShellDialog):
 
     def set_proxy(self, proxy: ProxyMeshResult) -> None:
         self._set_current_proxy(proxy)
-        self.status_label.setText(f"{proxy.mesh.face_count} polygons / {proxy.mesh.point_count} points")
+        self.status_label.setText(_proxy_status_text(proxy))
 
     def _set_current_proxy(self, proxy: ProxyMeshResult) -> None:
         had_mesh = self.viewport.has_mesh()
         self._current_proxy = proxy
         self.viewport.set_scene(build_proxy_viewport_scene(proxy), frame_camera=not had_mesh)
         self._on_preview_ready(proxy)
+
+    def _collision_settings_changed(self) -> None:
+        self._sync_collision_controls()
+        self.regenerate()
+
+    def _sync_collision_controls(self) -> None:
+        enabled = self.collision_check.isChecked()
+        for widget in (
+            self.collision_type_combo,
+            self.collision_per_stem_check,
+            self.collision_height_slider,
+            self.collision_height_spin,
+            self.collision_width_slider,
+            self.collision_width_spin,
+        ):
+            widget.setEnabled(enabled)
+
+
+def _proxy_status_text(proxy: ProxyMeshResult) -> str:
+    status = f"{proxy.mesh.face_count} polygons / {proxy.mesh.point_count} points"
+    if not proxy.settings.collision.enabled:
+        return f"{status}\nCollision: Off"
+    if proxy.collision_meshes:
+        label = "Box" if proxy.settings.collision.mode == ProxyCollisionMode.BOX else "Capsule"
+        return f"{status}\nCollision: {len(proxy.collision_meshes)} {label}"
+    return f"{status}\nCollision omitted: Height or Width is zero."
 
 
 def _build_int_slider_row(

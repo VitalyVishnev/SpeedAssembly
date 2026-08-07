@@ -21,7 +21,8 @@ from .proxy_mesh_service import (
     ProxyMeshSettings,
     ProxyMeshSourceRequest,
     export_proxy_usda_from_source_request,
-    generate_proxy_mesh_from_source_request,
+    generate_proxy_collision_meshes_from_source_request,
+    generate_proxy_preview_from_source_request,
 )
 from .runtime_error_mode import suppress_windows_native_error_dialogs
 from .worker_commands import PROXY_MESH_WORKER_COMMAND
@@ -82,9 +83,18 @@ def run_proxy_mesh_worker_request_file(path: str | Path) -> int:
                 method=request.settings.method,
             )
             result = ProxyMeshJobResult(
-                proxy=generate_proxy_mesh_from_source_request(request.request, request.settings)
+                proxy=generate_proxy_preview_from_source_request(request.request, request.settings)
             )
             _worker_stage("preview.generate.end")
+        elif request.action == "collision":
+            _worker_stage("collision.generate.start")
+            result = ProxyMeshJobResult(
+                collision_meshes=generate_proxy_collision_meshes_from_source_request(
+                    request.request,
+                    request.settings.collision,
+                )
+            )
+            _worker_stage("collision.generate.end")
         elif request.action == "export":
             _worker_stage(
                 "export.generate.start",

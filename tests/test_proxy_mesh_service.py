@@ -15,6 +15,8 @@ from xml_to_usda.models import (
     ExportMetadata,
     GeometryBuffer,
     InstanceBinding,
+    Joint,
+    Matrix4d,
     MeshData,
     Prototype,
     PrototypeIdentity,
@@ -23,6 +25,7 @@ from xml_to_usda.models import (
     TreeAsset,
     Vector3,
 )
+from xml_to_usda.proxy_collision import ProxyCollisionMode, ProxyCollisionSettings
 from xml_to_usda.proxy_mesh_service import (
     ProxyMeshError,
     ProxyMeshJobResult,
@@ -33,8 +36,10 @@ from xml_to_usda.proxy_mesh_service import (
     export_proxy_usda_from_source_request,
     export_proxy_usda,
     generate_proxy_mesh_from_source_request,
+    generate_proxy_preview_from_source_request,
     generate_proxy_mesh,
     render_proxy_usda,
+    update_proxy_collision,
 )
 from xml_to_usda.proxy_source_projection import (
     ProxySourceProjection,
@@ -61,6 +66,14 @@ BIG_SPRUCE = (
     / "SkeletalAssemblyTest_Spruce_Big_low.xml"
 )
 LEAFREFS_ON_BRANCH_LEVELS = Path(__file__).parent / "data" / "leafrefs_on_branch_levels.xml"
+THREE_TRUNKS = (
+    Path(__file__).resolve().parents[1]
+    / "samples"
+    / "speedtree"
+    / "simple_tree"
+    / "variants"
+    / "SimpleTree_02_three_trunks.xml"
+)
 
 
 def _triangle_mesh(name: str) -> MeshData:
@@ -73,6 +86,9 @@ def _triangle_mesh(name: str) -> MeshData:
         ),
         face_vertex_counts=(3,),
         face_vertex_indices=(0, 1, 2),
+        skel_joint_indices=(0, 0, 1),
+        skel_joint_weights=(1.0, 1.0, 1.0),
+        skel_element_size=1,
     )
 
 
@@ -82,6 +98,22 @@ def _buffer_mesh(name: str) -> GeometryBuffer:
         point_components=array("f", [0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.5, 0.0]),
         face_vertex_counts=array("i", [3]),
         face_vertex_indices=array("i", [0, 1, 2]),
+    )
+
+
+def _trunk_skeleton() -> tuple[Joint, ...]:
+    return (
+        Joint(
+            name="root",
+            bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 0.0)),
+            bind_end_transform=Matrix4d.from_translation(Vector3(0.0, 2.0, 0.0)),
+        ),
+        Joint(
+            name="trunk",
+            parent="root",
+            bind_transform=Matrix4d.from_translation(Vector3(0.0, 2.0, 0.0)),
+            bind_end_transform=Matrix4d.from_translation(Vector3(0.0, 4.0, 0.0)),
+        ),
     )
 
 
@@ -216,7 +248,7 @@ def _model(*, repeated_count: int = 2, prototype_payload: MeshData | GeometryBuf
         materials=(),
         source_objects=(),
         base_mesh=_triangle_mesh("Base"),
-        skeleton=(),
+        skeleton=_trunk_skeleton(),
         assembly_parts=tuple(
             RepeatedPartInstance(
                 name=f"Leaf_{index}",
@@ -307,7 +339,14 @@ def test_density_field_keeps_base_mesh_as_direct_geometry() -> None:
 def test_density_field_extracts_shared_foliage_surface_for_qem() -> None:
     foliage_only = replace(_model(repeated_count=1), base_mesh=None)
 
-    result = generate_proxy_mesh(foliage_only, ProxyMeshSettings(final_polycount=5000, density_resolution=12))
+    result = generate_proxy_mesh(
+        foliage_only,
+        ProxyMeshSettings(
+            final_polycount=5000,
+            density_resolution=12,
+            collision=ProxyCollisionSettings(enabled=False),
+        ),
+    )
 
     assert result.included_base_mesh is False
     assert result.mesh.face_count > 0
@@ -381,11 +420,21 @@ def test_base_mesh_priority_controls_base_simplification_budget() -> None:
 
     low_priority = generate_proxy_mesh(
         model,
-        ProxyMeshSettings(final_polycount=30, density_resolution=12, base_mesh_priority=0.05),
+        ProxyMeshSettings(
+            final_polycount=30,
+            density_resolution=12,
+            base_mesh_priority=0.05,
+            collision=ProxyCollisionSettings(enabled=False),
+        ),
     )
     high_priority = generate_proxy_mesh(
         model,
-        ProxyMeshSettings(final_polycount=30, density_resolution=12, base_mesh_priority=0.95),
+        ProxyMeshSettings(
+            final_polycount=30,
+            density_resolution=12,
+            base_mesh_priority=0.95,
+            collision=ProxyCollisionSettings(enabled=False),
+        ),
     )
 
     assert _mesh_signature(low_priority.mesh) != _mesh_signature(high_priority.mesh)
@@ -418,6 +467,7 @@ def test_base_mesh_prefilter_passes_percent_prune_setting_before_qem(monkeypatch
             density_resolution=12,
             base_mesh_priority=0.5,
             branch_prune_aggression=0.01,
+            collision=ProxyCollisionSettings(enabled=False),
         ),
     )
 
@@ -496,7 +546,10 @@ def test_proxy_simplification_keeps_connected_surface_instead_of_sampling_triang
     source = _quad_grid_mesh("ConnectedBase", 18, 18)
     base_only = replace(_model(repeated_count=0), base_mesh=source, prototypes=())
 
-    result = generate_proxy_mesh(base_only, ProxyMeshSettings(final_polycount=40))
+    result = generate_proxy_mesh(
+        base_only,
+        ProxyMeshSettings(final_polycount=40, collision=ProxyCollisionSettings(enabled=False)),
+    )
 
     assert result.mesh.face_count <= 40
     assert result.mesh.point_count < len(source.points)
@@ -537,6 +590,7 @@ def test_proxy_request_generation_uses_proxy_source_projection(monkeypatch) -> N
             base_mesh=_triangle_mesh("Base"),
             prototypes=_model(repeated_count=1).prototypes,
             repeated_parts=_model(repeated_count=1).repeated_parts,
+            skeleton=_trunk_skeleton(),
         )
 
     monkeypatch.setattr("xml_to_usda.proxy_mesh_service.load_proxy_source_projection", fake_load_proxy_source_projection)
@@ -559,6 +613,7 @@ def test_proxy_request_export_uses_proxy_source_projection(monkeypatch, tmp_path
             base_mesh=_triangle_mesh("Base"),
             prototypes=_model(repeated_count=1).prototypes,
             repeated_parts=_model(repeated_count=1).repeated_parts,
+            skeleton=_trunk_skeleton(),
         )
 
     monkeypatch.setattr("xml_to_usda.proxy_mesh_service.load_proxy_source_projection", fake_load_proxy_source_projection)
@@ -577,7 +632,13 @@ def test_proxy_source_projection_matches_canonical_proxy_inputs(source_path: Pat
     _report, canonical_model, diagnostics = load_canonical_model(str(source_path), source_cache_enabled=False)
     assert not [issue for issue in diagnostics if issue.severity == "error"]
 
-    projection_model = projection_to_tree_asset(load_proxy_source_projection(str(source_path)))
+    projection = load_proxy_source_projection(str(source_path))
+    projection_model = projection_to_tree_asset(projection)
+
+    assert projection.skeleton
+    assert projection.base_mesh is not None
+    assert len(projection.base_mesh.skel_joint_indices) == len(projection.base_mesh.points)
+    assert len(projection.base_mesh.skel_joint_weights) == len(projection.base_mesh.points)
 
     canonical = generate_proxy_mesh(canonical_model, settings)
     projected = generate_proxy_mesh(projection_model, settings)
@@ -608,6 +669,9 @@ def test_proxy_source_projection_reuses_typed_cache(monkeypatch, tmp_path: Path)
     assert _mesh_signature(generate_proxy_mesh(projection_to_tree_asset(second), settings).mesh) == _mesh_signature(
         generate_proxy_mesh(projection_to_tree_asset(first), settings).mesh
     )
+    assert second.skeleton == first.skeleton
+    assert second.base_mesh is not None and first.base_mesh is not None
+    assert second.base_mesh.skel_joint_indices == first.base_mesh.skel_joint_indices
 
 
 def test_proxy_source_projection_cache_ignores_legacy_pickle_without_unpickling(monkeypatch, tmp_path: Path) -> None:
@@ -645,16 +709,92 @@ def test_instance_bounds_method_remains_explicit_debug_baseline() -> None:
     assert result.mesh.face_count == 12
 
 
-def test_proxy_usda_is_single_geometry_mesh_without_assembly_contract() -> None:
+def test_proxy_usda_authors_one_default_box_collision_without_assembly_or_physics_contract() -> None:
     result = generate_proxy_mesh(_model(repeated_count=1), ProxyMeshSettings(final_polycount=5000))
     usda = render_proxy_usda(result, root_name="Tree_proxy")
 
     assert 'def Mesh "ProxyMesh"' in usda
+    assert 'def Mesh "UBX_ProxyMesh_00"' in usda
+    assert usda.count('uniform token purpose = "guide"') == 1
     assert "PointInstancer" not in usda
     assert "SkelRoot" not in usda
     assert "NaniteAssembly" not in usda
     assert "material:binding" not in usda
+    assert "PhysicsCollisionAPI" not in usda
     assert "int[] faceVertexCounts" in usda
+
+
+def test_proxy_collision_modes_and_zero_size_contract() -> None:
+    model = _model(repeated_count=0)
+    capsule = generate_proxy_mesh(
+        model,
+        ProxyMeshSettings(
+            final_polycount=5000,
+            collision=ProxyCollisionSettings(mode=ProxyCollisionMode.CAPSULE, height_multiplier=0.5),
+        ),
+    )
+    omitted = generate_proxy_mesh(
+        model,
+        ProxyMeshSettings(
+            final_polycount=5000,
+            collision=ProxyCollisionSettings(height_multiplier=0.0),
+        ),
+    )
+
+    assert [mesh.name for mesh in capsule.collision_meshes] == ["UCP_ProxyMesh_00"]
+    assert len(capsule.collision_meshes[0].points) > 30
+    assert omitted.collision_meshes == ()
+
+
+def test_proxy_collision_state_reuses_render_mesh_and_disabled_export_hides_cached_collision() -> None:
+    proxy = generate_proxy_mesh(_model(repeated_count=0), ProxyMeshSettings(final_polycount=5000))
+    disabled_settings = replace(
+        proxy.settings,
+        collision=replace(proxy.settings.collision, enabled=False),
+    )
+
+    updated = update_proxy_collision(proxy, disabled_settings)
+
+    assert updated.mesh is proxy.mesh
+    assert updated.collision_meshes is proxy.collision_meshes
+    assert 'def Mesh "UBX_ProxyMesh_00"' not in render_proxy_usda(updated, root_name="Tree_proxy")
+    with pytest.raises(ProxyMeshError, match="non-collision settings changed"):
+        update_proxy_collision(updated, replace(disabled_settings, final_polycount=123))
+
+
+def test_proxy_preview_prepares_hidden_collision_when_checkbox_is_off() -> None:
+    settings = ProxyMeshSettings(
+        final_polycount=100,
+        collision=ProxyCollisionSettings(enabled=False),
+    )
+
+    proxy = generate_proxy_preview_from_source_request(
+        ProxyMeshSourceRequest(input_path=str(SIMPLE_TREE_01)),
+        settings,
+    )
+
+    assert proxy.settings.collision.enabled is False
+    assert [mesh.name for mesh in proxy.collision_meshes] == ["UBX_ProxyMesh_00"]
+    assert 'def Mesh "UBX_ProxyMesh_00"' not in render_proxy_usda(proxy, root_name="Tree_proxy")
+
+
+def test_three_trunk_proxy_can_use_one_combined_or_one_collision_per_stem() -> None:
+    model = projection_to_tree_asset(load_proxy_source_projection(str(THREE_TRUNKS)))
+    combined = generate_proxy_mesh(
+        model,
+        ProxyMeshSettings(final_polycount=100, collision=ProxyCollisionSettings(one_per_stem=False)),
+    )
+    separated = generate_proxy_mesh(
+        model,
+        ProxyMeshSettings(final_polycount=100, collision=ProxyCollisionSettings(one_per_stem=True)),
+    )
+
+    assert [mesh.name for mesh in combined.collision_meshes] == ["UBX_ProxyMesh_00"]
+    assert [mesh.name for mesh in separated.collision_meshes] == [
+        "UBX_ProxyMesh_00",
+        "UBX_ProxyMesh_01",
+        "UBX_ProxyMesh_02",
+    ]
 
 
 def _mesh_signature(mesh: GeometryBuffer) -> tuple[tuple[float, ...], tuple[int, ...], tuple[int, ...]]:

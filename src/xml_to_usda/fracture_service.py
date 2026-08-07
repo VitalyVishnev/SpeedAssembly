@@ -618,6 +618,14 @@ def _select_main_axis(graph: _SkeletonGraph) -> tuple[str, ...]:
     return max(paths, key=lambda path: (_path_length(graph, path), len(path), tuple(reversed(path))))
 
 
+def select_skeleton_stem_axes(model: CanonicalTreeModel) -> tuple[tuple[str, ...], ...]:
+    """Return the base-mesh-owned stem axes used by Fracturing."""
+    graph = _build_skeleton_graph(model.skeleton)
+    face_owners, _auto_children = _base_face_bindings_by_index(model, graph)
+    axes = _select_stem_axes(graph, _subtree_base_face_counts(graph, face_owners))
+    return axes or (_select_main_axis(graph),)
+
+
 def _select_stem_axes(
     graph: _SkeletonGraph,
     subtree_base_face_counts: dict[str, int],

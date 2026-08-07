@@ -417,11 +417,19 @@ def _proxy_mesh_process_entry(
         apply_process_profile(request.cpu_profile)
         if bool(cancel_event.is_set()):
             raise RuntimeError("Proxy mesh generation cancelled by user.")
-        from .proxy_mesh_service import export_proxy_usda_from_source_request, generate_proxy_mesh_from_source_request
+        from .proxy_mesh_service import (
+            export_proxy_usda_from_source_request,
+            generate_proxy_collision_meshes_from_source_request,
+            generate_proxy_preview_from_source_request,
+        )
 
         if action == "preview":
-            proxy = generate_proxy_mesh_from_source_request(request, settings)
+            proxy = generate_proxy_preview_from_source_request(request, settings)
             message_queue.put(("result", ProxyMeshJobResult(proxy=proxy)))
+            return
+        if action == "collision":
+            collision_meshes = generate_proxy_collision_meshes_from_source_request(request, settings.collision)
+            message_queue.put(("result", ProxyMeshJobResult(collision_meshes=collision_meshes)))
             return
         if action == "export":
             export = export_proxy_usda_from_source_request(request, settings)

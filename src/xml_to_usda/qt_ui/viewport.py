@@ -195,6 +195,7 @@ class MatcapViewport(QOpenGLWidget):
         self._mesh_dirty = False
         self._grid_dirty = False
         self._ground_y = 0.0
+        self._grid_origin: Vector3 | None = None
         self._matcap_tint_strength = DEFAULT_MATCAP_TINT_ALPHA
         self._exploded_view_strength = 0.0
         self._collision_opacity = 0.25
@@ -364,6 +365,7 @@ class MatcapViewport(QOpenGLWidget):
             return
         self._visible_vertex_count_override = None
         self._scene = scene
+        self._grid_origin = None if scene is None else scene.grid_origin
         self._mesh = None
         self._precomputed_matcap_vertices = None
         self._precomputed_matcap_draws = None
@@ -378,8 +380,10 @@ class MatcapViewport(QOpenGLWidget):
                 scene.bounds.max_point,
                 frame_camera=frame_camera,
             )
+            if self._grid_origin is not None:
+                self._ground_y = self._grid_origin.y
         self._vertex_count = int(len(_build_scene_vertices(scene)) // MATCAP_VERTEX_STRIDE)
-        self._grid_vertex_count = int(len(_build_grid_vertices(self._target, self._radius, self._ground_y)) // 4)
+        self._grid_vertex_count = int(len(_build_grid_vertices(self._grid_center(), self._radius, self._ground_y)) // 4)
         self._trace_set_scene_event(scene)
         self._mesh_dirty = True
         self._grid_dirty = True
@@ -394,6 +398,7 @@ class MatcapViewport(QOpenGLWidget):
     ) -> None:
         self._visible_vertex_count_override = None
         self._scene = None
+        self._grid_origin = None
         self._mesh = mesh
         self._precomputed_matcap_vertices = None
         self._precomputed_matcap_draws = None
@@ -416,6 +421,7 @@ class MatcapViewport(QOpenGLWidget):
     ) -> None:
         self._visible_vertex_count_override = None
         self._scene = scene
+        self._grid_origin = None if scene is None else scene.grid_origin
         self._mesh = None
         self._precomputed_matcap_vertices = (
             vertices
@@ -426,9 +432,11 @@ class MatcapViewport(QOpenGLWidget):
         if self._hover_cut_token is not None and self._cut_marker_position(self._hover_cut_token) is None:
             self._hover_cut_token = None
         self._update_bounds_metrics(min_point, max_point, frame_camera=frame_camera)
+        if self._grid_origin is not None:
+            self._ground_y = self._grid_origin.y
         self._vertex_count = int(len(self._precomputed_matcap_vertices) // MATCAP_VERTEX_STRIDE)
         self._collision_vertex_count = 0
-        self._grid_vertex_count = int(len(_build_grid_vertices(self._target, self._radius, self._ground_y)) // 4)
+        self._grid_vertex_count = int(len(_build_grid_vertices(self._grid_center(), self._radius, self._ground_y)) // 4)
         self._trace_set_scene_event(scene)
         self._mesh_dirty = True
         self._grid_dirty = True
@@ -446,6 +454,7 @@ class MatcapViewport(QOpenGLWidget):
     ) -> None:
         self._visible_vertex_count_override = None
         self._scene = scene
+        self._grid_origin = scene.grid_origin
         self._mesh = None
         self._precomputed_matcap_vertices = (
             vertices
@@ -457,8 +466,10 @@ class MatcapViewport(QOpenGLWidget):
         if self._hover_cut_token is not None and self._cut_marker_position(self._hover_cut_token) is None:
             self._hover_cut_token = None
         self._update_bounds_metrics(min_point, max_point, frame_camera=frame_camera)
+        if self._grid_origin is not None:
+            self._ground_y = self._grid_origin.y
         self._vertex_count = sum(draw.vertex_count for draw in draws)
-        self._grid_vertex_count = int(len(_build_grid_vertices(self._target, self._radius, self._ground_y)) // 4)
+        self._grid_vertex_count = int(len(_build_grid_vertices(self._grid_center(), self._radius, self._ground_y)) // 4)
         self._trace_set_scene_event(scene)
         self._mesh_dirty = True
         self._grid_dirty = True
@@ -960,7 +971,7 @@ class MatcapViewport(QOpenGLWidget):
     def _upload_grid(self) -> None:
         if self._grid_program is None or self._grid_buffer is None or self._grid_vao is None:
             return
-        vertices = _build_grid_vertices(self._target, self._radius, self._ground_y)
+        vertices = _build_grid_vertices(self._grid_center(), self._radius, self._ground_y)
         self._grid_vertex_count = int(len(vertices) // 4)
         self._grid_vao.bind()
         self._grid_buffer.bind()
@@ -980,6 +991,9 @@ class MatcapViewport(QOpenGLWidget):
         self._grid_buffer.release()
         self._grid_vao.release()
         self._grid_dirty = False
+
+    def _grid_center(self) -> Vector3:
+        return self._target if self._grid_origin is None else self._grid_origin
 
     def _draw_grid(self, functions, mvp: QMatrix4x4) -> None:
         if self._grid_program is None or self._grid_vao is None or self._grid_vertex_count <= 0:

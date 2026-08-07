@@ -8,7 +8,7 @@ from xml_to_usda.proxy_mesh_worker_subprocess import (
     run_proxy_mesh_worker_request_file,
     write_proxy_mesh_worker_request,
 )
-from xml_to_usda.worker_file_protocol import WORKER_TOKEN_ENV
+from xml_to_usda.worker_file_protocol import WORKER_TOKEN_ENV, read_worker_payload
 
 
 def test_proxy_mesh_worker_reports_stage_breadcrumbs(monkeypatch, capsys, tmp_path: Path) -> None:
@@ -19,7 +19,7 @@ def test_proxy_mesh_worker_reports_stage_breadcrumbs(monkeypatch, capsys, tmp_pa
 
     monkeypatch.setenv(WORKER_TOKEN_ENV, worker_token)
     monkeypatch.setattr(
-        "xml_to_usda.proxy_mesh_worker_subprocess.generate_proxy_mesh_from_source_request",
+        "xml_to_usda.proxy_mesh_worker_subprocess.generate_proxy_preview_from_source_request",
         lambda _request, _settings: "proxy-result",
     )
     write_proxy_mesh_worker_request(
@@ -74,3 +74,38 @@ def test_proxy_mesh_worker_rejects_mismatched_origin_token(monkeypatch, tmp_path
     assert run_proxy_mesh_worker_request_file(request_path) == 1
     assert error_path.exists()
     assert result_path.exists() is False
+
+
+def test_proxy_mesh_worker_can_fit_collision_without_generating_proxy(monkeypatch, tmp_path: Path) -> None:
+    request_path = tmp_path / "proxy.request.json"
+    result_path = tmp_path / "proxy.result.json"
+    error_path = tmp_path / "proxy.error.json"
+    worker_token = "test-worker-token"
+    expected = ()
+
+    def fail_if_proxy_regenerates(*_args) -> None:
+        raise AssertionError("Proxy Mesh must not regenerate")
+
+    monkeypatch.setenv(WORKER_TOKEN_ENV, worker_token)
+    monkeypatch.setattr(
+        "xml_to_usda.proxy_mesh_worker_subprocess.generate_proxy_collision_meshes_from_source_request",
+        lambda _request, _settings: expected,
+    )
+    monkeypatch.setattr(
+        "xml_to_usda.proxy_mesh_worker_subprocess.generate_proxy_preview_from_source_request",
+        fail_if_proxy_regenerates,
+    )
+    write_proxy_mesh_worker_request(
+        request_path,
+        ProxyMeshWorkerRequest(
+            request=ProxyMeshSourceRequest(input_path="tree.xml"),
+            settings=ProxyMeshSettings(),
+            action="collision",
+            result_path=str(result_path),
+            error_path=str(error_path),
+            worker_token=worker_token,
+        ),
+    )
+
+    assert run_proxy_mesh_worker_request_file(request_path) == 0
+    assert read_worker_payload(result_path).collision_meshes == expected

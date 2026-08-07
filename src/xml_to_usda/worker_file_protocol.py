@@ -31,6 +31,7 @@ _WORKER_PAYLOAD_MODULES = (
     "xml_to_usda.runtime_paths",
     "xml_to_usda.conversion_worker_subprocess",
     "xml_to_usda.proxy_mesh_service",
+    "xml_to_usda.proxy_collision",
     "xml_to_usda.proxy_mesh_worker_subprocess",
     "xml_to_usda.fracture_collision",
     "xml_to_usda.fracture_export_service",

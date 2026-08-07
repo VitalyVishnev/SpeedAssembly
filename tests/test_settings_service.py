@@ -9,6 +9,7 @@ from xml_to_usda.fracture_collision import FractureCollisionMode, FractureCollis
 from xml_to_usda.fracture_preview_service import FracturePreviewSettings
 from xml_to_usda.fracture_service import FractureSettings
 from xml_to_usda.models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode, UdimMode
+from xml_to_usda.proxy_collision import ProxyCollisionMode, ProxyCollisionSettings
 from xml_to_usda.proxy_mesh_service import ProxyMeshSettings
 from xml_to_usda.settings_service import (
     BaseMaterialSettingRecord,
@@ -78,6 +79,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     snapshot = GuiSettingsSnapshot(
         last_input_path="tree.xml",
         last_output_path="tree.usda",
+        last_output_input_path="tree.xml",
         cpu_profile=CpuProfile.QUIET,
         preserve_temp_files=True,
         conversion_mode=ConversionMode.SKELETAL_PARTS,
@@ -131,6 +133,13 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
             base_mesh_priority=0.22,
             fuse_base_mesh_vertices=True,
             branch_prune_aggression=0.61,
+            collision=ProxyCollisionSettings(
+                enabled=True,
+                mode=ProxyCollisionMode.CAPSULE,
+                height_multiplier=0.75,
+                width_multiplier=1.5,
+                one_per_stem=True,
+            ),
         ),
         fracture_preview_settings=FracturePreviewSettings(
             fracture=FractureSettings(
@@ -188,6 +197,13 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert payload["proxy_mesh_settings"]["base_mesh_priority"] == 0.22
     assert payload["proxy_mesh_settings"]["fuse_base_mesh_vertices"] is True
     assert payload["proxy_mesh_settings"]["branch_prune_aggression"] == 0.61
+    assert payload["proxy_mesh_settings"]["collision"] == {
+        "enabled": True,
+        "mode": "capsule",
+        "height_multiplier": 0.75,
+        "width_multiplier": 1.5,
+        "one_per_stem": True,
+    }
     assert payload["fracture_preview_settings"]["fracture"]["target_piece_count"] == 0
     assert payload["fracture_preview_settings"]["fracture"]["separate_stems"] is True
     assert payload["fracture_preview_settings"]["fracture"]["branch_height_bias"] == -0.5
@@ -227,6 +243,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     restored = load_gui_settings(settings_path)
     assert restored.last_input_path == snapshot.last_input_path
     assert restored.last_output_path == snapshot.last_output_path
+    assert restored.last_output_input_path == snapshot.last_output_input_path
     assert restored.cpu_profile == snapshot.cpu_profile
     assert restored.preserve_temp_files is True
     assert restored.conversion_mode == snapshot.conversion_mode
@@ -284,6 +301,7 @@ def test_load_gui_settings_clamps_imported_proxy_density_to_supported_cap(tmp_pa
     restored = load_gui_settings(settings_path)
 
     assert restored.proxy_mesh_settings.density_resolution == 256
+    assert restored.proxy_mesh_settings.collision == ProxyCollisionSettings()
 
 
 def test_load_gui_settings_clamps_imported_proxy_branch_prune_aggression(tmp_path: Path) -> None:

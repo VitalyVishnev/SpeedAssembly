@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 from array import array
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .mesh_pruning import DEFAULT_BRANCH_PRUNE_AGGRESSION, select_large_connected_face_indices
@@ -20,6 +20,11 @@ from .models import ConversionRequest, CpuProfile, OutputMode
 from .naming import make_stable_prim_name
 from .output_resolution import ensure_output_path_allowed
 from .proxy_source_projection import load_proxy_source_projection, projection_to_tree_asset
+from .proxy_collision import (
+    ProxyCollisionError,
+    ProxyCollisionSettings,
+    build_proxy_collision_meshes,
+)
 from .qem_simplification import QemSimplificationError, simplify_geometry_buffer_qem
 
 
@@ -43,6 +48,7 @@ class ProxyMeshSettings:
     base_mesh_priority: float = 0.33
     fuse_base_mesh_vertices: bool = False
     branch_prune_aggression: float = DEFAULT_BRANCH_PRUNE_AGGRESSION
+    collision: ProxyCollisionSettings = field(default_factory=ProxyCollisionSettings)
 
 
 @dataclass(frozen=True)
@@ -94,6 +100,7 @@ class ProxyMeshResult:
     method: str
     source_instance_count: int
     included_base_mesh: bool
+    collision_meshes: tuple[MeshData, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -105,17 +112,19 @@ class ProxyMeshExportResult:
 
 
 class ProxyMeshJobResult:
-    __slots__ = ("proxy", "export", "cancelled", "error_message")
+    __slots__ = ("proxy", "export", "collision_meshes", "cancelled", "error_message")
 
     def __init__(
         self,
         proxy: ProxyMeshResult | None = None,
         export: ProxyMeshExportResult | None = None,
+        collision_meshes: tuple[MeshData, ...] | None = None,
         cancelled: bool = False,
         error_message: str | None = None,
     ) -> None:
         self.proxy = proxy
         self.export = export
+        self.collision_meshes = collision_meshes
         self.cancelled = cancelled
         self.error_message = error_message
 
@@ -146,7 +155,6 @@ def generate_proxy_mesh(model: CanonicalTreeModel, settings: ProxyMeshSettings |
         raise ProxyMeshError("Proxy base mesh priority must be between zero and one.")
     if not 0.0 <= resolved_settings.branch_prune_aggression <= 1.0:
         raise ProxyMeshError("Proxy branch prune aggression must be between zero and one.")
-
     if resolved_settings.method == PROXY_METHOD_INSTANCE_BOUNDS:
         source_boxes, included_base = _collect_source_boxes(model, resolved_settings)
         if not source_boxes:
@@ -159,12 +167,40 @@ def generate_proxy_mesh(model: CanonicalTreeModel, settings: ProxyMeshSettings |
         included_base = sources.base_mesh is not None
         mesh = _build_density_field_mesh(sources, resolved_settings)
 
+    collision_meshes = generate_proxy_collision_meshes(model, resolved_settings.collision)
     return ProxyMeshResult(
         mesh=mesh,
         settings=resolved_settings,
         method=resolved_settings.method,
         source_instance_count=len(model.repeated_parts),
         included_base_mesh=included_base,
+        collision_meshes=collision_meshes,
+    )
+
+
+def generate_proxy_collision_meshes(
+    model: CanonicalTreeModel,
+    settings: ProxyCollisionSettings | None,
+) -> tuple[MeshData, ...]:
+    """Fit Proxy collision without generating or simplifying the render mesh."""
+    try:
+        return build_proxy_collision_meshes(model, settings)
+    except ProxyCollisionError as exc:
+        raise ProxyMeshError(str(exc)) from exc
+
+
+def update_proxy_collision(
+    proxy: ProxyMeshResult,
+    settings: ProxyMeshSettings,
+    collision_meshes: tuple[MeshData, ...] | None = None,
+) -> ProxyMeshResult:
+    """Reuse a generated Proxy Mesh while replacing only its collision state."""
+    if replace(proxy.settings, collision=settings.collision) != settings:
+        raise ProxyMeshError("Cannot reuse Proxy Mesh after non-collision settings changed.")
+    return replace(
+        proxy,
+        settings=settings,
+        collision_meshes=proxy.collision_meshes if collision_meshes is None else collision_meshes,
     )
 
 
@@ -579,6 +615,29 @@ def generate_proxy_mesh_from_source_request(
     return generate_proxy_mesh(model, settings)
 
 
+def generate_proxy_preview_from_source_request(
+    request: ProxyMeshSourceRequest,
+    settings: ProxyMeshSettings | None = None,
+) -> ProxyMeshResult:
+    """Generate Preview once and retain a hidden collision fit for instant On/Off toggles."""
+    resolved = settings or ProxyMeshSettings()
+    preview_settings = replace(
+        resolved,
+        collision=replace(resolved.collision, enabled=True),
+    )
+    proxy = generate_proxy_mesh_from_source_request(request, preview_settings)
+    return replace(proxy, settings=resolved)
+
+
+def generate_proxy_collision_meshes_from_source_request(
+    request: ProxyMeshSourceRequest,
+    settings: ProxyCollisionSettings | None,
+) -> tuple[MeshData, ...]:
+    """Fit collision from cached Proxy Source Projection without rebuilding Proxy Mesh."""
+    _input_path, model = _load_proxy_source_projection(request)
+    return generate_proxy_collision_meshes(model, settings)
+
+
 def export_proxy_usda_from_source_request(
     request: ProxyMeshSourceRequest,
     settings: ProxyMeshSettings | None = None,
@@ -636,31 +695,43 @@ def export_generated_proxy_usda_from_request(
 
 
 def render_proxy_usda(proxy: ProxyMeshResult, *, root_name: str) -> str:
-    """Render one geometry-only USDA document for a generated proxy mesh."""
+    """Render one proxy mesh and its optional simple-collision sibling."""
     safe_root_name = make_stable_prim_name(root_name, fallback="Proxy")
     mesh = proxy.mesh
-    return "\n".join(
-        (
-            "#usda 1.0",
-            "(",
-            f'    defaultPrim = "{safe_root_name}"',
-            "    metersPerUnit = 1",
-            '    upAxis = "Y"',
-            ")",
-            "",
-            f'def Xform "{safe_root_name}"',
-            "{",
-            '    def Mesh "ProxyMesh"',
-            "    {",
-            '        uniform token orientation = "rightHanded"',
-            _render_array("point3f[] points", _point_strings(mesh), indent="        "),
-            _render_array("int[] faceVertexCounts", (str(value) for value in mesh.face_vertex_counts), indent="        "),
-            _render_array("int[] faceVertexIndices", (str(value) for value in mesh.face_vertex_indices), indent="        "),
-            "    }",
-            "}",
-            "",
+    lines = [
+        "#usda 1.0",
+        "(",
+        f'    defaultPrim = "{safe_root_name}"',
+        "    metersPerUnit = 1",
+        '    upAxis = "Y"',
+        ")",
+        "",
+        f'def Xform "{safe_root_name}"',
+        "{",
+        '    def Mesh "ProxyMesh"',
+        "    {",
+        '        uniform token orientation = "rightHanded"',
+        _render_array("point3f[] points", _point_strings(mesh), indent="        "),
+        _render_array("int[] faceVertexCounts", (str(value) for value in mesh.face_vertex_counts), indent="        "),
+        _render_array("int[] faceVertexIndices", (str(value) for value in mesh.face_vertex_indices), indent="        "),
+        "    }",
+    ]
+    for collision in proxy.collision_meshes if proxy.settings.collision.enabled else ():
+        lines.extend(
+            (
+                f'    def Mesh "{collision.name}"',
+                "    {",
+                '        uniform token purpose = "guide"',
+                '        uniform token subdivisionScheme = "none"',
+                '        uniform token orientation = "rightHanded"',
+                _render_array("point3f[] points", _mesh_point_strings(collision), indent="        "),
+                _render_array("int[] faceVertexCounts", (str(value) for value in collision.face_vertex_counts), indent="        "),
+                _render_array("int[] faceVertexIndices", (str(value) for value in collision.face_vertex_indices), indent="        "),
+                "    }",
+            )
         )
-    )
+    lines.extend(("}", ""))
+    return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -1149,6 +1220,11 @@ def _inverse_quaternion(q: Quaternion, *, label: str) -> Quaternion:
 def _point_strings(mesh: GeometryBuffer):
     for index in range(0, len(mesh.point_components), 3):
         yield f"({mesh.point_components[index]:g}, {mesh.point_components[index + 1]:g}, {mesh.point_components[index + 2]:g})"
+
+
+def _mesh_point_strings(mesh: MeshData):
+    for point in mesh.points:
+        yield f"({point.x:g}, {point.y:g}, {point.z:g})"
 
 
 def _render_array(name: str, values, *, indent: str) -> str:

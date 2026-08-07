@@ -20,6 +20,8 @@ from pathlib import Path
 from .models import (
     ExportMetadata,
     InstanceBinding,
+    Joint,
+    Matrix4d,
     MeshData,
     MeshLibraryEntry,
     MeshSection,
@@ -36,6 +38,8 @@ from .normalizer import (
     _extract_lod_faces,
     _extract_packed_points,
     _extract_packed_triangle_blocks,
+    _extract_skeleton,
+    _extract_vertex_skinning,
     _leaf_reference_position_offset,
     _mesh_with_original_scale,
     _object_abs_translate,
@@ -43,11 +47,12 @@ from .normalizer import (
     _read_leaf_reference_payload,
     _select_primary_lod,
 )
+from .skeleton_processing import orient_skeleton_x
 from .source_transform import build_source_transform
 from .xml_reader import packaged_xml_parser_adapter_enabled, read_source_xml
 
 
-PROXY_SOURCE_PROJECTION_CACHE_SCHEMA_VERSION = 2
+PROXY_SOURCE_PROJECTION_CACHE_SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -56,6 +61,7 @@ class ProxySourceProjection:
     base_mesh: MeshData | None
     prototypes: tuple[Prototype, ...]
     repeated_parts: tuple[RepeatedPartInstance, ...]
+    skeleton: tuple[Joint, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -73,6 +79,7 @@ def load_proxy_source_projection(input_path: str) -> ProxySourceProjection:
     root = document.tree.getroot()
     object_nodes = tuple(root.findall(".//Object"))
     mesh_nodes = tuple(root.findall(".//Meshes/Mesh"))
+    bone_nodes = tuple(root.findall(".//Bones/Bone"))
     source_transform = build_source_transform(
         root,
         _find_first_attr(root, "units"),
@@ -81,7 +88,17 @@ def load_proxy_source_projection(input_path: str) -> ProxySourceProjection:
     )
     messages: list[str] = []
     material_ids: set[int] = set()
-    object_projection = _extract_proxy_objects(object_nodes, messages, source_transform, material_ids)
+    skeleton = orient_skeleton_x(tuple(_extract_skeleton(bone_nodes, messages, source_transform)))
+    joint_index_by_source_id = {
+        joint.source_id: index for index, joint in enumerate(skeleton) if joint.source_id is not None
+    }
+    object_projection = _extract_proxy_objects(
+        object_nodes,
+        messages,
+        source_transform,
+        material_ids,
+        joint_index_by_source_id,
+    )
     repeated_parts = object_projection.repeated_parts
     mesh_library = _extract_proxy_mesh_library(mesh_nodes, messages, source_transform, material_ids)
     projection = ProxySourceProjection(
@@ -89,6 +106,7 @@ def load_proxy_source_projection(input_path: str) -> ProxySourceProjection:
         base_mesh=object_projection.base_mesh,
         prototypes=_build_proxy_prototypes(repeated_parts, mesh_library),
         repeated_parts=repeated_parts,
+        skeleton=skeleton,
     )
     _write_proxy_projection_cache(cache_path, projection)
     return projection
@@ -100,7 +118,7 @@ def projection_to_tree_asset(projection: ProxySourceProjection) -> TreeAsset:
         materials=(),
         source_objects=(),
         base_mesh=projection.base_mesh,
-        skeleton=(),
+        skeleton=projection.skeleton,
         assembly_parts=projection.repeated_parts,
         prototypes=projection.prototypes,
     )
@@ -111,34 +129,49 @@ def _extract_proxy_objects(
     messages: list[str],
     source_transform,
     material_ids: set[int],
+    joint_index_by_source_id: dict[int, int],
 ) -> _ProxyObjectProjection:
     merged_points: list[Vector3] = []
     merged_face_counts: list[int] = []
     merged_face_indices: list[int] = []
     merged_sections: dict[int, list[int]] = defaultdict(list)
+    merged_joint_indices: list[int] = []
+    merged_joint_weights: list[float] = []
     repeated_parts: list[RepeatedPartInstance] = []
 
     for obj in object_nodes:
         object_id = obj.attrib.get("ID")
         points_node: ET.Element | None = None
         triangles_nodes: list[ET.Element] = []
+        vertices_node: ET.Element | None = None
         leaf_ref_nodes: list[ET.Element] = []
         for child in obj:
             if child.tag == "Points" and points_node is None:
                 points_node = child
             elif child.tag == "Triangles":
                 triangles_nodes.append(child)
+            elif child.tag == "Vertices" and vertices_node is None:
+                vertices_node = child
             elif child.tag == "LeafReferences":
                 leaf_ref_nodes.append(child)
         if object_id is not None and points_node is not None and triangles_nodes:
             points = _extract_packed_points(points_node, f"{obj.attrib.get('Name', obj.tag)}.points", messages, source_transform)
-            face_counts, face_indices, _vertex_indices, sections = _extract_packed_triangle_blocks(
+            face_counts, face_indices, vertex_indices, sections = _extract_packed_triangle_blocks(
                 tuple(triangles_nodes),
                 f"{obj.attrib.get('Name', obj.tag)}.triangles",
                 messages,
                 material_ids,
             )
             if points and face_counts and face_indices:
+                joint_indices, joint_weights = _extract_vertex_skinning(
+                    vertices_node,
+                    face_indices,
+                    vertex_indices,
+                    len(points),
+                    joint_index_by_source_id,
+                    f"{obj.attrib.get('Name', obj.tag)}.vertices",
+                    messages,
+                )
                 point_offset = len(merged_points)
                 face_offset = len(merged_face_counts)
                 translate = _object_abs_translate(obj, source_transform)
@@ -148,6 +181,8 @@ def _extract_proxy_objects(
                 )
                 merged_face_counts.extend(face_counts)
                 merged_face_indices.extend(index + point_offset for index in face_indices)
+                merged_joint_indices.extend(joint_indices)
+                merged_joint_weights.extend(joint_weights)
                 for section in sections:
                     merged_sections[section.material_id].extend(
                         face_offset + face_index for face_index in section.face_indices
@@ -182,6 +217,9 @@ def _extract_proxy_objects(
             face_vertex_counts=tuple(merged_face_counts),
             face_vertex_indices=tuple(merged_face_indices),
             sections=_ordered_sections(merged_sections),
+            skel_joint_indices=tuple(merged_joint_indices),
+            skel_joint_weights=tuple(merged_joint_weights),
+            skel_element_size=1 if merged_joint_indices else 0,
         )
         if merged_points and merged_face_counts and merged_face_indices
         else None
@@ -356,10 +394,39 @@ def _projection_to_arrays(projection: ProxySourceProjection, np) -> dict[str, ob
         payload["base_points"] = np.empty((0, 3), dtype=np.float64)
         payload["base_face_counts"] = np.empty((0,), dtype=np.int32)
         payload["base_face_indices"] = np.empty((0,), dtype=np.int32)
+        payload["base_joint_indices"] = np.empty((0,), dtype=np.int32)
+        payload["base_joint_weights"] = np.empty((0,), dtype=np.float64)
+        payload["base_skel_element_size"] = np.asarray([0], dtype=np.int32)
     else:
         payload["base_points"] = _mesh_points_array(base, np)
         payload["base_face_counts"] = np.asarray(base.face_vertex_counts, dtype=np.int32)
         payload["base_face_indices"] = np.asarray(base.face_vertex_indices, dtype=np.int32)
+        payload["base_joint_indices"] = np.asarray(base.skel_joint_indices, dtype=np.int32)
+        payload["base_joint_weights"] = np.asarray(base.skel_joint_weights, dtype=np.float64)
+        payload["base_skel_element_size"] = np.asarray([base.skel_element_size], dtype=np.int32)
+
+    skeleton = projection.skeleton
+    payload["skeleton_names"] = np.asarray([joint.name for joint in skeleton])
+    payload["skeleton_source_ids"] = np.asarray(
+        [joint.source_id if joint.source_id is not None else -1 for joint in skeleton],
+        dtype=np.int64,
+    )
+    payload["skeleton_parents"] = np.asarray([joint.parent or "" for joint in skeleton])
+    payload["skeleton_generator_labels"] = np.asarray([joint.generator_label or "" for joint in skeleton])
+    payload["skeleton_generator_levels"] = np.asarray(
+        [joint.generator_level if joint.generator_level is not None else -1 for joint in skeleton],
+        dtype=np.int32,
+    )
+    payload["skeleton_bind_transforms"] = np.asarray([joint.bind_transform.rows for joint in skeleton], dtype=np.float64)
+    payload["skeleton_rest_transforms"] = np.asarray([joint.rest_transform.rows for joint in skeleton], dtype=np.float64)
+    payload["skeleton_bind_end_present"] = np.asarray(
+        [1 if joint.bind_end_transform is not None else 0 for joint in skeleton],
+        dtype=np.int8,
+    )
+    payload["skeleton_bind_end_transforms"] = np.asarray(
+        [(joint.bind_end_transform or Matrix4d.identity()).rows for joint in skeleton],
+        dtype=np.float64,
+    )
 
     payload["prototype_count"] = np.asarray([len(projection.prototypes)], dtype=np.int32)
     payload["prototype_keys"] = np.asarray([prototype.source_key for prototype in projection.prototypes])
@@ -414,7 +481,33 @@ def _projection_from_arrays(data) -> ProxySourceProjection:
             data["base_points"],
             data["base_face_counts"],
             data["base_face_indices"],
+            joint_indices=data["base_joint_indices"],
+            joint_weights=data["base_joint_weights"],
+            skel_element_size=int(data["base_skel_element_size"][0]),
         )
+
+    skeleton_names = data["skeleton_names"].astype(str).tolist()
+    skeleton_source_ids = data["skeleton_source_ids"].astype(int).tolist()
+    skeleton_parents = data["skeleton_parents"].astype(str).tolist()
+    skeleton_generator_labels = data["skeleton_generator_labels"].astype(str).tolist()
+    skeleton_generator_levels = data["skeleton_generator_levels"].astype(int).tolist()
+    bind_transforms = data["skeleton_bind_transforms"]
+    rest_transforms = data["skeleton_rest_transforms"]
+    bind_end_present = data["skeleton_bind_end_present"].astype(int).tolist()
+    bind_end_transforms = data["skeleton_bind_end_transforms"]
+    skeleton = tuple(
+        Joint(
+            name=skeleton_names[index],
+            source_id=skeleton_source_ids[index] if skeleton_source_ids[index] >= 0 else None,
+            parent=skeleton_parents[index] or None,
+            generator_label=skeleton_generator_labels[index] or None,
+            generator_level=skeleton_generator_levels[index] if skeleton_generator_levels[index] >= 0 else None,
+            bind_transform=_matrix_from_array(bind_transforms[index]),
+            rest_transform=_matrix_from_array(rest_transforms[index]),
+            bind_end_transform=_matrix_from_array(bind_end_transforms[index]) if bind_end_present[index] else None,
+        )
+        for index in range(len(skeleton_names))
+    )
 
     prototype_keys = data["prototype_keys"].astype(str).tolist()
     prototype_names = data["prototype_names"].astype(str).tolist()
@@ -471,6 +564,7 @@ def _projection_from_arrays(data) -> ProxySourceProjection:
         base_mesh=base_mesh,
         prototypes=tuple(prototypes),
         repeated_parts=repeated_parts,
+        skeleton=skeleton,
     )
 
 
@@ -478,13 +572,29 @@ def _mesh_points_array(mesh: MeshData, np):
     return np.asarray([(point.x, point.y, point.z) for point in mesh.points], dtype=np.float64)
 
 
-def _mesh_from_arrays(name: str, points, face_counts, face_indices) -> MeshData:
+def _mesh_from_arrays(
+    name: str,
+    points,
+    face_counts,
+    face_indices,
+    *,
+    joint_indices=(),
+    joint_weights=(),
+    skel_element_size: int = 0,
+) -> MeshData:
     return MeshData(
         name=name,
         points=tuple(Vector3(float(point[0]), float(point[1]), float(point[2])) for point in points),
         face_vertex_counts=tuple(int(value) for value in face_counts),
         face_vertex_indices=tuple(int(value) for value in face_indices),
+        skel_joint_indices=tuple(int(value) for value in joint_indices),
+        skel_joint_weights=tuple(float(value) for value in joint_weights),
+        skel_element_size=int(skel_element_size),
     )
+
+
+def _matrix_from_array(values) -> Matrix4d:
+    return Matrix4d(tuple(tuple(float(value) for value in row) for row in values))
 
 
 def _quaternion_from_row(row) -> Quaternion:
