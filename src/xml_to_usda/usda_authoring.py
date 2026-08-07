@@ -26,6 +26,7 @@ from .models import (
     GeometryBuffer,
     InstanceBinding,
     MaterialSpec,
+    Matrix4d,
     MeshData,
     MeshSection,
     Prototype,
@@ -1395,7 +1396,7 @@ def _render_base_animation(
     root_joint_name: str | None,
 ) -> str:
     joints = _render_joint_paths(model, root_joint_name=root_joint_name)
-    rotations = ", ".join(_identity_quaternion() for _ in model.skeleton)
+    rotations = ", ".join(_matrix_rotation_quaternion(joint.rest_transform).to_usda() for joint in model.skeleton)
     scales = ", ".join("(1, 1, 1)" for _ in model.skeleton)
     translations = _render_joint_rest_translations(model)
     return f'''def SkelAnimation "{animation_name}"
@@ -1405,6 +1406,33 @@ def _render_base_animation(
     half3[] scales = [{scales}]
     float3[] translations = [{translations}]
 }}'''
+
+
+def _matrix_rotation_quaternion(matrix: Matrix4d) -> Quaternion:
+    """Convert a USD row-vector rotation matrix to a normalized quaternion."""
+    row = matrix.rows
+    # Quaternion formulas use column-vector matrices; transpose the USD basis.
+    m00, m01, m02 = row[0][0], row[1][0], row[2][0]
+    m10, m11, m12 = row[0][1], row[1][1], row[2][1]
+    m20, m21, m22 = row[0][2], row[1][2], row[2][2]
+    trace = m00 + m11 + m22
+    if trace > 0.0:
+        scale = math.sqrt(trace + 1.0) * 2.0
+        real, i, j, k = 0.25 * scale, (m21 - m12) / scale, (m02 - m20) / scale, (m10 - m01) / scale
+    elif m00 > m11 and m00 > m22:
+        scale = math.sqrt(1.0 + m00 - m11 - m22) * 2.0
+        real, i, j, k = (m21 - m12) / scale, 0.25 * scale, (m01 + m10) / scale, (m02 + m20) / scale
+    elif m11 > m22:
+        scale = math.sqrt(1.0 + m11 - m00 - m22) * 2.0
+        real, i, j, k = (m02 - m20) / scale, (m01 + m10) / scale, 0.25 * scale, (m12 + m21) / scale
+    else:
+        scale = math.sqrt(1.0 + m22 - m00 - m11) * 2.0
+        real, i, j, k = (m10 - m01) / scale, (m02 + m20) / scale, (m12 + m21) / scale, 0.25 * scale
+    length = math.sqrt(real * real + i * i + j * j + k * k)
+    real, i, j, k = real / length, i / length, j / length, k / length
+    if real < 0.0:
+        real, i, j, k = -real, -i, -j, -k
+    return Quaternion(real, i, j, k)
 
 
 def _render_external_instancer_prototype(prototype: Prototype, contract: UeSchemaContract) -> str:

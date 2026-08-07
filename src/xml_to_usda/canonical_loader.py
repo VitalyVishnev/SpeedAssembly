@@ -39,11 +39,12 @@ from .models import (
 )
 from .normalizer import normalize_to_canonical
 from .source_validation import validate_source_model
+from .skeleton_processing import apply_dual_skinning
 from .worker_file_protocol import read_worker_payload, write_worker_payload_atomic
 from .xml_reader import analyze_xml, read_source_xml
 
 
-SOURCE_MODEL_CACHE_SCHEMA_VERSION = 8
+SOURCE_MODEL_CACHE_SCHEMA_VERSION = 9
 
 
 class _InvalidSourceModelCache(Exception):
@@ -150,6 +151,7 @@ def load_resolved_assembly_model(
     use_explicit_material_contract: bool = False,
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = (),
     conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY,
+    dual_skinning: bool = True,
     output_stem: str | None = None,
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
     fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60,
@@ -164,6 +166,9 @@ def load_resolved_assembly_model(
         telemetry_callback=telemetry_callback,
         cancel_event=cancel_event,
     )
+    if dual_skinning:
+        source_model = apply_dual_skinning(source_model)
+        source_diagnostics = validate_source_model(source_model)
     resolved = resolve_assembly_model(
         source_model,
         output_mode=output_mode,
@@ -200,6 +205,7 @@ def load_canonical_model(
     use_explicit_material_contract: bool = False,
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = (),
     conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY,
+    dual_skinning: bool = True,
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
     fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60,
     source_cache_enabled: bool = True,
@@ -220,6 +226,7 @@ def load_canonical_model(
         use_explicit_material_contract=use_explicit_material_contract,
         prototype_source_configs=prototype_source_configs,
         conversion_mode=conversion_mode,
+        dual_skinning=dual_skinning,
         fbx_cache_max_bytes=fbx_cache_max_bytes,
         fbx_cache_max_age_seconds=fbx_cache_max_age_seconds,
         source_cache_enabled=source_cache_enabled,

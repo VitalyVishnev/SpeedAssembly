@@ -1487,6 +1487,7 @@ class MainWindow(QWidget):
         self.wind_panel.set_global_options(
             is_ground_cover=self._operator_state.is_ground_cover,
             gust_attenuation=self._operator_state.gust_attenuation,
+            dual_skinning=self._operator_state.dual_skinning,
         )
         self.geometry_panel.apply_proxy_settings(self._proxy_mesh_settings)
         self.geometry_panel.apply_fracture_preview_settings(self._fracture_preview_settings)
@@ -1651,6 +1652,7 @@ class MainWindow(QWidget):
             )
         self.program_status_card.set_summary(
             mode=mode,
+            dual_skinning=self._operator_state.dual_skinning,
             materials=materials,
             materials_tooltip=materials_tooltip,
         )
@@ -2074,6 +2076,7 @@ class MainWindow(QWidget):
             self._operator_state,
             gust_attenuation=self.wind_panel.gust_attenuation(),
             is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
+            dual_skinning=self.wind_panel.dual_skinning_enabled(),
         )
         self._schedule_operator_state_save()
         self._refresh_state_cards()
@@ -2303,6 +2306,7 @@ class MainWindow(QWidget):
             udim_material_settings=self.materials_panel.collect_udim_material_settings(),
             prototype_source_configs=self.materials_panel.collect_prototype_source_configs(),
             conversion_mode=self._operator_state.conversion_mode,
+            dual_skinning=self.wind_panel.dual_skinning_enabled(),
             async_threshold_bytes=self.ASYNC_CONVERSION_THRESHOLD_BYTES,
             fbx_cache_max_bytes=self._fbx_cache_max_bytes(),
             fbx_cache_max_age_seconds=self._fbx_cache_max_age_seconds(),

@@ -32,6 +32,7 @@ def test_load_gui_settings_returns_defaults_for_missing_file(tmp_path: Path) -> 
     snapshot = load_gui_settings(tmp_path / "missing.json")
 
     assert snapshot == GuiSettingsSnapshot()
+    assert snapshot.dual_skinning is True
 
 
 def test_load_gui_settings_discards_legacy_fracture_preview_face_budget(tmp_path: Path) -> None:

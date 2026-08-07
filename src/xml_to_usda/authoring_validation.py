@@ -95,7 +95,8 @@ def _validate_skeletal_assembly_model(
         issues.extend(_validate_mesh_materials(model.base_mesh, material_ids, "Base Skeletal Tree"))
 
     if model.materials and model.base_mesh is not None:
-        if len(model.base_mesh.skel_joint_indices) != len(model.base_mesh.points):
+        expected_skinning_size = len(model.base_mesh.points) * model.base_mesh.skel_element_size
+        if len(model.base_mesh.skel_joint_indices) != expected_skinning_size:
             issues.append(
                 ValidationIssue(
                     severity="error",
@@ -103,7 +104,7 @@ def _validate_skeletal_assembly_model(
                     message="Base skeletal mesh joint index payload must match the authored point count for vertex interpolation.",
                 )
             )
-        if len(model.base_mesh.skel_joint_weights) != len(model.base_mesh.points):
+        if len(model.base_mesh.skel_joint_weights) != expected_skinning_size:
             issues.append(
                 ValidationIssue(
                     severity="error",

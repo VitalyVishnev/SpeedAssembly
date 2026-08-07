@@ -49,6 +49,7 @@ def prepare_conversion_plan(
     prototype_source_configs: tuple[PrototypeSourceConfig, ...],
     async_threshold_bytes: int,
     conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY,
+    dual_skinning: bool = True,
     udim_material_settings: tuple[UdimMaterialSetting, ...] = (),
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
     fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60,
@@ -112,6 +113,7 @@ def prepare_conversion_plan(
         use_explicit_material_contract=use_explicit_material_contract,
         prototype_source_configs=prototype_source_configs,
         conversion_mode=resolved_conversion_mode,
+        dual_skinning=bool(dual_skinning),
         fbx_cache_max_bytes=fbx_cache_max_bytes,
         fbx_cache_max_age_seconds=fbx_cache_max_age_seconds,
     )

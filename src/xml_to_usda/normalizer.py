@@ -32,6 +32,7 @@ from .models import (
     Vector3,
 )
 from .skeleton_rules import joint_name_from_bone_id, parse_generator_label
+from .skeleton_processing import orient_skeleton_x
 from .source_transform import SourceTransform, build_source_transform
 from .xml_reader import SourceNodeIndex
 
@@ -84,7 +85,7 @@ def normalize_to_canonical(
     materials = tuple(_extract_materials(source_nodes.materials))
     material_ids = {material.source_id for material in materials}
 
-    skeleton = tuple(_extract_skeleton(source_nodes.bones, data_messages, source_transform))
+    skeleton = orient_skeleton_x(tuple(_extract_skeleton(source_nodes.bones, data_messages, source_transform)))
     joint_index_by_source_id = {
         joint.source_id: index for index, joint in enumerate(skeleton) if joint.source_id is not None
     }
@@ -628,8 +629,28 @@ def _extract_skeleton(bones: tuple[ET.Element, ...], messages: list[str], source
         )
 
     start_by_id = {bone_id: start for bone_id, _, start, _, _, _ in raw_bones}
+    child_starts_by_parent: dict[int, list[Vector3]] = defaultdict(list)
+    for _bone_id, parent_id, start, _end, _label, _level in raw_bones:
+        if parent_id is not None:
+            child_starts_by_parent[parent_id].append(start)
     joints: list[Joint] = []
     for bone_id, parsed_parent_id, start, end, generator_label, generator_level in raw_bones:
+        if end is None:
+            direction_start = start_by_id.get(parsed_parent_id) if parsed_parent_id is not None else None
+            if direction_start is None:
+                direction_start = next((child for child in child_starts_by_parent.get(bone_id, ()) if child != start), None)
+                inferred_end = direction_start
+            else:
+                inferred_end = Vector3(
+                    start.x + start.x - direction_start.x,
+                    start.y + start.y - direction_start.y,
+                    start.z + start.z - direction_start.z,
+                )
+            if inferred_end is not None and inferred_end != start:
+                end = inferred_end
+                messages.append(f"inferred_skeleton_end: bone {bone_id} has no EndX/EndY/EndZ; direction was inferred from hierarchy")
+            else:
+                messages.append(f"missing_skeleton_orientation: bone {bone_id} has no usable direction for +X orientation")
         parent = joint_name_from_bone_id(parsed_parent_id) if parsed_parent_id is not None else None
         if parsed_parent_id is None or parsed_parent_id not in start_by_id:
             rest_translate = start

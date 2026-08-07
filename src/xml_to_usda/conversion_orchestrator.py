@@ -149,6 +149,7 @@ def _convert_single_input(
             use_explicit_material_contract=request.use_explicit_material_contract,
             prototype_source_configs=request.prototype_source_configs,
             conversion_mode=request.conversion_mode,
+            dual_skinning=request.dual_skinning,
             fbx_cache_max_bytes=request.fbx_cache_max_bytes,
             fbx_cache_max_age_seconds=request.fbx_cache_max_age_seconds,
             output_stem=resolved_output.stem if resolved_output is not None else None,

@@ -41,6 +41,7 @@ class OperatorState:
     single_material_path: str = ""
     gust_attenuation: float = 0.0
     is_ground_cover: bool = False
+    dual_skinning: bool = True
 
 
 def load_operator_state(
@@ -67,6 +68,7 @@ def load_operator_state(
             single_material_path=snapshot.single_material_path,
             gust_attenuation=snapshot.gust_attenuation,
             is_ground_cover=snapshot.is_ground_cover,
+            dual_skinning=snapshot.dual_skinning,
         ),
         snapshot,
     )
@@ -161,6 +163,7 @@ def _operator_snapshot_fields(state: OperatorState, previous_snapshot: GuiSettin
         "single_material_path": state.single_material_path,
         "gust_attenuation": float(state.gust_attenuation),
         "is_ground_cover": bool(state.is_ground_cover),
+        "dual_skinning": bool(state.dual_skinning),
     }
 
 

@@ -158,6 +158,7 @@ folded into pytest. The current contract map and commands live in
 Important folders:
 
 - `src/xml_to_usda/` - production code.
+- `src/xml_to_usda/skeleton_processing.py` - deterministic +X bone frames and parent/current bindings for base/repeated geometry.
 - `tests/` - regression coverage and contract checks.
 - `samples/` - controlled XML fixtures and example outputs.
 - `vault/` - reference USDA, importer, schema, and research material.

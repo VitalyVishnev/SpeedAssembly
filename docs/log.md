@@ -667,3 +667,16 @@ Major moves:
   and compacted long result paths to filenames while preserving full tooltips.
 - Restored the visual gap between the Wind/Geometry/Materials tabs and their
   content panels without reintroducing the removed summary text.
+
+## 2026-08-07 - Production skeleton orientation and dual skinning
+
+- Made +X-along-bone frames mandatory after UE 5.7 validation on fern and
+  spruce assets fixed opposite wind bending across the trunk.
+- Made linear parent/current Dual Skinning the default for the base mesh and
+  repeated Parts while retaining an explicit Wind-panel opt-out.
+- Removed skeleton-mode filename suffixes and renamed the implementation to
+  `skeleton_processing.py` now that both behaviors are production contracts.
+- Added concise On/Off guidance to the checkbox and exposed its current value
+  in the left Program Status card.
+- Passed 530 regression tests, 26 packaged contracts, the release EXE/ZIP
+  build, Detailed Cuts stability smoke, and Fracture worker recovery smoke.

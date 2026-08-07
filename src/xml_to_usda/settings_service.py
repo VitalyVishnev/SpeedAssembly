@@ -101,6 +101,7 @@ class GuiSettingsSnapshot:
     single_material_path: str = ""
     gust_attenuation: float = 0.0
     is_ground_cover: bool = False
+    dual_skinning: bool = True
     wind_group_settings: dict[str, WindGroupSettingRecord] = field(default_factory=dict)
     base_material_settings: tuple[BaseMaterialSettingRecord, ...] = ()
     part_mesh_settings: tuple[PartSourceSettingRecord, ...] = ()
@@ -155,6 +156,7 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
         single_material_path=str(payload.get("single_material_path", "")),
         gust_attenuation=_coerce_float(payload.get("gust_attenuation", 0.0), 0.0),
         is_ground_cover=bool(payload.get("is_ground_cover", False)),
+        dual_skinning=bool(payload.get("dual_skinning", True)),
         wind_group_settings=wind_group_settings,
         base_material_settings=base_material_settings,
         part_mesh_settings=part_mesh_settings,
@@ -185,6 +187,7 @@ def save_gui_settings(settings_path: str | Path, snapshot: GuiSettingsSnapshot) 
         "single_material_path": snapshot.single_material_path,
         "gust_attenuation": round(float(snapshot.gust_attenuation), 4),
         "is_ground_cover": bool(snapshot.is_ground_cover),
+        "dual_skinning": bool(snapshot.dual_skinning),
         "wind_group_settings": _serialize_wind_group_settings(snapshot.wind_group_settings),
         "base_material_settings": _serialize_base_material_settings(snapshot.base_material_settings),
         "part_mesh_settings": _serialize_part_mesh_settings(snapshot.part_mesh_settings),

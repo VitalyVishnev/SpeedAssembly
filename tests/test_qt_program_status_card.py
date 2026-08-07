@@ -110,12 +110,14 @@ def test_program_status_card_updates_source_and_material_summary(qtbot) -> None:
 
     card.set_summary(
         mode="Static Assembly",
+        dual_skinning=False,
         materials="Single Material · M_Bark",
         materials_tooltip="/Game/Tree/M_Bark.M_Bark",
         source="Base slots: 2\nPrototypes: 3\nInstances: 43,263",
     )
 
     assert "Static Assembly" in card.mode_label.text()
+    assert "Off" in card.skinning_label.text()
     assert "Instances: 43,263" in card.source_label.text()
     assert card.material_label.toolTip() == "/Game/Tree/M_Bark.M_Bark"
     assert "<b>MATERIALS</b>" in card.material_label.text()
@@ -143,6 +145,9 @@ def test_main_window_uses_one_status_card_and_no_tab_summary_rows(qtbot, tmp_pat
     qtbot.addWidget(window)
 
     assert window.status_label is window.program_status_card.status_label
+    assert window.wind_panel.dual_skinning_checkbox.isChecked() is True
+    assert "On:" in window.wind_panel.dual_skinning_checkbox.toolTip()
+    assert "Off:" in window.wind_panel.dual_skinning_checkbox.toolTip()
     assert not hasattr(window, "materials_card")
     assert not hasattr(window, "runtime_card")
     assert not hasattr(window.wind_panel, "summary_label")

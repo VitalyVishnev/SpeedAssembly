@@ -22,6 +22,16 @@ def test_output_resolution_defaults_to_single_file_usda() -> None:
     assert output_path == Path("D:/trees/SimpleTree_01.usda")
 
 
+def test_output_resolution_does_not_encode_dual_skinning_in_file_name() -> None:
+    request = ConversionRequest(
+        input_paths=("D:/trees/SimpleTree_01.xml",),
+        output_path="D:/exports/Tree.usda",
+        dual_skinning=True,
+    )
+
+    assert resolve_output_path(request, request.input_paths[0]) == Path("D:/exports/Tree.usda")
+
+
 def test_output_resolution_supports_batch_directory_and_template(tmp_path: Path) -> None:
     request = ConversionRequest(
         input_paths=("a.xml", "b.xml"),

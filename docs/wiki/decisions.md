@@ -1142,3 +1142,31 @@ Related files:
 - `src/xml_to_usda/proxy_mesh_service.py`
 - `src/xml_to_usda/qt_ui/proxy_preview.py`
 - `src/xml_to_usda/settings_service.py`
+
+## Decision: Local +X and dual skinning are the default skeleton contract
+
+Status: Active
+
+Every normalized bone frame points local +X from `Bone.Start` to `Bone.End`.
+Child frames project the parent Y axis onto the new perpendicular plane to
+limit chain twist, and SkelAnimation authors the matching local rest rotations.
+UE 5.7 tests on fern and spruce assets confirmed that identity local rotations
+were incorrect: branches on opposite sides of the trunk bent in opposite wind
+directions. +X frames make them bend consistently with the wind, so this is now
+the default contract without a UI control or filename suffix.
+
+If an older source omits Bone.End, normalization deterministically infers the
+direction from the parent segment or a root child and records a warning. An
+isolated bone with no usable direction retains its source frame and warns.
+
+`Dual Skinning` is enabled by default and remains operator-switchable in the
+Wind panel. Base-mesh vertices and repeated Part instances use linear
+parent/current weights from 1/0 at the bone start to 0/1 at the bone end
+(`1-t, t`). Root or degenerate segments retain one effective influence. When
+disabled, every vertex and repeated Part is rigidly bound to one bone, which
+can create hard joints. The setting does not alter the output filename.
+
+Related files:
+- `src/xml_to_usda/skeleton_processing.py`
+- `src/xml_to_usda/usda_authoring.py`
+- `src/xml_to_usda/qt_ui/panels.py`

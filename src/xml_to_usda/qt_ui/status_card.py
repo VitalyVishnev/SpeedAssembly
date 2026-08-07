@@ -121,9 +121,11 @@ class ProgramStatusCard(QFrame):
         summary_title.setObjectName("ProgramStatusSectionTitle")
         layout.addWidget(summary_title)
         self.mode_label = self._summary_label(host, "Mode", "Skeletal Assembly")
+        self.skinning_label = self._summary_label(host, "Dual Skinning", "On")
         self.material_label = self._summary_label(host, "Materials", "Source materials")
         self.source_label = self._summary_label(host, "Source", "No XML selected")
         layout.addWidget(self.mode_label)
+        layout.addWidget(self.skinning_label)
         layout.addWidget(self.material_label)
         layout.addWidget(self.source_label)
         layout.addStretch(1)
@@ -152,15 +154,23 @@ class ProgramStatusCard(QFrame):
         self,
         *,
         mode: str | None = None,
+        dual_skinning: bool | None = None,
         materials: str | None = None,
         source: str | None = None,
         materials_tooltip: str | None = None,
     ) -> None:
-        for label, title, value, tooltip in (
+        values = (
             (self.mode_label, "Mode", mode, None),
+            (
+                self.skinning_label,
+                "Dual Skinning",
+                None if dual_skinning is None else ("On" if dual_skinning else "Off"),
+                None,
+            ),
             (self.material_label, "Materials", materials, materials_tooltip),
             (self.source_label, "Source", source, None),
-        ):
+        )
+        for label, title, value, tooltip in values:
             if value is None:
                 continue
             label.setText(_summary_html(title, value))

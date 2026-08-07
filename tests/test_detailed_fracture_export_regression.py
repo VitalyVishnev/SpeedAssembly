@@ -9,6 +9,7 @@ from xml_to_usda.canonical_loader import load_source_tree_model
 from xml_to_usda.fracture_collision import FractureCollisionMode, FractureCollisionSettings
 from xml_to_usda.fracture_export_service import FractureExportRequest, export_fracture_usda_from_export_request
 from xml_to_usda.fracture_service import FractureSettings
+from xml_to_usda.skeleton_processing import apply_dual_skinning
 
 
 SIMPLE_TREE_01 = (
@@ -23,6 +24,7 @@ SIMPLE_TREE_01 = (
 
 def test_detailed_boolean_export_preserves_repeated_parts_normals_and_collision(monkeypatch, tmp_path: Path) -> None:
     _, source_model, _ = load_source_tree_model(SIMPLE_TREE_01)
+    default_skinning_model = apply_dual_skinning(source_model)
     boolean_meshes = {}
     authored_models = {}
     collision_inputs = []
@@ -75,7 +77,7 @@ def test_detailed_boolean_export_preserves_repeated_parts_normals_and_collision(
     for output in result.outputs:
         piece = output.piece
         model = authored_models[piece.name]
-        expected_parts = tuple(source_model.repeated_parts[index] for index in piece.repeated_part_indices)
+        expected_parts = tuple(default_skinning_model.repeated_parts[index] for index in piece.repeated_part_indices)
         expected_keys = {part.prototype_key for part in expected_parts}
 
         assert model.repeated_parts == expected_parts

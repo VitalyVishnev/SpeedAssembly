@@ -240,6 +240,8 @@ class WindTabPanel(QWidget):
 
         self.ground_cover_checkbox = QCheckBox("Ground Cover", controls)
         self.ground_cover_checkbox.toggled.connect(lambda _checked: self._on_change())
+        self.dual_skinning_checkbox = QCheckBox("Dual Skinning", controls)
+        self.dual_skinning_checkbox.toggled.connect(lambda _checked: self._on_change())
         self.gust_spin = self._make_spin(0.0, 1.0, 0.01, 0.0)
         self.gust_spin.valueChanged.connect(lambda _value: self._on_change())
         set_tooltip(
@@ -249,6 +251,11 @@ class WindTabPanel(QWidget):
         set_tooltip(
             "Reduces gust strength globally. Lower keeps sharper gusts; higher softens sudden gust motion.",
             self.gust_spin,
+        )
+        set_tooltip(
+            "On: smoothly blends the base mesh and instanced parts between the parent and current bone. "
+            "Off: rigidly binds each vertex and part to one bone, so bends can form hard joints.",
+            self.dual_skinning_checkbox,
         )
         # Wind inspection is now owned by the Wind tab itself instead of the
         # global action column so the operator can tweak wind globals and refresh
@@ -264,10 +271,11 @@ class WindTabPanel(QWidget):
         controls_layout.addWidget(self.ground_cover_checkbox, 0, 0, 1, 2)
         controls_layout.addWidget(self.refresh_button, 0, 2, 1, 1)
         controls_layout.addWidget(self.preview_button, 0, 3, 1, 1)
+        controls_layout.addWidget(self.dual_skinning_checkbox, 1, 0, 1, 4)
         gust_label = QLabel("Gust Attenuation", controls)
         set_tooltip(self.gust_spin.toolTip(), gust_label)
-        controls_layout.addWidget(gust_label, 1, 0)
-        controls_layout.addWidget(self.gust_spin, 1, 1, 1, 3)
+        controls_layout.addWidget(gust_label, 2, 0)
+        controls_layout.addWidget(self.gust_spin, 2, 1, 1, 3)
         controls_layout.setColumnStretch(1, 1)
         controls_layout.setColumnStretch(3, 1)
         outer.addWidget(controls)
@@ -284,17 +292,28 @@ class WindTabPanel(QWidget):
         self._rows.clear()
         _rebuild_scroll_layout(self.scroll_layout)
 
-    def set_global_options(self, *, is_ground_cover: bool, gust_attenuation: float) -> None:
+    def set_global_options(
+        self,
+        *,
+        is_ground_cover: bool,
+        gust_attenuation: float,
+        dual_skinning: bool = True,
+    ) -> None:
         with QSignalBlocker(self.ground_cover_checkbox):
             self.ground_cover_checkbox.setChecked(bool(is_ground_cover))
         with QSignalBlocker(self.gust_spin):
             self.gust_spin.setValue(float(gust_attenuation))
+        with QSignalBlocker(self.dual_skinning_checkbox):
+            self.dual_skinning_checkbox.setChecked(bool(dual_skinning))
 
     def is_ground_cover_enabled(self) -> bool:
         return bool(self.ground_cover_checkbox.isChecked())
 
     def gust_attenuation(self) -> float:
         return float(self.gust_spin.value())
+
+    def dual_skinning_enabled(self) -> bool:
+        return bool(self.dual_skinning_checkbox.isChecked())
 
     def rebuild(self, groups: tuple[DynamicWindSimulationGroup, ...]) -> None:
         self._rows.clear()

@@ -1256,6 +1256,11 @@ def _majority_token(tokens: tuple[str, ...], face_index: int) -> str:
 
 
 def _repeated_part_joint_token(part: RepeatedPartInstance, graph: _SkeletonGraph) -> str:
+    for source_bone_id in part.source_bone_ids:
+        for joint in graph.joints:
+            if joint.source_id == source_bone_id:
+                return joint.name
+
     if part.binding.joint_tokens:
         weighted_tokens = tuple(
             zip(
@@ -1268,10 +1273,6 @@ def _repeated_part_joint_token(part: RepeatedPartInstance, graph: _SkeletonGraph
             return token
         raise FractureError(f"Repeated part {part.name} references missing skeleton joint {token}.")
 
-    for source_bone_id in part.source_bone_ids:
-        for joint in graph.joints:
-            if joint.source_id == source_bone_id:
-                return joint.name
     raise FractureError(f"Repeated part {part.name} has no skeleton binding for fracture assignment.")
 
 
