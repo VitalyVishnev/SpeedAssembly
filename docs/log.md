@@ -739,3 +739,23 @@ Major moves:
   as crashed; the regression test preserves the observed exit-code-zero order.
 - Passed 547 regression tests, 26 packaged contracts, the release build and
   stability smokes, plus 10/10 clean packaged Big-low Conversion worker runs.
+
+## 2026-08-09 - UE imported-skeleton orientation experiment
+
+- Added a duplicate-first UE 5.8 Python experiment that reorients the selected
+  Skeletal Mesh to primary +X with the native `SkeletonModifier` API.
+- Documented that animation tracks, sockets, and Physics Asset frames are not
+  automatically compensated and require manual validation.
+
+## 2026-08-10 - Dynamic Wind Skeleton reference-pose experiment
+
+- Changed the orientation experiment to create its Skeletal Mesh beside the
+  source and generate a dedicated sibling Skeleton from the modified mesh.
+- Recorded the UE 5.8 Dynamic Wind runtime contract: bind transforms come from
+  the assigned Skeleton asset, so editing only the mesh reference pose cannot
+  change wind behavior.
+- Corrected the experiment after runtime evidence showed that UE Python blocks
+  the protected `SkeletonFactory.TargetSkeletalMesh` property. The script now
+  selects its output for the native `Create Skeleton` content-browser action.
+- Added a self-contained one-line Output Log variant suitable for attaching to
+  an Epic bug report; it has no dependency on the repository path.

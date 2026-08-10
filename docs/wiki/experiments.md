@@ -230,3 +230,41 @@ Related files:
 - `src/xml_to_usda/wind_external_skeleton.py`
 - `src/xml_to_usda/qt_ui/wind_preview.py`
 - `docs/wind_viewport_working_plan.md`
+
+## Experiment: Reorient an imported UE 5.8 Skeletal Mesh without reimport
+
+Status: Unverified in UE
+
+Context:
+Some already-imported vegetation assets use world-aligned local bone axes, which
+can invert procedural wind response across opposite sides of a tree.
+
+Approach:
+`scripts/ue_orient_selected_skeletal_mesh_x.py` duplicates one selected Skeletal
+Mesh beside its source and uses UE 5.8's native `SkeletonModifier` to orient
+primary +X along the hierarchy. Commit updates the mesh reference skeleton,
+mesh-description bone poses, and inverse bind matrices. It saves and selects the
+modified mesh in the Content Browser.
+
+Reason for the separate Skeleton:
+UE 5.8 Dynamic Wind reads bind transforms from
+`SkeletalMesh->GetSkeleton()->GetReferenceSkeleton()`, not from the Skeletal
+Mesh reference skeleton. Reorienting only the mesh therefore changes the editor
+bone display but not Dynamic Wind simulation.
+
+Python limitation:
+`USkeletonFactory::TargetSkeletalMesh` is protected and UE 5.8 rejects setting
+it through `set_editor_property`. The public Python API cannot automatically
+perform the final Skeleton creation. On the selected result use
+`Skeleton > Create Skeleton`; the native asset action initializes and
+assigns a new sibling Skeleton from that modified mesh.
+
+For bug reports and Output Log reproduction,
+`scripts/ue_orient_selected_skeletal_mesh_x_console.txt` contains the same
+experiment as one self-contained Python-console line with no local file lookup.
+
+Limits:
+The new Skeleton does not inherit Skeleton-only metadata from the old asset.
+Animation tracks, sockets, and Physics Asset local frames are not compensated.
+Reimport can replace the result. Validate reference-pose geometry, wind, sockets,
+physics, and any authored animations before treating this as a repair workflow.
