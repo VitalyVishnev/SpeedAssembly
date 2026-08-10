@@ -606,6 +606,22 @@ QPushButton#FileButton {{
 QPushButton#FileButton:hover {{
     background: {control_hover_fill};
 }}
+QCheckBox#PartsFolderButton {{
+    background: {button_fill};
+    color: {button_text};
+    border-radius: {file_button_height // 2}px;
+    min-width: 0px;
+    padding: 4px 10px;
+    spacing: 7px;
+}}
+QCheckBox#PartsFolderButton:hover,
+QCheckBox#PartsFolderButton:checked {{
+    background: {accent_fill};
+}}
+QCheckBox#PartsFolderButton:disabled {{
+    background: {button_fill_disabled};
+    color: rgba(19, 19, 15, 0.6);
+}}
 QPushButton#PrimaryActionButton {{
     background: {button_fill};
 }}

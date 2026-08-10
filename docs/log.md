@@ -774,3 +774,14 @@ Major moves:
   a full Static Assembly through Unreal Reference.
 - Removed an unreachable multi-prototype naming branch from the shared parts
   authoring path; output structure remains unchanged.
+
+## 2026-08-11 - Parts output folder choice
+
+- Added a parts-only `Create Parts Folder` checkbox beside Output USDA.
+- Checked output uses `<OutputStem>_SkeletalParts` or
+  `<OutputStem>_StaticParts`; unchecked output writes directly beside the
+  selected USDA path.
+- Kept the choice in the UI path-routing layer; USDA authoring remains
+  unchanged.
+- Parts conversion now stays idle and reports `Nothing to export` in the
+  status card when every prototype uses Unreal Reference.

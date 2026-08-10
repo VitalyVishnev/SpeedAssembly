@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 
@@ -7,8 +9,11 @@ pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 pytestmark = pytest.mark.qt
 
-from xml_to_usda.models import ConversionPhase, ConversionTelemetry
+from PySide6.QtWidgets import QCheckBox
+
+from xml_to_usda.models import ConversionPhase, ConversionTelemetry, PrototypeSourceMode
 from xml_to_usda.qt_ui.dependencies import build_default_dependencies
+from xml_to_usda.qt_ui.panels import GeometryRowState
 from xml_to_usda.qt_ui.persistence import UiShellState
 from xml_to_usda.qt_ui.status_card import ProgramStatusCard
 from xml_to_usda.qt_ui.theme import load_theme
@@ -153,3 +158,92 @@ def test_main_window_uses_one_status_card_and_no_tab_summary_rows(qtbot, tmp_pat
     assert not hasattr(window.wind_panel, "summary_label")
     assert not hasattr(window.geometry_panel, "summary_label")
     assert not hasattr(window.materials_panel, "summary_label")
+
+
+def test_parts_folder_button_controls_output_directory_and_visibility(qtbot, tmp_path) -> None:
+    window = MainWindow(
+        load_theme(),
+        UiShellState(width=1160, height=780, help_prompt_dismissed=True),
+        dependencies=build_default_dependencies(),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    output_path = tmp_path / "Tree.usda"
+    window.output_input.setText(str(output_path))
+
+    assert isinstance(window.parts_folder_button, QCheckBox)
+    assert window.parts_folder_button.isHidden()
+
+    window._set_conversion_mode("skeletal_parts")
+    assert not window.parts_folder_button.isHidden()
+    assert window.parts_folder_button.isChecked()
+    assert window._conversion_output_path() == str(tmp_path / "Tree_SkeletalParts")
+
+    window.parts_folder_button.setChecked(False)
+    assert window._conversion_output_path() == str(tmp_path)
+
+    window.parts_folder_button.setChecked(True)
+    window._set_conversion_mode("static_parts")
+    assert window._conversion_output_path() == str(tmp_path / "Tree_StaticParts")
+
+    window._set_conversion_mode("static_assembly")
+    assert window.parts_folder_button.isHidden()
+    assert window._conversion_output_path() == str(output_path)
+
+
+@pytest.mark.parametrize("mode", ("skeletal_parts", "static_parts"))
+def test_parts_conversion_reports_when_all_sources_are_unreal_references(
+    qtbot, tmp_path, monkeypatch, mode
+) -> None:
+    window = MainWindow(
+        load_theme(),
+        UiShellState(width=1160, height=780, help_prompt_dismissed=True),
+        dependencies=build_default_dependencies(),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    unreal_row = GeometryRowState(
+        source_key="Mesh_1",
+        source_name="FernLeaf",
+        source_mesh_id=1,
+        instance_count=347,
+        source_mode=PrototypeSourceMode.UNREAL_ASSET,
+        unreal_asset_path="/Game/Assembly/FernLeaf.FernLeaf",
+        fbx_path="",
+    )
+    monkeypatch.setattr(window.geometry_panel, "current_snapshot", lambda: {unreal_row.source_key: unreal_row})
+    monkeypatch.setattr(window, "_prepare_current_conversion_plan", lambda: pytest.fail("conversion must not start"))
+
+    window._set_conversion_mode(mode)
+    window.run_conversion()
+
+    assert window.program_status_card.state_label.text() == "Ready"
+    assert window.status_label.text() == "Nothing to export: all parts use Unreal Reference."
+
+    xml_row = GeometryRowState(
+        source_key="Mesh_2",
+        source_name="FernStem",
+        source_mesh_id=2,
+        instance_count=1,
+        source_mode=PrototypeSourceMode.XML_MESH,
+        unreal_asset_path="",
+        fbx_path="",
+    )
+    monkeypatch.setattr(
+        window.geometry_panel,
+        "current_snapshot",
+        lambda: {unreal_row.source_key: unreal_row, xml_row.source_key: xml_row},
+    )
+    monkeypatch.setattr(
+        window,
+        "_prepare_current_conversion_plan",
+        lambda: SimpleNamespace(request="request", run_async=False),
+    )
+    started = []
+    monkeypatch.setattr(window._background_jobs, "start_conversion", lambda **kwargs: started.append(kwargs))
+
+    window.run_conversion()
+
+    assert started == [{"request": "request", "run_async": False}]

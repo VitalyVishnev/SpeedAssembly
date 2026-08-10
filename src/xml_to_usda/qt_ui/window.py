@@ -60,7 +60,7 @@ from ..fbx_payload_cache import (
     sweep_fbx_payload_cache,
 )
 from ..gui_formatters import format_wind_group_summary, format_wind_json_result
-from ..models import CleanupPolicy, ConversionMode, ConversionRequest, OutputMode
+from ..models import CleanupPolicy, ConversionMode, ConversionRequest, OutputMode, PrototypeSourceMode
 from ..proxy_mesh_service import (
     ProxyMeshError,
     ProxyMeshResult,
@@ -143,6 +143,10 @@ CONVERSION_MODES: tuple[tuple[str, str, bool], ...] = (
     ("static_assembly", "Static Assembly", True),
     ("static_parts", "Static Assembly Parts", True),
 )
+PARTS_FOLDER_SUFFIXES = {
+    ConversionMode.SKELETAL_PARTS: "SkeletalParts",
+    ConversionMode.STATIC_PARTS: "StaticParts",
+}
 
 
 def _conversion_mode_tooltip(mode_key: str) -> str:
@@ -954,6 +958,18 @@ class MainWindow(QWidget):
         self.output_input.setPlaceholderText("Output USDA path")
         self.output_input.pathChanged.connect(self._handle_output_text_changed)
         self.output_input.setToolTip("USDA output path. The filename stem becomes the authored base asset name.")
+        self.parts_folder_button = QCheckBox("Create Parts Folder", self)
+        self.parts_folder_button.setObjectName("PartsFolderButton")
+        self.parts_folder_button.setChecked(True)
+        self.parts_folder_button.setToolTip(
+            "On: write parts into an OutputStem_SkeletalParts or OutputStem_StaticParts subfolder. "
+            "Off: write parts directly beside Output USDA."
+        )
+        output_row = QHBoxLayout()
+        output_row.setContentsMargins(0, 0, 0, 0)
+        output_row.setSpacing(max(4, spacing // 2))
+        output_row.addWidget(self.output_input, 1)
+        output_row.addWidget(self.parts_folder_button, 0)
 
         self.preset_combo = QComboBox(self.title_bar.preset_host)
         self.preset_combo.setObjectName("TitlePresetCombo")
@@ -1028,7 +1044,7 @@ class MainWindow(QWidget):
         layout.addWidget(self.source_input, 0, 1)
         layout.addLayout(right_column, 0, 2, 2, 1)
         layout.addWidget(self.output_button, 1, 0)
-        layout.addWidget(self.output_input, 1, 1)
+        layout.addLayout(output_row, 1, 1)
         layout.setColumnStretch(1, 1)
         layout.setRowMinimumHeight(0, 34)
         layout.setRowMinimumHeight(1, 34)
@@ -1131,6 +1147,7 @@ class MainWindow(QWidget):
             action.setChecked(key == mode_key)
         selected_label = next((label for key, label, _supported in CONVERSION_MODES if key == mode_key), mode_key)
         self._append_log(f"Conversion mode selected: {selected_label}")
+        self._sync_parts_folder_button()
         self._schedule_operator_state_save()
         self._refresh_state_cards()
 
@@ -1395,6 +1412,7 @@ class MainWindow(QWidget):
         self.preset_menu_button.setFixedSize(max(32, title_preset_height), title_preset_height)
 
         action_width = int(self._theme.layout.get("action_column_width", 148))
+        self.parts_folder_button.setFixedSize(max(132, int(round(action_width * 0.72))), file_button_height)
         self.convert_action_frame.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.convert_action_frame.setFixedWidth(action_width)
         button_height = int(self._theme.control_heights["button"])
@@ -1493,6 +1511,7 @@ class MainWindow(QWidget):
         if hasattr(self, "_conversion_mode_actions"):
             for key, action in self._conversion_mode_actions.items():
                 action.setChecked(key == self._conversion_mode)
+        self._sync_parts_folder_button()
         self._persistence_suspended = False
 
     def _apply_saved_active_tab(self) -> None:
@@ -1661,6 +1680,7 @@ class MainWindow(QWidget):
         self.convert_button.setText("Cancel" if self._conversion_running else "Convert to USDA")
         self.convert_button.setEnabled(self._conversion_running or (has_input and has_output))
         self.convert_mode_button.setEnabled(not self._conversion_running)
+        self.parts_folder_button.setEnabled(not self._conversion_running)
         self.title_bar.settings_button.setEnabled(not self._conversion_running)
         if self._global_settings_dialog is not None:
             self._global_settings_dialog.set_controls_enabled(not self._conversion_running)
@@ -2281,6 +2301,14 @@ class MainWindow(QWidget):
             target_edit.setText(selected)
 
     def run_conversion(self) -> None:
+        part_rows = tuple(self.geometry_panel.current_snapshot().values())
+        if (
+            self._operator_state.conversion_mode in PARTS_FOLDER_SUFFIXES
+            and part_rows
+            and all(row.source_mode == PrototypeSourceMode.UNREAL_ASSET for row in part_rows)
+        ):
+            self._set_status("Nothing to export: all parts use Unreal Reference.")
+            return
         try:
             plan = self._prepare_current_conversion_plan()
         except ValueError as exc:
@@ -2291,7 +2319,7 @@ class MainWindow(QWidget):
     def _prepare_current_conversion_plan(self):
         return self._deps.prepare_conversion_plan(
             input_path=self.source_input.text().strip(),
-            output_path=self.output_input.text().strip(),
+            output_path=self._conversion_output_path(),
             cpu_profile=self._operator_state.cpu_profile,
             cleanup_policy=self._current_cleanup_policy(),
             material_policy=self._operator_state.material_policy,
@@ -2307,6 +2335,19 @@ class MainWindow(QWidget):
             fbx_cache_max_bytes=self._fbx_cache_max_bytes(),
             fbx_cache_max_age_seconds=self._fbx_cache_max_age_seconds(),
         )
+
+    def _conversion_output_path(self) -> str:
+        output_path = self.output_input.text().strip()
+        folder_suffix = PARTS_FOLDER_SUFFIXES.get(self._operator_state.conversion_mode)
+        if not output_path or folder_suffix is None:
+            return output_path
+        output = Path(output_path)
+        if not self.parts_folder_button.isChecked():
+            return str(output.parent)
+        return str(output.with_suffix("").with_name(f"{output.stem}_{folder_suffix}"))
+
+    def _sync_parts_folder_button(self) -> None:
+        self.parts_folder_button.setVisible(self._operator_state.conversion_mode in PARTS_FOLDER_SUFFIXES)
 
     def _report_conversion_plan_error(self, exc: ValueError) -> None:
         message = str(exc)

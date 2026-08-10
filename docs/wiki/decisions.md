@@ -158,6 +158,17 @@ Manual operator validation confirmed that the standalone static parts import as
 expected and that a full Static Assembly using those imported assets through
 Unreal Reference imports normally.
 
+The main UI shows the `Create Parts Folder` checkbox only for Skeletal Assembly Parts and
+Static Assembly Parts. It is enabled by default to preserve the isolated-output
+workflow. Enabled output directories are named `<OutputStem>_SkeletalParts` or
+`<OutputStem>_StaticParts`; disabled writes the prototype files directly beside
+the selected Output USDA. This is path routing only and does not change USDA
+authoring.
+
+For either Parts mode, if every discovered prototype uses Unreal Reference,
+the UI does not start an empty conversion. It reports `Nothing to export` in
+the existing status card without opening an error dialog.
+
 Related files:
 - `src/xml_to_usda/conversion_orchestrator.py`
 - `src/xml_to_usda/usda_authoring.py`
