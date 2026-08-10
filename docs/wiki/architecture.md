@@ -63,6 +63,18 @@ cache disabled, an order-balanced one-core comparison reduced the complete
 median and from 1.648 s to 1.078 s CPU median: 34.0% and 34.6% respectively,
 without changing model output.
 
+USDA authoring preserves the same text while avoiding repeated scalar
+formatting in its hottest arrays. Reused `MeshData` normal/UV objects share
+their formatted strings by identity, low-cardinality integer arrays reuse
+their decimal strings, matrices use one fixed 4x4 formatter, and hot float
+formatting uses CPython's equivalent `%g` path. On the same 9.7 MB Big Spruce
+sample, one-core order-balanced comparisons against the previous authoring
+module reduced authoring-only wall median from 0.525 s to 0.338 s (35.7%),
+full text generation plus an OS temporary-file write from 0.490 s to 0.329 s
+(32.8%), and the `GeometryBuffer` streaming path from 0.480 s to 0.307 s
+(36.1%). Baseline and optimized outputs matched byte-for-byte. Keep these
+paths stdlib-only and benchmark-backed.
+
 Interactive preview flows may stop earlier when they inspect source facts rather
 than authored output. Wind Preview V1 loads canonical XML source facts, derives
 Dynamic Wind groups, and adapts those facts to viewport batches for inspection.

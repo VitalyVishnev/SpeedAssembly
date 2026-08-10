@@ -46,9 +46,9 @@ from .naming import make_stable_prim_name
 from .ue_schema import DEFAULT_UE_SCHEMA_CONTRACT, UeSchemaContract
 
 
-_UV_FORMAT_CACHE_MIN_PAIRS = 1024
-_UV_FORMAT_CACHE_SAMPLE_PAIRS = 2048
-_UV_FORMAT_CACHE_MAX_UNIQUE_RATIO = 0.75
+_FORMAT_CACHE_MIN_VALUES = 1024
+_FORMAT_CACHE_SAMPLE_VALUES = 2048
+_FORMAT_CACHE_MAX_UNIQUE_RATIO = 0.75
 _PARTS_CONVERSION_MODES = {ConversionMode.SKELETAL_PARTS, ConversionMode.STATIC_PARTS}
 
 
@@ -802,7 +802,7 @@ def _emit_base_mesh(sink, context: AuthoringContext, indent_level: int) -> None:
             sink,
             indent_level + 1,
             "uniform int[] primvars:skel:jointIndices",
-            (str(index) for index in mesh.skel_joint_indices),
+            _iter_int_strings(mesh.skel_joint_indices),
             metadata_lines=(
                 f"elementSize = {element_size}",
                 'interpolation = "vertex"',
@@ -812,7 +812,7 @@ def _emit_base_mesh(sink, context: AuthoringContext, indent_level: int) -> None:
             sink,
             indent_level + 1,
             "uniform float[] primvars:skel:jointWeights",
-            (f"{weight:g}" for weight in mesh.skel_joint_weights),
+            ("%g" % weight for weight in mesh.skel_joint_weights),
             metadata_lines=(
                 f"elementSize = {element_size}",
                 'interpolation = "vertex"',
@@ -882,7 +882,7 @@ def _emit_point_instancer(
         sink,
         indent_level + 1,
         contract.bind_weights_attr,
-        (f"{weight:g}" for binding in bindings for weight in binding.weights),
+        ("%g" % weight for binding in bindings for weight in binding.weights),
         metadata_lines=(
             f"elementSize = {binding_width}",
             'interpolation = "vertex"',
@@ -1739,11 +1739,21 @@ def _identity_matrix() -> str:
 
 
 def _render_bind_transforms(model: CanonicalTreeModel) -> str:
-    return ", ".join(joint.bind_transform.to_usda() for joint in model.skeleton)
+    return ", ".join(_format_matrix4d(joint.bind_transform) for joint in model.skeleton)
 
 
 def _render_rest_transforms(model: CanonicalTreeModel) -> str:
-    return ", ".join(joint.rest_transform.to_usda() for joint in model.skeleton)
+    return ", ".join(_format_matrix4d(joint.rest_transform) for joint in model.skeleton)
+
+
+def _format_matrix4d(matrix: Matrix4d) -> str:
+    first, second, third, fourth = matrix.rows
+    return "( (%g, %g, %g, %g), (%g, %g, %g, %g), (%g, %g, %g, %g), (%g, %g, %g, %g) )" % (
+        *first,
+        *second,
+        *third,
+        *fourth,
+    )
 
 
 def _identity_quaternion() -> str:
@@ -1761,50 +1771,75 @@ def _prototype_inline_mesh(prototype: Prototype) -> MeshData | GeometryBuffer | 
 def _iter_payload_point_strings(mesh: MeshData | GeometryBuffer):
     if isinstance(mesh, GeometryBuffer):
         for index in range(0, len(mesh.point_components), 3):
-            yield f"({mesh.point_components[index]:g}, {mesh.point_components[index + 1]:g}, {mesh.point_components[index + 2]:g})"
+            yield "(%g, %g, %g)" % (
+                mesh.point_components[index],
+                mesh.point_components[index + 1],
+                mesh.point_components[index + 2],
+            )
         return
     for point in mesh.points:
-        yield f"({point.x:g}, {point.y:g}, {point.z:g})"
+        yield "(%g, %g, %g)" % (point.x, point.y, point.z)
 
 
 def _iter_payload_normal_strings(mesh: MeshData | GeometryBuffer):
     if isinstance(mesh, GeometryBuffer):
-        for index in range(0, len(mesh.normal_components), 3):
-            yield (
-                f"({mesh.normal_components[index]:g}, {mesh.normal_components[index + 1]:g}, "
-                f"{mesh.normal_components[index + 2]:g})"
+        return (
+            "(%g, %g, %g)"
+            % (
+                mesh.normal_components[index],
+                mesh.normal_components[index + 1],
+                mesh.normal_components[index + 2],
             )
-        return
-    for normal in mesh.normals:
-        yield f"({normal.x:g}, {normal.y:g}, {normal.z:g})"
+            for index in range(0, len(mesh.normal_components), 3)
+        )
+    if _vector_coords_reuse_objects(mesh.normals):
+        cache: dict[int, str] = {}
+        values: list[str] = []
+        append = values.append
+        for normal in mesh.normals:
+            key = id(normal)
+            value = cache.get(key)
+            if value is None:
+                value = "(%g, %g, %g)" % (normal.x, normal.y, normal.z)
+                cache[key] = value
+            append(value)
+        return values
+    return ("(%g, %g, %g)" % (normal.x, normal.y, normal.z) for normal in mesh.normals)
 
 
 def _iter_payload_face_count_strings(mesh: MeshData | GeometryBuffer):
-    return map(str, mesh.face_vertex_counts)
+    return _iter_int_strings(mesh.face_vertex_counts)
 
 
 def _iter_payload_face_index_strings(mesh: MeshData | GeometryBuffer):
-    return map(str, mesh.face_vertex_indices)
+    return _iter_int_strings(mesh.face_vertex_indices)
+
+
+def _iter_int_strings(values):
+    count = len(values)
+    if count >= _FORMAT_CACHE_MIN_VALUES:
+        sample_count = min(count, _FORMAT_CACHE_SAMPLE_VALUES)
+        if len(set(values[:sample_count])) / sample_count <= _FORMAT_CACHE_MAX_UNIQUE_RATIO:
+            cache = {value: str(value) for value in set(values)}
+            return map(cache.__getitem__, values)
+    return map(str, values)
 
 
 def _iter_payload_uv_strings(mesh: MeshData | GeometryBuffer, *, uv_set: str = "primary"):
     if isinstance(mesh, GeometryBuffer):
         uv_components = mesh.secondary_uv_components if uv_set == "secondary" else mesh.uv_components
         if _uv_components_should_cache_format(uv_components):
-            yield from _iter_cached_uv_component_strings(uv_components)
-            return
-        yield from _iter_uv_component_strings(uv_components)
-        return
+            return _iter_cached_uv_component_strings(uv_components)
+        return _iter_uv_component_strings(uv_components)
     uv_coords = mesh.secondary_uv_coords if uv_set == "secondary" else mesh.uv_coords
     if _uv_coords_should_cache_format(uv_coords):
-        yield from _iter_cached_uv_coord_strings(uv_coords)
-        return
-    yield from _iter_uv_coord_strings(uv_coords)
+        return _iter_cached_uv_coord_strings(uv_coords)
+    return _iter_uv_coord_strings(uv_coords)
 
 
 def _iter_uv_component_strings(uv_components):
     for index in range(0, len(uv_components), 2):
-        yield f"({uv_components[index]:g}, {uv_components[index + 1]:g})"
+        yield "(%g, %g)" % (uv_components[index], uv_components[index + 1])
 
 
 def _iter_cached_uv_component_strings(uv_components):
@@ -1813,50 +1848,54 @@ def _iter_cached_uv_component_strings(uv_components):
         key = (uv_components[index], uv_components[index + 1])
         value = cache.get(key)
         if value is None:
-            value = f"({key[0]:g}, {key[1]:g})"
+            value = "(%g, %g)" % key
             cache[key] = value
         yield value
 
 
 def _iter_uv_coord_strings(uv_coords):
     for uv in uv_coords:
-        yield f"({uv.x:g}, {uv.y:g})"
+        yield "(%g, %g)" % (uv.x, uv.y)
 
 
 def _iter_cached_uv_coord_strings(uv_coords):
-    cache: dict[tuple[float, float], str] = {}
+    cache: dict[int, str] = {}
+    values: list[str] = []
+    append = values.append
     for uv in uv_coords:
-        key = (uv.x, uv.y)
+        key = id(uv)
         value = cache.get(key)
         if value is None:
-            value = f"({uv.x:g}, {uv.y:g})"
+            value = "(%g, %g)" % (uv.x, uv.y)
             cache[key] = value
-        yield value
+        append(value)
+    return values
 
 
 def _uv_components_should_cache_format(uv_components) -> bool:
     pair_count = len(uv_components) // 2
-    if pair_count < _UV_FORMAT_CACHE_MIN_PAIRS:
+    if pair_count < _FORMAT_CACHE_MIN_VALUES:
         return False
-    sample_pair_count = min(pair_count, _UV_FORMAT_CACHE_SAMPLE_PAIRS)
+    sample_pair_count = min(pair_count, _FORMAT_CACHE_SAMPLE_VALUES)
     sample_end = sample_pair_count * 2
     unique_pairs = {
         (uv_components[index], uv_components[index + 1])
         for index in range(0, sample_end, 2)
     }
-    return len(unique_pairs) / sample_pair_count <= _UV_FORMAT_CACHE_MAX_UNIQUE_RATIO
+    return len(unique_pairs) / sample_pair_count <= _FORMAT_CACHE_MAX_UNIQUE_RATIO
 
 
 def _uv_coords_should_cache_format(uv_coords) -> bool:
-    pair_count = len(uv_coords)
-    if pair_count < _UV_FORMAT_CACHE_MIN_PAIRS:
+    return _vector_coords_reuse_objects(uv_coords)
+
+
+def _vector_coords_reuse_objects(coords) -> bool:
+    value_count = len(coords)
+    if value_count < _FORMAT_CACHE_MIN_VALUES:
         return False
-    sample_pair_count = min(pair_count, _UV_FORMAT_CACHE_SAMPLE_PAIRS)
-    unique_pairs = {
-        (uv_coords[index].x, uv_coords[index].y)
-        for index in range(sample_pair_count)
-    }
-    return len(unique_pairs) / sample_pair_count <= _UV_FORMAT_CACHE_MAX_UNIQUE_RATIO
+    sample_value_count = min(value_count, _FORMAT_CACHE_SAMPLE_VALUES)
+    unique_objects = {id(coords[index]) for index in range(sample_value_count)}
+    return len(unique_objects) / sample_value_count <= _FORMAT_CACHE_MAX_UNIQUE_RATIO
 
 
 def _payload_has_uvs(mesh: MeshData | GeometryBuffer) -> bool:

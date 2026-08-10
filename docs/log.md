@@ -785,3 +785,16 @@ Major moves:
   unchanged.
 - Parts conversion now stays idle and reports `Nothing to export` in the
   status card when every prototype uses Unreal Reference.
+
+## 2026-08-11 - Faster USDA authoring
+
+- Reused formatted normal/UV and low-cardinality integer values, replaced hot
+  equivalent float formatting, and flattened fixed 4x4 matrix formatting.
+- On the 9.7 MB Big Spruce sample, order-balanced one-core comparisons reduced
+  full text generation plus file writing by 32.8%, authoring-only by 35.7%,
+  and `GeometryBuffer` streaming by 36.1%; baseline and candidate output hashes
+  matched exactly.
+- Rejected chunk tuning, `StringIO`, slower two-pass maps, and a NumPy branch
+  that could not reach the 50% target without disproportionate complexity.
+- Passed 551 regression tests, 25 focused authoring tests, 26 packaged
+  contracts, the release build, and both packaged stability smokes.

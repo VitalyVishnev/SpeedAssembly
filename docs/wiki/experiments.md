@@ -175,6 +175,30 @@ Related files:
 - `docs/raw/REFRACTOR_LOG.md`
 - `docs/wiki/known-bugs.md`
 
+## Experiment: Push USDA authoring from one-third to one-half faster
+
+Status: Rejected beyond the retained stdlib hot-path changes
+
+Context:
+After formatting reuse and cheaper equivalent scalar formatting passed the 30%
+gate, further changes were tested against the same Big Spruce authoring model.
+
+Outcome:
+Larger array chunks and `StringIO` produced no stable gain. Two-pass C-level
+maps were slower. NumPy identity factorization saved only about 26 ms, roughly
+8% of the already optimized path, while adding dependency-sensitive arrays and
+still falling short of 50%.
+
+Keep:
+Retain the simple identity/string caches, low-cardinality integer cache, direct
+matrix formatter, and equivalent `%g` formatting. Do not add a NumPy authoring
+branch or tune chunk sizes without a new representative profile showing a
+material end-to-end gain.
+
+Related files:
+- `src/xml_to_usda/usda_authoring.py`
+- `docs/wiki/architecture.md`
+
 ## Experiment: Automatic trunk-chain and synthetic fracture fill
 
 Status: Superseded
