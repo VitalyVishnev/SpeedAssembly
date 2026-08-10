@@ -75,6 +75,21 @@ full text generation plus an OS temporary-file write from 0.490 s to 0.329 s
 (36.1%). Baseline and optimized outputs matched byte-for-byte. Keep these
 paths stdlib-only and benchmark-backed.
 
+Dense numerical work stays behind the existing domain seams rather than
+changing the canonical model. `skeleton_processing.py` converts only bounded
+base-mesh chunks to NumPy for Dual Skinning and influence validation; repeated
+Part objects remain scalar. `payload_partition.py` views large
+`GeometryBuffer` arrays zero-copy and classifies face colors in bounded chunks.
+`fbx_adapter.py` uses NumPy only above measured size thresholds for control
+point transforms and indexed polygon-vertex UV expansion, then returns the
+same `array`-backed `GeometryBuffer` contract. On Big Spruce, full Dual
+Skinning and skin validation improved by 67.4% and 78.2%. On the 58,463-face
+real topology, material partition improved by 82.4%. A controlled sequential
+comparison on `SM_BigBranch_01_HIGH.fbx` (11,318,965 points, 14,164,402
+triangles, 42,493,206 UVs) reduced geometry/UV reading from 97.724 s to
+57.598 s (41.1%); SHA-256 matched for every output buffer. Small FBX files keep
+the scalar transform/UV path so NumPy startup cannot erase the gain.
+
 Interactive preview flows may stop earlier when they inspect source facts rather
 than authored output. Wind Preview V1 loads canonical XML source facts, derives
 Dynamic Wind groups, and adapts those facts to viewport batches for inspection.

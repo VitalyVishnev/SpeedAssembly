@@ -20,6 +20,7 @@ from .models import (
 _EPSILON = 1.0e-8
 _TRANSFORM_TOLERANCE = 1.0e-4
 _TWIST_WARNING_DEGREES = 75.0
+_DENSE_VERTEX_CHUNK_SIZE = 262_144
 
 
 def validate_skeleton(skeleton: tuple[Joint, ...] | None) -> tuple[ValidationIssue, ...]:
@@ -189,24 +190,81 @@ def _apply_part_dual_skinning(part: RepeatedPartInstance, joint_by_name: dict[st
 
 
 def _apply_mesh_dual_skinning(mesh: MeshData, skeleton: tuple[Joint, ...]) -> MeshData:
+    import numpy as np
+
     if mesh.skel_element_size != 1:
         raise ValueError("Dual Skinning requires the normalized single-influence base mesh.")
     if len(mesh.skel_joint_indices) != len(mesh.points):
         raise ValueError("Dual Skinning requires one normalized joint index per base-mesh point.")
 
+    joint_count = len(skeleton)
     joint_index = {joint.name: index for index, joint in enumerate(skeleton)}
+    joint_starts = np.empty((joint_count, 3), dtype=np.float64)
+    joint_segments = np.zeros((joint_count, 3), dtype=np.float64)
+    joint_has_end = np.zeros(joint_count, dtype=np.bool_)
+    parent_indices = np.full(joint_count, -1, dtype=np.int64)
+    for index, joint in enumerate(skeleton):
+        start = joint.bind_translate
+        joint_starts[index] = (start.x, start.y, start.z)
+        end = joint.bind_end_translate
+        if end is not None:
+            joint_segments[index] = (end.x - start.x, end.y - start.y, end.z - start.z)
+            joint_has_end[index] = True
+        if joint.parent is not None:
+            parent_indices[index] = joint_index.get(joint.parent, -1)
+
     indices: list[int] = []
     weights: list[float] = []
-    for point, current_index in zip(mesh.points, mesh.skel_joint_indices, strict=True):
-        joint = skeleton[current_index]
-        parent_index = joint_index.get(joint.parent) if joint.parent is not None else None
-        blend = _bone_blend(point, joint)
-        if parent_index is None or blend is None:
-            indices.extend((current_index, current_index))
-            weights.extend((1.0, 0.0))
-            continue
-        indices.extend((parent_index, current_index))
-        weights.extend((1.0 - blend, blend))
+    point_count = len(mesh.points)
+    for start_index in range(0, point_count, _DENSE_VERTEX_CHUNK_SIZE):
+        end_index = min(point_count, start_index + _DENSE_VERTEX_CHUNK_SIZE)
+        chunk_count = end_index - start_index
+        current_indices = np.asarray(mesh.skel_joint_indices[start_index:end_index], dtype=np.int64)
+        points = np.fromiter(
+            (
+                coordinate
+                for point in mesh.points[start_index:end_index]
+                for coordinate in (point.x, point.y, point.z)
+            ),
+            dtype=np.float64,
+            count=chunk_count * 3,
+        ).reshape((chunk_count, 3))
+
+        segments = joint_segments[current_indices]
+        segment_lengths_squared = (
+            segments[:, 0] * segments[:, 0]
+            + segments[:, 1] * segments[:, 1]
+            + segments[:, 2] * segments[:, 2]
+        )
+        relative_points = points - joint_starts[current_indices]
+        numerators = (
+            relative_points[:, 0] * segments[:, 0]
+            + relative_points[:, 1] * segments[:, 1]
+            + relative_points[:, 2] * segments[:, 2]
+        )
+        current_parents = parent_indices[current_indices]
+        blended = (
+            joint_has_end[current_indices]
+            & (segment_lengths_squared > _EPSILON)
+            & (current_parents >= 0)
+        )
+
+        chunk_indices = np.column_stack((current_indices, current_indices))
+        chunk_weights = np.empty((chunk_count, 2), dtype=np.float64)
+        chunk_weights[:, 0] = 1.0
+        chunk_weights[:, 1] = 0.0
+        if np.any(blended):
+            blend = np.clip(
+                numerators[blended] / segment_lengths_squared[blended],
+                0.0,
+                1.0,
+            )
+            chunk_indices[blended, 0] = current_parents[blended]
+            chunk_weights[blended, 0] = 1.0 - blend
+            chunk_weights[blended, 1] = blend
+
+        indices.extend(chunk_indices.ravel().tolist())
+        weights.extend(chunk_weights.ravel().tolist())
     return replace(
         mesh,
         skel_joint_indices=tuple(indices),
@@ -311,6 +369,8 @@ def _length_squared(vector: Vector3) -> float:
 
 
 def _validate_mesh_influences(mesh: MeshData, skeleton_size: int) -> list[ValidationIssue]:
+    import numpy as np
+
     width = mesh.skel_element_size
     if width not in {1, 2}:
         return [_error("invalid_base_mesh_skinning_width", f"Base mesh has {width} influences per vertex; expected one or two.")]
@@ -322,20 +382,44 @@ def _validate_mesh_influences(mesh: MeshData, skeleton_size: int) -> list[Valida
                 f"Base mesh has {len(mesh.skel_joint_indices)} indices and {len(mesh.skel_joint_weights)} weights; expected {expected} of each.",
             )
         ]
-    for point_index in range(len(mesh.points)):
-        start = point_index * width
-        indices = mesh.skel_joint_indices[start:start + width]
-        invalid_index = next((index for index in indices if index < 0 or index >= skeleton_size), None)
-        if invalid_index is not None:
+    point_count = len(mesh.points)
+    for start_point in range(0, point_count, _DENSE_VERTEX_CHUNK_SIZE):
+        end_point = min(point_count, start_point + _DENSE_VERTEX_CHUNK_SIZE)
+        start_value = start_point * width
+        end_value = end_point * width
+        indices = np.asarray(mesh.skel_joint_indices[start_value:end_value], dtype=np.int64).reshape((-1, width))
+        weights = np.asarray(mesh.skel_joint_weights[start_value:end_value], dtype=np.float64).reshape((-1, width))
+        invalid_joints = np.any((indices < 0) | (indices >= skeleton_size), axis=1)
+        invalid_weights = (
+            np.any(~np.isfinite(weights), axis=1)
+            | np.any((weights < -_TRANSFORM_TOLERANCE) | (weights > 1.0 + _TRANSFORM_TOLERANCE), axis=1)
+            | (np.abs(np.sum(weights, axis=1) - 1.0) > _TRANSFORM_TOLERANCE)
+        )
+        invalid_rows = np.flatnonzero(invalid_joints | invalid_weights)
+        if not len(invalid_rows):
+            continue
+
+        local_point = int(invalid_rows[0])
+        point_index = start_point + local_point
+        if invalid_joints[local_point]:
+            invalid_index = next(
+                index
+                for index in mesh.skel_joint_indices[point_index * width:(point_index + 1) * width]
+                if index < 0 or index >= skeleton_size
+            )
             return [
                 _error(
                     "invalid_base_mesh_joint_index",
                     f"Base mesh vertex {point_index} references joint index {invalid_index}; skeleton size is {skeleton_size}.",
                 )
             ]
-        weight_issue = _weight_issue(mesh.skel_joint_weights[start:start + width])
-        if weight_issue:
-            return [_error("invalid_base_mesh_joint_weights", f"Base mesh vertex {point_index} {weight_issue}.")]
+        point_weights = mesh.skel_joint_weights[point_index * width:(point_index + 1) * width]
+        return [
+            _error(
+                "invalid_base_mesh_joint_weights",
+                f"Base mesh vertex {point_index} {_weight_issue(point_weights)}.",
+            )
+        ]
     return []
 
 

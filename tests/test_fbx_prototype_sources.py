@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from array import array
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,9 @@ import pytest
 from xml_to_usda.cli import main as cli_main
 from xml_to_usda.fbx_adapter import (
     FbxImportError,
+    _LayerElementReader,
+    _append_polygon_vertex_uvs,
+    _append_transformed_control_points,
     _fbx_point_transform_coefficients,
     _transform_control_point,
     load_fbx_geometry,
@@ -76,7 +80,7 @@ def _write_fbx_json_payload(
     return payload_path
 
 
-def test_fbx_control_points_use_matrix_coefficients_without_native_multt() -> None:
+def test_fbx_control_points_use_matrix_coefficients_without_native_multt(monkeypatch) -> None:
     class _Transform:
         rows = (
             (2.0, 0.0, 0.0, 0.0),
@@ -92,8 +96,40 @@ def test_fbx_control_points_use_matrix_coefficients_without_native_multt() -> No
             raise AssertionError("FBX MultT must not run in the per-point loop")
 
     coefficients = _fbx_point_transform_coefficients(_Transform())
+    transformed = array("f")
+    monkeypatch.setattr("xml_to_usda.fbx_adapter._MIN_NUMPY_CONTROL_POINT_COUNT", 1)
+    _append_transformed_control_points(
+        transformed,
+        [(1.0, 2.0, 3.0, 1.0), (-1.0, -2.0, -3.0, 1.0)],
+        coefficients,
+    )
 
     assert _transform_control_point(coefficients, (1.0, 2.0, 3.0, 1.0)) == (12.0, 26.0, 42.0)
+    assert transformed == array("f", (12.0, 26.0, 42.0, 8.0, 14.0, 18.0))
+
+
+def test_large_fbx_uv_vectorization_preserves_polygon_vertex_order_across_chunks(monkeypatch) -> None:
+    class _Array:
+        def __init__(self, values) -> None:
+            self.values = values
+
+        def GetAt(self, index: int):
+            return self.values[index]
+
+    reader = _LayerElementReader(
+        mapping_mode="eByPolygonVertex",
+        reference_mode="eIndexToDirect",
+        direct_array=_Array(((0.0, 0.0), (1.0, 0.5))),
+        direct_count=2,
+        index_array=_Array((1, 0, 1)),
+        index_count=3,
+    )
+    target = array("f")
+    monkeypatch.setattr("xml_to_usda.fbx_adapter._MIN_NUMPY_POLYGON_VERTEX_COUNT", 1)
+    monkeypatch.setattr("xml_to_usda.fbx_adapter._NUMPY_POLYGON_VERTEX_CHUNK_SIZE", 2)
+
+    assert _append_polygon_vertex_uvs(target, reader, polygon_vertex_count=3)
+    assert target == array("f", (1.0, 0.5, 0.0, 0.0, 1.0, 0.5))
 
 
 def test_load_prototype_source_configs_from_json_reads_fbx_and_unreal_modes(tmp_path: Path) -> None:

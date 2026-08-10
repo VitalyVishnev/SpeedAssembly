@@ -465,6 +465,36 @@ Related files:
 - `src/xml_to_usda/fbx_import_supervisor.py`
 - `tests/test_fbx_prototype_sources.py`
 
+## Decision: Large FBX dense arrays use bounded NumPy paths
+
+Status: Active
+
+Keep `GeometryBuffer` and the Autodesk helper-process boundary unchanged.
+Above measured thresholds, transform control points in bounded NumPy chunks,
+expand indexed `eByPolygonVertex` UVs from a bounded direct table plus index
+chunks, and traverse triangle topology once per face when no per-corner work
+remains. Release the SDK control-point wrapper list before topology traversal.
+Small payloads retain the scalar path because a cold NumPy import is larger
+than their possible saving.
+
+Large vertex-color material partition views the existing `array` buffers with
+`numpy.frombuffer`; it does not copy them into shared memory or start a process
+pool. Cancellation is checked between bounded chunks. Exact-invalid topology
+and color-index behavior remains fail-safe, and the returned section order is
+unchanged.
+
+Evidence: `SM_BigBranch_01_HIGH.fbx` produced byte-identical point, face-count,
+face-index, and UV buffers while improving 97.724 s to 57.598 s. The real
+58,463-face partition improved 0.03242 s to 0.00570 s. Do not replace this with
+`FbxMesh.GetPolygonVertices()`: on the same class of asset it materializes tens
+of millions of Python integers and creates a multi-gigabyte transient peak.
+
+Related files:
+- `src/xml_to_usda/fbx_adapter.py`
+- `src/xml_to_usda/payload_partition.py`
+- `tests/test_fbx_prototype_sources.py`
+- `tests/test_payload_partition.py`
+
 ## Decision: Large GUI jobs run outside the UI process
 
 Status: Active
@@ -1227,6 +1257,14 @@ parent/current weights from 1/0 at the bone start to 0/1 at the bone end
 (`1-t, t`). Root or degenerate segments retain one effective influence. When
 disabled, every vertex and repeated Part is rigidly bound to one bone, which
 can create hard joints. The setting does not alter the output filename.
+
+The base-mesh implementation uses bounded NumPy chunks behind this interface;
+Repeated Part instances retain their object-level scalar path. Validation uses
+the same bounded strategy while preserving first-invalid-vertex order and the
+joint-before-weight diagnostic priority at one vertex. On Big Spruce, the full
+operations improved from 0.2824 s to 0.0921 s for Dual Skinning and from
+0.1227 s to 0.0267 s for validation. The complete cold source load improved by
+about 6.7%; the authored 14,339,986-character USDA remained byte-identical.
 
 Related files:
 - `src/xml_to_usda/skeleton_processing.py`

@@ -1,25 +1,13 @@
 from __future__ import annotations
 
-import warnings
 from array import array
-from concurrent.futures import ProcessPoolExecutor
-from concurrent.futures.process import BrokenProcessPool
-from dataclasses import dataclass
-from multiprocessing import shared_memory
 
-from .job_control import apply_process_profile, cpu_worker_count, throw_if_cancelled
+from .job_control import throw_if_cancelled
 from .models import CompactMeshSection, CpuProfile, GeometryBuffer
 
 
-_MIN_PARALLEL_FACE_COUNT = 50_000
-_MAX_PARALLEL_SHARED_BYTES = 384 * 1024 * 1024
-
-
-@dataclass(frozen=True)
-class _FaceChunk:
-    start_face: int
-    end_face: int
-    start_offset: int
+_MIN_NUMPY_FACE_COUNT = 50_000
+_NUMPY_FACE_CHUNK_SIZE = 262_144
 
 
 def partition_fbx_material_faces(
@@ -30,34 +18,9 @@ def partition_fbx_material_faces(
 ) -> tuple[CompactMeshSection, ...] | None:
     if payload.vertex_color_count == 0 or payload.face_count == 0 or not payload.face_vertex_indices:
         return None
-
-    worker_count = cpu_worker_count(cpu_profile)
-    shared_bytes = (
-        len(payload.face_vertex_counts) * payload.face_vertex_counts.itemsize
-        + len(payload.face_vertex_indices) * payload.face_vertex_indices.itemsize
-        + len(payload.vertex_color_components) * payload.vertex_color_components.itemsize
-    )
-    if (
-        worker_count <= 1
-        or payload.face_count < _MIN_PARALLEL_FACE_COUNT
-        or shared_bytes > _MAX_PARALLEL_SHARED_BYTES
-    ):
+    if payload.face_count < _MIN_NUMPY_FACE_COUNT:
         return _partition_fbx_material_faces_sequential(payload)
-
-    try:
-        return _partition_fbx_material_faces_parallel(
-            payload,
-            worker_count=worker_count,
-            cpu_profile=cpu_profile,
-            cancel_event=cancel_event,
-        )
-    except (OSError, BrokenProcessPool) as exc:
-        warnings.warn(
-            f"Parallel FBX material partition failed; retrying sequentially: {exc}",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        return _partition_fbx_material_faces_sequential(payload)
+    return _partition_fbx_material_faces_numpy(payload, cancel_event=cancel_event)
 
 
 def _partition_fbx_material_faces_sequential(payload: GeometryBuffer) -> tuple[CompactMeshSection, ...] | None:
@@ -96,139 +59,55 @@ def _partition_fbx_material_faces_sequential(payload: GeometryBuffer) -> tuple[C
     return tuple(sections)
 
 
-def _partition_fbx_material_faces_parallel(
+def _partition_fbx_material_faces_numpy(
     payload: GeometryBuffer,
     *,
-    worker_count: int,
-    cpu_profile: CpuProfile,
     cancel_event=None,
 ) -> tuple[CompactMeshSection, ...] | None:
-    chunks = _build_face_chunks(payload.face_vertex_counts, worker_count)
-    if len(chunks) <= 1:
-        return _partition_fbx_material_faces_sequential(payload)
+    import numpy as np
 
-    counts_memory = None
-    indices_memory = None
-    colors_memory = None
-    try:
-        counts_memory = shared_memory.SharedMemory(create=True, size=len(payload.face_vertex_counts) * payload.face_vertex_counts.itemsize)
-        indices_memory = shared_memory.SharedMemory(create=True, size=len(payload.face_vertex_indices) * payload.face_vertex_indices.itemsize)
-        colors_memory = shared_memory.SharedMemory(create=True, size=len(payload.vertex_color_components) * payload.vertex_color_components.itemsize)
-        counts_memory.buf[: len(payload.face_vertex_counts) * payload.face_vertex_counts.itemsize] = payload.face_vertex_counts.tobytes()
-        indices_memory.buf[: len(payload.face_vertex_indices) * payload.face_vertex_indices.itemsize] = payload.face_vertex_indices.tobytes()
-        colors_memory.buf[: len(payload.vertex_color_components) * payload.vertex_color_components.itemsize] = payload.vertex_color_components.tobytes()
+    throw_if_cancelled(cancel_event)
+    face_counts = np.frombuffer(payload.face_vertex_counts, dtype=np.int32)
+    face_indices = np.frombuffer(payload.face_vertex_indices, dtype=np.int32)
+    color_count = payload.vertex_color_count
+    colors = np.frombuffer(
+        payload.vertex_color_components,
+        dtype=np.float32,
+        count=color_count * 4,
+    ).reshape((color_count, 4))
+    bark_faces = array("i")
+    leaves_faces = array("i")
+    corner_offset = 0
 
-        bark_faces = array("i")
-        leaves_faces = array("i")
-        with ProcessPoolExecutor(max_workers=min(worker_count, len(chunks))) as executor:
-            futures = [
-                executor.submit(
-                    _partition_face_chunk_worker,
-                    counts_memory.name,
-                    len(payload.face_vertex_counts),
-                    indices_memory.name,
-                    len(payload.face_vertex_indices),
-                    colors_memory.name,
-                    len(payload.vertex_color_components),
-                    chunk.start_face,
-                    chunk.end_face,
-                    chunk.start_offset,
-                    cpu_profile.value,
-                )
-                for chunk in chunks
-            ]
-            for future in futures:
-                throw_if_cancelled(cancel_event)
-                bark_chunk, leaves_chunk = future.result()
-                bark_faces.extend(bark_chunk)
-                leaves_faces.extend(leaves_chunk)
-    finally:
-        for memory in (counts_memory, indices_memory, colors_memory):
-            if memory is None:
-                continue
-            memory.close()
-            memory.unlink()
+    for face_start in range(0, len(face_counts), _NUMPY_FACE_CHUNK_SIZE):
+        throw_if_cancelled(cancel_event)
+        face_end = min(len(face_counts), face_start + _NUMPY_FACE_CHUNK_SIZE)
+        chunk_counts = face_counts[face_start:face_end]
+        if np.any(chunk_counts <= 0):
+            return None
+        chunk_corner_count = int(np.sum(chunk_counts, dtype=np.int64))
+        end_corner_offset = corner_offset + chunk_corner_count
+        if end_corner_offset > len(face_indices):
+            return None
+        chunk_indices = face_indices[corner_offset:end_corner_offset]
+        if np.any(chunk_indices < 0) or np.any(chunk_indices >= color_count):
+            return None
+
+        face_offsets = np.empty(len(chunk_counts), dtype=np.int64)
+        face_offsets[0] = 0
+        np.cumsum(chunk_counts[:-1], dtype=np.int64, out=face_offsets[1:])
+        black_corners = np.all(colors[chunk_indices, :3] == 0.0, axis=1)
+        leaf_mask = np.logical_and.reduceat(black_corners, face_offsets)
+        bark_chunk = (np.flatnonzero(~leaf_mask) + face_start).astype(np.int32, copy=False)
+        leaves_chunk = (np.flatnonzero(leaf_mask) + face_start).astype(np.int32, copy=False)
+        bark_faces.frombytes(bark_chunk.tobytes())
+        leaves_faces.frombytes(leaves_chunk.tobytes())
+        corner_offset = end_corner_offset
 
     sections: list[CompactMeshSection] = []
     if bark_faces:
         sections.append(CompactMeshSection(material_id=1, face_indices=bark_faces))
     if leaves_faces:
         sections.append(CompactMeshSection(material_id=2, face_indices=leaves_faces))
+    throw_if_cancelled(cancel_event)
     return tuple(sections)
-
-
-def _partition_face_chunk_worker(
-    counts_name: str,
-    counts_length: int,
-    indices_name: str,
-    indices_length: int,
-    colors_name: str,
-    colors_length: int,
-    start_face: int,
-    end_face: int,
-    start_offset: int,
-    cpu_profile_value: str,
-) -> tuple[array, array]:
-    apply_process_profile(CpuProfile(cpu_profile_value))
-    counts_memory = shared_memory.SharedMemory(name=counts_name)
-    indices_memory = shared_memory.SharedMemory(name=indices_name)
-    colors_memory = shared_memory.SharedMemory(name=colors_name)
-    try:
-        counts = counts_memory.buf.cast("i")[:counts_length]
-        indices = indices_memory.buf.cast("i")[:indices_length]
-        colors = colors_memory.buf.cast("f")[:colors_length]
-        bark_faces = array("i")
-        leaves_faces = array("i")
-        offset = start_offset
-        for face_index in range(start_face, end_face):
-            face_count = counts[face_index]
-            material_id = 2
-            end_offset = offset + face_count
-            if end_offset > indices_length:
-                raise ValueError("Face topology exceeds available faceVertexIndices data.")
-            for face_offset in range(offset, end_offset):
-                point_index = indices[face_offset]
-                color_offset = point_index * 4
-                if point_index < 0 or color_offset + 2 >= colors_length:
-                    raise ValueError("Vertex color payload is shorter than the indexed point range.")
-                if not (
-                    colors[color_offset] == 0.0
-                    and colors[color_offset + 1] == 0.0
-                    and colors[color_offset + 2] == 0.0
-                ):
-                    material_id = 1
-                    break
-            if material_id == 1:
-                bark_faces.append(face_index)
-            else:
-                leaves_faces.append(face_index)
-            offset = end_offset
-        return bark_faces, leaves_faces
-    finally:
-        counts_memory.close()
-        indices_memory.close()
-        colors_memory.close()
-
-
-def _build_face_chunks(face_vertex_counts: array, worker_count: int) -> tuple[_FaceChunk, ...]:
-    total_faces = len(face_vertex_counts)
-    if total_faces <= 0:
-        return ()
-    target_chunk_size = max(1, total_faces // max(1, worker_count))
-    chunks: list[_FaceChunk] = []
-    start_face = 0
-    start_offset = 0
-    accumulated = 0
-    running_offset = 0
-    for face_index, face_count in enumerate(face_vertex_counts, start=1):
-        accumulated += 1
-        running_offset += face_count
-        if accumulated < target_chunk_size and face_index < total_faces:
-            continue
-        chunks.append(_FaceChunk(start_face=start_face, end_face=face_index, start_offset=start_offset))
-        start_offset = running_offset
-        start_face = face_index
-        accumulated = 0
-    if start_face < total_faces:
-        chunks.append(_FaceChunk(start_face=start_face, end_face=total_faces, start_offset=start_offset))
-    return tuple(chunks)

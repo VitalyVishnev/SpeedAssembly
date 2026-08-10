@@ -142,3 +142,28 @@ def test_skinning_validation_identifies_vertex_weights_and_mixed_binding_widths(
 
     assert any(issue.code == "invalid_base_mesh_joint_weights" and "vertex 0" in issue.message for issue in issues)
     assert any(issue.code == "inconsistent_dual_skinning_width" and "part_0" in issue.message for issue in issues)
+
+
+def test_skinning_validation_preserves_first_vertex_and_joint_before_weight_error_order() -> None:
+    model = apply_dual_skinning(_model())
+    assert model.base_mesh is not None
+    bad_weights = replace(
+        model.base_mesh,
+        skel_joint_indices=model.base_mesh.skel_joint_indices[:2] + (99,) + model.base_mesh.skel_joint_indices[3:],
+        skel_joint_weights=(0.25, 0.25) + model.base_mesh.skel_joint_weights[2:],
+    )
+
+    first_issue = validate_skinning(replace(model, base_mesh=bad_weights))[0]
+
+    assert first_issue.code == "invalid_base_mesh_joint_weights"
+    assert "vertex 0" in first_issue.message
+
+    same_vertex = replace(
+        bad_weights,
+        skel_joint_indices=(99,) + bad_weights.skel_joint_indices[1:],
+        skel_joint_weights=(float("nan"),) + bad_weights.skel_joint_weights[1:],
+    )
+    first_issue = validate_skinning(replace(model, base_mesh=same_vertex))[0]
+
+    assert first_issue.code == "invalid_base_mesh_joint_index"
+    assert "vertex 0" in first_issue.message

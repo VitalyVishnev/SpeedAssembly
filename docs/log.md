@@ -798,3 +798,22 @@ Major moves:
   that could not reach the 50% target without disproportionate complexity.
 - Passed 551 regression tests, 25 focused authoring tests, 26 packaged
   contracts, the release build, and both packaged stability smokes.
+
+## 2026-08-11 - NumPy acceleration for skinning and large FBX payloads
+
+- Moved base-mesh Dual Skinning and skin validation to bounded NumPy chunks
+  while preserving the canonical tuple model, repeated-Part path, diagnostic
+  order, and byte-identical USDA output.
+- Replaced the shared-memory process pool for large vertex-color material
+  partition with a bounded zero-copy `GeometryBuffer` view.
+- Added measured large-FBX paths for control-point transforms and indexed UV
+  expansion, released SDK point wrappers before topology traversal, and reduced
+  no-color/no-fallback topology work to one Python iteration per triangle.
+- Big Spruce Dual Skinning and validation improved by 67.4% and 78.2%; material
+  partition improved by 82.4%. A controlled old/new run of the 389 MB
+  `SM_BigBranch_01_HIGH.fbx` improved from 97.724 s to 57.598 s (41.1%) with
+  matching SHA-256 for point, face-count, face-index, and UV buffers.
+- Passed 553 regression tests, 26 packaged contracts, a fresh release build,
+  Detailed Cuts and recovery smokes, plus the strict packaged stability gate
+  at one worker/UI iteration on Big Spruce and the 28-million sample with no
+  crash, retry, or missing result.
