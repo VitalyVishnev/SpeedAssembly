@@ -122,7 +122,7 @@ def resolve_assembly_model(
         authoring_model,
         cancel_event=runtime.cancel_event,
     )
-    if resolved_conversion_mode == ConversionMode.STATIC_ASSEMBLY:
+    if resolved_conversion_mode in {ConversionMode.STATIC_ASSEMBLY, ConversionMode.STATIC_PARTS}:
         authoring_model = replace(authoring_model, prototype_strategy=PrototypeStrategy.INLINE_STATIC_PART)
     authoring_model = replace(
         authoring_model,

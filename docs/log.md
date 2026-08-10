@@ -759,3 +759,18 @@ Major moves:
   selects its output for the native `Create Skeleton` content-browser action.
 - Added a self-contained one-line Output Log variant suitable for attaching to
   an Epic bug report; it has no dependency on the repository path.
+
+## 2026-08-10 - Static Assembly Parts export
+
+- Enabled the existing Static Assembly Parts UI action and connected it to the
+  shared parts-library bundle path.
+- Each unique resolved Repeated Part prototype now writes as a standalone
+  static USDA without assembly, instancer, skeleton, or skinning fields.
+- Added an intent-level batch/USDA contract regression.
+
+## 2026-08-11 - Static Assembly Parts validation and polish
+
+- Operator validation confirmed standalone part import and successful reuse by
+  a full Static Assembly through Unreal Reference.
+- Removed an unreachable multi-prototype naming branch from the shared parts
+  authoring path; output structure remains unchanged.

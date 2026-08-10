@@ -4,6 +4,7 @@
 - `Observed Source XML` - a real SpeedTree XML sample treated as observed schema, not a formal spec.
 - `Skeletal Assembly` (`Skeletal Mesh Nanite Assembly`) - the skeletal import shape: Assembly Root, Main Skeleton, Base Skeletal Tree, and repeated skeletal Assembly Parts.
 - `Static Assembly` (`Static Mesh Nanite Assembly`) - the secondary rigid export shape: Assembly Root, rigid prototypes, and repeated static Assembly Parts without skeletons.
+- `Static Assembly Parts` - a parts-library export that writes every unique resolved Repeated Part prototype once as a standalone static USDA; it does not author an Assembly or instance placements.
 - `Assembly Root` - the root prim of the authored USD scene.
 - `Base Skeletal Tree` - the unique tree geometry bound to the Main Skeleton.
 - `Main Skeleton` - the shared skeleton used by the base tree and skeletal assembly parts.

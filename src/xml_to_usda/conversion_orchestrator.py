@@ -38,6 +38,9 @@ from .runtime_paths import JobWorkspace, RuntimePaths, resolve_runtime_paths
 from .usda_writer import write_resolved_usda_document, write_usda_document
 
 
+_PARTS_CONVERSION_MODES = {ConversionMode.SKELETAL_PARTS, ConversionMode.STATIC_PARTS}
+
+
 def convert_file(
     input_path: str,
     output_path: str | None,
@@ -122,7 +125,7 @@ def _convert_single_input(
     resolved_output = resolve_output_path(request, input_path)
     export_target = (
         resolve_skeletal_parts_output_directory(resolved_output)
-        if resolved_output is not None and request.conversion_mode == ConversionMode.SKELETAL_PARTS
+        if resolved_output is not None and request.conversion_mode in _PARTS_CONVERSION_MODES
         else resolved_output
     )
     if export_target is not None:
@@ -173,10 +176,11 @@ def _convert_single_input(
                 runtime_job_dir=str(job_workspace.job_dir) if job_workspace.debug_preserve else None,
             )
 
-        if request.conversion_mode == ConversionMode.SKELETAL_PARTS:
-            usda_document = _write_skeletal_parts_bundle(
+        if request.conversion_mode in _PARTS_CONVERSION_MODES:
+            usda_document = _write_parts_bundle(
                 model,
                 diagnostics,
+                conversion_mode=request.conversion_mode,
                 output_directory=export_target,
                 telemetry_callback=runtime_telemetry,
                 cancel_event=cancel_event,
@@ -215,16 +219,17 @@ def _convert_single_input(
     )
 
 
-def _write_skeletal_parts_bundle(
+def _write_parts_bundle(
     model,
     diagnostics: tuple[ValidationIssue, ...],
     *,
+    conversion_mode: ConversionMode,
     output_directory,
     telemetry_callback,
     cancel_event,
 ) -> UsdAssemblyDocument:
     if output_directory is None:
-        raise ValueError("Skeletal Parts export requires a resolved output directory.")
+        raise ValueError("Parts export requires a resolved output directory.")
 
     output_directory.mkdir(parents=True, exist_ok=True)
 
@@ -247,7 +252,7 @@ def _write_skeletal_parts_bundle(
             diagnostics,
             output_path=output_path,
             base_mesh_name=None,
-            conversion_mode=ConversionMode.SKELETAL_PARTS,
+            conversion_mode=conversion_mode,
             telemetry_callback=telemetry_callback,
             cancel_event=cancel_event,
         )

@@ -19,6 +19,8 @@ Main systems:
 - `src/xml_to_usda/usda_authoring.py` - authors the final USDA structure.
 - `src/xml_to_usda/usda_writer.py` - writes USDA through the shared authoring contract.
 - `src/xml_to_usda/conversion_service.py` and `src/xml_to_usda/conversion_orchestrator.py` - normalize caller intent and run conversions.
+- parts-library requests reuse one bundle path in `conversion_orchestrator.py`;
+  each resolved prototype is isolated into its own skeletal or static USDA.
 - `src/xml_to_usda/qt_ui/` - supported PySide6 shell and preview adapters.
 - `src/xml_to_usda/fbx_adapter.py` and `src/xml_to_usda/fbx_import_supervisor.py` - Autodesk FBX integration and helper process control.
 - `src/xml_to_usda/discovery_service.py` and `src/xml_to_usda/source_discovery_worker_subprocess.py` - lightweight material/prototype row discovery; XML files at or above 5 MiB are inspected outside the GUI process.

@@ -4,6 +4,12 @@ SpeedAssembly is a deterministic converter from SpeedTree Raw XML to USDA for th
 
 The current goal is to preserve the importer contract while keeping the pipeline inspectable and deterministic. The validated primary path is `skeletal_assembly` (Skeletal Assembly, or `Skeletal Mesh Nanite Assembly`). `static_assembly` is supported as a secondary export shape (`Static Mesh Nanite Assembly`), but it must not redefine the skeletal contract.
 
+The two parts-library modes write one USDA per resolved Repeated Part prototype:
+`skeletal_parts` keeps the local Part Skeleton, while inline `static_parts`
+payloads become plain static meshes without assembly, instancing, skeleton, or
+skinning fields. Static parts have been imported and reused by a full Static
+Assembly through Unreal Reference in the current Unreal target workflow.
+
 The standalone release is named `SpeedAssembly.exe` and its release bundle is
 `SpeedAssembly_release.zip`. The release ZIP contains only the executable and
 `examples/SimpleTree_01.xml`; `build_info.json` remains beside the executable

@@ -16,6 +16,7 @@ SUPPORTED_AUTHORING_MODES = {
     ConversionMode.SKELETAL_ASSEMBLY,
     ConversionMode.SKELETAL_PARTS,
     ConversionMode.STATIC_ASSEMBLY,
+    ConversionMode.STATIC_PARTS,
 }
 
 
@@ -40,8 +41,8 @@ def validate_authoring_model(
 
     if mode == ConversionMode.STATIC_ASSEMBLY:
         issues.extend(_validate_static_assembly_model(model, material_ids))
-    elif mode == ConversionMode.SKELETAL_PARTS:
-        issues.extend(_validate_skeletal_parts_model(model, material_ids))
+    elif mode in {ConversionMode.SKELETAL_PARTS, ConversionMode.STATIC_PARTS}:
+        issues.extend(_validate_parts_model(model, material_ids, mode))
     else:
         issues.extend(_validate_skeletal_assembly_model(model, material_ids))
 
@@ -219,9 +220,10 @@ def _validate_skeletal_assembly_model(
     return issues
 
 
-def _validate_skeletal_parts_model(
+def _validate_parts_model(
     model: CanonicalTreeModel,
     material_ids: set[int],
+    mode: ConversionMode,
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
 
@@ -230,7 +232,7 @@ def _validate_skeletal_parts_model(
             ValidationIssue(
                 severity="error",
                 code="missing_prototypes",
-                message="Skeletal parts export requires at least one valid prototype payload.",
+                message=f"{mode.value} export requires at least one valid prototype payload.",
             )
         )
         return issues

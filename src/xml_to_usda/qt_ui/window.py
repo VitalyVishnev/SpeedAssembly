@@ -138,14 +138,10 @@ class WindowAssets:
 
 
 CONVERSION_MODES: tuple[tuple[str, str, bool], ...] = (
-    # The mode switch is intentionally ahead of backend support so the future
-    # shell layout does not need another structural change when the additional
-    # assembly/parts modes land. Unsupported entries stay visible but disabled
-    # until their application-layer contracts exist.
     ("skeletal_assembly", "Skeletal Assembly", True),
-    ("skeletal_parts", "Skeletal Parts", True),
+    ("skeletal_parts", "Skeletal Assembly Parts", True),
     ("static_assembly", "Static Assembly", True),
-    ("static_parts", "Static Parts", False),
+    ("static_parts", "Static Assembly Parts", True),
 )
 
 
@@ -154,7 +150,7 @@ def _conversion_mode_tooltip(mode_key: str) -> str:
         "skeletal_assembly": "Full skeletal Nanite Assembly. Keeps skeletons and repeated parts for the main UE path.",
         "skeletal_parts": "Writes reusable skeletal prototype files. Fewer assembly fields; more useful for part libraries.",
         "static_assembly": "Writes a rigid static Nanite Assembly. No skeleton; simpler output for non-skinned vegetation.",
-        "static_parts": "Reserved static part-library mode. Disabled until the importer contract is validated.",
+        "static_parts": "Writes reusable static prototype files. No assembly, instancer, skeleton, or skinning data.",
     }.get(mode_key, "Conversion output shape. Lower complexity omits contracts; higher fidelity keeps assembly structure.")
 
 

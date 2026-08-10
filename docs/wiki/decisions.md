@@ -140,6 +140,30 @@ Related files:
 - `docs/raw/ue_import_contract.md`
 - `docs/raw/workflow_status.md`
 
+## Decision: Static Assembly Parts is a prototype-library export
+
+Status: Active; operator-validated in Unreal
+
+`static_parts` uses the same resolved prototype set and output-directory rule
+as `skeletal_parts`, then writes one USDA per prototype. Inline XML and FBX
+payloads become a root `Xform` with one `SM_`-prefixed static `Mesh`. The file
+contains no Assembly Root API, Base Mesh, PointInstancer, skeleton, skeletal
+binding, or instance transforms. Explicit Unreal asset reuse remains a pure
+external-reference prototype because no geometry payload exists to bake.
+
+This is not Fracture export: it neither clips the Base Mesh nor creates one file
+per Fracture Piece. It exports each unique Repeated Part prototype once.
+
+Manual operator validation confirmed that the standalone static parts import as
+expected and that a full Static Assembly using those imported assets through
+Unreal Reference imports normally.
+
+Related files:
+- `src/xml_to_usda/conversion_orchestrator.py`
+- `src/xml_to_usda/usda_authoring.py`
+- `src/xml_to_usda/qt_ui/window.py`
+- `tests/test_export_modes.py`
+
 ## Decision: The canonical model is source-normalized
 
 Status: Active

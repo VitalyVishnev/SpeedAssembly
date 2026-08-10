@@ -277,6 +277,34 @@ def test_static_assembly_conversion_writes_single_usda_file(tmp_path: Path) -> N
     assert not inventory.contains("/StaticAssembly", "primvars:skel:")
 
 
+def test_static_parts_conversion_writes_only_repeated_prototypes_as_static_meshes(tmp_path: Path) -> None:
+    output_path = tmp_path / "SimpleTree_StaticParts.usda"
+
+    result = convert_file(
+        str(SIMPLE_TREE_01),
+        str(output_path),
+        conversion_mode=ConversionMode.STATIC_PARTS,
+    )
+
+    output_directory = tmp_path / "SimpleTree_StaticParts"
+    assert result.usda_document is not None
+    assert result.usda_document.text is None
+    assert result.output_path == str(output_directory)
+    assert {path.name for path in output_directory.iterdir()} == {"Twig_01.usda", "Twig_02.usda"}
+
+    twig_text = (output_directory / "Twig_01.usda").read_text(encoding="utf-8")
+    inventory = UsdaInventory.from_text(twig_text)
+
+    assert inventory.has_prim("/Twig_01", "Xform")
+    assert inventory.has_prim("/Twig_01/SM_Twig_01", "Mesh")
+    assert inventory.has_attribute("/Twig_01", "assetInfo")
+    assert not inventory.has_api_schema("/Twig_01", "NaniteAssemblyRootAPI")
+    assert not inventory.contains("/Twig_01", "PointInstancer")
+    assert not inventory.contains("/Twig_01", "SkelRoot")
+    assert not inventory.contains("/Twig_01", "Skeleton")
+    assert not inventory.contains("/Twig_01", "primvars:skel:")
+
+
 def test_static_assembly_preserves_fbx_and_unreal_reference_prototypes(tmp_path: Path) -> None:
     payload_path = _write_fbx_json_payload(tmp_path, file_name="spruce_branch.json")
     _, fbx_model, fbx_diagnostics = load_canonical_model(

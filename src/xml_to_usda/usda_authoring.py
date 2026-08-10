@@ -49,6 +49,7 @@ from .ue_schema import DEFAULT_UE_SCHEMA_CONTRACT, UeSchemaContract
 _UV_FORMAT_CACHE_MIN_PAIRS = 1024
 _UV_FORMAT_CACHE_SAMPLE_PAIRS = 2048
 _UV_FORMAT_CACHE_MAX_UNIQUE_RATIO = 0.75
+_PARTS_CONVERSION_MODES = {ConversionMode.SKELETAL_PARTS, ConversionMode.STATIC_PARTS}
 
 
 @dataclass(frozen=True)
@@ -105,12 +106,11 @@ def build_authoring_context(
         )
 
     resolved_conversion_mode = ConversionMode.parse(conversion_mode or model.metadata.conversion_mode)
-    if resolved_conversion_mode == ConversionMode.STATIC_PARTS:
-        raise ValueError(f"Unsupported conversion mode: {resolved_conversion_mode.value}.")
     if resolved_conversion_mode not in {
         ConversionMode.SKELETAL_ASSEMBLY,
         ConversionMode.SKELETAL_PARTS,
         ConversionMode.STATIC_ASSEMBLY,
+        ConversionMode.STATIC_PARTS,
     }:
         raise ValueError(f"Unsupported conversion mode: {resolved_conversion_mode.value}.")
 
@@ -249,17 +249,11 @@ def author_usda(
     _write_line(sink, 1, f'defaultPrim = "{stage_root_name}"')
     _write_line(sink, 0, ")")
     _write_line(sink, 0)
-    if context.conversion_mode == ConversionMode.SKELETAL_PARTS:
+    if context.conversion_mode in _PARTS_CONVERSION_MODES:
         if _is_single_prototype_parts_document(context):
             _emit_single_prototype_parts_document(sink, context)
             return
-        single_prototype_name = _single_parts_asset_name(context)
-        if single_prototype_name:
-            _write_line(sink, 1, f'def Xform "{stage_root_name}" (')
-            _emit_asset_info_name_metadata(sink, 2, single_prototype_name)
-            _write_line(sink, 1, ")")
-        else:
-            _write_line(sink, 1, f'def Xform "{stage_root_name}"')
+        _write_line(sink, 1, f'def Xform "{stage_root_name}"')
         _write_line(sink, 0, "{")
 
         materials = _render_materials_scope(model.materials, stage_root_name)
@@ -572,26 +566,42 @@ def _emit_static_instancer_prototype(
         _write_block(sink, _render_external_instancer_prototype(prototype, context.contract), indent_level)
         return
 
-    mesh = _prototype_inline_mesh(prototype)
-    if mesh is None:
-        raise ValueError(f"Prototype {prototype.identity.prim_name} is missing mesh payload.")
-
-    part_mesh_name = _static_mesh_prim_name(prototype, context.contract)
     _write_line(sink, indent_level, f'def Xform "{prototype.identity.prim_name}" (')
     _write_line(sink, indent_level + 1, 'kind = "component"')
     _write_line(sink, indent_level, ")")
     _write_line(sink, indent_level, "{")
-    _write_line(sink, indent_level + 1, f'def Mesh "{part_mesh_name}"')
-    _write_line(sink, indent_level + 1, "{")
-    _write_line(sink, indent_level + 2, 'uniform token subdivisionScheme = "none"')
-    _emit_material_binding(sink, mesh, indent_level + 2, context.contract.root_prim_name)
-    _emit_mesh_payload(sink, mesh, context.contract.mesh_orientation, indent_level + 2)
-    _write_line(sink, indent_level + 1, "}")
+    _emit_static_part_payload(sink, prototype, context, indent_level + 1)
     if prototype.source_key == "__static_base_mesh__":
         for collision_mesh in context.model.static_collision_meshes:
             _emit_static_collision_mesh(sink, collision_mesh, context, indent_level + 1)
         for collision_primitive in context.model.static_collision_primitives:
             _emit_static_collision_primitive(sink, collision_primitive, indent_level + 1)
+    _write_line(sink, indent_level, "}")
+
+
+def _emit_static_part_payload(
+    sink,
+    prototype: Prototype,
+    context: AuthoringContext,
+    indent_level: int,
+    *,
+    material_root_prim_name: str | None = None,
+) -> None:
+    mesh = _prototype_inline_mesh(prototype)
+    if mesh is None:
+        raise ValueError(f"Prototype {prototype.identity.prim_name} is missing mesh payload.")
+
+    part_mesh_name = _static_mesh_prim_name(prototype, context.contract)
+    _write_line(sink, indent_level, f'def Mesh "{part_mesh_name}"')
+    _write_line(sink, indent_level, "{")
+    _write_line(sink, indent_level + 1, 'uniform token subdivisionScheme = "none"')
+    _emit_material_binding(
+        sink,
+        mesh,
+        indent_level + 1,
+        material_root_prim_name or context.contract.root_prim_name,
+    )
+    _emit_mesh_payload(sink, mesh, context.contract.mesh_orientation, indent_level + 1)
     _write_line(sink, indent_level, "}")
 
 
@@ -976,13 +986,22 @@ def _emit_single_prototype_parts_document(
         _write_block(sink, materials, 1)
         _write_line(sink, 0)
 
-    _emit_inline_part_payload(
-        sink,
-        prototype,
-        context,
-        indent_level=1,
-        material_root_prim_name=root_name,
-    )
+    if context.conversion_mode == ConversionMode.STATIC_PARTS:
+        _emit_static_part_payload(
+            sink,
+            prototype,
+            context,
+            1,
+            material_root_prim_name=root_name,
+        )
+    else:
+        _emit_inline_part_payload(
+            sink,
+            prototype,
+            context,
+            indent_level=1,
+            material_root_prim_name=root_name,
+        )
     _write_line(sink, 0, "}")
 
 
@@ -995,6 +1014,10 @@ def _emit_instancer_prototype(
     contract = context.contract
     if prototype.resolution_mode == PrototypeResolutionMode.EXTERNAL_ASSET:
         _write_block(sink, _render_external_instancer_prototype(prototype, contract), indent_level)
+        return
+
+    if context.conversion_mode == ConversionMode.STATIC_PARTS:
+        _emit_static_instancer_prototype(sink, prototype, context, indent_level)
         return
 
     if context.model.prototype_strategy != PrototypeStrategy.INLINE_SKELETAL_PART:
@@ -1578,16 +1601,8 @@ def _emit_asset_info_name_metadata(sink, indent_level: int, name: str) -> None:
     _write_line(sink, indent_level, "}")
 
 
-def _single_parts_asset_name(context: AuthoringContext) -> str | None:
-    if context.conversion_mode != ConversionMode.SKELETAL_PARTS:
-        return None
-    if len(context.model.prototypes) != 1:
-        return None
-    return context.model.prototypes[0].identity.prim_name
-
-
 def _is_single_prototype_parts_document(context: AuthoringContext) -> bool:
-    return context.conversion_mode == ConversionMode.SKELETAL_PARTS and len(context.model.prototypes) == 1
+    return context.conversion_mode in _PARTS_CONVERSION_MODES and len(context.model.prototypes) == 1
 
 
 def _stage_root_name(context: AuthoringContext) -> str:
