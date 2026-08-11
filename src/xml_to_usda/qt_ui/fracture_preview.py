@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-from PySide6.QtCore import QEvent, QObject, QSignalBlocker, Qt
+from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
@@ -147,7 +147,6 @@ class FracturePreviewDialog(PreviewShellDialog):
         self._manual_cut_tokens = self._settings.fracture.pinned_cut_joint_tokens
         self._manual_cut_undo_stack = list(self._manual_cut_tokens)
         self._cut_delete_buttons: dict[str, QPushButton] = {}
-        self._parameter_wheel_filter = None
         self._collision_visual_base_scale = self._collision_geometry_setting(self._settings.collision)
         self._collision_visual_base_length_scale = self._collision_length_setting(self._settings.collision)
         self.current_preview: FracturePreviewResult | None = None
@@ -670,8 +669,6 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.viewport.on_bone_cut_toggled = self._toggle_manual_cut_token
         self.undo_cut_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
         self.undo_cut_shortcut.activated.connect(self._undo_last_manual_cut)
-        self._parameter_wheel_filter = _ParameterWheelFilter(settings_scroll, self)
-        _install_parameter_wheel_filter(settings_content, self._parameter_wheel_filter)
         self._sync_settings_controls(self._settings)
         self.piece_count_slider.sliderReleased.connect(self._emit_settings_changed)
         self.piece_count_spin.editingFinished.connect(self._emit_settings_changed)
@@ -1276,29 +1273,6 @@ def _slider_row(slider: QSlider, spin) -> QHBoxLayout:
     row.addWidget(slider, 1)
     row.addWidget(spin, 0)
     return row
-
-
-class _ParameterWheelFilter(QObject):
-    def __init__(self, scroll_area: QScrollArea, parent=None) -> None:
-        super().__init__(parent)
-        self._scroll_area = scroll_area
-
-    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt override
-        if event.type() != QEvent.Type.Wheel:
-            return super().eventFilter(watched, event)
-        delta = event.angleDelta().y()
-        if delta == 0:
-            delta = event.pixelDelta().y()
-        bar = self._scroll_area.verticalScrollBar()
-        bar.setValue(bar.value() - int(delta))
-        event.accept()
-        return True
-
-
-def _install_parameter_wheel_filter(parent: QWidget, wheel_filter: _ParameterWheelFilter) -> None:
-    for widget_type in (QAbstractSpinBox, QSlider, QComboBox):
-        for widget in parent.findChildren(widget_type):
-            widget.installEventFilter(wheel_filter)
 
 
 def _set_combo_data(combo: QComboBox, value: str) -> None:

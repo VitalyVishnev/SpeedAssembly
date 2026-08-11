@@ -13,6 +13,10 @@ import math
 from array import array
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
 
 from .mesh_pruning import DEFAULT_BRANCH_PRUNE_AGGRESSION, select_large_connected_face_indices
 from .models import CanonicalTreeModel, GeometryBuffer, MeshData, Prototype, Quaternion, Vector3
@@ -22,15 +26,18 @@ from .output_resolution import ensure_output_path_allowed
 from .proxy_source_projection import load_proxy_source_projection, projection_to_tree_asset
 from .proxy_collision import (
     ProxyCollisionError,
+    ProxyCollisionSource,
     ProxyCollisionSettings,
     build_proxy_collision_meshes,
+    build_proxy_collision_meshes_from_source,
+    prepare_proxy_collision_source,
 )
 from .qem_simplification import QemSimplificationError, simplify_geometry_buffer_qem
 
 
 DEFAULT_PROXY_POLYCOUNT = 5000
 BASE_MESH_FUSE_THRESHOLD_METERS = 0.001
-MAX_PROXY_DENSITY_RESOLUTION = 256
+MAX_PROXY_DENSITY_RESOLUTION = 512
 PROXY_METHOD_DENSITY_FIELD = "density_field"
 PROXY_METHOD_INSTANCE_BOUNDS = "instance_bounds"
 
@@ -101,6 +108,7 @@ class ProxyMeshResult:
     source_instance_count: int
     included_base_mesh: bool
     collision_meshes: tuple[MeshData, ...] = ()
+    collision_source: ProxyCollisionSource | None = None
 
 
 @dataclass(frozen=True)
@@ -167,7 +175,21 @@ def generate_proxy_mesh(model: CanonicalTreeModel, settings: ProxyMeshSettings |
         included_base = sources.base_mesh is not None
         mesh = _build_density_field_mesh(sources, resolved_settings)
 
-    collision_meshes = generate_proxy_collision_meshes(model, resolved_settings.collision)
+    collision_source = None
+    collision_meshes: tuple[MeshData, ...] = ()
+    if (
+        resolved_settings.collision.enabled
+        and resolved_settings.collision.height_multiplier > 0.0
+        and resolved_settings.collision.width_multiplier > 0.0
+    ):
+        try:
+            collision_source = prepare_proxy_collision_source(model)
+            collision_meshes = build_proxy_collision_meshes_from_source(
+                collision_source,
+                resolved_settings.collision,
+            )
+        except ProxyCollisionError as exc:
+            raise ProxyMeshError(str(exc)) from exc
     return ProxyMeshResult(
         mesh=mesh,
         settings=resolved_settings,
@@ -175,6 +197,7 @@ def generate_proxy_mesh(model: CanonicalTreeModel, settings: ProxyMeshSettings |
         source_instance_count=len(model.repeated_parts),
         included_base_mesh=included_base,
         collision_meshes=collision_meshes,
+        collision_source=collision_source,
     )
 
 
@@ -197,10 +220,23 @@ def update_proxy_collision(
     """Reuse a generated Proxy Mesh while replacing only its collision state."""
     if replace(proxy.settings, collision=settings.collision) != settings:
         raise ProxyMeshError("Cannot reuse Proxy Mesh after non-collision settings changed.")
+    resolved_collision_meshes = collision_meshes
+    if resolved_collision_meshes is None:
+        same_fit = replace(proxy.settings.collision, enabled=settings.collision.enabled) == settings.collision
+        if same_fit or proxy.collision_source is None:
+            resolved_collision_meshes = proxy.collision_meshes
+        else:
+            try:
+                resolved_collision_meshes = build_proxy_collision_meshes_from_source(
+                    proxy.collision_source,
+                    replace(settings.collision, enabled=True),
+                )
+            except ProxyCollisionError as exc:
+                raise ProxyMeshError(str(exc)) from exc
     return replace(
         proxy,
         settings=settings,
-        collision_meshes=proxy.collision_meshes if collision_meshes is None else collision_meshes,
+        collision_meshes=resolved_collision_meshes,
     )
 
 
@@ -975,7 +1011,7 @@ def _occupied_foliage_density_cells(
     instances: tuple[_PreparedFoliageKernel, ...],
     overall: _Bounds,
     resolution: int,
-) -> tuple[set[tuple[int, int, int]], float, Vector3]:
+) -> tuple[np.ndarray, float, Vector3]:
     import numpy as np
 
     extent_x = overall.maximum.x - overall.minimum.x
@@ -986,7 +1022,7 @@ def _occupied_foliage_density_cells(
     nx = max(1, int((extent_x / cell_size) + 0.999999))
     ny = max(1, int((extent_y / cell_size) + 0.999999))
     nz = max(1, int((extent_z / cell_size) + 0.999999))
-    occupied: set[tuple[int, int, int]] = set()
+    occupied = np.zeros((nx, ny, nz), dtype=np.bool_)
     fixed_x = (overall.minimum.x + overall.maximum.x) * 0.5 if extent_x <= cell_size else None
     fixed_y = (overall.minimum.y + overall.maximum.y) * 0.5 if extent_y <= cell_size else None
     fixed_z = (overall.minimum.z + overall.maximum.z) * 0.5 if extent_z <= cell_size else None
@@ -1014,13 +1050,13 @@ def _occupied_foliage_density_cells(
             np=np,
         )
 
-    if not occupied:
+    if not bool(occupied.any()):
         raise ProxyMeshError("Proxy method density_field produced no occupied foliage cells.")
     return occupied, cell_size, overall.minimum
 
 
 def _mark_occupied_kernel_cells(
-    occupied: set[tuple[int, int, int]],
+    occupied: np.ndarray,
     *,
     instance: _PreparedFoliageKernel,
     i_range: tuple[int, int],
@@ -1061,33 +1097,62 @@ def _mark_occupied_kernel_cells(
             else np.minimum(grid_maximum.x, grid_minimum.x + (i_indices.astype(np.float64) + 0.5) * cell_size)
         )
         mask = _prepared_kernel_mask(x_values, y_values, z_values, instance)
-        if not bool(mask.any()):
-            continue
-        local_i, local_j, local_k = np.nonzero(mask)
-        occupied.update(
-            zip(
-                i_indices[local_i].astype(int).tolist(),
-                j_indices[local_j].astype(int).tolist(),
-                k_indices[local_k].astype(int).tolist(),
-            )
-        )
+        occupied[
+            chunk_start : chunk_stop + 1,
+            j_range[0] : j_range[1] + 1,
+            k_range[0] : k_range[1] + 1,
+        ] |= mask
 
 
 def _prepared_kernel_mask(x_values, y_values, z_values, instance: _PreparedFoliageKernel):
-    x = x_values[:, None, None] - instance.position.x
-    y = y_values[None, :, None] - instance.position.y
-    z = z_values[None, None, :] - instance.position.z
+    import numpy as np
+
     q = instance.inverse_orientation
-    tx = 2.0 * (q.j * z - q.k * y)
-    ty = 2.0 * (q.k * x - q.i * z)
-    tz = 2.0 * (q.i * y - q.j * x)
-    local_x = (x + q.real * tx + (q.j * tz - q.k * ty)) * instance.inverse_scale.x
-    local_y = (y + q.real * ty + (q.k * tx - q.i * tz)) * instance.inverse_scale.y
-    local_z = (z + q.real * tz + (q.i * ty - q.j * tx)) * instance.inverse_scale.z
-    dx = (local_x - instance.local_center.x) / instance.local_half_extent.x
-    dy = (local_y - instance.local_center.y) / instance.local_half_extent.y
-    dz = (local_z - instance.local_center.z) / instance.local_half_extent.z
-    return dx * dx + dy * dy + dz * dz <= 1.0
+    rotation = np.asarray(
+        (
+            _rotate_components(q, 1.0, 0.0, 0.0),
+            _rotate_components(q, 0.0, 1.0, 0.0),
+            _rotate_components(q, 0.0, 0.0, 1.0),
+        ),
+        dtype=np.float64,
+    ).T
+    row_scale = np.asarray(
+        (
+            instance.inverse_scale.x / instance.local_half_extent.x,
+            instance.inverse_scale.y / instance.local_half_extent.y,
+            instance.inverse_scale.z / instance.local_half_extent.z,
+        ),
+        dtype=np.float64,
+    )
+    transform = rotation * row_scale[:, None]
+    center = -np.asarray(
+        (
+            instance.local_center.x / instance.local_half_extent.x,
+            instance.local_center.y / instance.local_half_extent.y,
+            instance.local_center.z / instance.local_half_extent.z,
+        ),
+        dtype=np.float64,
+    )
+    quadratic = transform.T @ transform
+    linear = 2.0 * (transform.T @ center)
+    constant = float(center @ center)
+
+    x = x_values - instance.position.x
+    y = y_values - instance.position.y
+    z = z_values - instance.position.z
+    distance_squared = (
+        (quadratic[1, 1] * y * y + linear[1] * y)[:, None]
+        + (quadratic[2, 2] * z * z + linear[2] * z)[None, :]
+        + 2.0 * quadratic[1, 2] * y[:, None] * z[None, :]
+        + constant
+    )
+    distance_squared = (
+        distance_squared[None, :, :]
+        + (quadratic[0, 0] * x * x + linear[0] * x)[:, None, None]
+    )
+    distance_squared += 2.0 * quadratic[0, 1] * x[:, None, None] * y[None, :, None]
+    distance_squared += 2.0 * quadratic[0, 2] * x[:, None, None] * z[None, None, :]
+    return distance_squared <= 1.0
 
 
 def _clamp_cell_index(value: int, count: int) -> int:
@@ -1095,44 +1160,90 @@ def _clamp_cell_index(value: int, count: int) -> int:
 
 
 def _mesh_from_occupied_cells(
-    occupied: set[tuple[int, int, int]],
+    occupied: np.ndarray,
     cell_size: float,
     grid_minimum: Vector3,
 ) -> GeometryBuffer:
-    points = array("f")
-    face_counts = array("i")
-    face_indices = array("i")
-    vertex_indices: dict[tuple[int, int, int], int] = {}
-    directions = (
-        ((1, 0, 0), ((1, 0, 0), (1, 1, 0), (1, 1, 1), (1, 0, 1))),
-        ((-1, 0, 0), ((0, 0, 0), (0, 0, 1), (0, 1, 1), (0, 1, 0))),
-        ((0, 1, 0), ((0, 1, 0), (0, 1, 1), (1, 1, 1), (1, 1, 0))),
-        ((0, -1, 0), ((0, 0, 0), (1, 0, 0), (1, 0, 1), (0, 0, 1))),
-        ((0, 0, 1), ((0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1))),
-        ((0, 0, -1), ((0, 0, 0), (0, 1, 0), (1, 1, 0), (1, 0, 0))),
+    import numpy as np
+
+    if not bool(occupied.any()):
+        return GeometryBuffer(
+            name="ProxyMesh",
+            point_components=array("f"),
+            face_vertex_counts=array("i"),
+            face_vertex_indices=array("i"),
+        )
+
+    directions = np.asarray(
+        ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)),
+        dtype=np.int32,
     )
-    for i, j, k in sorted(occupied):
-        for direction, corners in directions:
-            neighbor = (i + direction[0], j + direction[1], k + direction[2])
-            if neighbor in occupied:
-                continue
-            face = []
-            for corner in corners:
-                vertex_key = (i + corner[0], j + corner[1], k + corner[2])
-                vertex_index = vertex_indices.get(vertex_key)
-                if vertex_index is None:
-                    vertex_index = len(points) // 3
-                    vertex_indices[vertex_key] = vertex_index
-                    points.extend(
-                        (
-                            grid_minimum.x + vertex_key[0] * cell_size,
-                            grid_minimum.y + vertex_key[1] * cell_size,
-                            grid_minimum.z + vertex_key[2] * cell_size,
-                        )
-                    )
-                face.append(vertex_index)
-            face_counts.append(4)
-            face_indices.extend(face)
+    corners = np.asarray(
+        (
+            ((1, 0, 0), (1, 1, 0), (1, 1, 1), (1, 0, 1)),
+            ((0, 0, 0), (0, 0, 1), (0, 1, 1), (0, 1, 0)),
+            ((0, 1, 0), (0, 1, 1), (1, 1, 1), (1, 1, 0)),
+            ((0, 0, 0), (1, 0, 0), (1, 0, 1), (0, 0, 1)),
+            ((0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)),
+            ((0, 0, 0), (0, 1, 0), (1, 1, 0), (1, 0, 0)),
+        ),
+        dtype=np.int32,
+    )
+    interior = occupied.copy()
+    interior[:-1] &= occupied[1:]
+    interior[-1] = False
+    interior[1:] &= occupied[:-1]
+    interior[0] = False
+    interior[:, :-1] &= occupied[:, 1:]
+    interior[:, -1] = False
+    interior[:, 1:] &= occupied[:, :-1]
+    interior[:, 0] = False
+    interior[:, :, :-1] &= occupied[:, :, 1:]
+    interior[:, :, -1] = False
+    interior[:, :, 1:] &= occupied[:, :, :-1]
+    interior[:, :, 0] = False
+    np.logical_not(interior, out=interior)
+    np.logical_and(interior, occupied, out=interior)
+    cells = np.argwhere(interior).astype(np.int32, copy=False)
+
+    present = np.zeros((len(cells), len(directions)), dtype=np.bool_)
+    occupied_shape = np.asarray(occupied.shape, dtype=np.int32)
+    for direction_index, direction in enumerate(directions):
+        neighbor_cells = cells + direction
+        valid = np.all((neighbor_cells >= 0) & (neighbor_cells < occupied_shape), axis=1)
+        valid_neighbors = neighbor_cells[valid]
+        present[valid, direction_index] = occupied[
+            valid_neighbors[:, 0],
+            valid_neighbors[:, 1],
+            valid_neighbors[:, 2],
+        ]
+    face_cells, face_directions = np.nonzero(~present)
+    vertex_keys = cells[face_cells, None, :] + corners[face_directions]
+    flat_vertex_keys = vertex_keys.reshape((-1, 3))
+    grid_shape = cells.max(axis=0).astype(np.int64) + 2
+    strides = np.asarray((grid_shape[1] * grid_shape[2], grid_shape[2], 1), dtype=np.int64)
+    vertex_ids = flat_vertex_keys.astype(np.int64) @ strides
+    _unique_ids, first_indices, inverse_indices = np.unique(
+        vertex_ids,
+        return_index=True,
+        return_inverse=True,
+    )
+    first_order = np.argsort(first_indices)
+    point_keys = flat_vertex_keys[first_indices[first_order]]
+    point_index_by_unique_id = np.empty(len(first_order), dtype=np.int32)
+    point_index_by_unique_id[first_order] = np.arange(len(first_order), dtype=np.int32)
+    quads = point_index_by_unique_id[inverse_indices].reshape((-1, 4))
+    triangles = np.empty((len(quads) * 2, 3), dtype=np.int32)
+    triangles[0::2] = quads[:, (0, 1, 2)]
+    triangles[1::2] = quads[:, (0, 2, 3)]
+
+    point_values = point_keys.astype(np.float64) * cell_size
+    point_values += np.asarray((grid_minimum.x, grid_minimum.y, grid_minimum.z), dtype=np.float64)
+    points = array("f")
+    points.frombytes(np.asarray(point_values, dtype=np.float32).tobytes())
+    face_counts = array("i", (3,)) * len(triangles)
+    face_indices = array("i")
+    face_indices.frombytes(triangles.tobytes())
     return GeometryBuffer(
         name="ProxyMesh",
         point_components=points,

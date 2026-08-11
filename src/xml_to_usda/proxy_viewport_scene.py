@@ -15,7 +15,7 @@ from .viewport_scene import (
 )
 
 
-_COLLISION_COLOR = Color4(0.35, 0.86, 1.0, 0.25)
+_COLLISION_COLOR = Color4(0.42, 0.95, 1.0, 0.30)
 
 
 def build_proxy_viewport_scene(proxy: ProxyMeshResult) -> ViewportScene:

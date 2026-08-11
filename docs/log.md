@@ -817,3 +817,52 @@ Major moves:
   Detailed Cuts and recovery smokes, plus the strict packaged stability gate
   at one worker/UI iteration on Big Spruce and the 28-million sample with no
   crash, retry, or missing result.
+
+## 2026-08-11 - Multi-stem Proxy collision and local refit
+
+- Stopped each collision stem axis at its initial generator level so descendant
+  branches cannot inflate or obscure independently fitted multi-stem guides.
+- Retained a compact stem-only collision source with the generated Proxy Mesh;
+  fit changes now rebuild locally instead of starting a worker and reloading the
+  full Proxy Source Projection.
+- The real three-trunk sample now produces three independent Box or Capsule
+  guides. Median local refit measured 0.71 ms there and 0.93 ms on Big Spruce,
+  versus about 456 ms and 870 ms for the previous fresh-process UI path.
+- Corrected per-stem width fitting for shared multistem root skin ownership. On
+  the three-trunk sample the fitted widths changed from `0.465 / 0.444 / 1.042`
+  meters to `0.465 / 0.444 / 0.453` meters without changing combined or
+  single-stem fitting.
+- Passed all 553 source regression tests, 26 packaged contracts, a fresh release
+  build, both packaged smokes, and the strict packaged stability gate at one
+  iteration on Big Spruce and the 28-million sample.
+
+## 2026-08-11 - Safe parameter scrolling and brighter Proxy collision
+
+- Replaced the Fracture-only wheel guard with one application-wide Qt filter:
+  wheel input over parameter controls scrolls their settings panel without
+  changing values, while viewport zoom and scroll bars remain native.
+- Increased Proxy collision guide opacity from `0.25` to `0.30` and brightened
+  its cyan tint, moderately strengthening the existing Fresnel rim without a
+  new shader branch.
+- Passed 22 focused Qt/viewport tests and produced the requested source-backed
+  Quick preview; packaged contracts, release ZIP, and smoke were intentionally
+  not run.
+
+## 2026-08-11 - Faster high-resolution Proxy Mesh
+
+- Increased Density Resolution from 256 to 512 and removed the redundant
+  Method selector from Proxy Preview; Density Field remains the fixed shipping
+  method.
+- Replaced Python occupied-cell tuples with a bounded dense NumPy grid,
+  evaluated foliage ellipsoids as quadratic forms, vectorized boundary surface
+  assembly, and bypassed the Python QEM triangulation loop for triangle input.
+- On the dense `SkeletalAssemblyTest_03_28mil.xml`, resolution 512 improved from
+  83.1 seconds to a 23.2-second median across three fresh worker-equivalent
+  processes. The three results had identical SHA-256; Big Spruce resolution 64
+  and 256 retained their previous byte-identical mesh hashes.
+- Rejected QEM aggressiveness changes, a lossless prepass, and naïve greedy
+  voxel strips because they provided no real win or weakened topology/quality.
+- Passed all 554 source tests and 26 packaged contracts, built the release EXE
+  and ZIP, and passed the packaged Detailed Cuts/recovery smokes. A direct
+  frozen Proxy worker preview of the external sample at resolution 512 exited
+  normally in 23.45 seconds with 4,999 output faces.

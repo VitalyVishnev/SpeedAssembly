@@ -89,19 +89,6 @@ class ProxyPreviewDialog(PreviewShellDialog):
         title.setStyleSheet("font-weight: 700;")
         settings_layout.addWidget(title)
 
-        _add_group_header(settings_layout, settings_panel, "Method")
-        self.method_combo = QComboBox(settings_panel)
-        self.method_combo.addItem("Density Field", PROXY_METHOD_DENSITY_FIELD)
-        self.method_combo.setCurrentIndex(self.method_combo.findData(settings.method))
-        method_label = QLabel("Method", settings_panel)
-        set_tooltip(
-            "Proxy generation algorithm. Density Field builds a compact shell from source geometry.",
-            method_label,
-            self.method_combo,
-        )
-        settings_layout.addWidget(method_label)
-        settings_layout.addWidget(self.method_combo)
-
         _add_group_header(settings_layout, settings_panel, "Simplification")
         self.polycount_slider, self.polycount_spin = _build_int_slider_row(
             settings_panel,
@@ -271,7 +258,6 @@ class ProxyPreviewDialog(PreviewShellDialog):
         if initial_proxy is not None:
             self.status_label.setText(_proxy_status_text(initial_proxy))
 
-        self.method_combo.currentIndexChanged.connect(lambda _index: self.regenerate())
         self.polycount_slider.sliderReleased.connect(self.regenerate)
         self.polycount_spin.editingFinished.connect(self.regenerate)
         self.inflation_slider.sliderReleased.connect(self.regenerate)
@@ -299,7 +285,7 @@ class ProxyPreviewDialog(PreviewShellDialog):
 
     def settings(self) -> ProxyMeshSettings:
         return ProxyMeshSettings(
-            method=str(self.method_combo.currentData() or PROXY_METHOD_DENSITY_FIELD),
+            method=PROXY_METHOD_DENSITY_FIELD,
             final_polycount=int(self.polycount_spin.value()),
             bounds_inflation=float(self.inflation_spin.value()),
             density_resolution=int(self.density_resolution_spin.value()),

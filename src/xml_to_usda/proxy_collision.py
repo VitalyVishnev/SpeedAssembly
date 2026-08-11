@@ -1,4 +1,4 @@
-"""Single-primitive trunk collision for Proxy Mesh assets."""
+"""Trunk collision fitting for Proxy Mesh assets."""
 
 from __future__ import annotations
 
@@ -28,6 +28,14 @@ class ProxyCollisionSettings:
     height_multiplier: float = 0.5
     width_multiplier: float = 1.0
     one_per_stem: bool = False
+
+
+@dataclass(frozen=True)
+class ProxyCollisionSource:
+    skeleton: tuple[Joint, ...]
+    stem_axes: tuple[tuple[str, ...], ...]
+    points: tuple[Vector3, ...]
+    point_joint_indices: tuple[int, ...]
 
 
 class ProxyCollisionError(ValueError):
@@ -64,6 +72,14 @@ def build_proxy_collision_meshes(
     resolved = validated_proxy_collision_settings(settings)
     if not resolved.enabled or resolved.height_multiplier == 0.0 or resolved.width_multiplier == 0.0:
         return ()
+    return _build_proxy_collision_meshes_from_source(
+        prepare_proxy_collision_source(model),
+        resolved,
+        render_mesh_name=render_mesh_name,
+    )
+
+
+def prepare_proxy_collision_source(model: CanonicalTreeModel) -> ProxyCollisionSource:
     if not model.skeleton:
         raise ProxyCollisionError("Proxy collision requires a skeleton.")
     if model.base_mesh is None:
@@ -77,19 +93,58 @@ def build_proxy_collision_meshes(
         raise ProxyCollisionError("Proxy collision could not resolve a skeleton stem axis.")
 
     joint_by_name = {joint.name: joint for joint in model.skeleton}
-    selected_axes = tuple(
-        _selected_axis(tuple(joint_by_name[token] for token in tokens if token in joint_by_name), resolved.height_multiplier)
-        for tokens in stem_axes
+    primary_axes = tuple(_primary_stem_axis(axis, joint_by_name) for axis in stem_axes)
+    stem_joint_indices = tuple(
+        index
+        for index, joint in enumerate(model.skeleton)
+        if any(joint.name in axis for axis in primary_axes)
     )
-    groups = tuple((selected_axis,) for selected_axis in selected_axes) if resolved.one_per_stem else (selected_axes,)
+    source_index_by_model_index = {
+        model_index: source_index for source_index, model_index in enumerate(stem_joint_indices)
+    }
+    points, point_joint_indices = _stem_mesh_points(model, source_index_by_model_index)
+    return ProxyCollisionSource(
+        skeleton=tuple(model.skeleton[index] for index in stem_joint_indices),
+        stem_axes=primary_axes,
+        points=points,
+        point_joint_indices=point_joint_indices,
+    )
+
+
+def build_proxy_collision_meshes_from_source(
+    source: ProxyCollisionSource,
+    settings: ProxyCollisionSettings | None,
+    *,
+    render_mesh_name: str = "ProxyMesh",
+) -> tuple[MeshData, ...]:
+    resolved = validated_proxy_collision_settings(settings)
+    if not resolved.enabled or resolved.height_multiplier == 0.0 or resolved.width_multiplier == 0.0:
+        return ()
+    return _build_proxy_collision_meshes_from_source(source, resolved, render_mesh_name=render_mesh_name)
+
+
+def _build_proxy_collision_meshes_from_source(
+    source: ProxyCollisionSource,
+    settings: ProxyCollisionSettings,
+    *,
+    render_mesh_name: str,
+) -> tuple[MeshData, ...]:
+    if not source.skeleton or not source.stem_axes:
+        raise ProxyCollisionError("Proxy collision source has no skeleton stem axes.")
+    joint_by_name = {joint.name: joint for joint in source.skeleton}
+    selected_axes = tuple(
+        _selected_axis(tuple(joint_by_name[token] for token in tokens if token in joint_by_name), settings.height_multiplier)
+        for tokens in source.stem_axes
+    )
+    groups = tuple((selected_axis,) for selected_axis in selected_axes) if settings.one_per_stem else (selected_axes,)
     return tuple(
-        _build_collision_for_axes(model, group, resolved, render_mesh_name=render_mesh_name, primitive_index=index)
+        _build_collision_for_axes(source, group, settings, render_mesh_name=render_mesh_name, primitive_index=index)
         for index, group in enumerate(groups)
     )
 
 
 def _build_collision_for_axes(
-    model: CanonicalTreeModel,
+    source: ProxyCollisionSource,
     selected_axes: tuple[_SelectedAxis, ...],
     settings: ProxyCollisionSettings,
     *,
@@ -121,7 +176,11 @@ def _build_collision_for_axes(
         )
     else:
         start, end = _fitted_span(selected_points, direction)
-    trunk_points = _trunk_mesh_points(model, selected_tokens)
+    width_tokens = selected_tokens
+    if len(source.stem_axes) > 1 and len(selected_axes) == 1 and len(selected_tokens) > 1:
+        # A shared multistem root may own base vertices from every stem.
+        width_tokens = selected_tokens - {source.stem_axes[primitive_index][0]}
+    trunk_points = _trunk_mesh_points(source, width_tokens)
     auto_width, transverse_offset = _transverse_aabb_width(trunk_points, start, direction)
     if len(selected_axes) > 1:
         start = _add(start, transverse_offset)
@@ -203,25 +262,64 @@ def _fitted_axis(points: tuple[Vector3, ...], expected_direction: Vector3) -> Ve
     return Vector3(float(axis[0] / length), float(axis[1] / length), float(axis[2] / length))
 
 
-def _trunk_mesh_points(model: CanonicalTreeModel, selected_tokens: frozenset[str]) -> tuple[Vector3, ...]:
+def _primary_stem_axis(axis: tuple[str, ...], joint_by_name: dict[str, Joint]) -> tuple[str, ...]:
+    joints = tuple(joint_by_name[token] for token in axis if token in joint_by_name)
+    if not joints:
+        raise ProxyCollisionError("Proxy collision main skeleton axis is empty.")
+    generator_level = joints[0].generator_level
+    if generator_level is None:
+        return tuple(joint.name for joint in joints)
+    primary: list[str] = []
+    for joint in joints:
+        if joint.generator_level != generator_level:
+            break
+        primary.append(joint.name)
+    return tuple(primary) or (joints[0].name,)
+
+
+def _stem_mesh_points(
+    model: CanonicalTreeModel,
+    source_index_by_model_index: dict[int, int],
+) -> tuple[tuple[Vector3, ...], tuple[int, ...]]:
     mesh = model.base_mesh
     assert mesh is not None
     element_size = int(mesh.skel_element_size)
     expected = len(mesh.points) * element_size
     if element_size <= 0 or len(mesh.skel_joint_indices) < expected or len(mesh.skel_joint_weights) < expected:
         raise ProxyCollisionError("Proxy collision requires complete base-mesh skin binding data.")
-    selected: list[Vector3] = []
+    selected_points: list[Vector3] = []
+    selected_joint_indices: list[int] = []
     for point_index, point in enumerate(mesh.points):
         offset = point_index * element_size
-        influence = max(range(element_size), key=lambda slot: float(mesh.skel_joint_weights[offset + slot]))
+        influence = (
+            0
+            if element_size == 1
+            else max(range(element_size), key=lambda slot: float(mesh.skel_joint_weights[offset + slot]))
+        )
         joint_index = int(mesh.skel_joint_indices[offset + influence])
         if not 0 <= joint_index < len(model.skeleton):
             raise ProxyCollisionError(f"Proxy collision base-mesh point {point_index} references invalid joint {joint_index}.")
-        if model.skeleton[joint_index].name in selected_tokens:
-            selected.append(point)
+        source_joint_index = source_index_by_model_index.get(joint_index)
+        if source_joint_index is not None:
+            selected_points.append(point)
+            selected_joint_indices.append(source_joint_index)
+    if not selected_points:
+        raise ProxyCollisionError("Proxy collision found no base-mesh vertices owned by the skeleton stems.")
+    return tuple(selected_points), tuple(selected_joint_indices)
+
+
+def _trunk_mesh_points(source: ProxyCollisionSource, selected_tokens: frozenset[str]) -> tuple[Vector3, ...]:
+    selected_joint_indices = {
+        index for index, joint in enumerate(source.skeleton) if joint.name in selected_tokens
+    }
+    selected = tuple(
+        point
+        for point, joint_index in zip(source.points, source.point_joint_indices, strict=True)
+        if joint_index in selected_joint_indices
+    )
     if not selected:
         raise ProxyCollisionError("Proxy collision found no base-mesh vertices owned by the selected trunk segment.")
-    return tuple(selected)
+    return selected
 
 
 def _fitted_span(points: tuple[Vector3, ...], axis: Vector3) -> tuple[Vector3, Vector3]:

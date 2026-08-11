@@ -38,12 +38,28 @@ Main systems:
 - `src/xml_to_usda/collision_primitives.py` - shared oriented Box/Capsule mesh builders used by Proxy Mesh and Fracturing.
 - `src/xml_to_usda/mesh_pruning.py` - shared deterministic percentage-based face pruning for preview/proxy workflows that need to drop the smallest disconnected base-mesh islands before their own simplification pass.
 
-Proxy Preview treats render-mesh generation and collision fitting as separate
-worker actions. Collision-only settings reuse the current `ProxyMeshResult`;
-On/Off reuses the retained fitted collision immediately, while fit changes load
-the cached Proxy Source Projection without rerunning voxel extraction or QEM.
+Proxy Preview prepares a compact `ProxyCollisionSource` with only primary-stem
+joints and their owned base-mesh points during render-mesh generation. The
+source remains in `ProxyMeshResult`; collision On/Off reuses retained guides and
+fit changes rebuild them locally without a worker, source reload, voxel
+extraction, or QEM. The simplified viewport mesh is not a collision source
+because it no longer retains per-stem skin ownership and also contains crown
+geometry.
 The Proxy viewport frames and places its grid from the render mesh and explicit
 tree pivot, never from guide collision bounds.
+
+The Proxy density field uses a longest-axis grid capped at resolution `512`.
+Foliage ellipsoids are evaluated as equivalent quadratic forms into one dense
+NumPy boolean grid instead of a Python set of occupied coordinate tuples. The
+grid is bounded by `512^3` cells; surface extraction keeps only boundary cells,
+authors their triangles in deterministic first-seen order, and hands already
+triangulated buffers to the shared QEM path. Existing resolution 64/256 output
+ordering remains byte-identical.
+
+The main Qt shell installs one application-wide parameter wheel filter. Wheel
+input over sliders, spin boxes, combos, and dials scrolls the nearest settings
+panel when available and never changes the parameter; wheel input over a 3D
+viewport remains available for camera zoom.
 
 Important data flow:
 

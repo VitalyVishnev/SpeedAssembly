@@ -185,7 +185,10 @@ def test_proxy_viewport_scene_adds_all_collision_primitives_as_transparent_ghost
     scene = build_proxy_viewport_scene(proxy)
 
     assert [draw.visibility_group for draw in scene.draw_calls] == ["mesh", "collision", "collision"]
-    assert [draw.tint.a for draw in scene.draw_calls[1:]] == [pytest.approx(0.25), pytest.approx(0.25)]
+    assert [draw.tint for draw in scene.draw_calls[1:]] == [
+        Color4(0.42, 0.95, 1.0, 0.30),
+        Color4(0.42, 0.95, 1.0, 0.30),
+    ]
     assert scene.stats.draw_call_count == 3
     assert scene.bounds.min_point.y == pytest.approx(0.0)
     assert scene.grid_origin == Vector3(0.0, 0.0, 0.0)

@@ -52,6 +52,21 @@ def _triangulated_mesh_arrays(mesh: GeometryBuffer):
         raise QemSimplificationError(f"Mesh {mesh.name} has no points.")
     if not bool(np.isfinite(points).all()):
         raise QemSimplificationError(f"Mesh {mesh.name} contains non-finite point coordinates.")
+    face_counts = np.asarray(mesh.face_vertex_counts)
+    if (
+        len(face_counts) > 0
+        and len(mesh.face_vertex_indices) == len(face_counts) * 3
+        and bool(np.all(face_counts == 3))
+    ):
+        triangle_array = np.asarray(mesh.face_vertex_indices, dtype=np.int32).reshape((-1, 3))
+        invalid = np.flatnonzero((triangle_array < 0) | (triangle_array >= len(points)))
+        if len(invalid) > 0:
+            flat_index = int(invalid[0])
+            raise QemSimplificationError(
+                f"Mesh {mesh.name} face {flat_index // 3} references point "
+                f"{int(triangle_array.reshape(-1)[flat_index])} outside the mesh."
+            )
+        return points, triangle_array
     triangles: list[tuple[int, int, int]] = []
     offset = 0
     point_count = len(points)

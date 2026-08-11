@@ -127,8 +127,8 @@ def test_proxy_generation_rejects_density_resolution_above_service_cap() -> None
         assembly_parts=(),
     )
 
-    with pytest.raises(ProxyMeshError, match="must be between 1 and 256"):
-        generate_proxy_mesh(empty_model, ProxyMeshSettings(density_resolution=257))
+    with pytest.raises(ProxyMeshError, match="must be between 1 and 512"):
+        generate_proxy_mesh(empty_model, ProxyMeshSettings(density_resolution=513))
 
 
 def _strip_mesh(name: str, triangle_count: int) -> MeshData:
@@ -758,6 +758,16 @@ def test_proxy_collision_state_reuses_render_mesh_and_disabled_export_hides_cach
     assert updated.mesh is proxy.mesh
     assert updated.collision_meshes is proxy.collision_meshes
     assert 'def Mesh "UBX_ProxyMesh_00"' not in render_proxy_usda(updated, root_name="Tree_proxy")
+
+    capsule_settings = replace(
+        disabled_settings,
+        collision=replace(disabled_settings.collision, enabled=True, mode=ProxyCollisionMode.CAPSULE),
+    )
+    refitted = update_proxy_collision(updated, capsule_settings)
+
+    assert refitted.mesh is proxy.mesh
+    assert refitted.collision_source is proxy.collision_source
+    assert [mesh.name for mesh in refitted.collision_meshes] == ["UCP_ProxyMesh_00"]
     with pytest.raises(ProxyMeshError, match="non-collision settings changed"):
         update_proxy_collision(updated, replace(disabled_settings, final_polycount=123))
 
@@ -795,6 +805,54 @@ def test_three_trunk_proxy_can_use_one_combined_or_one_collision_per_stem() -> N
         "UBX_ProxyMesh_01",
         "UBX_ProxyMesh_02",
     ]
+    box_widths = tuple(_distance(mesh.points[0], mesh.points[1]) for mesh in separated.collision_meshes)
+    assert max(box_widths) / min(box_widths) < 1.1
+    capsule_settings = replace(
+        separated.settings,
+        collision=replace(separated.settings.collision, mode=ProxyCollisionMode.CAPSULE),
+    )
+    capsules = update_proxy_collision(separated, capsule_settings)
+    assert [mesh.name for mesh in capsules.collision_meshes] == [
+        "UCP_ProxyMesh_00",
+        "UCP_ProxyMesh_01",
+        "UCP_ProxyMesh_02",
+    ]
+    assert separated.collision_source is not None
+    joint_by_name = {joint.name: joint for joint in model.skeleton}
+    for collision, axis_tokens in zip(
+        separated.collision_meshes,
+        separated.collision_source.stem_axes,
+        strict=True,
+    ):
+        joints = tuple(joint_by_name[token] for token in axis_tokens)
+        axis_points = tuple(joint.bind_translate for joint in joints) + (joints[-1].bind_end_translate,)
+        assert axis_points[-1] is not None
+        expected_length = sum(
+            _distance(axis_points[index], axis_points[index + 1])
+            for index in range(len(axis_points) - 1)
+        ) * 0.5
+        bottom = _average_points(collision.points[:4])
+        top = _average_points(collision.points[4:])
+        assert (bottom.x, bottom.y, bottom.z) == pytest.approx(
+            (joints[0].bind_translate.x, joints[0].bind_translate.y, joints[0].bind_translate.z)
+        )
+        assert _distance(bottom, top) == pytest.approx(expected_length)
+
+
+def _average_points(points: tuple[Vector3, ...]) -> Vector3:
+    return Vector3(
+        sum(point.x for point in points) / len(points),
+        sum(point.y for point in points) / len(points),
+        sum(point.z for point in points) / len(points),
+    )
+
+
+def _distance(first: Vector3, second: Vector3) -> float:
+    return (
+        (first.x - second.x) ** 2
+        + (first.y - second.y) ** 2
+        + (first.z - second.z) ** 2
+    ) ** 0.5
 
 
 def _mesh_signature(mesh: GeometryBuffer) -> tuple[tuple[float, ...], tuple[int, ...], tuple[int, ...]]:

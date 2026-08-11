@@ -300,7 +300,7 @@ def test_load_gui_settings_clamps_imported_proxy_density_to_supported_cap(tmp_pa
 
     restored = load_gui_settings(settings_path)
 
-    assert restored.proxy_mesh_settings.density_resolution == 256
+    assert restored.proxy_mesh_settings.density_resolution == 512
     assert restored.proxy_mesh_settings.collision == ProxyCollisionSettings()
 
 

@@ -317,3 +317,48 @@ The new Skeleton does not inherit Skeleton-only metadata from the old asset.
 Animation tracks, sockets, and Physics Asset local frames are not compensated.
 Reimport can replace the result. Validate reference-pose geometry, wind, sockets,
 physics, and any authored animations before treating this as a repair workflow.
+
+## Experiment: Fit Proxy collision from the simplified viewport mesh
+
+Status: Rejected
+
+Context:
+Collision-only Proxy Preview updates were slow enough to suggest reusing the
+already available low-poly viewport mesh.
+
+Outcome:
+The density/QEM mesh no longer retains base-mesh skin ownership and includes
+crown geometry. Assigning its points to independent stems would require a new
+geometric heuristic and could reproduce the multi-stem width error.
+
+Keep:
+Prepare one compact source from primary-stem joints and their owned base-mesh
+points during initial preview generation, then refit collision locally. On the
+three-trunk sample it contains 19 joints and 180 points; on Big Spruce, 17
+joints and 973 points.
+
+Related files:
+- `src/xml_to_usda/proxy_collision.py`
+- `src/xml_to_usda/proxy_mesh_service.py`
+
+## Experiment: Reduce high-resolution Proxy QEM input before simplification
+
+Status: Rejected
+
+Resolution 512 on the dense 28-million sample produces about 6.77 million raw
+surface triangles before the requested 5,000-triangle QEM result. A native
+`fast-simplification` lossless prepass reduced a resolution-256 input from
+1.65 million to 0.93 million triangles, but total simplification rose from
+2.25 to 3.56 seconds. Raising QEM aggressiveness from 7 to 10 on the
+resolution-512 input changed the result and was slightly slower: 9.30 seconds
+versus 8.98 seconds.
+
+Greedy coplanar voxel-strip merging was also rejected: naïve strip boundaries
+introduce T-junctions, so making it topology-safe would require a second mesh
+algorithm and substantially more complexity. Keep direct QEM and the retained
+dense-grid/quadratic NumPy acceleration. Revisit surface reduction only with a
+measured topology-preserving implementation.
+
+Related files:
+- `src/xml_to_usda/proxy_mesh_service.py`
+- `src/xml_to_usda/qem_simplification.py`

@@ -17,9 +17,12 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractScrollArea,
+    QAbstractSlider,
+    QAbstractSpinBox,
     QLayout,
     QCheckBox,
     QComboBox,
@@ -37,6 +40,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QApplication,
+    QScrollBar,
     QSizePolicy,
     QSpinBox,
     QTabWidget,
@@ -676,6 +680,26 @@ class GlobalSettingsDialog(QDialog):
             self.warning_label.setText("")
 
 
+class _ParameterWheelFilter(QObject):
+    def eventFilter(self, watched, event) -> bool:  # type: ignore[override]
+        if (
+            event.type() != QEvent.Type.Wheel
+            or not isinstance(watched, (QAbstractSlider, QAbstractSpinBox, QComboBox))
+            or isinstance(watched, QScrollBar)
+        ):
+            return super().eventFilter(watched, event)
+
+        parent = watched.parentWidget()
+        while parent is not None and not isinstance(parent, QAbstractScrollArea):
+            parent = parent.parentWidget()
+        if parent is not None:
+            delta = event.angleDelta().y() or event.pixelDelta().y()
+            bar = parent.verticalScrollBar()
+            bar.setValue(bar.value() - int(delta))
+        event.accept()
+        return True
+
+
 class MainWindow(QWidget):
     ASYNC_SOURCE_DISCOVERY_THRESHOLD_BYTES = 5 * 1024 * 1024
     ASYNC_WIND_REFRESH_THRESHOLD_BYTES = 5 * 1024 * 1024
@@ -804,7 +828,9 @@ class MainWindow(QWidget):
 
         self._build_layout()
         app = QApplication.instance()
+        self._parameter_wheel_filter = _ParameterWheelFilter(self)
         if app is not None:
+            app.installEventFilter(self._parameter_wheel_filter)
             app.installEventFilter(self)
         self._install_resize_event_filters()
         self._apply_saved_state()
@@ -2890,6 +2916,11 @@ class MainWindow(QWidget):
             },
         )
         if reusable_proxy is not None:
+            if reusable_proxy.collision_source is not None:
+                if self._background_jobs.proxy_preview_running:
+                    self._background_jobs.cancel_proxy_mesh_preview()
+                self._handle_proxy_preview_result(reusable_proxy)
+                return
             previous_collision = cached_proxy.settings.collision
             same_fit = replace(previous_collision, enabled=settings.collision.enabled) == settings.collision
             zero_size = settings.collision.height_multiplier == 0.0 or settings.collision.width_multiplier == 0.0

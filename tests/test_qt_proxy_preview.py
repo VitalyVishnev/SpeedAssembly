@@ -11,8 +11,8 @@ pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 pytestmark = pytest.mark.qt
 
-from xml_to_usda.models import GeometryBuffer, MeshData, Vector3
-from xml_to_usda.proxy_collision import ProxyCollisionMode
+from xml_to_usda.models import GeometryBuffer, Joint, Matrix4d, MeshData, Vector3
+from xml_to_usda.proxy_collision import ProxyCollisionMode, ProxyCollisionSource
 from xml_to_usda.proxy_mesh_service import (
     PROXY_METHOD_DENSITY_FIELD,
     ProxyMeshResult,
@@ -27,6 +27,9 @@ def test_proxy_preview_exposes_persisted_collision_contract(qtbot) -> None:
     dialog = ProxyPreviewDialog(settings=ProxyMeshSettings())
     qtbot.addWidget(dialog)
 
+    assert not hasattr(dialog, "method_combo")
+    assert dialog.density_resolution_spin.maximum() == 512
+    assert dialog.settings().method == PROXY_METHOD_DENSITY_FIELD
     assert dialog.collision_check.isChecked()
     assert dialog.collision_type_combo.currentData() == ProxyCollisionMode.BOX.value
     assert dialog.collision_height_spin.value() == pytest.approx(0.5)
@@ -72,6 +75,24 @@ def test_collision_toggle_reuses_proxy_and_fit_changes_request_collision_only() 
                 face_vertex_indices=(0, 1, 2),
             ),
         ),
+        collision_source=ProxyCollisionSource(
+            skeleton=(
+                Joint(
+                    name="root",
+                    generator_level=0,
+                    bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 0.0)),
+                    bind_end_transform=Matrix4d.from_translation(Vector3(0.0, 2.0, 0.0)),
+                ),
+            ),
+            stem_axes=(("root",),),
+            points=(
+                Vector3(-0.5, 0.0, -0.5),
+                Vector3(0.5, 0.0, 0.5),
+                Vector3(-0.5, 1.0, -0.5),
+                Vector3(0.5, 1.0, 0.5),
+            ),
+            point_joint_indices=(0, 0, 0, 0),
+        ),
     )
     fake = SimpleNamespace(
         _proxy_mesh_settings=proxy.settings,
@@ -101,4 +122,6 @@ def test_collision_toggle_reuses_proxy_and_fit_changes_request_collision_only() 
         collision=replace(proxy.settings.collision, mode=ProxyCollisionMode.CAPSULE),
     )
     MainWindow._handle_proxy_preview_settings_changed(fake, "tree.xml", request, capsule)
-    assert starts[-1][2] == {"collision_only": True}
+    assert starts == []
+    assert handled[-1].mesh is proxy.mesh
+    assert [mesh.name for mesh in handled[-1].collision_meshes] == ["UCP_ProxyMesh_00"]

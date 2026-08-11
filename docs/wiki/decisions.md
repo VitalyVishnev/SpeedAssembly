@@ -1215,25 +1215,84 @@ Status: Active
 Proxy Mesh collision defaults to one enabled Box fitted from the lower `0.5`
 of the same base-mesh-owned stem axes used by Fracturing. Width `1.0` is the
 largest transverse local AABB span of vertices owned by the selected stem
-segments. Height and Width zero deliberately omit collision.
+segments. Each axis stops when the initial stem generator level changes, so a
+descendant side branch cannot inflate the collision height or width. Height and
+Width zero deliberately omit collision.
 
 Multi-stem sources default to one combined PCA-fitted primitive. `One Primitive
 per Stem` instead emits one independently fitted `UBX_` or `UCP_` guide sibling
-per stem. Collision transforms are baked into mesh points because UE ignored
-collision prim transforms in the validated Fracture path. Do not author USD
-Physics APIs on these siblings.
+per stem. Per-stem width excludes vertices owned by the first stem joint when
+more than one stem exists: observed SpeedTree skin binding assigns all base
+rings to one shared root, so using that ownership measures the distance between
+stems instead of one diameter. The next selected stem joints retain an
+unambiguous trunk cross-section. Combined and single-stem fitting keep their
+existing root coverage. Collision transforms are baked into mesh points because
+UE ignored collision prim transforms in the validated Fracture path. Do not
+author USD Physics APIs on these siblings.
 
 Box and Capsule import as simple collision on the Proxy Static Mesh was manually
 confirmed in UE 5.7.x on 2026-08-08. Proxy Preview retains the fitted collision
 when hidden, so `Generate Collision` On/Off never regenerates Proxy Mesh. Other
-collision fit changes use the collision-only worker action. Guide collision does
-not contribute to camera/grid bounds; the grid stays at the tree pivot.
+collision fit changes rebuild locally from a compact stem-only source retained
+with the preview result; they do not start a worker or reload the full Proxy
+Source Projection. The simplified viewport mesh is not used because it has no
+per-stem skin ownership. Guide collision does not contribute to camera/grid
+bounds; the grid stays at the tree pivot.
 
 Related files:
 - `src/xml_to_usda/proxy_collision.py`
 - `src/xml_to_usda/collision_primitives.py`
 - `src/xml_to_usda/proxy_source_projection.py`
 - `src/xml_to_usda/proxy_mesh_service.py`
+
+## Decision: Proxy UI exposes one density method with resolution up to 512
+
+Status: Active
+
+Density Field is the only supported operator-facing Proxy Mesh method. The
+Method control is hidden and UI requests always emit `density_field`; the
+internal `instance_bounds` path remains only as a diagnostic baseline. Density
+Resolution accepts `1..512`, and imported larger values clamp to 512.
+
+High-resolution occupancy uses one bounded dense NumPy boolean grid. Prepared
+ellipsoid kernels are evaluated through their mathematically equivalent
+quadratic form, the surface builder processes only boundary cells, and the QEM
+adapter accepts the resulting triangles without a Python face loop. This keeps
+the existing extraction and simplification contract rather than introducing a
+second high-resolution algorithm.
+
+On `SkeletalAssemblyTest_03_28mil.xml`, the observed full resolution-512 path
+improved from 83.1 seconds before this work to a 23.2-second median across three
+fresh worker-equivalent processes. All three produced the same mesh SHA-256.
+Big Spruce resolution 64 and 256 retained their previous byte-identical mesh
+hashes. QEM remains the dominant cost at 512; higher QEM aggressiveness and a
+lossless prepass were measured and rejected because they did not improve total
+time without changing quality.
+
+Related files:
+- `src/xml_to_usda/proxy_mesh_service.py`
+- `src/xml_to_usda/qem_simplification.py`
+- `src/xml_to_usda/qt_ui/proxy_preview.py`
+- `src/xml_to_usda/settings_service.py`
+
+Proxy collision guides use a brighter cyan tint with opacity `0.30` in Proxy
+Preview. This is a 20% opacity increase over the former `0.25`; the brighter
+tint also strengthens the existing rim/Fresnel contribution without adding a
+separate shader path.
+
+## Decision: Mouse wheel does not edit UI parameters
+
+Status: Active
+
+The application-level Qt event filter consumes wheel input over parameter
+sliders, spin boxes, combo boxes, and dials. It forwards vertical movement to
+the nearest scroll area when one exists. Scroll bars and 3D viewports retain
+their native wheel behavior. This prevents accidental parameter regeneration
+while browsing any main or preview settings panel.
+
+Related files:
+- `src/xml_to_usda/qt_ui/window.py`
+- `tests/test_qt_parameter_wheel.py`
 
 ## Decision: Local +X and dual skinning are the default skeleton contract
 
