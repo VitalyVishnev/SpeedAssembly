@@ -70,6 +70,7 @@ from ..proxy_mesh_service import (
     ProxyMeshResult,
     ProxyMeshSettings,
     ProxyMeshSourceRequest,
+    derive_proxy_usda_output_path,
     prepare_proxy_mesh_source_request,
     update_proxy_collision,
 )
@@ -1036,14 +1037,6 @@ class MainWindow(QWidget):
         self.generate_button.setObjectName("GenerateWindButton")
         self.generate_button.clicked.connect(self.run_generate_wind_json)
         self.generate_button.setToolTip("Writes Dynamic Wind JSON. Lower wind values calm motion; higher values bend groups more.")
-        self.generate_proxy_button = QPushButton("Generate\nProxy Mesh", self)
-        self.generate_proxy_button.setObjectName("GenerateProxyButton")
-        self.generate_proxy_button.clicked.connect(self.run_generate_proxy_mesh)
-        self.generate_proxy_button.setToolTip("Writes the proxy companion USDA. Lower proxy settings are cheaper; higher settings keep more shape.")
-        self._action_buttons = [
-            self.generate_button,
-            self.generate_proxy_button,
-        ]
 
         self.generate_action_frame = QFrame(self)
         self.generate_action_frame.setObjectName("SplitActionFrame")
@@ -1051,12 +1044,7 @@ class MainWindow(QWidget):
         generate_action_layout.setContentsMargins(0, 0, 0, 0)
         generate_action_layout.setSpacing(0)
         generate_action_layout.addWidget(self.generate_button, 1)
-        self.generate_action_divider = QFrame(self.generate_action_frame)
-        self.generate_action_divider.setObjectName("GenerateActionDivider")
-        generate_action_layout.addWidget(self.generate_action_divider, 0)
-        generate_action_layout.addWidget(self.generate_proxy_button, 1)
         generate_action_layout.setStretch(0, 1)
-        generate_action_layout.setStretch(2, 1)
 
         right_column = QVBoxLayout()
         self._action_column_layout = right_column
@@ -1449,12 +1437,8 @@ class MainWindow(QWidget):
         self.generate_action_frame.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.generate_action_frame.setFixedWidth(action_width)
         self.generate_action_frame.setFixedHeight(button_height)
-        generate_left_width = max(1, (action_width - 1) // 2)
-        generate_right_width = max(1, action_width - generate_left_width - 1)
         self.generate_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.generate_proxy_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.generate_button.setFixedSize(generate_left_width, button_height)
-        self.generate_proxy_button.setFixedSize(generate_right_width, button_height)
+        self.generate_button.setFixedSize(action_width, button_height)
 
         refresh_width = int(self._theme.chrome.get("wind_refresh_button_width", 164))
         refresh_height = int(self._theme.chrome.get("wind_refresh_button_height", 28))
@@ -1727,7 +1711,10 @@ class MainWindow(QWidget):
             has_input and not self._conversion_running and not self._wind_refresh_running and not self._wind_json_running
         )
         proxy_running = self._background_jobs.proxy_mesh_running or self._background_jobs.proxy_preview_running
-        self.generate_proxy_button.setEnabled(has_input and not self._conversion_running and not proxy_running)
+        if self._proxy_preview_dialog is not None:
+            self._proxy_preview_dialog.set_export_enabled(
+                has_input and not self._conversion_running and not proxy_running
+            )
         self.geometry_panel.preview_proxy_button.setEnabled(has_input and not self._conversion_running)
         fracture_preview_running = self._background_jobs.fracture_preview_running
         self.geometry_panel.preview_fracture_button.setEnabled(
@@ -2481,6 +2468,8 @@ class MainWindow(QWidget):
         dialog = ProxyPreviewDialog(
             settings=self._proxy_mesh_settings,
             initial_proxy=self._proxy_preview_result_for_input(input_path),
+            output_path=str(derive_proxy_usda_output_path(request.input_path, request.output_path)),
+            on_generate_proxy=self.run_generate_proxy_mesh,
             on_settings_changed=lambda settings, current_input=input_path, current_request=request: self._handle_proxy_preview_settings_changed(
                 current_input,
                 current_request,
@@ -3012,11 +3001,18 @@ class MainWindow(QWidget):
             self._finish_status_activity("cancelled", "Proxy Preview cancelled.")
         self._apply_proxy_preview_state(input_path, settings, proxy)
 
-    def run_generate_proxy_mesh(self) -> None:
+    def run_generate_proxy_mesh(
+        self,
+        proxy_output_path: str = "",
+        settings: ProxyMeshSettings | None = None,
+    ) -> None:
         self._source_refresh_timer.stop()
-        self._proxy_mesh_settings = self.geometry_panel.proxy_settings()
+        self._proxy_mesh_settings = settings or self.geometry_panel.proxy_settings()
+        if settings is not None:
+            self.geometry_panel.apply_proxy_settings(settings)
+            self._schedule_operator_state_save()
         try:
-            request = self._build_proxy_source_request()
+            request = self._build_proxy_source_request(proxy_output_path=proxy_output_path)
         except ValueError as exc:
             self._report_error("Missing input", str(exc))
             return
@@ -3106,6 +3102,8 @@ class MainWindow(QWidget):
     def _handle_proxy_mesh_export_result(self, result) -> None:
         self._finish_status_activity("success", f"Wrote Proxy Mesh USDA to {result.output_path}")
         self._append_log(f"Proxy Mesh complete\nWrote Proxy Mesh USDA to {result.output_path}")
+        if self._proxy_preview_dialog is not None:
+            self._proxy_preview_dialog.set_export_complete(result.output_path)
 
     def _handle_fracture_export_result(self, result) -> None:
         output_count = len(result.outputs)
@@ -3121,10 +3119,11 @@ class MainWindow(QWidget):
         self._append_log(f"Proxy Mesh preview error\n{message}")
         self._append_runtime_log("ERROR Proxy Mesh preview failed", message)
 
-    def _build_proxy_source_request(self) -> ProxyMeshSourceRequest:
+    def _build_proxy_source_request(self, *, proxy_output_path: str = "") -> ProxyMeshSourceRequest:
         return prepare_proxy_mesh_source_request(
             input_path=self.source_input.text(),
             output_path=self.output_input.text().strip(),
+            proxy_output_path=proxy_output_path,
             output_mode=OutputMode.SELF_CONTAINED,
             cpu_profile=self._operator_state.cpu_profile,
             fbx_cache_max_bytes=self._fbx_cache_max_bytes(),

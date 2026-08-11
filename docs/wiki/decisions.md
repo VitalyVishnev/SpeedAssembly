@@ -1269,6 +1269,13 @@ hashes. QEM remains the dominant cost at 512; higher QEM aggressiveness and a
 lossless prepass were measured and rejected because they did not improve total
 time without changing quality.
 
+The main file action row contains Convert to USDA and Generate Wind JSON only.
+Proxy Preview owns its export action in a bottom `Generate Proxy` block. The
+displayed path defaults to `<main Output stem>_proxy.usda`, remains editable,
+and is treated as the exact destination rather than being suffixed a second
+time. If current preview settings match the cached mesh, export writes that
+mesh; otherwise the existing isolated Proxy worker generates it.
+
 Related files:
 - `src/xml_to_usda/proxy_mesh_service.py`
 - `src/xml_to_usda/qem_simplification.py`

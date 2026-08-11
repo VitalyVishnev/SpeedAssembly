@@ -62,6 +62,7 @@ class ProxyMeshSettings:
 class ProxyMeshSourceRequest:
     input_path: str
     output_path: str = ""
+    proxy_output_path: str = ""
     output_mode: OutputMode = OutputMode.SELF_CONTAINED
     cpu_profile: CpuProfile = CpuProfile.BALANCED
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024
@@ -83,6 +84,7 @@ def prepare_proxy_mesh_source_request(
     *,
     input_path: str,
     output_path: str = "",
+    proxy_output_path: str = "",
     output_mode: OutputMode = OutputMode.SELF_CONTAINED,
     cpu_profile: CpuProfile = CpuProfile.BALANCED,
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
@@ -93,6 +95,7 @@ def prepare_proxy_mesh_source_request(
     return ProxyMeshSourceRequest(
         input_path=input_path.strip(),
         output_path=output_path.strip(),
+        proxy_output_path=proxy_output_path.strip(),
         output_mode=output_mode,
         cpu_profile=cpu_profile,
         fbx_cache_max_bytes=fbx_cache_max_bytes,
@@ -603,10 +606,15 @@ def export_proxy_usda(
     *,
     input_path: str,
     output_path: str,
+    proxy_output_path: str = "",
     settings: ProxyMeshSettings | None = None,
 ) -> ProxyMeshExportResult:
     """Generate and write the companion proxy USDA file."""
-    proxy_path = derive_proxy_usda_output_path(input_path, output_path)
+    proxy_path = (
+        Path(proxy_output_path.strip())
+        if proxy_output_path.strip()
+        else derive_proxy_usda_output_path(input_path, output_path)
+    )
     ensure_output_path_allowed(proxy_path)
     proxy = generate_proxy_mesh(model, settings)
     root_name = make_stable_prim_name(proxy_path.stem, fallback="Proxy")
@@ -626,9 +634,14 @@ def export_generated_proxy_usda(
     *,
     input_path: str,
     output_path: str,
+    proxy_output_path: str = "",
 ) -> ProxyMeshExportResult:
     """Write an already generated proxy mesh without rebuilding it."""
-    proxy_path = derive_proxy_usda_output_path(input_path, output_path)
+    proxy_path = (
+        Path(proxy_output_path.strip())
+        if proxy_output_path.strip()
+        else derive_proxy_usda_output_path(input_path, output_path)
+    )
     ensure_output_path_allowed(proxy_path)
     root_name = make_stable_prim_name(proxy_path.stem, fallback="Proxy")
     usda_text = render_proxy_usda(proxy, root_name=root_name)
@@ -684,6 +697,7 @@ def export_proxy_usda_from_source_request(
         model,
         input_path=input_path,
         output_path=request.output_path,
+        proxy_output_path=request.proxy_output_path,
         settings=settings,
     )
 
@@ -697,6 +711,7 @@ def export_generated_proxy_usda_from_source_request(
         proxy,
         input_path=request.input_path,
         output_path=request.output_path,
+        proxy_output_path=request.proxy_output_path,
     )
 
 

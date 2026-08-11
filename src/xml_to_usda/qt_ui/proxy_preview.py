@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from array import array
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QSignalBlocker, QTimer
 from PySide6.QtWidgets import (
@@ -16,13 +17,18 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
     QScrollArea,
     QSlider,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from ..models import GeometryBuffer
@@ -53,6 +59,8 @@ class ProxyPreviewDialog(PreviewShellDialog):
         on_settings_changed=None,
         preview_mesh: GeometryBuffer | None = None,
         initial_proxy: ProxyMeshResult | None = None,
+        output_path: str = "",
+        on_generate_proxy=None,
         on_preview_ready=None,
         on_preview_closed=None,
         parent=None,
@@ -61,6 +69,8 @@ class ProxyPreviewDialog(PreviewShellDialog):
         self._on_settings_changed = on_settings_changed or (lambda settings: None)
         self._preview_mesh = preview_mesh
         self._current_proxy: ProxyMeshResult | None = initial_proxy
+        self._default_output_path = output_path.strip()
+        self._on_generate_proxy = on_generate_proxy or (lambda output_path, settings: None)
         self._on_preview_ready = on_preview_ready or (lambda proxy: None)
         self._on_preview_closed = on_preview_closed or (lambda settings, proxy: None)
 
@@ -254,6 +264,39 @@ class ProxyPreviewDialog(PreviewShellDialog):
         self.status_label = QLabel("", settings_panel)
         self.status_label.setWordWrap(True)
         settings_layout.addWidget(self.status_label)
+
+        self.export_pane = QWidget(self.global_host)
+        export_pane_layout = QVBoxLayout(self.export_pane)
+        export_pane_layout.setContentsMargins(0, 0, 0, 0)
+        export_pane_layout.setSpacing(5)
+        _add_group_header(export_pane_layout, self.export_pane, "Generate Proxy")
+        output_label = QLabel("Output Path", self.export_pane)
+        self.output_path_edit = QLineEdit(self.export_pane)
+        self.output_path_edit.setText(self._default_output_path)
+        self.output_path_edit.setPlaceholderText("Select an output Proxy USDA path")
+        set_tooltip(
+            "Proxy USDA path. Defaults beside the main Output USDA; Browse or type to override.",
+            output_label,
+            self.output_path_edit,
+        )
+        export_pane_layout.addWidget(output_label)
+        export_pane_layout.addWidget(self.output_path_edit)
+        export_row = QWidget(self.export_pane)
+        export_layout = QHBoxLayout(export_row)
+        export_layout.setContentsMargins(0, 0, 0, 0)
+        export_layout.setSpacing(6)
+        self.browse_output_button = QPushButton("Browse", export_row)
+        self.browse_output_button.clicked.connect(self.browse_output_path)
+        self.browse_output_button.setFixedHeight(24)
+        self.browse_output_button.setToolTip("Choose where to write the Proxy USDA file.")
+        self.generate_proxy_button = QPushButton("Generate Proxy", export_row)
+        self.generate_proxy_button.clicked.connect(self.generate_proxy)
+        self.generate_proxy_button.setFixedHeight(24)
+        self.generate_proxy_button.setToolTip("Writes the current Proxy Mesh and collision to USDA.")
+        export_layout.addWidget(self.browse_output_button, 0)
+        export_layout.addWidget(self.generate_proxy_button, 1)
+        export_pane_layout.addWidget(export_row)
+        settings_layout.addWidget(self.export_pane)
         settings_layout.addStretch(1)
         if initial_proxy is not None:
             self.status_label.setText(_proxy_status_text(initial_proxy))
@@ -332,6 +375,41 @@ class ProxyPreviewDialog(PreviewShellDialog):
     def set_proxy(self, proxy: ProxyMeshResult) -> None:
         self._set_current_proxy(proxy)
         self.status_label.setText(_proxy_status_text(proxy))
+
+    def browse_output_path(self) -> None:
+        selected, _filter = QFileDialog.getSaveFileName(
+            self,
+            "Save Proxy USDA",
+            self.output_path_edit.text().strip() or self._default_output_path,
+            "USDA files (*.usda);;All files (*)",
+        )
+        if selected:
+            self.output_path_edit.setText(selected)
+
+    def generate_proxy(self) -> None:
+        output_path = self.output_path_edit.text().strip() or self._default_output_path
+        if not output_path:
+            self.status_label.setText("Select an output Proxy USDA path.")
+            return
+        if Path(output_path).exists():
+            answer = QMessageBox.question(
+                self,
+                "Overwrite Proxy USDA?",
+                f"Overwrite existing file?\n{output_path}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self.status_label.setText("Writing Proxy USDA...")
+        self._on_generate_proxy(output_path, self.settings())
+
+    def set_export_enabled(self, enabled: bool) -> None:
+        self.generate_proxy_button.setEnabled(enabled)
+
+    def set_export_complete(self, output_path: str) -> None:
+        self.output_path_edit.setText(output_path)
+        self.status_label.setText(f"Wrote Proxy Mesh USDA\n{output_path}")
 
     def _set_current_proxy(self, proxy: ProxyMeshResult) -> None:
         had_mesh = self.viewport.has_mesh()

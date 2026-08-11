@@ -619,10 +619,14 @@ def test_proxy_request_export_uses_proxy_source_projection(monkeypatch, tmp_path
     monkeypatch.setattr("xml_to_usda.proxy_mesh_service.load_proxy_source_projection", fake_load_proxy_source_projection)
     request = ConversionRequest(input_paths=("tree.xml",), output_path=str(tmp_path / "tree.usda"))
 
-    source_request = ProxyMeshSourceRequest.from_conversion_request(request)
+    explicit_output = tmp_path / "custom_proxy.usda"
+    source_request = replace(
+        ProxyMeshSourceRequest.from_conversion_request(request),
+        proxy_output_path=str(explicit_output),
+    )
     result = export_proxy_usda_from_source_request(source_request, ProxyMeshSettings(final_polycount=5000))
 
-    assert result.output_path == str(tmp_path / "tree_proxy.usda")
+    assert result.output_path == str(explicit_output)
     assert calls["input_path"] == "tree.xml"
 
 

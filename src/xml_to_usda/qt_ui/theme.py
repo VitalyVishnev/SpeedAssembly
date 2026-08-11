@@ -628,8 +628,7 @@ QPushButton#PrimaryActionButton {{
 QPushButton#PrimaryActionButton:hover {{
     background: {control_hover_fill};
 }}
-QPushButton#GenerateWindButton,
-QPushButton#GenerateProxyButton {{
+QPushButton#GenerateWindButton {{
     background: {button_fill};
     color: {button_text};
     border-radius: {button_radius}px;
@@ -637,20 +636,10 @@ QPushButton#GenerateProxyButton {{
     min-height: {button_height}px;
     padding: 4px 10px;
 }}
-QPushButton#GenerateWindButton {{
-    border-top-right-radius: 0px;
-    border-bottom-right-radius: 0px;
-}}
-QPushButton#GenerateProxyButton {{
-    border-top-left-radius: 0px;
-    border-bottom-left-radius: 0px;
-}}
-QPushButton#GenerateWindButton:hover,
-QPushButton#GenerateProxyButton:hover {{
+QPushButton#GenerateWindButton:hover {{
     background: {control_hover_fill};
 }}
-QPushButton#GenerateWindButton:disabled,
-QPushButton#GenerateProxyButton:disabled {{
+QPushButton#GenerateWindButton:disabled {{
     background: {button_fill_disabled};
     color: rgba(26, 26, 21, 0.58);
 }}
@@ -731,11 +720,6 @@ QMenu::separator {{
     margin: 6px 10px;
 }}
 QFrame#SplitActionDivider {{
-    background: {chrome_control_fill};
-    min-width: 1px;
-    max-width: 1px;
-}}
-QFrame#GenerateActionDivider {{
     background: {chrome_control_fill};
     min-width: 1px;
     max-width: 1px;

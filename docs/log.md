@@ -866,3 +866,16 @@ Major moves:
   and ZIP, and passed the packaged Detailed Cuts/recovery smokes. A direct
   frozen Proxy worker preview of the external sample at resolution 512 exited
   normally in 23.45 seconds with 4,999 output faces.
+
+## 2026-08-11 - Proxy export moved into Preview
+
+- Removed `Generate Proxy Mesh` from the main file action row, leaving Convert
+  to USDA and Generate Wind JSON.
+- Added a bottom `Generate Proxy` block to Proxy Preview with an editable exact
+  USDA output path, Browse action, and overwrite confirmation. The default is
+  derived from the main Output USDA.
+- Reused the existing cached-preview/export worker path; no second exporter or
+  generation implementation was added.
+- Passed all 554 source tests, 26 packaged contracts, the packaged Detailed
+  Cuts/recovery smokes, and a frozen export-worker smoke. The custom
+  `ChosenProxy.usda` path was written exactly without a second `_proxy` suffix.

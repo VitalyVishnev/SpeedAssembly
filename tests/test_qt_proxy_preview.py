@@ -23,13 +23,24 @@ from xml_to_usda.qt_ui.proxy_preview import ProxyPreviewDialog
 from xml_to_usda.qt_ui.window import MainWindow
 
 
-def test_proxy_preview_exposes_persisted_collision_contract(qtbot) -> None:
-    dialog = ProxyPreviewDialog(settings=ProxyMeshSettings())
+def test_proxy_preview_exposes_persisted_collision_contract(qtbot, tmp_path) -> None:
+    generated: list[tuple[str, ProxyMeshSettings]] = []
+    default_output = tmp_path / "tree_proxy.usda"
+    dialog = ProxyPreviewDialog(
+        settings=ProxyMeshSettings(),
+        output_path=str(default_output),
+        on_generate_proxy=lambda path, settings: generated.append((path, settings)),
+    )
     qtbot.addWidget(dialog)
 
     assert not hasattr(dialog, "method_combo")
     assert dialog.density_resolution_spin.maximum() == 512
     assert dialog.settings().method == PROXY_METHOD_DENSITY_FIELD
+    assert dialog.output_path_edit.text() == str(default_output)
+    explicit_output = tmp_path / "custom.usda"
+    dialog.output_path_edit.setText(str(explicit_output))
+    dialog.generate_proxy_button.click()
+    assert generated == [(str(explicit_output), dialog.settings())]
     assert dialog.collision_check.isChecked()
     assert dialog.collision_type_combo.currentData() == ProxyCollisionMode.BOX.value
     assert dialog.collision_height_spin.value() == pytest.approx(0.5)
