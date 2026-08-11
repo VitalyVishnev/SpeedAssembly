@@ -37,6 +37,10 @@ Main systems:
 - `src/xml_to_usda/proxy_collision.py` - deterministic Box/Capsule fitting for Proxy Mesh trunk collision using the Fracturing stem-axis contract.
 - `src/xml_to_usda/collision_primitives.py` - shared oriented Box/Capsule mesh builders used by Proxy Mesh and Fracturing.
 - `src/xml_to_usda/mesh_pruning.py` - shared deterministic percentage-based face pruning for preview/proxy workflows that need to drop the smallest disconnected base-mesh islands before their own simplification pass.
+- `docs/user/`, `mkdocs.yml`, and `.github/workflows/documentation.yml` - public
+  user documentation, isolated from the maintained engineering wiki and built
+  as a static MkDocs Material site for GitHub Pages. Documentation dependencies
+  stay outside the application runtime and release package.
 
 Proxy Preview prepares a compact `ProxyCollisionSource` with only primary-stem
 joints and their owned base-mesh points during render-mesh generation. The
@@ -236,6 +240,8 @@ Important folders:
 - `vault/` - reference USDA, importer, schema, and research material.
 - `docs/raw/` - preserved historical documentation.
 - `docs/wiki/` - maintained project memory.
+- `docs/user/` - public operator documentation; this is the only `docs/`
+  subtree published by MkDocs.
 
 External dependencies:
 

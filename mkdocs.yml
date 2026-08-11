@@ -1,0 +1,77 @@
+site_name: SpeedAssembly Documentation
+site_description: User documentation for the SpeedAssembly vegetation pipeline tool.
+site_url: https://vitalyvishnev.github.io/SpeedAssembly/
+repo_url: https://github.com/VitalyVishnev/SpeedAssembly
+repo_name: VitalyVishnev/SpeedAssembly
+edit_uri: edit/master/docs/user/
+docs_dir: docs/user
+site_dir: site
+strict: true
+
+theme:
+  name: material
+  language: en
+  font: false
+  palette:
+    - scheme: speedassembly
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.path
+    - navigation.indexes
+    - navigation.tracking
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+nav:
+  - Overview: index.md
+  - Getting started:
+      - Quick start: getting-started/quick-start.md
+  - Concepts:
+      - Pipeline overview: concepts/pipeline-overview.md
+  - Workflows:
+      - Proxy Mesh: workflows/proxy-mesh.md
+  - Parameter reference:
+      - Proxy Mesh: reference/proxy-mesh.md
+  - Troubleshooting:
+      - FAQ: troubleshooting/faq.md
+
+plugins:
+  - search
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+exclude_docs: |
+  .obsidian/
+  _drafts/
+  _templates/
+
+copyright: Copyright &copy; 2026 Vitaly Vishnev
+
+extra:
+  generator: false

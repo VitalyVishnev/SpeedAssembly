@@ -1,0 +1,96 @@
+:root {
+  --sa-ink: #1a1a15;
+  --sa-muted: #403d30;
+  --sa-panel: #dce5e8;
+  --sa-panel-border: #e0e9ec;
+  --sa-olive: #8f964e;
+  --sa-gold: #ddbb64;
+  --sa-copper: #bf8c4e;
+  --sa-danger: #a65233;
+  --sa-success: #3f7d4a;
+}
+
+[data-md-color-scheme="speedassembly"] {
+  --md-default-fg-color: var(--sa-ink);
+  --md-default-fg-color--light: var(--sa-muted);
+  --md-default-bg-color: #edf1ef;
+  --md-primary-fg-color: var(--sa-olive);
+  --md-primary-bg-color: #11130e;
+  --md-accent-fg-color: #725227;
+  --md-typeset-a-color: #66702f;
+  --md-code-bg-color: #d5dde0;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #747b3f;
+  --md-accent-fg-color: var(--sa-gold);
+  --md-default-bg-color: #20241f;
+  --md-typeset-a-color: #d7bd70;
+}
+
+body {
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+[data-md-color-scheme="speedassembly"] body {
+  background:
+    radial-gradient(circle at 12% 8%, rgb(143 150 78 / 28%), transparent 34rem),
+    radial-gradient(circle at 88% 18%, rgb(191 140 78 / 24%), transparent 30rem),
+    #d5ddda;
+}
+
+.md-header {
+  box-shadow: 0 0.2rem 1rem rgb(19 19 15 / 18%);
+}
+
+.md-main__inner {
+  margin-top: 1.2rem;
+}
+
+[data-md-color-scheme="speedassembly"] .md-content__inner {
+  background: rgb(237 241 239 / 96%);
+  border: 1px solid rgb(224 233 236 / 90%);
+  border-radius: 1.25rem;
+  box-shadow: 0 1rem 3rem rgb(26 26 21 / 12%);
+  padding: 1.6rem 2rem 2.2rem;
+}
+
+.sa-hero {
+  background: linear-gradient(135deg, rgb(143 150 78 / 20%), rgb(221 187 100 / 24%));
+  border: 1px solid rgb(143 150 78 / 35%);
+  border-radius: 1rem;
+  margin-bottom: 1.5rem;
+  padding: 1.5rem 1.75rem;
+}
+
+.sa-hero h1 {
+  margin-bottom: 0.4rem;
+}
+
+.md-typeset .md-button--primary {
+  background-color: var(--sa-olive);
+  border-color: var(--sa-olive);
+  color: #11130e;
+}
+
+.md-typeset .md-button--primary:hover {
+  background-color: var(--sa-copper);
+  border-color: var(--sa-copper);
+}
+
+.md-typeset table:not([class]) th {
+  background: rgb(143 150 78 / 20%);
+}
+
+@media screen and (max-width: 76.2344em) {
+  .md-main__inner {
+    margin-top: 0;
+  }
+
+  [data-md-color-scheme="speedassembly"] .md-content__inner {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 1.2rem;
+  }
+}

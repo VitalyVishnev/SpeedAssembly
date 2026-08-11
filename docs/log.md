@@ -879,3 +879,19 @@ Major moves:
 - Passed all 554 source tests, 26 packaged contracts, the packaged Detailed
   Cuts/recovery smokes, and a frozen export-worker smoke. The custom
   `ChosenProxy.usda` path was written exactly without a second `_proxy` suffix.
+
+## 2026-08-12 - Public documentation foundation
+
+- Added an isolated `docs/user/` MkDocs Material site for public SpeedAssembly
+  documentation; maintained `docs/wiki/`, raw history, drafts, templates, and
+  local Obsidian state stay outside the published artifact.
+- Added a branded responsive theme, search/navigation, Quick Start, pipeline
+  overview, Proxy Mesh workflow, complete Proxy parameter reference with stable
+  anchors, FAQ, and an excluded article template.
+- Added pinned documentation-only dependencies, a one-command `.venv310` local
+  preview, and an independent GitHub Pages Actions workflow for `master`.
+- Corrected the local Obsidian vault to store attachments under
+  `docs/user/assets/images` with relative standard Markdown links.
+- `mkdocs build --strict` passed; the local site, navigation, and direct
+  `reference/proxy-mesh/#density-resolution` deep link were visually verified
+  with no browser warnings or errors.

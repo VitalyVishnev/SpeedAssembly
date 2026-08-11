@@ -26,6 +26,31 @@ Proxy Mesh exists as a companion Static Mesh for collision, distance-field, and
 lower-cost shadow workflows; import confirmation does not by itself validate
 lighting quality.
 
+## Decision: Public user documentation is an isolated MkDocs site
+
+Status: Active
+
+Public operator documentation lives only in `docs/user/`. MkDocs Material
+builds that directory through `mkdocs.yml`; the GitHub Pages workflow publishes
+the generated static `site/` artifact independently from application releases.
+`docs/wiki/`, `docs/raw/`, drafts, templates, and local Obsidian state must not
+enter the public artifact.
+
+Documentation dependencies are pinned in `requirements-docs.txt` and remain
+outside the application runtime and packaged EXE. Local authoring uses the
+canonical `.venv310` environment and `scripts/preview_documentation.cmd`.
+
+Contextual application help will target explicit stable anchors such as
+`reference/proxy-mesh/#density-resolution`; heading copy may change without
+removing an anchor already used by a released application.
+
+Related files:
+- `mkdocs.yml`
+- `requirements-docs.txt`
+- `.github/workflows/documentation.yml`
+- `docs/user/`
+- `scripts/preview_documentation.cmd`
+
 ## Decision: Tests are organized by system contract and execution boundary
 
 Status: Active

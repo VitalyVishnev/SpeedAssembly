@@ -15,9 +15,13 @@ build-next/
 dist/
 dist-next/
 dist-preview/
+site/
 XMLtoUSDAConverter.spec
 PyI_*.spec
 _pyi_*.py
+
+# Local documentation editor state
+docs/user/.obsidian/
 
 # Temporary diagnostics and generated scratch data
 .tmp*/
