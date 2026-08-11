@@ -97,7 +97,8 @@ Rules:
 - Не делай костыли, сделай сразу систему так, чтобы работала. Чтобы не пришлось переделывать.
 - Переиспользуй готовые решения, которые есть в проекте, не изобретай велосипед.
 - For subagents use faster, cheaper models.
-- Use ponytail skill by default.
+- For code use ponytail skill by default.
+- If you notice, that you have to dig deep for specific information, that could be useful in the future, you can leave short notes in code for tourself and other agent to make navigation and code reserch easier and faster. But make this notes systematically, so they create sort of knowledge graph.
 
 ## Simplicity and Architecture Requirements
 
