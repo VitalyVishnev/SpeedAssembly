@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QScrollBar,
     QSizePolicy,
     QSpinBox,
+    QTabBar,
     QTabWidget,
     QToolButton,
     QVBoxLayout,
@@ -133,6 +134,63 @@ from .theme import (
     write_theme_payload,
 )
 from ..runtime_trace import RuntimeTraceLogger as QtTraceLogger, trace_path_for_settings_dir
+
+
+class RoundedTabBar(QTabBar):
+    """Paint shell tabs directly because QTabBar does not clip QSS radii reliably."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._tab_fill = QColor()
+        self._selected_fill = QColor()
+        self._hover_fill = QColor()
+        self._text_color = QColor()
+        self._radius = 0
+        self._tab_gap = 0
+        self._hovered_index = -1
+        self.setMouseTracking(True)
+
+    def apply_theme(self, theme: ResolvedTheme) -> None:
+        self._tab_fill = QColor(theme.colors["tab_fill"])
+        self._selected_fill = QColor(theme.colors["tab_selected_fill"])
+        self._hover_fill = QColor(theme.colors.get("tab_hover_fill", theme.colors["accent_fill"]))
+        self._text_color = QColor(theme.colors["tab_text"])
+        self._radius = int(theme.radii.get("tab", theme.radii["button"]))
+        self._tab_gap = int(theme.spacing["control_gap"])
+        self.updateGeometry()
+        self.update()
+
+    def tabSizeHint(self, index: int) -> QSize:  # type: ignore[override]
+        size = super().tabSizeHint(index)
+        return QSize(size.width() + self._tab_gap, size.height())
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        for index in range(self.count()):
+            rect = self.tabRect(index)
+            painted_rect = QRectF(rect).adjusted(0, 0, -self._tab_gap, 0)
+            fill = self._selected_fill if index == self.currentIndex() else self._hover_fill if index == self._hovered_index else self._tab_fill
+            painter.setBrush(fill)
+            painter.drawRoundedRect(painted_rect, self._radius, self._radius)
+            painter.setPen(self._text_color)
+            painter.drawText(painted_rect, Qt.AlignmentFlag.AlignCenter, self.tabText(index))
+            painter.setPen(Qt.PenStyle.NoPen)
+        painter.end()
+
+    def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        hovered_index = self.tabAt(event.position().toPoint())
+        if hovered_index != self._hovered_index:
+            self._hovered_index = hovered_index
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:  # type: ignore[override]
+        if self._hovered_index != -1:
+            self._hovered_index = -1
+            self.update()
+        super().leaveEvent(event)
 
 
 @dataclass(frozen=True)
@@ -1127,6 +1185,9 @@ class MainWindow(QWidget):
         )
 
         self.tabs = QTabWidget(self)
+        tab_bar = RoundedTabBar(self.tabs)
+        tab_bar.apply_theme(self._theme)
+        self.tabs.setTabBar(tab_bar)
         self.tabs.addTab(self.wind_panel, "Wind")
         self.tabs.addTab(self.geometry_panel, "Geometry")
         self.tabs.addTab(self.materials_panel, "Materials")
@@ -1382,6 +1443,7 @@ class MainWindow(QWidget):
     def _apply_runtime_theme_to_widgets(self, runtime_theme: ResolvedTheme) -> None:
         self._theme = runtime_theme
         self.setStyleSheet(build_stylesheet(runtime_theme))
+        self.tabs.tabBar().apply_theme(runtime_theme)
         self.title_bar.apply_theme(runtime_theme)
         self.panel.set_theme(runtime_theme, self._assets.panel_blur, self._assets.noise)
         self._apply_theme_to_layout()

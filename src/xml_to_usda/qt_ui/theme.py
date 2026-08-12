@@ -791,19 +791,16 @@ QTabWidget::pane {{
     background: transparent;
     margin-top: {tab_content_gap}px;
 }}
+QTabBar {{
+    background: transparent;
+}}
 QTabBar::tab {{
-    background: {tab_fill};
+    background: transparent;
     color: {tab_text};
-    border-radius: {tab_radius}px;
+    border: none;
     min-width: {tab_min_width}px;
     padding: 8px 16px;
     margin-right: 8px;
-}}
-QTabBar::tab:selected {{
-    background: {tab_selected_fill};
-}}
-QTabBar::tab:hover {{
-    background: {tab_hover_fill};
 }}
 QScrollArea {{
     border: none;

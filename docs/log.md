@@ -950,3 +950,8 @@ Major moves:
 - Order-balanced A/B medians on Big Spruce improved by 35.7% for quality 2,
   57.5% for quality 3, and 56.9% for quality 4. Three real XML comparisons kept
   all joint indices/tokens identical with at most `4.44e-16` weight drift.
+## 2026-08-12 - Deterministic rounded main tabs
+
+- Replaced stylesheet-only rendering of the main Wind, Geometry, and Materials
+  tab backgrounds with `RoundedTabBar` painting. Qt now preserves the intended
+  rounded tab shape independently of Windows monitor scaling.

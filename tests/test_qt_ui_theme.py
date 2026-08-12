@@ -4,9 +4,11 @@ import json
 from pathlib import Path
 
 import pytest
+from PySide6.QtWidgets import QTabWidget, QWidget
 
 pytestmark = pytest.mark.qt
 
+from xml_to_usda.qt_ui.window import RoundedTabBar
 from xml_to_usda.qt_ui.theme import (
     ThemeOverrides,
     bake_theme_payload,
@@ -72,3 +74,26 @@ def test_theme_payload_bakes_and_stylesheet_uses_shared_control_colors(tmp_path)
     assert "QPushButton#FileButton" in stylesheet
     assert "#445566" in stylesheet
     assert "#778899" in stylesheet
+
+
+@pytest.mark.parametrize("scale", (1.0, 1.75))
+def test_main_tab_bar_paints_rounded_corners_at_runtime_scale(qtbot, scale: float) -> None:
+    tabs = QTabWidget()
+    tab_bar = RoundedTabBar(tabs)
+    tabs.setTabBar(tab_bar)
+    for label in ("Wind", "Geometry", "Materials"):
+        tabs.addTab(QWidget(), label)
+
+    theme = scale_theme_for_runtime(load_theme(), scale)
+    tabs.setStyleSheet(build_stylesheet(theme))
+    tab_bar.apply_theme(theme)
+    tabs.resize(800, 480)
+    qtbot.addWidget(tabs)
+    tabs.show()
+
+    image = tab_bar.grab().toImage()
+    first_tab_rect = tab_bar.tabRect(0)
+    gap_center_x = first_tab_rect.right() - tab_bar._tab_gap // 2
+    device_pixel_ratio = image.devicePixelRatio()
+    assert image.pixelColor(first_tab_rect.topLeft()) != tab_bar._selected_fill
+    assert image.pixelColor(round(gap_center_x * device_pixel_ratio), round(device_pixel_ratio)) != tab_bar._selected_fill

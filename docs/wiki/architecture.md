@@ -184,8 +184,10 @@ Preview Geometry, Automatic Cuts, Cut Surface, Viewport, Collision, and Manual
 Cuts sections. It retains its parameter-wheel filter so wheel input scrolls
 settings rather than changing an unfocused value.
 The Wind, Geometry, and Materials tabs on the main shell reuse the same
-compact controls inside their existing rounded cards. UDIM tile IDs are styled
-as explicit editable fields rather than passive numeric labels.
+compact controls inside their existing rounded cards. Their `RoundedTabBar`
+paints the tab fill directly because Qt stylesheet radii do not reliably clip
+`QTabBar` backgrounds across monitor DPI settings. UDIM tile IDs are styled as
+explicit editable fields rather than passive numeric labels.
 
 The main shell keeps one `ProgramStatusCard` beside those tabs. It consumes the
 existing `ConversionTelemetry` directly, groups backend phases into five
