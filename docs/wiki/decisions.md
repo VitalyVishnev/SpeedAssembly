@@ -1368,13 +1368,18 @@ influence count per cluster; non-zero weights must precede zero padding. One
 active high-width vertex raises the cost of its cluster, not necessarily the
 whole mesh. Treat matching UE 5.7.x behavior as pending import/runtime validation.
 
-The base-mesh implementation uses bounded NumPy chunks behind this interface;
-Repeated Part instances retain their object-level scalar path. Validation uses
-the same bounded strategy while preserving first-invalid-vertex order and the
-joint-before-weight diagnostic priority at one vertex. On Big Spruce, the full
-operations improved from 0.2824 s to 0.0921 s for the original two-weight path and from
-0.1227 s to 0.0267 s for validation. The complete cold source load improved by
-about 6.7%; the authored 14,339,986-character USDA remained byte-identical.
+The implementation precomputes bone geometry and inherited candidate tables
+once, evaluates Base Mesh in bounded NumPy chunks, and evaluates Repeated Parts
+in one NumPy batch before reconstructing their canonical objects. Validation
+uses the same bounded strategy while preserving first-invalid-vertex order and
+the joint-before-weight diagnostic priority at one vertex. An order-balanced
+same-process A/B benchmark on Big Spruce (30,489 points, 1,108 joints, 3,613
+Repeated Parts; 11 measured pairs, GC disabled, model preloaded) reduced median
+Skinning Quality time by 35.7% for quality 2, 57.5% for quality 3, and 56.9% for
+quality 4. Simple Tree reductions were 36.0%, 64.4%, and 60.3%. Joint indices
+and binding tokens matched the previous implementation on Simple Tree, Big
+Spruce, and `SkeletonTest_01`; maximum absolute weight drift was `4.44e-16`.
+Quality 1 remains the unchanged constant-time pass-through.
 
 Related files:
 - `src/xml_to_usda/skeleton_processing.py`

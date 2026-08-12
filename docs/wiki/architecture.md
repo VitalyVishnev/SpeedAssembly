@@ -100,9 +100,10 @@ full text generation plus an OS temporary-file write from 0.490 s to 0.329 s
 paths stdlib-only and benchmark-backed.
 
 Dense numerical work stays behind the existing domain seams rather than
-changing the canonical model. `skeleton_processing.py` converts only bounded
-base-mesh chunks to NumPy for Skinning Quality and influence validation; repeated
-Part objects remain scalar. `payload_partition.py` views large
+changing the canonical model. `skeleton_processing.py` precomputes bone geometry
+once, evaluates base-mesh chunks and Repeated Part bindings in NumPy batches,
+then returns the unchanged canonical objects; influence validation uses the same
+bounded strategy. `payload_partition.py` views large
 `GeometryBuffer` arrays zero-copy and classifies face colors in bounded chunks.
 `fbx_adapter.py` uses NumPy only above measured size thresholds for control
 point transforms and indexed polygon-vertex UV expansion, then returns the

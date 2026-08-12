@@ -944,3 +944,9 @@ Major moves:
 - Recorded UE 5.8 source evidence that zero Assembly Part weights are removed
   before runtime and that Base Mesh Nanite influence cost is cluster-local.
   Matching UE 5.7.x behavior remains a manual validation item.
+- Batched every Skinning Quality 2-4 hot path: bone geometry and inherited
+  candidates are computed once, Base Mesh stays chunk-bounded, and Repeated
+  Parts are evaluated together before canonical object reconstruction.
+- Order-balanced A/B medians on Big Spruce improved by 35.7% for quality 2,
+  57.5% for quality 3, and 56.9% for quality 4. Three real XML comparisons kept
+  all joint indices/tokens identical with at most `4.44e-16` weight drift.
