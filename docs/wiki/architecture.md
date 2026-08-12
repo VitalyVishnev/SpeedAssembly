@@ -152,6 +152,15 @@ The SpeedTree XML worker path does not import the External Skeleton backend.
 An unexpected native Wind Preview worker exit is retried once in a clean
 process. Worker subprocesses enable Python faulthandler so a repeated native
 failure leaves a diagnostic stack in the captured stderr file.
+
+SpeedTree skeleton order is a semantic topology signal, not incidental file
+ordering. At a fork, the lowest-index direct child continues the current
+generator line; every other child starts a new line. The common conforming
+shape places that continuation immediately after its parent. This Generator
+Continuation contract is distinct from the geometric Primary Stem Axis used by
+Fracturing and Proxy collision, which selects a longest root-to-leaf path.
+Neither rule may silently substitute for the other. See
+[SpeedTree bone order identifies generator continuation](decisions.md#decision-speedtree-bone-order-identifies-generator-continuation).
 Release packaging includes only the OpenUSD modules, plugin metadata, and
 release DLLs required by `Usd.Stage`/`UsdSkel`; debug and unrelated pxr
 binaries stay outside the GUI package.

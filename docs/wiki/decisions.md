@@ -1049,6 +1049,81 @@ Related files:
 - `src/xml_to_usda/qt_ui/wind_preview.py`
 - `tests/test_wind_viewport_scene.py`
 
+## Decision: SpeedTree bone order identifies generator continuation
+
+Status: Active; validated by UE 5.7 Dynamic Wind repair
+
+Context:
+SpeedTree skeletons branch heavily, so hierarchy alone does not identify which
+child continues the current trunk or branch. Geometry-based longest-path
+selection answers a different question and can choose a longer side branch.
+
+Decision:
+Treat Reference Skeleton order as semantic for SpeedTree-derived skeletons. At
+each fork, the direct child with the lowest skeleton index continues the current
+generator line; every other direct child starts its own line. In the normal
+preorder shape the continuation is `parent index + 1`, but consumers must use
+the lowest direct-child index when they need the general continuation rule.
+Leaf bones use the incoming segment direction. Coincident terminal joints use
+the nearest usable direction on the same line.
+
+Keep this separate from Primary Stem Axis selection. Fracturing and Proxy
+collision may choose the geometrically longest root-to-leaf path to represent a
+physical stem; that path must not redefine generator continuation, wind group
+structure, or imported-bone orientation.
+
+Evidence:
+The same ordering signal already drives Wind Preview Auto Hierarchy. Manual UE
+5.7 testing of the in-place foliage repair confirmed that index-based
+continuation correctly orients branching and terminal bones and fixes Dynamic
+Wind direction when both the Skeletal Mesh and its dedicated Skeleton Asset are
+updated.
+
+Consequences:
+Do not infer continuation from numeric name suffixes, child count, nearest
+child, or longest subtree. For non-SpeedTree external skeletons, file order is
+not assumed to carry this SpeedTree contract without explicit operator intent
+or source evidence.
+
+Related files:
+- `src/xml_to_usda/wind_viewport_scene.py`
+- `scripts/ue57_fix_selected_foliage_bones.py`
+- `src/xml_to_usda/fracture_service.py`
+- `src/xml_to_usda/proxy_collision.py`
+
+## Decision: Imported foliage orientation must update Mesh and Skeleton reference poses
+
+Status: Active; validated in UE 5.7
+
+Context:
+Changing only the Skeletal Mesh reference skeleton visibly rotates editor bone
+axes, but Dynamic Wind reads bind transforms from the assigned Skeleton Asset.
+That produces a plausible-looking repair with unchanged runtime animation.
+
+Decision:
+An in-place foliage orientation repair is complete only when the Skeletal Mesh
+and its dedicated Skeleton Asset contain the same updated local reference pose.
+Validation runs after both owners have been updated; it must not compare saved
+asset state with uncommitted `SkeletonModifier` state.
+
+Pure UE 5.7 Python does not expose `USkeleton::UpdateReferencePoseFromMesh`.
+Preserving exact bone names therefore requires two commits: apply all transforms
+plus a transient leaf rename so the Skeleton Asset synchronizes, then restore
+the original name. Count both commits as potential Nanite Assembly rebuilds.
+A future one-commit implementation should expose the native reference-pose
+update through a small Editor C++/Blueprint bridge rather than leave a renamed
+bone or altered hierarchy.
+
+Consequences:
+The Asset Action refuses shared Skeleton Assets because updating their reference
+pose would affect unselected meshes and UE's merge path does not provide the
+required deterministic replacement. Animation tracks, sockets, Physics Assets,
+and reimport remain separate compatibility checks.
+
+Related files:
+- `scripts/ue57_fix_selected_foliage_bones.py`
+- `docs/wiki/known-bugs.md`
+
 ## Decision: Preview dialogs share one viewport system
 
 Status: Active

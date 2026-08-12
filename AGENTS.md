@@ -152,10 +152,15 @@ No abstractions for single-use code.
 ### Rule 3 - Surgical Changes
 Touch only what you must. Don't improve adjacent code.
 Match existing style. Don't refactor what isn't broken.
+Preserve the last user-observed working baseline and change one contract
+boundary at a time. After two contradictory failures, stop adding fallbacks
+and re-derive the next change from that baseline.
 
 ### Rule 4 - Goal-Driven Execution
 Define success criteria. Loop until verified.
 Strong success criteria let Claude loop independently.
+When the requested artifact is directly pasteable or runnable, deliver that
+artifact first; generators and file-backed helpers are secondary.
 
 ### Rule 5 - Surface conflicts, don't average them
 If two patterns contradict, pick one (more recent / more tested).
@@ -165,6 +170,12 @@ Don't blend conflicting patterns.
 ### Rule 6 - Read before you write
 Before adding code, read exports, immediate callers, shared utilities.
 If unsure why existing code is structured a certain way, ask.
+Before introducing a domain heuristic, search maintained decisions and code
+for the same semantic concept. Source order, hierarchy, geometry, and naming
+are different signals; do not substitute one for another without evidence.
+For UE asset mutation, identify the editable working state, authoritative saved
+owner, and runtime reader; validate only after the transition that updates the
+state being checked, and count rebuild-triggering commits before delivery.
 
 ### Rule 7 - Tests verify intent, not just behavior
 Tests must encode WHY behavior matters, not just WHAT it does.

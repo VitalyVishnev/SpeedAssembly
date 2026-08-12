@@ -56,6 +56,8 @@
 - `Boolean Cap Hard Edge` - the required normal discontinuity around the complete source/cap perimeter. Cap-internal edges are additionally hard at dihedral angles of at least 90 degrees.
 - `Hierarchy Connector` - the parent-to-child skeleton link used to express attachment. For a SpeedTree branch it can connect a trunk bone to the start of the branch and is not the physical child bone used for manual cut position or direction.
 - `Physical Bone Segment` - `joint.bind → joint.bind_end` when `bind_end` exists; otherwise the hierarchy connector is the fallback. Manual cut `t` is always measured on this segment.
+- `Generator Continuation` - for a SpeedTree-derived skeleton, the lowest-index direct child at a fork; it continues the current generator line while the other direct children start new lines. It is commonly the bone immediately after its parent in Reference Skeleton order.
+- `Primary Stem Axis` - a geometrically selected root-to-leaf skeleton path used to represent a physical stem for Fracturing or Proxy collision. It is not the SpeedTree Generator Continuation rule.
 - `Dynamic Wind` - the separate Unreal JSON wind output generated from the normalized skeleton.
 - `Wind Preview` - the Dynamic Wind inspection and planned authoring window. V1 is an XML source inspector; V2 adds Auto Hierarchy, manual override layers, external skeleton loading, and Dynamic Wind JSON export from the final group stack.
 - `Source Name` - any name observed in XML, FBX, or source filenames.

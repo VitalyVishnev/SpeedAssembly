@@ -1,5 +1,49 @@
 # Known Bugs
 
+## Limitation: UE 5.7 in-place foliage orientation requires a dedicated Skeleton
+
+Status: Fail-loud
+
+The UE 5.7 Asset Action repair refuses a selected Skeletal Mesh when another
+Skeletal Mesh references the same Skeleton Asset. `SkeletonModifier` only
+merges a shared Skeleton and does not replace its existing reference-pose
+transforms, while changing that shared pose would also alter unselected assets.
+Use a dedicated Skeleton per vegetation mesh before running the repair. The
+operation intentionally changes reference frames in place; authored animation,
+sockets, Physics Assets, and reimport behavior remain operator validation items.
+
+Exact bone-name preservation currently costs two Skeletal Mesh commits. The
+first applies orientation and a transient leaf rename so UE synchronizes the
+Skeleton reference pose; the second restores that name. Nanite Assemblies can
+therefore compile twice. A one-commit production implementation requires a
+small UE 5.7 C++/Blueprint bridge exposing
+`USkeleton::UpdateReferencePoseFromMesh`; leaving a renamed helper bone or an
+altered hierarchy was rejected.
+
+Related files:
+- `scripts/ue57_fix_selected_foliage_bones.py`
+- `docs/wiki/experiments.md`
+
+## Limitation: Wind Auto Hierarchy assumes immediate preorder continuation
+
+Status: Unverified outside conforming SpeedTree order
+
+The shared Generator Continuation contract selects the lowest-index direct
+child at a fork. Wind Preview currently recognizes it only when that child is
+exactly `parent index + 1`, which is the normal SpeedTree preorder shape. The UE
+5.7 repair uses the general lowest-direct-child rule. A reordered or filtered
+external skeleton could therefore group differently between the two consumers.
+
+Next step:
+Retain a real counterexample before changing behavior. If non-immediate
+continuation is observed, make Wind Preview use the same lowest-direct-child
+helper and preserve explicit `Continue line` behavior for non-SpeedTree inputs.
+
+Related files:
+- `src/xml_to_usda/wind_viewport_scene.py`
+- `scripts/ue57_fix_selected_foliage_bones.py`
+- `docs/wiki/decisions.md`
+
 ## Bug: Restored very large XML could destabilize GUI startup
 
 Status: Mitigated; packaged validation passed, operator validation pending

@@ -955,3 +955,20 @@ Major moves:
 - Replaced stylesheet-only rendering of the main Wind, Geometry, and Materials
   tab backgrounds with `RoundedTabBar` painting. Qt now preserves the intended
   rounded tab shape independently of Windows monitor scaling.
+
+# 2026-08-12
+
+- Added a UE 5.7 in-place foliage-bone Asset Action experiment with terminal
+  zero-length fallback, Skeleton Asset synchronization/validation, and a
+  generator for its self-contained Execute Python Command payload.
+- Removed an invalid pre-commit +X check that prevented the native UE 5.7
+  orientation pass from ever reaching its first commit.
+- Replaced UE's ambiguous multi-child orientation with the established
+  SpeedTree skeleton-order continuation rule and transported secondary axes.
+  Orientation now shares the Skeleton-sync commit, retaining the minimum two
+  commits required by pure UE 5.7 Python while preserving exact bone names.
+- Promoted SpeedTree Generator Continuation to a stable project contract,
+  explicitly separated it from geometric Primary Stem Axis selection, and
+  recorded the validated UE 5.7 Mesh/Skeleton reference-pose ownership model.
+- Added workflow rules for semantic-heuristic lookup, UE state-owner validation,
+  rebuild counting, preserving working baselines, and pasteable-first delivery.

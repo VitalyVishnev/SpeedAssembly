@@ -280,9 +280,13 @@ Related files:
 - `src/xml_to_usda/qt_ui/wind_preview.py`
 - `docs/wind_viewport_working_plan.md`
 
-## Experiment: Reorient an imported UE 5.8 Skeletal Mesh without reimport
+## Experiment: Reorient an imported UE Skeletal Mesh without reimport
 
-Status: Unverified in UE
+Status: UE 5.7 in-place path validated; duplicate-and-create path superseded
+
+Settled contracts now live in
+[Decisions](decisions.md#decision-imported-foliage-orientation-must-update-mesh-and-skeleton-reference-poses).
+This section preserves the failed and superseded routes.
 
 Context:
 Some already-imported vegetation assets use world-aligned local bone axes, which
@@ -308,15 +312,47 @@ perform the final Skeleton creation. On the selected result use
 `Skeleton > Create Skeleton`; the native asset action initializes and
 assigns a new sibling Skeleton from that modified mesh.
 
+Outcome:
+The duplicate workflow established that changing only the Skeletal Mesh can
+rotate editor bone axes without changing Dynamic Wind. It was superseded by
+the UE 5.7 in-place Asset Action, which updates both the original mesh and its
+dedicated Skeleton Asset. Manual UE 5.7 testing confirmed correct runtime wind,
+branching-bone orientation, and terminal-bone orientation.
+
+UE 5.7 in-place Asset Action:
+`scripts/ue57_fix_selected_foliage_bones.py` edits all selected Skeletal Meshes
+and their existing dedicated Skeleton Assets. It uses a transient leaf rename
+and restores the original name to make UE 5.7 rebuild the Skeleton reference
+pose; a transform-only `SkeletonModifier` commit does not do that. It refuses
+shared Skeleton Assets because UE 5.7 otherwise preserves their old reference
+pose and would also affect unselected meshes.
+
+The native multi-child orientation policy is unsuitable for SpeedTree branch
+junctions. The repair instead uses Reference Skeleton order: the lowest-index
+child continues the current generator line, while every other child starts its
+own line. This matches the converter's automatic Wind Preview branch-order
+contract. Each bone's +X points to that continuation; a leaf uses its incoming
+segment, and coincident terminal joints inherit the nearest usable line.
+Transported parent +Y prevents arbitrary roll changes along a chain.
+
+Orientation and the temporary rename share the first commit; restoring the
+exact original name requires the second. This is the minimum available through
+pure UE 5.7 Python: transform-only commits do not update the Skeleton Asset,
+and `USkeleton::UpdateReferencePoseFromMesh` is not exposed to Python. The
+script validates exact Mesh/Skeleton local-pose agreement after both commits.
+`scripts/ue57_make_foliage_asset_action_command.py` copies the self-contained
+`exec(...)` command for an Execute Python Command node.
+
 For bug reports and Output Log reproduction,
 `scripts/ue_orient_selected_skeletal_mesh_x_console.txt` contains the same
 experiment as one self-contained Python-console line with no local file lookup.
 
 Limits:
-The new Skeleton does not inherit Skeleton-only metadata from the old asset.
-Animation tracks, sockets, and Physics Asset local frames are not compensated.
-Reimport can replace the result. Validate reference-pose geometry, wind, sockets,
-physics, and any authored animations before treating this as a repair workflow.
+The in-place path intentionally preserves the existing dedicated Skeleton Asset,
+but animation tracks, sockets, and Physics Asset local frames are not
+compensated. Reimport can replace the result. Reference-pose geometry and
+Dynamic Wind are validated; sockets, physics, authored animation, and reimport
+remain operator validation items.
 
 ## Experiment: Fit Proxy collision from the simplified viewport mesh
 
