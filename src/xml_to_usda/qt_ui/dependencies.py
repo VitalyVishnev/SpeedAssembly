@@ -26,6 +26,7 @@ class QtUiDependencies:
     convert_request: object
     discover_base_material_rows: object
     discover_part_prototype_rows: object
+    discover_missing_bone_generator_groups: object
     inspect_fbx_material_slot_rows: object
     load_gui_settings: object
     save_gui_settings: object
@@ -66,6 +67,7 @@ def build_default_dependencies() -> QtUiDependencies:
         discover_part_prototype_rows,
         inspect_fbx_material_slot_rows,
     )
+    from ..source_analysis import discover_missing_bone_generator_groups
     from ..pipeline import convert_request
     from ..settings_service import load_gui_settings, save_gui_settings
     from ..wind_service import (
@@ -100,6 +102,7 @@ def build_default_dependencies() -> QtUiDependencies:
         convert_request=convert_request,
         discover_base_material_rows=discover_base_material_rows,
         discover_part_prototype_rows=discover_part_prototype_rows,
+        discover_missing_bone_generator_groups=discover_missing_bone_generator_groups,
         inspect_fbx_material_slot_rows=inspect_fbx_material_slot_rows,
         load_gui_settings=load_gui_settings,
         save_gui_settings=save_gui_settings,

@@ -121,13 +121,20 @@ class ProgramStatusCard(QFrame):
         summary_title.setObjectName("ProgramStatusSectionTitle")
         layout.addWidget(summary_title)
         self.mode_label = self._summary_label(host, "Mode", "Skeletal Assembly")
-        self.skinning_label = self._summary_label(host, "Dual Skinning", "On")
+        self.skinning_label = self._summary_label(host, "Skinning Quality", "1 weight")
         self.material_label = self._summary_label(host, "Materials", "Source materials")
         self.source_label = self._summary_label(host, "Source", "No XML selected")
+        self.bone_gap_warning_label = QLabel(host)
+        self.bone_gap_warning_label.setObjectName("ProgramStatusWarning")
+        self.bone_gap_warning_label.setWordWrap(True)
+        self.bone_gap_warning_label.setMinimumWidth(0)
+        self.bone_gap_warning_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.bone_gap_warning_label.hide()
         layout.addWidget(self.mode_label)
         layout.addWidget(self.skinning_label)
         layout.addWidget(self.material_label)
         layout.addWidget(self.source_label)
+        layout.addWidget(self.bone_gap_warning_label)
         layout.addStretch(1)
 
         self._reset_timer = QTimer(self)
@@ -154,7 +161,7 @@ class ProgramStatusCard(QFrame):
         self,
         *,
         mode: str | None = None,
-        dual_skinning: bool | None = None,
+        skinning_quality: int | None = None,
         materials: str | None = None,
         source: str | None = None,
         materials_tooltip: str | None = None,
@@ -163,8 +170,8 @@ class ProgramStatusCard(QFrame):
             (self.mode_label, "Mode", mode, None),
             (
                 self.skinning_label,
-                "Dual Skinning",
-                None if dual_skinning is None else ("On" if dual_skinning else "Off"),
+                "Skinning Quality",
+                None if skinning_quality is None else f"{skinning_quality} weight{'s' if skinning_quality != 1 else ''}",
                 None,
             ),
             (self.material_label, "Materials", materials, materials_tooltip),
@@ -179,6 +186,20 @@ class ProgramStatusCard(QFrame):
     def set_message(self, text: str) -> None:
         self.status_label.setText(_compact_path(text))
         self.status_label.setToolTip(text)
+
+    def set_bone_gap_warning(self, groups: tuple[str, ...]) -> None:
+        if not groups:
+            self.bone_gap_warning_label.clear()
+            self.bone_gap_warning_label.setToolTip("")
+            self.bone_gap_warning_label.hide()
+            return
+        if len(groups) == 1:
+            text = f"⚠ Missing bones: {groups[0]}"
+        else:
+            text = f"⚠ Missing bones in {len(groups)} groups"
+        self.bone_gap_warning_label.setText(text)
+        self.bone_gap_warning_label.setToolTip(", ".join(groups))
+        self.bone_gap_warning_label.show()
 
     def set_passive_message(self, text: str) -> None:
         if self.state_label.property("statusState") == "working":

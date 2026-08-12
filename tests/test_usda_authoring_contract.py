@@ -15,6 +15,7 @@ from xml_to_usda.models import (
     Matrix4d,
     MeshData,
     MeshSection,
+    SkinningQuality,
     TreeAsset,
     UdimMaterialSetting,
     UdimMode,
@@ -24,6 +25,7 @@ from xml_to_usda.models import (
 from xml_to_usda.normalizer import normalize_to_canonical
 from xml_to_usda.pipeline import convert_file
 from xml_to_usda.source_analysis import discover_source_materials
+from xml_to_usda.skeleton_processing import apply_skinning_quality
 from xml_to_usda.udim_settings import load_udim_material_settings_from_json
 from xml_to_usda.usda_authoring import author_usda_text
 from xml_to_usda.usda_writer import render_usda
@@ -203,6 +205,29 @@ def test_point_instancer_binding_attrs_use_joint_tokens_from_main_skeleton() -> 
     assert '"bone_104"' in bind_joints_payload
     assert '"Tree_point_17"' not in bind_joints_payload
     assert '0]' in bind_weights_payload or ', 0,' in bind_weights_payload
+
+
+@pytest.mark.parametrize("quality", (SkinningQuality.THREE_WEIGHTS, SkinningQuality.FOUR_WEIGHTS))
+def test_point_instancer_authors_selected_inherited_binding_width(quality: SkinningQuality) -> None:
+    document = read_source_xml(SIMPLE_TREE_01)
+    report = inspect_xml(document)
+    model = apply_skinning_quality(normalize_to_canonical(document, report), skinning_quality=quality)
+    diagnostics = validate_model(model)
+
+    assert not any(issue.severity == "error" for issue in diagnostics)
+    usda = render_usda(model, diagnostics)
+    binding_payload = _slice_between(
+        usda.text,
+        'token[] primvars:unreal:naniteAssembly:bindJoints = [',
+        'int[] primvars:unreal:naniteAssembly:bindJoints:indices = None',
+    )
+    weight_payload = _slice_between(
+        usda.text,
+        'float[] primvars:unreal:naniteAssembly:bindJointWeights = [',
+        'int[] primvars:unreal:naniteAssembly:bindJointWeights:indices = None',
+    )
+    assert f"elementSize = {int(quality)}" in binding_payload
+    assert f"elementSize = {int(quality)}" in weight_payload
 
 
 def test_assembly_part_orientations_remain_non_uniform_and_deterministic() -> None:

@@ -28,6 +28,14 @@ def test_validate_conversion_request_rejects_explicit_output_for_batch() -> None
         validate_conversion_request(request)
 
 
+@pytest.mark.parametrize("quality", (0, 5, 2.5, True, "high"))
+def test_validate_conversion_request_rejects_invalid_skinning_quality(quality) -> None:
+    request = ConversionRequest(input_paths=("a.xml",), skinning_quality=quality)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="integer from 1 to 4"):
+        validate_conversion_request(request)
+
+
 @pytest.mark.parametrize(
     ("setting", "message"),
     (

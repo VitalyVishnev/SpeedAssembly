@@ -35,12 +35,13 @@ from .models import (
     OutputMode,
     PrototypeSourceConfig,
     ResolvedAssemblyModel,
+    SkinningQuality,
     UdimMaterialSetting,
     ValidationIssue,
 )
 from .normalizer import normalize_to_canonical
 from .source_validation import validate_source_model
-from .skeleton_processing import apply_dual_skinning
+from .skeleton_processing import apply_skinning_quality
 from .worker_file_protocol import read_worker_payload, write_worker_payload_atomic
 from .xml_reader import analyze_xml, read_source_xml
 
@@ -174,7 +175,7 @@ def load_resolved_assembly_model(
     use_explicit_material_contract: bool = False,
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = (),
     conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY,
-    dual_skinning: bool = True,
+    skinning_quality: SkinningQuality | int = SkinningQuality.ONE_WEIGHT,
     output_stem: str | None = None,
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
     fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60,
@@ -189,8 +190,9 @@ def load_resolved_assembly_model(
         telemetry_callback=telemetry_callback,
         cancel_event=cancel_event,
     )
-    if dual_skinning:
-        source_model = apply_dual_skinning(source_model)
+    resolved_skinning_quality = SkinningQuality.parse(skinning_quality)
+    if resolved_skinning_quality != SkinningQuality.ONE_WEIGHT:
+        source_model = apply_skinning_quality(source_model, skinning_quality=resolved_skinning_quality)
         source_diagnostics = validate_source_model(source_model)
     resolved = resolve_assembly_model(
         source_model,
@@ -228,7 +230,7 @@ def load_canonical_model(
     use_explicit_material_contract: bool = False,
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = (),
     conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY,
-    dual_skinning: bool = True,
+    skinning_quality: SkinningQuality | int = SkinningQuality.ONE_WEIGHT,
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
     fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60,
     source_cache_enabled: bool = True,
@@ -249,7 +251,7 @@ def load_canonical_model(
         use_explicit_material_contract=use_explicit_material_contract,
         prototype_source_configs=prototype_source_configs,
         conversion_mode=conversion_mode,
-        dual_skinning=dual_skinning,
+        skinning_quality=skinning_quality,
         fbx_cache_max_bytes=fbx_cache_max_bytes,
         fbx_cache_max_age_seconds=fbx_cache_max_age_seconds,
         source_cache_enabled=source_cache_enabled,

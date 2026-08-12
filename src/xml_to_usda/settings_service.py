@@ -15,7 +15,7 @@ from pathlib import Path
 from .fracture_collision import FractureCollisionMode, FractureCollisionSettings
 from .fracture_preview_service import FracturePreviewSettings
 from .fracture_service import FractureSettings
-from .models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode, UdimMode
+from .models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode, SkinningQuality, UdimMode
 from .proxy_collision import ProxyCollisionMode, ProxyCollisionSettings
 from .proxy_mesh_service import (
     MAX_PROXY_DENSITY_RESOLUTION,
@@ -107,7 +107,7 @@ class GuiSettingsSnapshot:
     single_material_path: str = ""
     gust_attenuation: float = 0.0
     is_ground_cover: bool = False
-    dual_skinning: bool = True
+    skinning_quality: SkinningQuality = SkinningQuality.ONE_WEIGHT
     wind_group_settings: dict[str, WindGroupSettingRecord] = field(default_factory=dict)
     base_material_settings: tuple[BaseMaterialSettingRecord, ...] = ()
     part_mesh_settings: tuple[PartSourceSettingRecord, ...] = ()
@@ -163,7 +163,7 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
         single_material_path=str(payload.get("single_material_path", "")),
         gust_attenuation=_coerce_float(payload.get("gust_attenuation", 0.0), 0.0),
         is_ground_cover=bool(payload.get("is_ground_cover", False)),
-        dual_skinning=bool(payload.get("dual_skinning", True)),
+        skinning_quality=_parse_skinning_quality(payload),
         wind_group_settings=wind_group_settings,
         base_material_settings=base_material_settings,
         part_mesh_settings=part_mesh_settings,
@@ -195,7 +195,7 @@ def save_gui_settings(settings_path: str | Path, snapshot: GuiSettingsSnapshot) 
         "single_material_path": snapshot.single_material_path,
         "gust_attenuation": round(float(snapshot.gust_attenuation), 4),
         "is_ground_cover": bool(snapshot.is_ground_cover),
-        "dual_skinning": bool(snapshot.dual_skinning),
+        "skinning_quality": int(SkinningQuality.parse(snapshot.skinning_quality)),
         "wind_group_settings": _serialize_wind_group_settings(snapshot.wind_group_settings),
         "base_material_settings": _serialize_base_material_settings(snapshot.base_material_settings),
         "part_mesh_settings": _serialize_part_mesh_settings(snapshot.part_mesh_settings),
@@ -265,6 +265,20 @@ def _parse_conversion_mode(raw_value) -> ConversionMode:
         return ConversionMode.parse(raw_value)
     except ValueError:
         return ConversionMode.SKELETAL_ASSEMBLY
+
+
+def _parse_skinning_quality(payload: dict[str, object]) -> SkinningQuality:
+    try:
+        if "skinning_quality" in payload:
+            return SkinningQuality.parse(payload["skinning_quality"])
+        if not bool(payload.get("dual_skinning", True)):
+            return SkinningQuality.ONE_WEIGHT
+        return {
+            "inherited_three": SkinningQuality.THREE_WEIGHTS,
+            "inherited_four": SkinningQuality.FOUR_WEIGHTS,
+        }.get(str(payload.get("attachment_skinning_mode", "")), SkinningQuality.TWO_WEIGHTS)
+    except (TypeError, ValueError):
+        return SkinningQuality.ONE_WEIGHT
 
 
 def _parse_gui_material_policy(raw_value) -> MaterialPolicy:

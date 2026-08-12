@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -8,6 +9,8 @@ import pytest
 pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 pytestmark = pytest.mark.qt
+
+from PySide6.QtWidgets import QMessageBox
 
 from xml_to_usda.qt_ui.dependencies import build_default_dependencies
 from xml_to_usda.qt_ui.persistence import UiShellState
@@ -87,3 +90,20 @@ def test_restored_large_xml_starts_isolated_discovery_without_sync_parsing(qtbot
         assert window._background_jobs.source_discovery_running is True
     finally:
         MainWindow.ASYNC_SOURCE_DISCOVERY_THRESHOLD_BYTES = original_threshold
+
+
+def test_missing_bone_group_warning_requires_acknowledgement_but_does_not_change_state(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        "xml_to_usda.qt_ui.window.QMessageBox.warning",
+        lambda parent, title, message, buttons: calls.append((parent, title, message, buttons)),
+    )
+    window = SimpleNamespace(_shown_bone_gap_warning=None)
+
+    MainWindow._warn_about_missing_bone_generator_groups(window, "tree.xml", ("Group_2",))
+    MainWindow._warn_about_missing_bone_generator_groups(window, "tree.xml", ("Group_2",))
+
+    assert len(calls) == 1
+    assert calls[0][1] == "Missing skeleton bones"
+    assert "Group_2" in calls[0][2]
+    assert calls[0][3] == QMessageBox.StandardButton.Ok

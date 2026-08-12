@@ -895,3 +895,52 @@ Major moves:
 - `mkdocs build --strict` passed; the local site, navigation, and direct
   `reference/proxy-mesh/#density-resolution` deep link were visually verified
   with no browser warnings or errors.
+
+## 2026-08-12 - Documentation authoring kit
+
+- Added an excluded editorial plan covering the proposed public information
+  architecture, article priorities, evidence needs, screenshots, test assets,
+  and a minimum writing order.
+- Added an excluded Russian-language Markdown/MkDocs guide with copy-ready
+  examples for links, images, tables, admonitions, tabs, code blocks, stable
+  parameter anchors, article templates, and publication checks.
+- `mkdocs build --strict` passed and confirmed that `_drafts/` and
+  `_templates/` remain outside the published site.
+
+## 2026-08-12 - Missing intermediate skeleton-group warning
+
+- Added early Source Discovery detection for gaps in bone `Generator` levels.
+- The GUI now shows a modal, non-blocking export warning naming every missing
+  intermediate group; object-group names are intentionally ignored.
+- Program Status keeps a compact yellow missing-bones warning visible for the
+  active XML after the modal dialog is acknowledged.
+- Added persisted `Current 2`, inherited `Max 3`, inherited `Max 4`, and local
+  `Soft 2` attachment modes beside Dual Skinning. Only base-tree skinning
+  changed in that initial experiment; later entries below extend Assembly Parts.
+- Added intent tests for inherited attachment continuity, deterministic
+  influence caps, Soft-2 localization, validation, settings, and UI transport.
+  The experimental modes remain unverified in UE 5.7.x.
+- Replaced Soft-2 parent hardening with a two-weight collar on each child base:
+  inherited parent-surface weights transition to rigid parent over 20% of the
+  child, then continue into the ordinary parent-to-child gradient. Parent mesh
+  weights are unchanged, preventing the observed M-shaped deformation profile.
+- Replaced the overlapping Dual Skinning toggle and attachment-mode selectors
+  with one persisted, discrete `Skinning Quality` slider: rigid 1, collar 2,
+  inherited 3, and inherited 4. Labels mark qualities 3/4 as expensive.
+- Deepened the conversion seam to one `SkinningQuality` value and confined old
+  settings migration to JSON loading. Added strict range/type validation,
+  real-sample width validation for all four qualities, and removed the obsolete
+  runtime dual-state contract.
+- Refined the Skinning Quality control: labels now align to the styled slider's
+  actual tick/handle centers, edge ticks have room for unclipped labels, the
+  selected label is emphasized, labels are clickable, and both direct track
+  clicks and continuous handle/track dragging work.
+- Made `1 weight` the default for new settings and CLI requests. Added concise
+  per-quality tooltips, reserved label geometry for the bold font, and added a
+  lower text margin so the selected two-line label no longer clips or shifts.
+- Extended Skinning Quality 3/4 to Repeated Parts: each rigid instance now uses
+  the inherited Base Mesh distribution evaluated at its position, padded to the
+  selected width for one PointInstancer contract.
+- Recorded UE 5.8 source evidence that zero Assembly Part weights are removed
+  before runtime and that Base Mesh Nanite influence cost is cluster-local.
+  Matching UE 5.7.x behavior remains a manual validation item.

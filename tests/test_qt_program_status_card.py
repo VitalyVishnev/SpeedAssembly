@@ -9,7 +9,8 @@ pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 pytestmark = pytest.mark.qt
 
-from PySide6.QtWidgets import QCheckBox
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtWidgets import QCheckBox, QStyle, QStyleOptionSlider
 
 from xml_to_usda.models import ConversionPhase, ConversionTelemetry, PrototypeSourceMode
 from xml_to_usda.qt_ui.dependencies import build_default_dependencies
@@ -115,17 +116,35 @@ def test_program_status_card_updates_source_and_material_summary(qtbot) -> None:
 
     card.set_summary(
         mode="Static Assembly",
-        dual_skinning=False,
+        skinning_quality=1,
         materials="Single Material · M_Bark",
         materials_tooltip="/Game/Tree/M_Bark.M_Bark",
         source="Base slots: 2\nPrototypes: 3\nInstances: 43,263",
     )
 
     assert "Static Assembly" in card.mode_label.text()
-    assert "Off" in card.skinning_label.text()
+    assert "1 weight" in card.skinning_label.text()
     assert "Instances: 43,263" in card.source_label.text()
     assert card.material_label.toolTip() == "/Game/Tree/M_Bark.M_Bark"
     assert "<b>MATERIALS</b>" in card.material_label.text()
+
+
+def test_program_status_card_keeps_missing_bone_warning_visible(qtbot) -> None:
+    card = ProgramStatusCard()
+    qtbot.addWidget(card)
+
+    card.set_bone_gap_warning(("Group_2",))
+    card.finish("success", "Source rows loaded.")
+
+    assert not card.bone_gap_warning_label.isHidden()
+    assert card.bone_gap_warning_label.text() == "⚠ Missing bones: Group_2"
+
+    card.set_bone_gap_warning(("Group_2", "Group_4"))
+    assert card.bone_gap_warning_label.text() == "⚠ Missing bones in 2 groups"
+    assert card.bone_gap_warning_label.toolTip() == "Group_2, Group_4"
+
+    card.set_bone_gap_warning(())
+    assert card.bone_gap_warning_label.isHidden()
 
 
 def test_program_status_card_compacts_paths_but_keeps_full_tooltip(qtbot) -> None:
@@ -150,14 +169,81 @@ def test_main_window_uses_one_status_card_and_no_tab_summary_rows(qtbot, tmp_pat
     qtbot.addWidget(window)
 
     assert window.status_label is window.program_status_card.status_label
-    assert window.wind_panel.dual_skinning_checkbox.isChecked() is True
-    assert "On:" in window.wind_panel.dual_skinning_checkbox.toolTip()
-    assert "Off:" in window.wind_panel.dual_skinning_checkbox.toolTip()
+    assert window.wind_panel.skinning_quality_slider.minimum() == 1
+    assert window.wind_panel.skinning_quality_slider.maximum() == 4
+    assert window.wind_panel.skinning_quality().value == 1
+    assert "Maximum skinning influences" in window.wind_panel.skinning_quality_slider.toolTip()
     assert not hasattr(window, "materials_card")
     assert not hasattr(window, "runtime_card")
     assert not hasattr(window.wind_panel, "summary_label")
     assert not hasattr(window.geometry_panel, "summary_label")
     assert not hasattr(window.materials_panel, "summary_label")
+
+
+def test_skinning_quality_slider_labels_align_and_control_supports_click_and_drag(qtbot, tmp_path) -> None:
+    window = MainWindow(
+        load_theme(),
+        UiShellState(width=1160, height=780, help_prompt_dismissed=True),
+        dependencies=build_default_dependencies(),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    window.show()
+    slider = window.wind_panel.skinning_quality_slider
+    labels = window.wind_panel.skinning_tick_labels
+    def labels_are_aligned() -> bool:
+        option = QStyleOptionSlider()
+        slider.initStyleOption(option)
+        groove = slider.style().subControlRect(QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderGroove, slider)
+        handle = slider.style().subControlRect(QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderHandle, slider)
+        span = groove.width() - handle.width()
+        slider_offset = labels.mapFromGlobal(slider.mapToGlobal(QPoint())).x()
+        return all(
+            abs(
+                label.geometry().center().x()
+                - (
+                    slider_offset
+                    + groove.x()
+                    + handle.width() // 2
+                    + QStyle.sliderPositionFromValue(1, 4, label.value, span, option.upsideDown)
+                )
+            )
+            <= 1
+            for label in labels.labels
+        )
+
+    qtbot.waitUntil(labels_are_aligned, timeout=1000)
+
+    option = QStyleOptionSlider()
+    slider.initStyleOption(option)
+    groove = slider.style().subControlRect(QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderGroove, slider)
+    handle = slider.style().subControlRect(QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderHandle, slider)
+    span = groove.width() - handle.width()
+    slider_offset = labels.mapFromGlobal(slider.mapToGlobal(QPoint())).x()
+    for label in labels.labels:
+        position = QStyle.sliderPositionFromValue(1, 4, label.value, span, option.upsideDown)
+        expected_center = slider_offset + groove.x() + handle.width() // 2 + position
+        assert abs(label.geometry().center().x() - expected_center) <= 1
+        assert label.toolTip()
+        assert label.height() >= label.sizeHint().height() + 4
+
+    slider.setValue(1)
+    qtbot.mouseClick(slider, Qt.MouseButton.LeftButton, pos=QPoint(slider.width() - 2, slider.height() // 2))
+    assert slider.value() == 4
+    assert labels.labels[3].font().bold()
+
+    qtbot.mouseClick(labels.labels[1], Qt.MouseButton.LeftButton)
+    assert slider.value() == 2
+
+    start = QPoint(slider.width() // 3, slider.height() // 2)
+    end = QPoint(slider.width() * 2 // 3, slider.height() // 2)
+    qtbot.mousePress(slider, Qt.MouseButton.LeftButton, pos=start)
+    assert slider.isSliderDown()
+    qtbot.mouseMove(slider, pos=end)
+    qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=end)
+    assert slider.value() == 3
+    assert not slider.isSliderDown()
 
 
 def test_parts_folder_button_controls_output_directory_and_visibility(qtbot, tmp_path) -> None:

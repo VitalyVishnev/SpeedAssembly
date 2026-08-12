@@ -16,6 +16,7 @@ from dataclasses import replace
 
 from .models import BaseMaterialOverride, CanonicalTreeModel, ObservedXmlSchemaReport, PrototypeDiscoveryEntry
 from .normalizer import normalize_to_canonical
+from .skeleton_rules import parse_generator_label
 from .xml_reader import analyze_xml, iterparse_source_xml, read_source_xml
 
 
@@ -140,6 +141,23 @@ def discover_source_materials(input_path: str) -> tuple[BaseMaterialOverride, ..
         for source_id in material_id_order
         if source_id in used_base_material_ids
     )
+
+
+def discover_missing_bone_generator_groups(input_path: str) -> tuple[str, ...]:
+    """Return numeric Generator groups skipped between authored bone levels."""
+    levels: set[int] = set()
+    for _event, elem in iterparse_source_xml(input_path, events=("end",)):
+        if elem.tag == "Bone":
+            raw_bone_id = elem.attrib.get("ID", "")
+            bone_id = int(raw_bone_id) if raw_bone_id.lstrip("-").isdigit() else -1
+            _label, level = parse_generator_label(elem.attrib.get("Generator"), bone_id)
+            if level is not None:
+                levels.add(level)
+        elem.clear()
+
+    if len(levels) < 2:
+        return ()
+    return tuple(f"Group_{level}" for level in range(min(levels), max(levels)) if level not in levels)
 
 
 def _base_geometry_mode(model: CanonicalTreeModel) -> str:

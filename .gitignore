@@ -22,6 +22,8 @@ _pyi_*.py
 
 # Local documentation editor state
 docs/user/.obsidian/
+docs/user/_drafts/
+docs/user/_templates/
 
 # Temporary diagnostics and generated scratch data
 .tmp*/

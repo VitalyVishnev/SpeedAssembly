@@ -1326,7 +1326,7 @@ Related files:
 - `src/xml_to_usda/qt_ui/window.py`
 - `tests/test_qt_parameter_wheel.py`
 
-## Decision: Local +X and dual skinning are the default skeleton contract
+## Decision: Local +X and Skinning Quality are the default skeleton contract
 
 Status: Active
 
@@ -1342,18 +1342,37 @@ If an older source omits Bone.End, normalization deterministically infers the
 direction from the parent segment or a root child and records a warning. An
 isolated bone with no usable direction retains its source frame and warns.
 
-`Dual Skinning` is enabled by default and remains operator-switchable in the
-Wind panel. Base-mesh vertices and repeated Part instances use linear
-parent/current weights from 1/0 at the bone start to 0/1 at the bone end
-(`1-t, t`). Root or degenerate segments retain one effective influence. When
-disabled, every vertex and repeated Part is rigidly bound to one bone, which
-can create hard joints. The setting does not alter the output filename.
+`Skinning Quality` is a discrete Wind-panel setting and the single conversion
+contract for skeletal influence width. Quality 1 is the default and preserves
+normalized rigid bindings at the lowest runtime cost. Quality 2 uses a two-weight child attachment
+collar: the child base inherits the parent surface's `grandparent + parent`
+mixture, reaches rigid parent over the first 20% of the child segment, then
+transitions `parent -> child`. Qualities 3 and 4 recursively inherit the
+parent's deformation vector at child attachments and deterministically clamp
+and normalize it to their selected width. The setting does not alter the
+output filename.
+
+Repeated Parts stay rigid at quality 1 and use the established two-weight
+parent/current path at quality 2. At qualities 3 and 4, each rigid Part receives
+the same recursively inherited distribution that Base Mesh has at the instance
+position, clamped and padded to the selected width. Persisted settings store one integer `skinning_quality`.
+Legacy `dual_skinning` and `attachment_skinning_mode` fields are accepted only
+at the JSON loading seam and migrated to qualities 1-4.
+
+UE 5.8 source inspection establishes that assembly builder ignores zero and
+nearly-zero weights, normalizes, quantizes, sorts, and stores the actual
+non-zero influence count per Assembly Part. Therefore fixed-width USD padding
+does not add a runtime GPU iteration. For Base Mesh Nanite skinning, the builder
+reads per-vertex weights until the first zero and stores the maximum active
+influence count per cluster; non-zero weights must precede zero padding. One
+active high-width vertex raises the cost of its cluster, not necessarily the
+whole mesh. Treat matching UE 5.7.x behavior as pending import/runtime validation.
 
 The base-mesh implementation uses bounded NumPy chunks behind this interface;
 Repeated Part instances retain their object-level scalar path. Validation uses
 the same bounded strategy while preserving first-invalid-vertex order and the
 joint-before-weight diagnostic priority at one vertex. On Big Spruce, the full
-operations improved from 0.2824 s to 0.0921 s for Dual Skinning and from
+operations improved from 0.2824 s to 0.0921 s for the original two-weight path and from
 0.1227 s to 0.0267 s for validation. The complete cold source load improved by
 about 6.7%; the authored 14,339,986-character USDA remained byte-identical.
 
@@ -1375,8 +1394,8 @@ the documented hierarchy-based direction inference.
 
 Skeletal Assembly authoring validates base-mesh and repeated-Part influence
 widths, array shapes, joint references, finite `[0, 1]` weights, and per-element
-weight sums. If any authored payload uses Dual Skinning, all bound base/repeated
-payloads must use two influences. Diagnostics identify the exact bone, vertex,
+weight sums. Base meshes and Repeated Parts accept one to four influences and
+must share the selected Skinning Quality width. Diagnostics identify the exact bone, vertex,
 or Part where possible. Errors stop USDA authoring through the existing gate;
 warnings use the existing diagnostics/status/log path.
 
@@ -1384,6 +1403,25 @@ Related files:
 - `src/xml_to_usda/skeleton_processing.py`
 - `src/xml_to_usda/source_validation.py`
 - `src/xml_to_usda/authoring_validation.py`
+
+## Decision: Missing intermediate bone Generator groups warn but do not block export
+
+Status: Active
+
+Source Discovery detects numeric gaps between the minimum and maximum
+`Generator` levels authored on XML bones. A gap such as `Group_0`, `Group_1`,
+`Group_3` produces a modal GUI warning naming `Group_2`, because later bones may
+be attached directly to an earlier group and create long, animation-sensitive
+connections. The dialog requires `OK`, but conversion remains available because
+an operator may have authored the gap intentionally. The main Program Status
+card also keeps a compact yellow warning visible until a gap-free XML is
+selected. Object names are not used for this check; they do not reliably
+describe bone assignment.
+
+Related files:
+- `src/xml_to_usda/source_analysis.py`
+- `src/xml_to_usda/discovery_service.py`
+- `src/xml_to_usda/qt_ui/window.py`
 
 ## Decision: Persist Output together with its Input
 

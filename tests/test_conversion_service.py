@@ -98,7 +98,7 @@ def test_prepare_conversion_plan_builds_default_material_request() -> None:
     assert plan.request.material_policy == MaterialPolicy.SOURCE_MATERIALS
     assert plan.request.bark_material_path is None
     assert plan.request.leaves_material_path is None
-    assert plan.request.dual_skinning is True
+    assert int(plan.request.skinning_quality) == 1
     assert plan.request.single_material_path is None
     assert plan.request.use_explicit_material_contract is False
     assert plan.request.conversion_mode == ConversionMode.SKELETAL_ASSEMBLY

@@ -12,6 +12,7 @@ from .models import (
     Matrix4d,
     MeshData,
     RepeatedPartInstance,
+    SkinningQuality,
     ValidationIssue,
     Vector3,
 )
@@ -21,6 +22,7 @@ _EPSILON = 1.0e-8
 _TRANSFORM_TOLERANCE = 1.0e-4
 _TWIST_WARNING_DEGREES = 75.0
 _DENSE_VERTEX_CHUNK_SIZE = 262_144
+_SOFT_ATTACHMENT_COLLAR_FRACTION = 0.2
 
 
 def validate_skeleton(skeleton: tuple[Joint, ...] | None) -> tuple[ValidationIssue, ...]:
@@ -93,7 +95,7 @@ def validate_skeleton(skeleton: tuple[Joint, ...] | None) -> tuple[ValidationIss
 
 
 def validate_skinning(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
-    """Validate authored single/dual influences for the base mesh and repeated Parts."""
+    """Validate authored skinning influences for the base mesh and repeated Parts."""
     issues: list[ValidationIssue] = []
     skeleton = model.skeleton or ()
     widths: list[tuple[str, int]] = []
@@ -106,8 +108,8 @@ def validate_skinning(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
     for part in model.repeated_parts:
         width = part.binding.element_size
         widths.append((f"Part {part.name!r}", width))
-        if width not in {1, 2}:
-            issues.append(_error("invalid_part_binding_width", f"Repeated Part {part.name!r} has {width} influences; expected one or two."))
+        if width not in {1, 2, 3, 4}:
+            issues.append(_error("invalid_part_binding_width", f"Repeated Part {part.name!r} has {width} influences; expected one to four."))
             continue
         if len(part.binding.weights) != width:
             issues.append(_error("invalid_binding_shape", f"Repeated Part {part.name!r} has mismatched joint and weight counts."))
@@ -119,21 +121,59 @@ def validate_skinning(model: CanonicalTreeModel) -> tuple[ValidationIssue, ...]:
         if weight_issue:
             issues.append(_error("invalid_part_binding_weights", f"Repeated Part {part.name!r} {weight_issue}."))
 
-    active_widths = {width for _label, width in widths if width > 0}
-    if 2 in active_widths and active_widths != {2}:
-        detail = ", ".join(f"{label}: {width}" for label, width in widths if width != 2)
-        issues.append(_error("inconsistent_dual_skinning_width", f"Dual Skinning requires two influences everywhere; found {detail}."))
+    base_width = mesh.skel_element_size if mesh is not None else 0
+    if base_width and any(width != base_width for label, width in widths if label != "base mesh"):
+        detail = ", ".join(
+            f"{label}: {width}"
+            for label, width in widths
+            if label != "base mesh" and width != base_width
+        )
+        issues.append(
+            _error(
+                "inconsistent_skinning_quality_width",
+                f"Skinning Quality requires {base_width} influences for every repeated Part; found {detail}.",
+            )
+        )
     return tuple(issues)
 
 
-def apply_dual_skinning(model: CanonicalTreeModel) -> CanonicalTreeModel:
-    """Blend base vertices and repeated parts between parent/current bones."""
+def apply_skinning_quality(
+    model: CanonicalTreeModel,
+    *,
+    skinning_quality: SkinningQuality | int = SkinningQuality.ONE_WEIGHT,
+) -> CanonicalTreeModel:
+    """Apply the selected one-to-four-weight skinning contract."""
+    quality = SkinningQuality.parse(skinning_quality)
+    if quality == SkinningQuality.ONE_WEIGHT:
+        return model
     skeleton = model.skeleton
-    base_mesh = model.base_mesh
-    if base_mesh is not None:
-        base_mesh = _apply_mesh_dual_skinning(base_mesh, skeleton)
     joint_by_name = {joint.name: joint for joint in skeleton}
-    repeated_parts = tuple(_apply_part_dual_skinning(part, joint_by_name) for part in model.repeated_parts)
+    base_mesh = model.base_mesh
+    if quality >= SkinningQuality.THREE_WEIGHTS:
+        max_influences = int(quality)
+        joint_index = {joint.name: index for index, joint in enumerate(skeleton)}
+        start_distributions = _inherited_start_distributions(skeleton, max_influences)
+        if base_mesh is not None:
+            base_mesh = _apply_mesh_inherited_skinning(
+                base_mesh,
+                skeleton,
+                max_influences=max_influences,
+                start_distributions=start_distributions,
+            )
+        repeated_parts = tuple(
+            _apply_part_inherited_skinning(
+                part,
+                skeleton,
+                joint_index,
+                start_distributions,
+                max_influences=max_influences,
+            )
+            for part in model.repeated_parts
+        )
+    else:
+        if base_mesh is not None:
+            base_mesh = _apply_mesh_two_weight_skinning(base_mesh, skeleton)
+        repeated_parts = tuple(_apply_part_two_weight_skinning(part, joint_by_name) for part in model.repeated_parts)
     return replace(model, base_mesh=base_mesh, assembly_parts=repeated_parts)
 
 
@@ -174,12 +214,12 @@ def orient_skeleton_x(skeleton: tuple[Joint, ...]) -> tuple[Joint, ...]:
     return tuple(oriented)
 
 
-def _apply_part_dual_skinning(part: RepeatedPartInstance, joint_by_name: dict[str, Joint]) -> RepeatedPartInstance:
+def _apply_part_two_weight_skinning(part: RepeatedPartInstance, joint_by_name: dict[str, Joint]) -> RepeatedPartInstance:
     if part.binding.element_size != 1:
-        raise ValueError(f"Dual Skinning requires one normalized joint binding for repeated part {part.name!r}.")
+        raise ValueError(f"Two-weight skinning requires one normalized joint binding for repeated part {part.name!r}.")
     joint = joint_by_name.get(part.binding.joint_tokens[0])
     if joint is None:
-        raise ValueError(f"Dual Skinning cannot resolve repeated part {part.name!r} joint binding.")
+        raise ValueError(f"Two-weight skinning cannot resolve repeated part {part.name!r} joint binding.")
     parent = joint_by_name.get(joint.parent) if joint.parent is not None else None
     blend = _bone_blend(part.position, joint)
     if parent is None or blend is None:
@@ -189,13 +229,48 @@ def _apply_part_dual_skinning(part: RepeatedPartInstance, joint_by_name: dict[st
     return replace(part, binding=binding)
 
 
-def _apply_mesh_dual_skinning(mesh: MeshData, skeleton: tuple[Joint, ...]) -> MeshData:
+def _apply_part_inherited_skinning(
+    part: RepeatedPartInstance,
+    skeleton: tuple[Joint, ...],
+    joint_index: dict[str, int],
+    start_distributions: tuple[dict[int, float], ...],
+    *,
+    max_influences: int,
+) -> RepeatedPartInstance:
+    if part.binding.element_size != 1:
+        raise ValueError(f"Inherited skinning requires one normalized joint binding for repeated part {part.name!r}.")
+    current_index = joint_index.get(part.binding.joint_tokens[0])
+    if current_index is None:
+        raise ValueError(f"Inherited skinning cannot resolve repeated part {part.name!r} joint binding.")
+    joint = skeleton[current_index]
+
+    parameter = _bone_blend(part.position, joint)
+    if parameter is None:
+        distribution = {current_index: 1.0}
+    else:
+        distribution = {
+            index: weight * (1.0 - parameter)
+            for index, weight in start_distributions[current_index].items()
+            if weight * (1.0 - parameter) > _EPSILON
+        }
+        if parameter > _EPSILON:
+            distribution[current_index] = distribution.get(current_index, 0.0) + parameter
+        distribution = _truncate_distribution(distribution or {current_index: 1.0}, max_influences)
+
+    binding = InstanceBinding(
+        joint_tokens=tuple(skeleton[index].name for index in distribution),
+        weights=tuple(distribution.values()),
+    ).padded(max_influences)
+    return replace(part, binding=binding)
+
+
+def _apply_mesh_two_weight_skinning(mesh: MeshData, skeleton: tuple[Joint, ...]) -> MeshData:
     import numpy as np
 
     if mesh.skel_element_size != 1:
-        raise ValueError("Dual Skinning requires the normalized single-influence base mesh.")
+        raise ValueError("Two-weight skinning requires the normalized single-influence base mesh.")
     if len(mesh.skel_joint_indices) != len(mesh.points):
-        raise ValueError("Dual Skinning requires one normalized joint index per base-mesh point.")
+        raise ValueError("Two-weight skinning requires one normalized joint index per base-mesh point.")
 
     joint_count = len(skeleton)
     joint_index = {joint.name: index for index, joint in enumerate(skeleton)}
@@ -212,6 +287,20 @@ def _apply_mesh_dual_skinning(mesh: MeshData, skeleton: tuple[Joint, ...]) -> Me
             joint_has_end[index] = True
         if joint.parent is not None:
             parent_indices[index] = joint_index.get(joint.parent, -1)
+
+    attachment_parent_blends = np.full(joint_count, np.nan, dtype=np.float64)
+    grandparent_indices = np.full(joint_count, -1, dtype=np.int64)
+    for current_index, joint in enumerate(skeleton):
+        parent_index = parent_indices[current_index]
+        if parent_index < 0:
+            continue
+        grandparent_index = parent_indices[parent_index]
+        if grandparent_index < 0:
+            continue
+        parameter = _bone_blend(joint.bind_translate, skeleton[parent_index])
+        if parameter is not None and _EPSILON < parameter < 1.0 - _EPSILON:
+            attachment_parent_blends[current_index] = parameter
+            grandparent_indices[current_index] = grandparent_index
 
     indices: list[int] = []
     weights: list[float] = []
@@ -263,6 +352,39 @@ def _apply_mesh_dual_skinning(mesh: MeshData, skeleton: tuple[Joint, ...]) -> Me
             chunk_weights[blended, 0] = 1.0 - blend
             chunk_weights[blended, 1] = blend
 
+            blended_rows = np.flatnonzero(blended)
+            blended_current_indices = current_indices[blended]
+            attachment_blends = attachment_parent_blends[blended_current_indices]
+            has_collar = np.isfinite(attachment_blends)
+            if np.any(has_collar):
+                collar_rows = blended_rows[has_collar]
+                collar_parameters = blend[has_collar]
+                collar_attachment_blends = attachment_blends[has_collar]
+                collar_current_indices = blended_current_indices[has_collar]
+                collar_parent_indices = parent_indices[collar_current_indices]
+                inside_collar = collar_parameters <= _SOFT_ATTACHMENT_COLLAR_FRACTION
+
+                if np.any(inside_collar):
+                    progress = collar_parameters[inside_collar] / _SOFT_ATTACHMENT_COLLAR_FRACTION
+                    progress = progress * progress * (3.0 - 2.0 * progress)
+                    grandparent_weight = (1.0 - collar_attachment_blends[inside_collar]) * (1.0 - progress)
+                    rows = collar_rows[inside_collar]
+                    chunk_indices[rows, 0] = grandparent_indices[collar_current_indices[inside_collar]]
+                    chunk_indices[rows, 1] = collar_parent_indices[inside_collar]
+                    chunk_weights[rows, 0] = grandparent_weight
+                    chunk_weights[rows, 1] = 1.0 - grandparent_weight
+
+                after_collar = ~inside_collar
+                if np.any(after_collar):
+                    progress = (
+                        collar_parameters[after_collar] - _SOFT_ATTACHMENT_COLLAR_FRACTION
+                    ) / (1.0 - _SOFT_ATTACHMENT_COLLAR_FRACTION)
+                    rows = collar_rows[after_collar]
+                    chunk_indices[rows, 0] = collar_parent_indices[after_collar]
+                    chunk_indices[rows, 1] = collar_current_indices[after_collar]
+                    chunk_weights[rows, 0] = 1.0 - progress
+                    chunk_weights[rows, 1] = progress
+
         indices.extend(chunk_indices.ravel().tolist())
         weights.extend(chunk_weights.ravel().tolist())
     return replace(
@@ -271,6 +393,153 @@ def _apply_mesh_dual_skinning(mesh: MeshData, skeleton: tuple[Joint, ...]) -> Me
         skel_joint_weights=tuple(weights),
         skel_element_size=2,
     )
+
+
+def _apply_mesh_inherited_skinning(
+    mesh: MeshData,
+    skeleton: tuple[Joint, ...],
+    *,
+    max_influences: int,
+    start_distributions: tuple[dict[int, float], ...] | None = None,
+) -> MeshData:
+    import numpy as np
+
+    if mesh.skel_element_size != 1:
+        raise ValueError("Inherited skinning requires the normalized single-influence base mesh.")
+    if len(mesh.skel_joint_indices) != len(mesh.points):
+        raise ValueError("Inherited skinning requires one normalized joint index per base-mesh point.")
+    if max_influences not in {3, 4}:
+        raise ValueError("Inherited skinning supports three or four influences.")
+
+    joint_count = len(skeleton)
+    joint_index = {joint.name: index for index, joint in enumerate(skeleton)}
+    if start_distributions is None:
+        start_distributions = _inherited_start_distributions(skeleton, max_influences)
+
+    output_indices: list[int] = []
+    output_weights: list[float] = []
+    point_count = len(mesh.points)
+    for start_index in range(0, point_count, _DENSE_VERTEX_CHUNK_SIZE):
+        end_index = min(point_count, start_index + _DENSE_VERTEX_CHUNK_SIZE)
+        chunk_count = end_index - start_index
+        current_indices = np.asarray(mesh.skel_joint_indices[start_index:end_index], dtype=np.int64)
+        invalid = current_indices[(current_indices < 0) | (current_indices >= joint_count)]
+        if len(invalid):
+            raise ValueError(f"Inherited skinning cannot resolve joint index {int(invalid[0])}.")
+        points = np.fromiter(
+            (
+                coordinate
+                for point in mesh.points[start_index:end_index]
+                for coordinate in (point.x, point.y, point.z)
+            ),
+            dtype=np.float64,
+            count=chunk_count * 3,
+        ).reshape((chunk_count, 3))
+        chunk_indices = np.empty((chunk_count, max_influences), dtype=np.int64)
+        chunk_weights = np.zeros((chunk_count, max_influences), dtype=np.float64)
+
+        for current_index_raw in np.unique(current_indices):
+            current_index = int(current_index_raw)
+            selected = np.flatnonzero(current_indices == current_index)
+            joint = skeleton[current_index]
+            end = joint.bind_end_translate
+            if end is None:
+                parameters = np.ones(len(selected), dtype=np.float64)
+            else:
+                segment = np.asarray(
+                    (
+                        end.x - joint.bind_translate.x,
+                        end.y - joint.bind_translate.y,
+                        end.z - joint.bind_translate.z,
+                    ),
+                    dtype=np.float64,
+                )
+                length_squared = float(np.dot(segment, segment))
+                if length_squared <= _EPSILON:
+                    parameters = np.ones(len(selected), dtype=np.float64)
+                else:
+                    start = np.asarray(
+                        (joint.bind_translate.x, joint.bind_translate.y, joint.bind_translate.z),
+                        dtype=np.float64,
+                    )
+                    parameters = np.clip(((points[selected] - start) @ segment) / length_squared, 0.0, 1.0)
+
+            start_distribution_for_joint = start_distributions[current_index]
+            candidate_indices = sorted(set(start_distribution_for_joint) | {current_index})
+            candidate_weights = np.asarray(
+                [start_distribution_for_joint.get(candidate, 0.0) for candidate in candidate_indices],
+                dtype=np.float64,
+            )[None, :] * (1.0 - parameters[:, None])
+            candidate_weights[:, candidate_indices.index(current_index)] += parameters
+            chosen_count = min(max_influences, len(candidate_indices))
+            order = np.argsort(-candidate_weights, axis=1, kind="stable")[:, :chosen_count]
+            chosen_indices = np.take(np.asarray(candidate_indices, dtype=np.int64), order)
+            chosen_weights = np.take_along_axis(candidate_weights, order, axis=1)
+            chosen_weights /= np.sum(chosen_weights, axis=1, keepdims=True)
+            chunk_indices[selected] = current_index
+            chunk_indices[selected, :chosen_count] = chosen_indices
+            chunk_weights[selected, :chosen_count] = chosen_weights
+
+        output_indices.extend(chunk_indices.ravel().tolist())
+        output_weights.extend(chunk_weights.ravel().tolist())
+
+    return replace(
+        mesh,
+        skel_joint_indices=tuple(output_indices),
+        skel_joint_weights=tuple(output_weights),
+        skel_element_size=max_influences,
+    )
+
+
+def _inherited_start_distributions(
+    skeleton: tuple[Joint, ...],
+    max_influences: int,
+) -> tuple[dict[int, float], ...]:
+    joint_index = {joint.name: index for index, joint in enumerate(skeleton)}
+    parent_indices = tuple(
+        joint_index.get(joint.parent, -1) if joint.parent is not None else -1
+        for joint in skeleton
+    )
+    distributions: list[dict[int, float] | None] = [None] * len(skeleton)
+
+    def resolve(index: int, visiting: set[int]) -> dict[int, float]:
+        cached = distributions[index]
+        if cached is not None:
+            return cached
+        if index in visiting:
+            raise ValueError("Inherited skinning cannot resolve a cyclic skeleton hierarchy.")
+        parent_index = parent_indices[index]
+        if parent_index < 0:
+            distribution = {index: 1.0}
+        else:
+            visiting.add(index)
+            parent_start = resolve(parent_index, visiting)
+            visiting.remove(index)
+            parameter = _bone_blend(skeleton[index].bind_translate, skeleton[parent_index])
+            if parameter is None:
+                distribution = {parent_index: 1.0}
+            else:
+                distribution = {
+                    joint: weight * (1.0 - parameter)
+                    for joint, weight in parent_start.items()
+                    if weight * (1.0 - parameter) > _EPSILON
+                }
+                distribution[parent_index] = distribution.get(parent_index, 0.0) + parameter
+            distribution = _truncate_distribution(distribution, max_influences)
+        distributions[index] = distribution
+        return distribution
+
+    for index in range(len(skeleton)):
+        resolve(index, set())
+    return tuple(distribution or {} for distribution in distributions)
+
+
+def _truncate_distribution(distribution: dict[int, float], max_influences: int) -> dict[int, float]:
+    ordered = sorted(distribution.items(), key=lambda item: (-item[1], item[0]))[:max_influences]
+    total = sum(weight for _joint, weight in ordered)
+    if total <= _EPSILON:
+        raise ValueError("Skinning influence distribution has no positive weight.")
+    return {joint: weight / total for joint, weight in ordered}
 
 
 def _bone_blend(position: Vector3, joint: Joint) -> float | None:
@@ -372,8 +641,8 @@ def _validate_mesh_influences(mesh: MeshData, skeleton_size: int) -> list[Valida
     import numpy as np
 
     width = mesh.skel_element_size
-    if width not in {1, 2}:
-        return [_error("invalid_base_mesh_skinning_width", f"Base mesh has {width} influences per vertex; expected one or two.")]
+    if width not in {1, 2, 3, 4}:
+        return [_error("invalid_base_mesh_skinning_width", f"Base mesh has {width} influences per vertex; expected one to four.")]
     expected = len(mesh.points) * width
     if len(mesh.skel_joint_indices) != expected or len(mesh.skel_joint_weights) != expected:
         return [

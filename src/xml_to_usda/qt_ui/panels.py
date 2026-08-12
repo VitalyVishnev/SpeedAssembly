@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QSignalBlocker, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QCheckBox,
@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSlider,
+    QStyle,
+    QStyleOptionSlider,
     QSizePolicy,
     QSpinBox,
     QVBoxLayout,
@@ -43,6 +45,7 @@ from ..models import (
     FbxMaterialSlotOverride,
     PrototypeSourceConfig,
     PrototypeSourceMode,
+    SkinningQuality,
     UdimMaterialSetting,
     UdimMode,
 )
@@ -192,6 +195,189 @@ class SliderSpinEditor(QWidget):
         return max(self._slider_minimum, min(self._slider_maximum, raw_value))
 
 
+class DiscreteSlider(QSlider):
+    """Integer slider supporting both direct track clicks and handle dragging."""
+
+    def __init__(self, orientation: Qt.Orientation, parent=None) -> None:
+        super().__init__(orientation, parent)
+        self._track_drag_active = False
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+        handle = self.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider,
+            option,
+            QStyle.SubControl.SC_SliderHandle,
+            self,
+        )
+        if handle.contains(event.position().toPoint()):
+            super().mousePressEvent(event)
+            return
+        self._track_drag_active = True
+        self.setSliderDown(True)
+        self.setValue(self._value_at(event.position().toPoint()))
+        event.accept()
+
+    def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        if not self._track_drag_active:
+            super().mouseMoveEvent(event)
+            return
+        self.setValue(self._value_at(event.position().toPoint()))
+        event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        if not self._track_drag_active:
+            super().mouseReleaseEvent(event)
+            return
+        self.setValue(self._value_at(event.position().toPoint()))
+        self._track_drag_active = False
+        self.setSliderDown(False)
+        event.accept()
+
+    def _value_at(self, position: QPoint) -> int:
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+        groove = self.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider,
+            option,
+            QStyle.SubControl.SC_SliderGroove,
+            self,
+        )
+        handle = self.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider,
+            option,
+            QStyle.SubControl.SC_SliderHandle,
+            self,
+        )
+        span = max(1, groove.width() - handle.width())
+        handle_position = position.x() - groove.x() - handle.width() // 2
+        return QStyle.sliderValueFromPosition(
+            self.minimum(),
+            self.maximum(),
+            handle_position,
+            span,
+            option.upsideDown,
+        )
+
+
+class SkinningTickLabel(QLabel):
+    selected = Signal(int)
+
+    def __init__(self, value: int, text: str, tooltip: str, parent=None) -> None:
+        super().__init__(text, parent)
+        self.value = value
+        self.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(tooltip)
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.selected.emit(self.value)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class SkinningTickLabels(QWidget):
+    """Place labels below the exact styled handle centers for each tick."""
+
+    def __init__(self, slider: QSlider, labels: tuple[tuple[str, str], ...], parent=None) -> None:
+        super().__init__(parent)
+        self._slider = slider
+        self.labels = tuple(
+            SkinningTickLabel(value, text, tooltip, self)
+            for value, (text, tooltip) in zip(range(slider.minimum(), slider.maximum() + 1), labels, strict=True)
+        )
+        for label in self.labels:
+            label.selected.connect(slider.setValue)
+        slider.valueChanged.connect(self._set_selected)
+        slider.installEventFilter(self)
+        self._update_label_metrics()
+        self._set_selected(slider.value())
+        QTimer.singleShot(0, self._update_label_metrics)
+
+    def edge_margin(self) -> int:
+        return max(label.sizeHint().width() for label in self.labels) // 2
+
+    def _set_selected(self, selected_value: int) -> None:
+        for label in self.labels:
+            font = label.font()
+            font.setBold(label.value == selected_value)
+            label.setFont(font)
+        self._layout_labels()
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._layout_labels()
+
+    def eventFilter(self, watched, event) -> bool:  # type: ignore[override]
+        if watched is self._slider and event.type() in {
+            QEvent.Type.Move,
+            QEvent.Type.Resize,
+            QEvent.Type.StyleChange,
+        }:
+            QTimer.singleShot(0, self._layout_labels)
+        return super().eventFilter(watched, event)
+
+    def changeEvent(self, event) -> None:  # type: ignore[override]
+        super().changeEvent(event)
+        if event.type() in {QEvent.Type.StyleChange, QEvent.Type.FontChange}:
+            QTimer.singleShot(0, self._update_label_metrics)
+
+    def _update_label_metrics(self) -> None:
+        bold_heights: list[int] = []
+        for label in self.labels:
+            selected = label.font().bold()
+            normal_font = label.font()
+            normal_font.setBold(False)
+            bold_font = label.font()
+            bold_font.setBold(True)
+            label.setMinimumWidth(0)
+            label.setMaximumWidth(16_777_215)
+            label.setFont(bold_font)
+            bold_size = label.sizeHint()
+            label.setFixedWidth(bold_size.width())
+            bold_heights.append(bold_size.height())
+            label.setFont(bold_font if selected else normal_font)
+        self.setMinimumHeight(max(bold_heights) + 4)
+        self._layout_labels()
+
+    def _layout_labels(self) -> None:
+        if not self.width() or not self._slider.width():
+            return
+        option = QStyleOptionSlider()
+        self._slider.initStyleOption(option)
+        groove = self._slider.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider,
+            option,
+            QStyle.SubControl.SC_SliderGroove,
+            self._slider,
+        )
+        handle = self._slider.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider,
+            option,
+            QStyle.SubControl.SC_SliderHandle,
+            self._slider,
+        )
+        span = max(1, groove.width() - handle.width())
+        slider_offset = self.mapFromGlobal(self._slider.mapToGlobal(QPoint(0, 0))).x()
+        for label in self.labels:
+            handle_position = QStyle.sliderPositionFromValue(
+                self._slider.minimum(),
+                self._slider.maximum(),
+                label.value,
+                span,
+                option.upsideDown,
+            )
+            center = slider_offset + groove.x() + handle.width() // 2 + handle_position
+            width = label.width()
+            label.setGeometry(center - width // 2, 0, width, self.height())
+
+
 @dataclass(frozen=True)
 class GeometryRowState:
     source_key: str
@@ -240,8 +426,29 @@ class WindTabPanel(QWidget):
 
         self.ground_cover_checkbox = QCheckBox("Ground Cover", controls)
         self.ground_cover_checkbox.toggled.connect(lambda _checked: self._on_change())
-        self.dual_skinning_checkbox = QCheckBox("Dual Skinning", controls)
-        self.dual_skinning_checkbox.toggled.connect(lambda _checked: self._on_change())
+        skinning_label = QLabel("Skinning Quality", controls)
+        self.skinning_quality_slider = DiscreteSlider(Qt.Orientation.Horizontal, controls)
+        self.skinning_quality_slider.setRange(1, 4)
+        self.skinning_quality_slider.setValue(1)
+        self.skinning_quality_slider.setSingleStep(1)
+        self.skinning_quality_slider.setPageStep(1)
+        self.skinning_quality_slider.setTickInterval(1)
+        self.skinning_quality_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.skinning_quality_slider.setAccessibleName("Skinning Quality")
+        self.skinning_quality_slider.valueChanged.connect(lambda _value: self._on_change())
+        self.skinning_tick_labels = SkinningTickLabels(
+            self.skinning_quality_slider,
+            (
+                ("1 weight", "Default and cheapest. Rigid skinning works well for many trees."),
+                ("2 weights", "Soft branch bending. Attachment artifacts may still be visible."),
+                ("3 weights\n(Expensive)", "Soft bending with fewer attachment artifacts, at higher runtime cost."),
+                ("4 weights\n(Expensive)", "Most visually stable deformation, with the highest runtime cost."),
+            ),
+            controls,
+        )
+        skinning_slider_row = QHBoxLayout()
+        skinning_slider_row.setContentsMargins(self.skinning_tick_labels.edge_margin(), 0, self.skinning_tick_labels.edge_margin(), 0)
+        skinning_slider_row.addWidget(self.skinning_quality_slider)
         self.gust_spin = self._make_spin(0.0, 1.0, 0.01, 0.0)
         self.gust_spin.valueChanged.connect(lambda _value: self._on_change())
         set_tooltip(
@@ -253,9 +460,9 @@ class WindTabPanel(QWidget):
             self.gust_spin,
         )
         set_tooltip(
-            "On: smoothly blends the base mesh and instanced parts between the parent and current bone. "
-            "Off: rigidly binds each vertex and part to one bone, so bends can form hard joints.",
-            self.dual_skinning_checkbox,
+            "Maximum skinning influences per base-mesh vertex. 1 is rigid and cheapest; 2 uses the soft child-attachment collar; 3 and 4 preserve deeper inherited deformation at higher runtime cost.",
+            skinning_label,
+            self.skinning_quality_slider,
         )
         # Wind inspection is now owned by the Wind tab itself instead of the
         # global action column so the operator can tweak wind globals and refresh
@@ -271,11 +478,13 @@ class WindTabPanel(QWidget):
         controls_layout.addWidget(self.ground_cover_checkbox, 0, 0, 1, 2)
         controls_layout.addWidget(self.refresh_button, 0, 2, 1, 1)
         controls_layout.addWidget(self.preview_button, 0, 3, 1, 1)
-        controls_layout.addWidget(self.dual_skinning_checkbox, 1, 0, 1, 4)
+        controls_layout.addWidget(skinning_label, 1, 0, 1, 4)
+        controls_layout.addLayout(skinning_slider_row, 2, 0, 1, 4)
+        controls_layout.addWidget(self.skinning_tick_labels, 3, 0, 1, 4)
         gust_label = QLabel("Gust Attenuation", controls)
         set_tooltip(self.gust_spin.toolTip(), gust_label)
-        controls_layout.addWidget(gust_label, 2, 0)
-        controls_layout.addWidget(self.gust_spin, 2, 1, 1, 3)
+        controls_layout.addWidget(gust_label, 4, 0)
+        controls_layout.addWidget(self.gust_spin, 4, 1, 1, 3)
         controls_layout.setColumnStretch(1, 1)
         controls_layout.setColumnStretch(3, 1)
         outer.addWidget(controls)
@@ -297,14 +506,14 @@ class WindTabPanel(QWidget):
         *,
         is_ground_cover: bool,
         gust_attenuation: float,
-        dual_skinning: bool = True,
+        skinning_quality: SkinningQuality | int = SkinningQuality.ONE_WEIGHT,
     ) -> None:
         with QSignalBlocker(self.ground_cover_checkbox):
             self.ground_cover_checkbox.setChecked(bool(is_ground_cover))
         with QSignalBlocker(self.gust_spin):
             self.gust_spin.setValue(float(gust_attenuation))
-        with QSignalBlocker(self.dual_skinning_checkbox):
-            self.dual_skinning_checkbox.setChecked(bool(dual_skinning))
+        with QSignalBlocker(self.skinning_quality_slider):
+            self.skinning_quality_slider.setValue(int(SkinningQuality.parse(skinning_quality)))
 
     def is_ground_cover_enabled(self) -> bool:
         return bool(self.ground_cover_checkbox.isChecked())
@@ -312,8 +521,8 @@ class WindTabPanel(QWidget):
     def gust_attenuation(self) -> float:
         return float(self.gust_spin.value())
 
-    def dual_skinning_enabled(self) -> bool:
-        return bool(self.dual_skinning_checkbox.isChecked())
+    def skinning_quality(self) -> SkinningQuality:
+        return SkinningQuality(self.skinning_quality_slider.value())
 
     def rebuild(self, groups: tuple[DynamicWindSimulationGroup, ...]) -> None:
         self._rows.clear()

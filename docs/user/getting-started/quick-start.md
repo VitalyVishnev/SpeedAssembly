@@ -1,6 +1,6 @@
 # Quick start
 
-This guide covers the shortest validated path from a SpeedTree Raw XML source to a USDA file for Unreal Engine.
+This guide covers the shortest path from a SpeedTree Raw XML source to a USDA file for Unreal Engine.
 
 ## Before you begin
 

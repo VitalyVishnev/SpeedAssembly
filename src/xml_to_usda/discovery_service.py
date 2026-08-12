@@ -19,7 +19,11 @@ from .settings_service import (
     FbxMaterialSlotSettingRecord,
     PartSourceSettingRecord,
 )
-from .source_analysis import discover_part_prototypes, discover_source_materials
+from .source_analysis import (
+    discover_missing_bone_generator_groups,
+    discover_part_prototypes,
+    discover_source_materials,
+)
 
 
 @dataclass(frozen=True)
@@ -87,6 +91,7 @@ class SourceDiscoveryResult:
     input_path: str
     base: BaseMaterialDiscovery
     prototypes: PrototypeDiscovery
+    missing_bone_generator_groups: tuple[str, ...] = ()
 
 
 def discover_source_rows(request: SourceDiscoveryRequest) -> SourceDiscoveryResult:
@@ -100,6 +105,7 @@ def discover_source_rows(request: SourceDiscoveryRequest) -> SourceDiscoveryResu
             request.input_path,
             persisted_records=request.part_persisted_records,
         ),
+        missing_bone_generator_groups=discover_missing_bone_generator_groups(request.input_path),
     )
 
 

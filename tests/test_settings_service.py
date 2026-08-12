@@ -8,7 +8,7 @@ import pytest
 from xml_to_usda.fracture_collision import FractureCollisionMode, FractureCollisionSettings
 from xml_to_usda.fracture_preview_service import FracturePreviewSettings
 from xml_to_usda.fracture_service import FractureSettings
-from xml_to_usda.models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode, UdimMode
+from xml_to_usda.models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode, SkinningQuality, UdimMode
 from xml_to_usda.proxy_collision import ProxyCollisionMode, ProxyCollisionSettings
 from xml_to_usda.proxy_mesh_service import ProxyMeshSettings
 from xml_to_usda.settings_service import (
@@ -33,7 +33,23 @@ def test_load_gui_settings_returns_defaults_for_missing_file(tmp_path: Path) -> 
     snapshot = load_gui_settings(tmp_path / "missing.json")
 
     assert snapshot == GuiSettingsSnapshot()
-    assert snapshot.dual_skinning is True
+    assert snapshot.skinning_quality == SkinningQuality.ONE_WEIGHT
+
+
+@pytest.mark.parametrize(
+    ("legacy_fields", "expected"),
+    (
+        ({"dual_skinning": False}, SkinningQuality.ONE_WEIGHT),
+        ({"dual_skinning": True, "attachment_skinning_mode": "soft_two"}, SkinningQuality.TWO_WEIGHTS),
+        ({"dual_skinning": True, "attachment_skinning_mode": "inherited_three"}, SkinningQuality.THREE_WEIGHTS),
+        ({"dual_skinning": True, "attachment_skinning_mode": "inherited_four"}, SkinningQuality.FOUR_WEIGHTS),
+    ),
+)
+def test_load_gui_settings_migrates_legacy_skinning_fields(tmp_path: Path, legacy_fields, expected) -> None:
+    settings_path = tmp_path / "gui_settings.json"
+    settings_path.write_text(json.dumps({"schema_version": GUI_SETTINGS_SCHEMA_VERSION, **legacy_fields}), encoding="utf-8")
+
+    assert load_gui_settings(settings_path).skinning_quality == expected
 
 
 def test_load_gui_settings_discards_legacy_fracture_preview_face_budget(tmp_path: Path) -> None:
@@ -89,6 +105,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
         single_material_path="/Game/Assembly/Fern/M_Fern.M_Fern",
         gust_attenuation=0.6,
         is_ground_cover=True,
+        skinning_quality=SkinningQuality.FOUR_WEIGHTS,
         wind_group_settings={
             "0": WindGroupSettingRecord(
                 is_trunk_group=True,
@@ -185,6 +202,9 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert payload["cpu_profile"] == CpuProfile.QUIET.value
     assert payload["preserve_temp_files"] is True
     assert payload["material_policy"] == MaterialPolicy.SINGLE_MATERIAL.value
+    assert payload["skinning_quality"] == 4
+    assert "dual_skinning" not in payload
+    assert "attachment_skinning_mode" not in payload
     assert payload["wind_group_settings"]["0"]["is_trunk_group"] is True
     assert "base_material_settings_by_input_path" not in payload
     assert "part_mesh_settings_by_input_path" not in payload
@@ -248,6 +268,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
     assert restored.preserve_temp_files is True
     assert restored.conversion_mode == snapshot.conversion_mode
     assert restored.material_policy == snapshot.material_policy
+    assert restored.skinning_quality == SkinningQuality.FOUR_WEIGHTS
     assert restored.fbx_cache_max_size_gb == 42
     assert restored.fbx_cache_max_age_days == 7
     assert restored.debug_trace_enabled is True

@@ -7,6 +7,7 @@ from xml_to_usda.discovery_service import (
     discover_part_prototype_rows,
     inspect_fbx_material_slot_rows,
 )
+from xml_to_usda.source_analysis import discover_missing_bone_generator_groups
 from xml_to_usda.models import CpuProfile, FbxMaterialMode, FbxMaterialSlotSpec, PrototypeSourceMode
 from xml_to_usda.settings_service import (
     BaseMaterialSettingRecord,
@@ -16,6 +17,30 @@ from xml_to_usda.settings_service import (
 
 
 SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "samples" / "speedtree" / "simple_tree" / "variants" / "SimpleTree_01.xml"
+
+
+def test_discover_missing_bone_generator_groups_reports_only_internal_gaps(tmp_path: Path) -> None:
+    xml_path = tmp_path / "missing_group.xml"
+    xml_path.write_text(
+        '<SpeedTreeRaw><Bones Count="3">'
+        '<Bone ID="0" Generator="Group_0" />'
+        '<Bone ID="1" Generator="Group_1" />'
+        '<Bone ID="2" Generator="Group_3" />'
+        "</Bones></SpeedTreeRaw>",
+        encoding="utf-8",
+    )
+
+    assert discover_missing_bone_generator_groups(str(xml_path)) == ("Group_2",)
+
+    xml_path.write_text(
+        '<SpeedTreeRaw><Bones Count="3">'
+        '<Bone ID="0" Generator="Group_0" />'
+        '<Bone ID="1" Generator="Group_1" />'
+        '<Bone ID="2" Generator="Group_2" />'
+        "</Bones></SpeedTreeRaw>",
+        encoding="utf-8",
+    )
+    assert discover_missing_bone_generator_groups(str(xml_path)) == ()
 
 
 def test_discover_base_material_rows_merges_persisted_paths() -> None:

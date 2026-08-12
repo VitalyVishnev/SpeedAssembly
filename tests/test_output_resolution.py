@@ -22,11 +22,11 @@ def test_output_resolution_defaults_to_single_file_usda() -> None:
     assert output_path == Path("D:/trees/SimpleTree_01.usda")
 
 
-def test_output_resolution_does_not_encode_dual_skinning_in_file_name() -> None:
+def test_output_resolution_does_not_encode_skinning_quality_in_file_name() -> None:
     request = ConversionRequest(
         input_paths=("D:/trees/SimpleTree_01.xml",),
         output_path="D:/exports/Tree.usda",
-        dual_skinning=True,
+        skinning_quality=4,
     )
 
     assert resolve_output_path(request, request.input_paths[0]) == Path("D:/exports/Tree.usda")

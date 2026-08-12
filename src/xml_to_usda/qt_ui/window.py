@@ -765,6 +765,7 @@ class MainWindow(QWidget):
         self._fracture_preview_settings = FracturePreviewSettings()
         self._proxy_mesh_preview_result: ProxyMeshResult | None = None
         self._proxy_mesh_preview_input_path = ""
+        self._shown_bone_gap_warning: tuple[str, tuple[str, ...]] | None = None
         self._fracture_preview_cache: OrderedDict[tuple[object, object], object] = OrderedDict()
 
         self._operator_state, self._operator_snapshot = load_operator_state(
@@ -1513,7 +1514,7 @@ class MainWindow(QWidget):
         self.wind_panel.set_global_options(
             is_ground_cover=self._operator_state.is_ground_cover,
             gust_attenuation=self._operator_state.gust_attenuation,
-            dual_skinning=self._operator_state.dual_skinning,
+            skinning_quality=self._operator_state.skinning_quality,
         )
         self.geometry_panel.apply_proxy_settings(self._proxy_mesh_settings)
         self.geometry_panel.apply_fracture_preview_settings(self._fracture_preview_settings)
@@ -1679,7 +1680,7 @@ class MainWindow(QWidget):
             )
         self.program_status_card.set_summary(
             mode=mode,
-            dual_skinning=self._operator_state.dual_skinning,
+            skinning_quality=int(self._operator_state.skinning_quality),
             materials=materials,
             materials_tooltip=materials_tooltip,
         )
@@ -1753,6 +1754,7 @@ class MainWindow(QWidget):
             f"Material policy: {request.material_policy.value}",
             f"Ground cover: {self._operator_state.is_ground_cover}",
             f"Gust attenuation: {self._operator_state.gust_attenuation:.2f}",
+            f"Skinning quality: {int(request.skinning_quality)} weight(s)",
             f"Prototype rows: {len(request.prototype_source_configs)}",
             f"Wind groups: {wind_state}",
         ]
@@ -2000,6 +2002,8 @@ class MainWindow(QWidget):
         self._operator_state = replace(self._operator_state, input_path=normalized_text)
         input_changed = normalized_text != previous_input
         if input_changed:
+            self._shown_bone_gap_warning = None
+            self.program_status_card.set_bone_gap_warning(())
             if normalized_text:
                 self.program_status_card.begin_activity("Inspecting XML", "Inspecting selected XML...")
             else:
@@ -2105,7 +2109,7 @@ class MainWindow(QWidget):
             self._operator_state,
             gust_attenuation=self.wind_panel.gust_attenuation(),
             is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
-            dual_skinning=self.wind_panel.dual_skinning_enabled(),
+            skinning_quality=self.wind_panel.skinning_quality(),
         )
         self._schedule_operator_state_save()
         self._refresh_state_cards()
@@ -2166,6 +2170,7 @@ class MainWindow(QWidget):
         try:
             prototype_discovery = self._deps.discover_part_prototype_rows(input_path, persisted_records=part_records)
             base_discovery = self._deps.discover_base_material_rows(input_path, persisted_records=base_records)
+            missing_bone_generator_groups = self._deps.discover_missing_bone_generator_groups(input_path)
         except Exception as exc:
             self._clear_input_dependent_tabs()
             self.program_status_card.set_summary(source="XML inspection failed")
@@ -2185,6 +2190,7 @@ class MainWindow(QWidget):
             wind_records=wind_records,
             base_discovery=base_discovery,
             prototype_discovery=prototype_discovery,
+            missing_bone_generator_groups=missing_bone_generator_groups,
         )
         self._finish_status_activity("success", "Source rows loaded.")
 
@@ -2215,6 +2221,7 @@ class MainWindow(QWidget):
             wind_records=wind_records,
             base_discovery=result.base,
             prototype_discovery=result.prototypes,
+            missing_bone_generator_groups=result.missing_bone_generator_groups,
         )
         self._finish_status_activity("success", "Source rows loaded.")
         self._maybe_auto_refresh_wind_groups()
@@ -2234,6 +2241,7 @@ class MainWindow(QWidget):
         wind_records,
         base_discovery,
         prototype_discovery,
+        missing_bone_generator_groups=(),
     ) -> None:
         base_count = len(base_discovery.rows)
         prototype_count = len(prototype_discovery.rows)
@@ -2257,6 +2265,29 @@ class MainWindow(QWidget):
         )
         self.wind_panel.set_persisted_settings(wind_records)
         self.wind_panel.clear()
+        self.program_status_card.set_bone_gap_warning(missing_bone_generator_groups)
+        self._warn_about_missing_bone_generator_groups(input_path, missing_bone_generator_groups)
+
+    def _warn_about_missing_bone_generator_groups(
+        self,
+        input_path: str,
+        groups: tuple[str, ...],
+    ) -> None:
+        warning_key = (input_path, groups)
+        if not groups or warning_key == self._shown_bone_gap_warning:
+            return
+        self._shown_bone_gap_warning = warning_key
+        group_list = "\n".join(f"• {group}" for group in groups)
+        QMessageBox.warning(
+            self,
+            "Missing skeleton bones",
+            "Attention: no bones are assigned to the following generator group(s):\n\n"
+            f"{group_list}\n\n"
+            "Bones from later groups may attach directly to an earlier group, causing long "
+            "connections and potentially incorrect animation.\n\n"
+            "Export is still allowed. Verify the skeleton before continuing.",
+            QMessageBox.StandardButton.Ok,
+        )
 
     def _clear_input_dependent_tabs(self) -> None:
         self.wind_panel.clear()
@@ -2343,7 +2374,7 @@ class MainWindow(QWidget):
             udim_material_settings=self.materials_panel.collect_udim_material_settings(),
             prototype_source_configs=self.materials_panel.collect_prototype_source_configs(),
             conversion_mode=self._operator_state.conversion_mode,
-            dual_skinning=self.wind_panel.dual_skinning_enabled(),
+            skinning_quality=self.wind_panel.skinning_quality(),
             async_threshold_bytes=self.ASYNC_CONVERSION_THRESHOLD_BYTES,
             fbx_cache_max_bytes=self._fbx_cache_max_bytes(),
             fbx_cache_max_age_seconds=self._fbx_cache_max_age_seconds(),

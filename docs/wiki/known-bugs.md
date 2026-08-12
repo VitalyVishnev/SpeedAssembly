@@ -523,3 +523,39 @@ Related files:
 - `src/xml_to_usda/proxy_collision.py`
 - `src/xml_to_usda/collision_primitives.py`
 - `src/xml_to_usda/proxy_mesh_service.py`
+
+## Bug: Base-tree child branches can detach from Dual Skinning deformation
+
+Status: Mitigated by Skinning Quality 2-4; runtime cost still unmeasured
+
+Symptoms:
+A child branch whose first joint starts inside a parent bone segment follows
+the parent's rigid joint transform, while nearby parent geometry follows a
+linear blend of that joint and its parent. During bending, the child root can
+separate from or stretch away from the deformed parent surface. Unreal's long
+same-colour bone line is the hierarchy edge from the parent joint origin to the
+child joint origin; it exposes the mismatch but is not an extra source bone.
+
+Cause:
+Current base-mesh Dual Skinning restarts at every source bone: a child segment
+starts with 100% parent-joint influence. It does not inherit the parent
+segment's blended deformation at the attachment position. The supplied
+`SkeletonTest_01.xml` confirms cross-generator child starts throughout parent
+segments, not only at their endpoints.
+
+Likely fix:
+Propagate the attachment-position influence vector into the child segment and
+interpolate from that vector toward the child joint. This requires up to three
+influences at one branch level and four at the next. The same inherited vector
+now drives Repeated Parts at qualities 3/4, but their wider binding still needs
+UE 5.7.x import/runtime validation.
+
+Next step:
+Retain the new two-weight collar as the default and compare quality 1-4 on
+representative trees, grass, and ferns in UE 5.7.x. Record GPU skinning cost and
+confirm that the USD importer preserves widths 3/4 on deeper branch levels.
+
+Related files:
+- `src/xml_to_usda/skeleton_processing.py`
+- `src/xml_to_usda/authoring_validation.py`
+- `tests/test_skeleton_processing.py`

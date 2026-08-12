@@ -210,6 +210,7 @@ def build_ui_palette(theme: ResolvedTheme) -> dict[str, str]:
         "chrome_control_hover_fill": _css_color(str(theme.colors.get("chrome_control_hover_fill", control_hover_source))),
         "danger_fill": _css_color(str(theme.colors["danger_fill"])),
         "success_fill": _css_color(str(theme.colors.get("success_fill", "#3F7D4A"))),
+        "warning_fill": _css_color(str(theme.colors.get("warning_fill", "#E0A526"))),
         "danger_fill_soft": _with_alpha(str(theme.colors["danger_fill"]), 0.78),
         "log_fill": _css_color(str(theme.colors["log_fill"])),
         "card_fill": _css_color(str(theme.colors["card_fill"])),
@@ -276,6 +277,7 @@ def build_stylesheet(theme: ResolvedTheme) -> str:
     button_fill_disabled = palette["button_fill_disabled"]
     danger_fill = palette["danger_fill"]
     success_fill = palette["success_fill"]
+    warning_fill = palette["warning_fill"]
     danger_fill_soft = palette["danger_fill_soft"]
 
     return f"""
@@ -343,6 +345,12 @@ QLabel#ProgramStatusSummary {{
     color: {card_text};
     font-size: {theme.font_sizes['small']}px;
     padding: 3px 0px 5px 0px;
+}}
+QLabel#ProgramStatusWarning {{
+    color: {warning_fill};
+    font-size: {theme.font_sizes['small']}px;
+    font-weight: 700;
+    padding: 5px 0px;
 }}
 QLabel#ProgramStatusStep,
 QLabel#ProgramStatusStepMarker {{

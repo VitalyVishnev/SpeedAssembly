@@ -362,3 +362,38 @@ measured topology-preserving implementation.
 Related files:
 - `src/xml_to_usda/proxy_mesh_service.py`
 - `src/xml_to_usda/qem_simplification.py`
+
+## Experiment: Inherit parent deformation at base-tree branch attachments
+
+Status: Implemented behind operator-selectable experiment; Unverified in UE 5.7.x
+
+For a child joint attached at parameter `t` inside its parent bone, evaluate
+the parent's existing influence vector at that position. Use that vector at
+the child's start and blend it toward 100% child-joint influence along the
+child segment. This preserves positional continuity between the child root and
+the already-deforming parent surface without adding synthetic skeleton joints.
+
+Base-tree recursion accumulates one additional ancestor influence at each
+branch level. Quality 3/4 evaluates that same distribution at every Assembly
+Part position; the Part remains rigid and receives one blended transform.
+
+The Wind panel exposes one discrete `Skinning Quality` slider:
+
+- `1 weight`: default rigid output and lowest runtime cost.
+- `2 weights`: the production candidate using the child attachment collar.
+- `3 weights (Expensive)`: recursively inherited base-tree weights, deterministically clamped
+  and normalized to three slots.
+- `4 weights (Expensive)`: the same propagation with four slots.
+
+The two-weight mode leaves parent geometry on its unchanged gradient. At an
+  internal child attachment, the child base starts with the parent's exact
+  `grandparent + parent` mixture. Over the first 20% of the child segment that
+  mixture smoothly reaches `100% parent`; the remaining 80% transitions
+  linearly from `parent` to `child`. This keeps two slots and avoids the
+  M-shaped parent profile produced by locally hardening parent geometry.
+
+Quality 2 keeps the established two-weight Assembly Part path. Qualities 3/4
+author matching inherited three-/four-slot Assembly Part bindings. The quality
+selection is persisted as one integer. UE 5.7.x visual wind tests passed for
+the earlier Base Mesh qualities 2-4; the new Assembly Part widths and their
+runtime cost still require UE 5.7.x validation.

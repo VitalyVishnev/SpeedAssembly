@@ -101,7 +101,7 @@ paths stdlib-only and benchmark-backed.
 
 Dense numerical work stays behind the existing domain seams rather than
 changing the canonical model. `skeleton_processing.py` converts only bounded
-base-mesh chunks to NumPy for Dual Skinning and influence validation; repeated
+base-mesh chunks to NumPy for Skinning Quality and influence validation; repeated
 Part objects remain scalar. `payload_partition.py` views large
 `GeometryBuffer` arrays zero-copy and classifies face colors in bounded chunks.
 `fbx_adapter.py` uses NumPy only above measured size thresholds for control

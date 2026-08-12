@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..fracture_preview_service import FracturePreviewSettings
-from ..models import ConversionMode, CpuProfile, MaterialPolicy
+from ..models import ConversionMode, CpuProfile, MaterialPolicy, SkinningQuality
 from ..proxy_mesh_service import ProxyMeshSettings
 from ..settings_service import (
     BaseMaterialSettingRecord,
@@ -41,7 +41,7 @@ class OperatorState:
     single_material_path: str = ""
     gust_attenuation: float = 0.0
     is_ground_cover: bool = False
-    dual_skinning: bool = True
+    skinning_quality: SkinningQuality = SkinningQuality.ONE_WEIGHT
 
 
 def load_operator_state(
@@ -73,7 +73,7 @@ def load_operator_state(
             single_material_path=snapshot.single_material_path,
             gust_attenuation=snapshot.gust_attenuation,
             is_ground_cover=snapshot.is_ground_cover,
-            dual_skinning=snapshot.dual_skinning,
+            skinning_quality=snapshot.skinning_quality,
         ),
         snapshot,
     )
@@ -171,7 +171,7 @@ def _operator_snapshot_fields(state: OperatorState, previous_snapshot: GuiSettin
         "single_material_path": state.single_material_path,
         "gust_attenuation": float(state.gust_attenuation),
         "is_ground_cover": bool(state.is_ground_cover),
-        "dual_skinning": bool(state.dual_skinning),
+        "skinning_quality": state.skinning_quality,
     }
 
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from array import array
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, IntEnum
 from typing import Any
 
 try:
@@ -118,6 +118,28 @@ class MaterialPolicy(StrEnum):
             cls.SINGLE_MATERIAL.value,
             cls.VERTEX_COLOR_SPLIT.value,
         )
+
+
+class SkinningQuality(IntEnum):
+    ONE_WEIGHT = 1
+    TWO_WEIGHTS = 2
+    THREE_WEIGHTS = 3
+    FOUR_WEIGHTS = 4
+
+    @classmethod
+    def parse(cls, raw: "SkinningQuality | int | str | None") -> "SkinningQuality":
+        if isinstance(raw, cls):
+            return raw
+        if raw is None:
+            return cls.ONE_WEIGHT
+        if isinstance(raw, bool):
+            raise ValueError("Skinning quality cannot be a boolean.")
+        if isinstance(raw, int):
+            return cls(raw)
+        normalized = str(raw).strip()
+        if normalized not in {"1", "2", "3", "4"}:
+            raise ValueError(f"Unsupported skinning quality: {raw!r}.")
+        return cls(int(normalized))
 
 
 class UdimMode(StrEnum):
@@ -828,7 +850,7 @@ class ConversionRequest:
     use_explicit_material_contract: bool = False
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = ()
     conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
-    dual_skinning: bool = True
+    skinning_quality: SkinningQuality = SkinningQuality.ONE_WEIGHT
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024
     fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60
 
