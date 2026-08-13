@@ -1434,6 +1434,12 @@ position, clamped and padded to the selected width. Persisted settings store one
 Legacy `dual_skinning` and `attachment_skinning_mode` fields are accepted only
 at the JSON loading seam and migrated to qualities 1-4.
 
+SpeedTree `BoneID=-1` is the root-fixed attachment sentinel for Base Mesh
+vertices and `LeafReferences`, observed on the trunk base and directly
+scattered trunk foliage. Canonical normalization maps it to source bone `0`
+and joint `root` before Skinning Quality, Fracturing, or Proxy projection/cache
+logic runs. Other negative bone ids remain invalid.
+
 UE 5.8 source inspection establishes that assembly builder ignores zero and
 nearly-zero weights, normalizes, quantizes, sorts, and stores the actual
 non-zero influence count per Assembly Part. Therefore fixed-width USD padding

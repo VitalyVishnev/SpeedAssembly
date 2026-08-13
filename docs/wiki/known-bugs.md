@@ -603,3 +603,23 @@ Related files:
 - `src/xml_to_usda/skeleton_processing.py`
 - `src/xml_to_usda/authoring_validation.py`
 - `tests/test_skeleton_processing.py`
+
+## Resolved: Root-fixed repeated parts failed Skinning Quality 2-4
+
+Status: Resolved (2026-08-13)
+
+Observed SpeedTree exports use `BoneID=-1` for root-fixed Base Mesh vertices
+and `LeafReferences` near the trunk base. Base Mesh normalization already
+mapped this sentinel to `root`, but Repeated Parts produced the nonexistent
+joint `bone_-01`; inherited skinning then failed on the first such Part.
+
+Canonical normalization now maps the sentinel to source bone `0`/`root` for
+both payload types. Source-model and Proxy Source Projection cache schemas were
+advanced so stale unresolved bindings cannot survive the fix. The regression
+test applies four-weight skinning to a `LeafReferences BoneID=-1` attachment.
+
+Related files:
+- `src/xml_to_usda/normalizer.py`
+- `src/xml_to_usda/canonical_loader.py`
+- `src/xml_to_usda/proxy_source_projection.py`
+- `tests/test_normalizer.py`

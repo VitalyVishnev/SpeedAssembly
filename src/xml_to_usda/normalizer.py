@@ -802,7 +802,11 @@ def _build_leaf_reference_instance(
     source_transform: SourceTransform,
     position_offset: Vector3,
 ) -> RepeatedPartInstance:
-    source_bone_id = payload.bone_ids[index] if index < len(payload.bone_ids) else None
+    source_bone_id = (
+        _normalize_source_bone_id(payload.bone_ids[index])
+        if index < len(payload.bone_ids)
+        else None
+    )
     source_mesh_id = payload.mesh_ids[index] if index < len(payload.mesh_ids) else None
     prototype_key = f"Mesh_{source_mesh_id}" if source_mesh_id is not None else "LeafPrototype"
     uniform_scale = payload.scales[index] if index < len(payload.scales) else 1.0
@@ -1095,6 +1099,10 @@ def _binding_from_bone_id(source_bone_id: int | None) -> InstanceBinding:
     return InstanceBinding(joint_tokens=(token,), weights=(1.0,))
 
 
+def _normalize_source_bone_id(source_bone_id: int) -> int:
+    return 0 if source_bone_id == -1 else source_bone_id
+
+
 def _joint_hierarchy_depths(skeleton: tuple[Joint, ...]) -> dict[str, int]:
     joints_by_name = {joint.name: joint for joint in skeleton}
     depths: dict[str, int] = {}
@@ -1320,10 +1328,8 @@ def _extract_vertex_skinning(
         if vertex_index < 0 or vertex_index >= bone_count:
             messages.append(f"packed_array_error: {context} vertex index {vertex_index} exceeds BoneID count {bone_count}")
             continue
-        source_bone_id = source_bone_ids[vertex_index]
-        if source_bone_id == -1:
-            source_bone_id = 0
-        elif source_bone_id < 0:
+        source_bone_id = _normalize_source_bone_id(source_bone_ids[vertex_index])
+        if source_bone_id < 0:
             messages.append(f"packed_array_error: {context} BoneID {source_bone_id} is not a valid skeletal binding")
             continue
         joint_index = joint_index_get(source_bone_id)

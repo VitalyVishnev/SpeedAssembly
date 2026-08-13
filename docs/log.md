@@ -972,3 +972,11 @@ Major moves:
   recorded the validated UE 5.7 Mesh/Skeleton reference-pose ownership model.
 - Added workflow rules for semantic-heuristic lookup, UE state-owner validation,
   rebuild counting, preserving working baselines, and pasteable-first delivery.
+
+## 2026-08-13 - Root-fixed SpeedTree attachments
+
+- Normalized SpeedTree `BoneID=-1` to source bone `0`/`root` consistently for
+  Base Mesh vertices and repeated `LeafReferences`, including inherited
+  Skinning Quality paths.
+- Invalidated source-model and Proxy Source Projection caches and recorded the
+  observed root-fixed trunk-foliage contract.

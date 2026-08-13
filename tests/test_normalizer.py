@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from xml_to_usda.models import MeshData, MeshSection, SourceObject, Vector3
+from xml_to_usda.models import MeshData, MeshSection, SkinningQuality, SourceObject, Vector3
 from xml_to_usda.normalizer import (
     _build_base_mesh,
     _extract_assembly_parts_from_leaf_references,
@@ -18,6 +18,7 @@ from xml_to_usda.normalizer import (
     normalize_to_canonical,
 )
 from xml_to_usda.pipeline import inspect_source, load_canonical_model
+from xml_to_usda.skeleton_processing import apply_skinning_quality, validate_skinning
 from xml_to_usda.source_transform import build_source_transform
 from xml_to_usda.xml_reader import analyze_xml, inspect_xml, read_source_xml, render_inspect_report
 
@@ -172,7 +173,7 @@ def test_object_reads_all_sibling_leaf_reference_blocks(tmp_path: Path) -> None:
                 <Material ID="10" Name="Needles" />
             </Materials>
             <Bones>
-                <Bone ID="20" ParentID="-1" Name="Root" StartX="0" StartY="0" StartZ="0" Generator="Group_0" />
+                <Bone ID="0" ParentID="-1" Name="Root" StartX="0" StartY="0" StartZ="0" EndX="0" EndY="0" EndZ="1" Generator="Group_0" />
             </Bones>
             <Objects>
                 <Object ID="1" Name="Branch" AbsX="0" AbsY="0" AbsZ="0" RelX="0" RelY="0" RelZ="0">
@@ -187,7 +188,7 @@ def test_object_reads_all_sibling_leaf_reference_blocks(tmp_path: Path) -> None:
                         <RotAngle>0</RotAngle>
                         <MeshID>1</MeshID>
                         <MeshLOD>0</MeshLOD>
-                        <BoneID>20</BoneID>
+                        <BoneID>0</BoneID>
                     </LeafReferences>
                     <LeafReferences Material="10" Count="1">
                         <X>1</X>
@@ -200,7 +201,7 @@ def test_object_reads_all_sibling_leaf_reference_blocks(tmp_path: Path) -> None:
                         <RotAngle>0</RotAngle>
                         <MeshID>2</MeshID>
                         <MeshLOD>0</MeshLOD>
-                        <BoneID>20</BoneID>
+                        <BoneID>-1</BoneID>
                     </LeafReferences>
                 </Object>
             </Objects>
@@ -214,11 +215,15 @@ def test_object_reads_all_sibling_leaf_reference_blocks(tmp_path: Path) -> None:
     model = normalize_to_canonical(document, analysis.report, source_nodes=analysis.source_nodes)
 
     assert analysis.report.leaf_mesh_distribution == {"1": 1, "2": 1}
-    assert analysis.report.leaf_binding_distribution == {"20": 2}
+    assert analysis.report.leaf_binding_distribution == {"-1": 1, "0": 1}
     assert analysis.report.leaf_source_object_distribution == {"1": 2}
     assert len(model.assembly_parts) == 2
     assert [part.prototype_key for part in model.assembly_parts] == ["Mesh_1", "Mesh_2"]
-    assert [part.bind_joint for part in model.assembly_parts] == ["bone_020", "bone_020"]
+    assert [part.bind_joint for part in model.assembly_parts] == ["root", "root"]
+    assert [part.source_bone_ids for part in model.assembly_parts] == [(0,), (0,)]
+
+    inherited = apply_skinning_quality(model, skinning_quality=SkinningQuality.FOUR_WEIGHTS)
+    assert not validate_skinning(inherited)
 
 
 def test_speedtree_xml_without_units_uses_meter_source_scale() -> None:

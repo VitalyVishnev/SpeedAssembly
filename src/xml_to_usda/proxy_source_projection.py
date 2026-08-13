@@ -52,7 +52,7 @@ from .source_transform import build_source_transform
 from .xml_reader import packaged_xml_parser_adapter_enabled, read_source_xml
 
 
-PROXY_SOURCE_PROJECTION_CACHE_SCHEMA_VERSION = 3
+PROXY_SOURCE_PROJECTION_CACHE_SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)
