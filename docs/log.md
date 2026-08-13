@@ -980,3 +980,11 @@ Major moves:
   Skinning Quality paths.
 - Invalidated source-model and Proxy Source Projection caches and recorded the
   observed root-fixed trunk-foliage contract.
+
+## 2026-08-14 - Known-bugs audit and compaction
+
+- Reduced `known-bugs.md` to current defects, fail-loud limits, and actionable
+  validation gaps; removed resolved records and non-bug architecture/test notes.
+- Merged overlapping cache, UDIM, Proxy Mesh, Fracture stability, and UE
+  validation entries. Detailed resolved crash history remains canonical in
+  `encountered-crashes.md`.
