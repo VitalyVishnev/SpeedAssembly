@@ -75,6 +75,7 @@ from ..proxy_mesh_service import (
     prepare_proxy_mesh_source_request,
     update_proxy_collision,
 )
+from ..viewport_scene import ViewportScene
 from ..fracture_export_service import FractureCapMaterialSetting, FractureExportRequest
 from ..fracture_preview_service import (
     FracturePreviewSettings,
@@ -823,6 +824,8 @@ class MainWindow(QWidget):
         self._fracture_preview_settings = FracturePreviewSettings()
         self._proxy_mesh_preview_result: ProxyMeshResult | None = None
         self._proxy_mesh_preview_input_path = ""
+        self._proxy_source_preview_scene: ViewportScene | None = None
+        self._proxy_source_preview_input_path = ""
         self._shown_bone_gap_warning: tuple[str, tuple[str, ...]] | None = None
         self._fracture_preview_cache: OrderedDict[tuple[object, object], object] = OrderedDict()
 
@@ -2074,6 +2077,8 @@ class MainWindow(QWidget):
             self._current_dynamic_wind = None
             self._proxy_mesh_preview_result = None
             self._proxy_mesh_preview_input_path = ""
+            self._proxy_source_preview_scene = None
+            self._proxy_source_preview_input_path = ""
             self._reset_fracture_manual_session_cuts()
             self._pending_generate_after_refresh = False
             self._pending_wind_preview_after_refresh = False
@@ -2561,6 +2566,7 @@ class MainWindow(QWidget):
         dialog = ProxyPreviewDialog(
             settings=self._proxy_mesh_settings,
             initial_proxy=self._proxy_preview_result_for_input(input_path),
+            source_scene=self._proxy_source_preview_scene if self._proxy_source_preview_input_path == input_path else None,
             output_path=str(derive_proxy_usda_output_path(request.input_path, request.output_path)),
             on_generate_proxy=self.run_generate_proxy_mesh,
             on_settings_changed=lambda settings, current_input=input_path, current_request=request: self._handle_proxy_preview_settings_changed(
@@ -3017,7 +3023,12 @@ class MainWindow(QWidget):
                 return
             self._background_jobs.start_proxy_mesh_preview(request, settings, collision_only=True)
             return
-        self._background_jobs.start_proxy_mesh_preview(request, settings)
+        dialog = self._proxy_preview_dialog
+        self._background_jobs.start_proxy_mesh_preview(
+            request,
+            settings,
+            include_source_scene=not (dialog is not None and dialog.viewport.has_source_scene),
+        )
 
     def _handle_proxy_collision_preview_result(self, settings: ProxyMeshSettings, collision_meshes) -> None:
         input_path = self.source_input.text().strip()
@@ -3036,9 +3047,16 @@ class MainWindow(QWidget):
         if self._proxy_preview_dialog is not None:
             self._proxy_preview_dialog.set_loading(message)
 
-    def _handle_proxy_preview_result(self, proxy: ProxyMeshResult) -> None:
+    def _handle_proxy_preview_result(
+        self,
+        proxy: ProxyMeshResult,
+        source_scene: ViewportScene | None = None,
+    ) -> None:
         input_path = self.source_input.text().strip()
         self._cache_proxy_preview_result(input_path, proxy)
+        if source_scene is not None:
+            self._proxy_source_preview_scene = source_scene
+            self._proxy_source_preview_input_path = input_path
         self._finish_status_activity("success", "Proxy Preview ready.")
         self._trace(
             "job.result",
@@ -3064,6 +3082,8 @@ class MainWindow(QWidget):
         )
         dialog = self._proxy_preview_dialog
         if dialog is not None:
+            if source_scene is not None:
+                dialog.set_source_scene(source_scene)
             dialog.set_proxy(proxy)
             self._trace(
                 "viewport.upload",

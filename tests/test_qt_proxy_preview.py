@@ -19,6 +19,7 @@ from xml_to_usda.proxy_mesh_service import (
     ProxyMeshSettings,
     ProxyMeshSourceRequest,
 )
+from xml_to_usda.proxy_viewport_scene import build_proxy_viewport_scene
 from xml_to_usda.qt_ui.proxy_preview import ProxyPreviewDialog
 from xml_to_usda.qt_ui.window import MainWindow
 
@@ -59,6 +60,34 @@ def test_proxy_preview_exposes_persisted_collision_contract(qtbot, tmp_path) -> 
     assert collision.one_per_stem is True
 
 
+def test_proxy_preview_switches_viewport_silhouette_mode(qtbot) -> None:
+    proxy = ProxyMeshResult(
+        mesh=GeometryBuffer(
+            name="ProxyMesh",
+            point_components=array("f", (0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0)),
+            face_vertex_counts=array("i", (3,)),
+            face_vertex_indices=array("i", (0, 1, 2)),
+        ),
+        settings=ProxyMeshSettings(),
+        method=PROXY_METHOD_DENSITY_FIELD,
+        source_instance_count=0,
+        included_base_mesh=True,
+    )
+    dialog = ProxyPreviewDialog(
+        settings=proxy.settings,
+        initial_proxy=proxy,
+        source_scene=build_proxy_viewport_scene(proxy),
+    )
+    qtbot.addWidget(dialog)
+
+    assert dialog.viewport.mode_switch.height() <= 26
+    assert dialog.viewport.mode_switch.pos().x() == 8
+    assert dialog.viewport.mode_switch.pos().y() == 8
+    assert dialog.viewport.silhouette_button.isEnabled()
+    dialog.viewport.silhouette_button.click()
+    assert dialog.viewport.silhouette_diff is True
+    dialog.viewport.shaded_button.click()
+    assert dialog.viewport.silhouette_diff is False
 def test_collision_toggle_reuses_proxy_and_fit_changes_request_collision_only() -> None:
     starts = []
     handled = []

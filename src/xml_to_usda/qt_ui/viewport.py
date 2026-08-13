@@ -19,7 +19,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor, QMatrix4x4, QPainter, QPen, QSurfaceFormat, QVector3D
 from PySide6.QtOpenGL import QOpenGLBuffer, QOpenGLShader, QOpenGLShaderProgram, QOpenGLVertexArrayObject
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
-from PySide6.QtWidgets import QSizePolicy
+from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QToolButton, QWidget
 
 from ..models import Color4, GeometryBuffer, Quaternion, Vector3
 from ..viewport_scene import ViewportBoneSegment, ViewportDrawCall, ViewportScene
@@ -27,7 +27,9 @@ from ..viewport_scene import ViewportBoneSegment, ViewportDrawCall, ViewportScen
 
 GL_COLOR_BUFFER_BIT = 0x00004000
 GL_DEPTH_BUFFER_BIT = 0x00000100
+GL_STENCIL_BUFFER_BIT = 0x00000400
 GL_DEPTH_TEST = 0x0B71
+GL_STENCIL_TEST = 0x0B90
 GL_BLEND = 0x0BE2
 GL_BACK = 0x0405
 GL_CULL_FACE = 0x0B44
@@ -36,6 +38,15 @@ GL_LINES = 0x0001
 GL_ONE_MINUS_SRC_ALPHA = 0x0303
 GL_SRC_ALPHA = 0x0302
 GL_TRIANGLES = 0x0004
+GL_ALWAYS = 0x0207
+GL_EQUAL = 0x0202
+GL_KEEP = 0x1E00
+GL_REPLACE = 0x1E01
+_SOURCE_STENCIL_BIT = 0x1
+_PROXY_STENCIL_BIT = 0x2
+_PROXY_TOO_SMALL_COLOR = QVector3D(0.10, 0.46, 1.0)
+_PROXY_TOO_LARGE_COLOR = QVector3D(1.0, 0.12, 0.08)
+_SILHOUETTE_OVERLAP_COLOR = QVector3D(0.25, 0.27, 0.28)
 DEFAULT_MATCAP_TINT_ALPHA = 0.0
 MATCAP_VERTEX_STRIDE = 17
 MAX_QT_OPENGL_BUFFER_BYTES = (1 << 31) - 1
@@ -1226,7 +1237,291 @@ class MatcapViewport(QOpenGLWidget):
 
 
 class ProxyViewport(MatcapViewport):
-    pass
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        format_ = self.format()
+        format_.setStencilBufferSize(8)
+        self.setFormat(format_)
+        self._source_scene: ViewportScene | None = None
+        self._source_vertices = np.asarray([], dtype=np.float32)
+        self._source_draws: tuple[MatcapInstanceDraw, ...] = ()
+        self._source_batches: tuple[_MatcapInstanceBatch, ...] = ()
+        self._source_vertex_buffer: QOpenGLBuffer | None = None
+        self._source_instance_buffer: QOpenGLBuffer | None = None
+        self._source_vao: QOpenGLVertexArrayObject | None = None
+        self._source_dirty = False
+        self._silhouette_diff = False
+
+        self.mode_switch = QWidget(self)
+        self.mode_switch.setObjectName("ProxyModeSwitch")
+        self.mode_switch.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        mode_layout = QHBoxLayout(self.mode_switch)
+        mode_layout.setContentsMargins(2, 2, 2, 2)
+        mode_layout.setSpacing(0)
+        self.shaded_button = QToolButton(self.mode_switch)
+        self.shaded_button.setText("Shaded")
+        self.shaded_button.setObjectName("ProxyShadedButton")
+        self.shaded_button.setFixedSize(62, 22)
+        self.silhouette_button = QToolButton(self.mode_switch)
+        self.silhouette_button.setText("Silhouette Diff")
+        self.silhouette_button.setObjectName("ProxySilhouetteButton")
+        self.silhouette_button.setFixedSize(92, 22)
+        for button in (self.shaded_button, self.silhouette_button):
+            button.setCheckable(True)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            mode_layout.addWidget(button)
+        self.shaded_button.clicked.connect(lambda: self.set_silhouette_diff(False))
+        self.silhouette_button.clicked.connect(lambda: self.set_silhouette_diff(True))
+        self.silhouette_button.setToolTip("Blue: Proxy is smaller. Red: Proxy is larger.")
+        self.mode_switch.setStyleSheet(
+            "QWidget#ProxyModeSwitch { background: rgba(12, 16, 18, 190); border-radius: 5px; }"
+            "QToolButton { color: rgba(235, 240, 235, 180); background: transparent; border: 0; "
+            "padding: 0; font-size: 11px; }"
+            "QToolButton#ProxyShadedButton { border-top-left-radius: 3px; border-bottom-left-radius: 3px; }"
+            "QToolButton#ProxySilhouetteButton { border-top-right-radius: 3px; border-bottom-right-radius: 3px; }"
+            "QToolButton:checked { color: white; background: rgba(148, 157, 77, 220); }"
+            "QToolButton:disabled { color: rgba(235, 240, 235, 60); }"
+        )
+        self._sync_mode_buttons()
+        self.mode_switch.setFixedSize(158, 26)
+        self.mode_switch.move(8, 8)
+
+    @property
+    def silhouette_diff(self) -> bool:
+        return self._silhouette_diff
+
+    @property
+    def has_source_scene(self) -> bool:
+        return self._source_scene is not None
+
+    def set_source_scene(self, scene: ViewportScene | None) -> None:
+        had_source = self._source_scene is not None
+        self._source_scene = scene
+        self._source_vertices, self._source_draws = _build_instanced_scene_payload(scene)
+        self._source_dirty = True
+        if scene is None:
+            self._silhouette_diff = False
+        elif not had_source and self._scene is not None:
+            min_point, max_point = _combined_scene_bounds(self._scene, scene)
+            self._update_bounds_metrics(min_point, max_point, frame_camera=True)
+        self._sync_mode_buttons()
+        self.update()
+
+    def set_scene(
+        self,
+        scene: ViewportScene | None,
+        *,
+        frame_camera: bool = True,
+        precompute_static: bool = False,
+    ) -> None:
+        super().set_scene(scene, frame_camera=frame_camera, precompute_static=precompute_static)
+        if scene is not None and self._source_scene is not None:
+            min_point, max_point = _combined_scene_bounds(scene, self._source_scene)
+            self._update_bounds_metrics(min_point, max_point, frame_camera=frame_camera)
+            self._grid_dirty = True
+
+    def set_silhouette_diff(self, enabled: bool) -> None:
+        self._silhouette_diff = bool(enabled and self._source_scene is not None)
+        self._sync_mode_buttons()
+        self.update()
+
+    def initializeGL(self) -> None:  # type: ignore[override]
+        super().initializeGL()
+        self._source_vao = QOpenGLVertexArrayObject(self)
+        self._source_vao.create()
+        self._source_vertex_buffer = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
+        self._source_vertex_buffer.create()
+        self._source_instance_buffer = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
+        self._source_instance_buffer.create()
+        self._source_dirty = True
+
+    def paintGL(self) -> None:  # type: ignore[override]
+        if not self._silhouette_diff or self._source_scene is None:
+            super().paintGL()
+            return
+        functions = self.context().functions()
+        functions.glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)
+        if self._mesh_dirty:
+            self._upload_mesh()
+        if self._source_dirty:
+            self._upload_source_scene()
+        if self._program is None or self._vao is None or not self._source_batches:
+            return
+
+        mvp = self._projection_matrix() * self._view_matrix()
+        functions.glEnable(GL_DEPTH_TEST)
+        functions.glEnable(GL_STENCIL_TEST)
+        functions.glDisable(GL_BLEND)
+        functions.glColorMask(False, False, False, False)
+        functions.glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE)
+
+        functions.glStencilMask(_SOURCE_STENCIL_BIT)
+        functions.glStencilFunc(GL_ALWAYS, _SOURCE_STENCIL_BIT, 0xFF)
+        self._draw_source_scene(functions, mvp)
+        functions.glClear(GL_DEPTH_BUFFER_BIT)
+        functions.glStencilMask(_PROXY_STENCIL_BIT)
+        functions.glStencilFunc(GL_ALWAYS, _PROXY_STENCIL_BIT, 0xFF)
+        self._draw_proxy_scene(functions, mvp)
+
+        functions.glColorMask(True, True, True, True)
+        functions.glStencilMask(0x0)
+        functions.glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        functions.glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP)
+        functions.glStencilFunc(GL_EQUAL, _SOURCE_STENCIL_BIT, 0xFF)
+        self._draw_source_scene(functions, mvp, flat_color=_PROXY_TOO_SMALL_COLOR)
+        functions.glStencilFunc(GL_EQUAL, _PROXY_STENCIL_BIT, 0xFF)
+        self._draw_proxy_scene(functions, mvp, flat_color=_PROXY_TOO_LARGE_COLOR)
+        functions.glStencilFunc(GL_EQUAL, _SOURCE_STENCIL_BIT | _PROXY_STENCIL_BIT, 0xFF)
+        self._draw_source_scene(functions, mvp, flat_color=_SILHOUETTE_OVERLAP_COLOR)
+        functions.glStencilMask(0xFF)
+        functions.glDisable(GL_STENCIL_TEST)
+
+    def _sync_mode_buttons(self) -> None:
+        self.shaded_button.setChecked(not self._silhouette_diff)
+        self.silhouette_button.setChecked(self._silhouette_diff)
+        self.silhouette_button.setEnabled(self._source_scene is not None)
+
+    def _upload_source_scene(self) -> None:
+        if (
+            self._program is None
+            or self._source_vertex_buffer is None
+            or self._source_instance_buffer is None
+            or self._source_vao is None
+        ):
+            return
+        if not _upload_matcap_vertices(
+            program=self._program,
+            vertex_buffer=self._source_vertex_buffer,
+            vao=self._source_vao,
+            vertices=self._source_vertices,
+        ):
+            return
+        instance_rows, self._source_batches = _build_matcap_instance_batches(self._source_draws)
+        if not _upload_matcap_instances(
+            context=self.context(),
+            program=self._program,
+            instance_buffer=self._source_instance_buffer,
+            vao=self._source_vao,
+            instances=instance_rows,
+        ):
+            return
+        self._source_dirty = False
+
+    def _draw_proxy_scene(self, functions, mvp: QMatrix4x4, *, flat_color: QVector3D | None = None) -> None:
+        if self._program is None or self._vao is None or self._vertex_count <= 0 or not self._program.bind():
+            return
+        _set_matcap_program_uniforms(
+            self._program,
+            functions=functions,
+            mvp=mvp,
+            normal_matrix=self._view_matrix().normalMatrix(),
+            piece_tint_strength=0.0,
+            flat_color=flat_color,
+        )
+        self._vao.bind()
+        functions.glDrawArrays(GL_TRIANGLES, 0, self._vertex_count)
+        self._vao.release()
+        self._program.release()
+
+    def _draw_source_scene(self, functions, mvp: QMatrix4x4, *, flat_color: QVector3D | None = None) -> None:
+        if (
+            self._program is None
+            or self._source_vao is None
+            or self._source_instance_buffer is None
+            or not self._source_batches
+            or not self._program.bind()
+        ):
+            return
+        _set_matcap_program_uniforms(
+            self._program,
+            functions=functions,
+            mvp=mvp,
+            normal_matrix=self._view_matrix().normalMatrix(),
+            piece_tint_strength=0.0,
+            use_instancing=True,
+            flat_color=flat_color,
+        )
+        self._source_vao.bind()
+        extra_functions = self.context().extraFunctions()
+        for batch in self._source_batches:
+            _bind_matcap_instance_batch(
+                program=self._program,
+                instance_buffer=self._source_instance_buffer,
+                first_instance=batch.first_instance,
+            )
+            extra_functions.glDrawArraysInstanced(
+                GL_TRIANGLES,
+                batch.first_vertex,
+                batch.vertex_count,
+                batch.instance_count,
+            )
+        self._source_instance_buffer.release()
+        self._source_vao.release()
+        self._program.release()
+
+    def _release_gl_resources(self) -> None:
+        if self.isValid():
+            self.makeCurrent()
+            try:
+                for buffer in (self._source_vertex_buffer, self._source_instance_buffer):
+                    if buffer is not None:
+                        buffer.destroy()
+                if self._source_vao is not None:
+                    self._source_vao.destroy()
+            finally:
+                self.doneCurrent()
+        self._source_vertex_buffer = None
+        self._source_instance_buffer = None
+        self._source_vao = None
+        self._source_batches = ()
+        self._source_dirty = self._source_scene is not None
+        super()._release_gl_resources()
+
+
+def _build_instanced_scene_payload(
+    scene: ViewportScene | None,
+) -> tuple[np.ndarray, tuple[MatcapInstanceDraw, ...]]:
+    if scene is None:
+        return np.asarray([], dtype=np.float32), ()
+    ranges: dict[str, tuple[int, int]] = {}
+    vertex_arrays: list[np.ndarray] = []
+    vertex_count = 0
+    for batch in scene.mesh_batches:
+        vertices = _build_viewport_vertices(batch.mesh)
+        count = int(len(vertices) // MATCAP_VERTEX_STRIDE)
+        if count <= 0:
+            continue
+        ranges[batch.batch_id] = (vertex_count, count)
+        vertex_arrays.append(vertices)
+        vertex_count += count
+    draws = tuple(
+        MatcapInstanceDraw(
+            first_vertex=ranges[draw.batch_id][0],
+            vertex_count=ranges[draw.batch_id][1],
+            translate=draw.translate,
+            orientation=draw.orientation,
+            scale=draw.scale,
+        )
+        for draw in scene.draw_calls
+        if draw.batch_id in ranges and draw.visibility_group != "collision"
+    )
+    vertices = np.concatenate(vertex_arrays) if vertex_arrays else np.asarray([], dtype=np.float32)
+    return vertices.astype(np.float32, copy=False), draws
+
+
+def _combined_scene_bounds(first: ViewportScene, second: ViewportScene) -> tuple[Vector3, Vector3]:
+    return (
+        Vector3(
+            min(first.bounds.min_point.x, second.bounds.min_point.x),
+            min(first.bounds.min_point.y, second.bounds.min_point.y),
+            min(first.bounds.min_point.z, second.bounds.min_point.z),
+        ),
+        Vector3(
+            max(first.bounds.max_point.x, second.bounds.max_point.x),
+            max(first.bounds.max_point.y, second.bounds.max_point.y),
+            max(first.bounds.max_point.z, second.bounds.max_point.z),
+        ),
+    )
 
 
 def _build_scene_vertices(scene: ViewportScene | None, *, collision: bool = False) -> np.ndarray:
@@ -1551,7 +1846,13 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
         """
         varying vec3 viewNormal;
         varying vec4 pieceColor;
+        uniform float useFlatColor;
+        uniform vec3 flatColor;
         void main() {
+            if (useFlatColor > 0.5) {
+                gl_FragColor = vec4(flatColor, 1.0);
+                return;
+            }
             vec3 n = normalize(viewNormal);
             vec2 uv = n.xy * 0.5 + 0.5;
             float facing = clamp(n.z * 0.5 + 0.5, 0.0, 1.0);
@@ -1632,6 +1933,7 @@ def _set_matcap_program_uniforms(
     model_matrix: QMatrix4x4 | None = None,
     draw_explode_offset: Vector3 = Vector3(0.0, 0.0, 0.0),
     use_instancing: bool = False,
+    flat_color: QVector3D | None = None,
 ) -> None:
     program.setUniformValue("mvp", mvp)
     program.setUniformValue("modelMatrix", model_matrix if model_matrix is not None else QMatrix4x4())
@@ -1647,6 +1949,11 @@ def _set_matcap_program_uniforms(
     instancing_location = program.uniformLocation("useInstancing")
     if instancing_location >= 0:
         functions.glUniform1f(instancing_location, 1.0 if use_instancing else 0.0)
+    flat_color_location = program.uniformLocation("useFlatColor")
+    if flat_color_location >= 0:
+        functions.glUniform1f(flat_color_location, 1.0 if flat_color is not None else 0.0)
+    if flat_color is not None:
+        program.setUniformValue("flatColor", flat_color)
     tint_strength_location = program.uniformLocation("pieceTintStrength")
     if tint_strength_location >= 0:
         functions.glUniform1f(tint_strength_location, float(max(0.0, piece_tint_strength)))

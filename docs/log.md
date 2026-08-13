@@ -988,3 +988,14 @@ Major moves:
 - Merged overlapping cache, UDIM, Proxy Mesh, Fracture stability, and UE
   validation entries. Detailed resolved crash history remains canonical in
   `encountered-crashes.md`.
+
+## 2026-08-14 - Proxy silhouette comparison prototype
+
+- Added an in-viewport `Shaded` / `Silhouette Diff` switch to Proxy Preview.
+- Added an instanced original-tree `ViewportScene` from the existing Proxy
+  Source Projection load; Diff marks original-only pixels blue and Proxy-only
+  pixels red without changing export state.
+- Compacted the viewport switch and clarified the stencil/render constants and
+  preview worker action selection before commit.
+- Recorded that the prototype compares geometry silhouettes, not masked leaf
+  opacity or exact UE shadow output.

@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from ..models import GeometryBuffer
 from ..proxy_collision import ProxyCollisionMode, ProxyCollisionSettings
 from ..proxy_viewport_scene import build_proxy_viewport_scene
+from ..viewport_scene import ViewportScene
 from ..proxy_mesh_service import (
     BASE_MESH_FUSE_THRESHOLD_METERS,
     DEFAULT_PROXY_POLYCOUNT,
@@ -59,6 +60,7 @@ class ProxyPreviewDialog(PreviewShellDialog):
         on_settings_changed=None,
         preview_mesh: GeometryBuffer | None = None,
         initial_proxy: ProxyMeshResult | None = None,
+        source_scene: ViewportScene | None = None,
         output_path: str = "",
         on_generate_proxy=None,
         on_preview_ready=None,
@@ -76,6 +78,7 @@ class ProxyPreviewDialog(PreviewShellDialog):
 
         self.viewport = ProxyViewport(self)
         self.set_viewport_widget(self.viewport)
+        self.viewport.set_source_scene(source_scene)
         if initial_proxy is not None:
             self.viewport.set_scene(build_proxy_viewport_scene(initial_proxy))
 
@@ -375,6 +378,9 @@ class ProxyPreviewDialog(PreviewShellDialog):
     def set_proxy(self, proxy: ProxyMeshResult) -> None:
         self._set_current_proxy(proxy)
         self.status_label.setText(_proxy_status_text(proxy))
+
+    def set_source_scene(self, scene: ViewportScene) -> None:
+        self.viewport.set_source_scene(scene)
 
     def browse_output_path(self) -> None:
         selected, _filter = QFileDialog.getSaveFileName(

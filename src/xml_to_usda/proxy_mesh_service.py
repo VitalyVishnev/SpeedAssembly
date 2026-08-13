@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import numpy as np
+    from .viewport_scene import ViewportScene
 
 from .mesh_pruning import DEFAULT_BRANCH_PRUNE_AGGRESSION, select_large_connected_face_indices
 from .models import CanonicalTreeModel, GeometryBuffer, MeshData, Prototype, Quaternion, Vector3
@@ -123,17 +124,19 @@ class ProxyMeshExportResult:
 
 
 class ProxyMeshJobResult:
-    __slots__ = ("proxy", "export", "collision_meshes", "cancelled", "error_message")
+    __slots__ = ("proxy", "source_scene", "export", "collision_meshes", "cancelled", "error_message")
 
     def __init__(
         self,
         proxy: ProxyMeshResult | None = None,
+        source_scene: ViewportScene | None = None,
         export: ProxyMeshExportResult | None = None,
         collision_meshes: tuple[MeshData, ...] | None = None,
         cancelled: bool = False,
         error_message: str | None = None,
     ) -> None:
         self.proxy = proxy
+        self.source_scene = source_scene
         self.export = export
         self.collision_meshes = collision_meshes
         self.cancelled = cancelled
@@ -669,12 +672,31 @@ def generate_proxy_preview_from_source_request(
     settings: ProxyMeshSettings | None = None,
 ) -> ProxyMeshResult:
     """Generate Preview once and retain a hidden collision fit for instant On/Off toggles."""
+    _input_path, model = _load_proxy_source_projection(request)
+    return _generate_proxy_preview(model, settings)
+
+
+def generate_proxy_preview_payload_from_source_request(
+    request: ProxyMeshSourceRequest,
+    settings: ProxyMeshSettings | None = None,
+) -> tuple[ProxyMeshResult, ViewportScene]:
+    """Generate Proxy Preview and its original-tree comparison scene from one source load."""
+    _input_path, model = _load_proxy_source_projection(request)
+    from .proxy_viewport_scene import build_proxy_source_viewport_scene
+
+    return _generate_proxy_preview(model, settings), build_proxy_source_viewport_scene(model)
+
+
+def _generate_proxy_preview(
+    model: CanonicalTreeModel,
+    settings: ProxyMeshSettings | None,
+) -> ProxyMeshResult:
     resolved = settings or ProxyMeshSettings()
     preview_settings = replace(
         resolved,
         collision=replace(resolved.collision, enabled=True),
     )
-    proxy = generate_proxy_mesh_from_source_request(request, preview_settings)
+    proxy = generate_proxy_mesh(model, preview_settings)
     return replace(proxy, settings=resolved)
 
 

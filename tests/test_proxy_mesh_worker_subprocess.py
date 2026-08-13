@@ -19,8 +19,8 @@ def test_proxy_mesh_worker_reports_stage_breadcrumbs(monkeypatch, capsys, tmp_pa
 
     monkeypatch.setenv(WORKER_TOKEN_ENV, worker_token)
     monkeypatch.setattr(
-        "xml_to_usda.proxy_mesh_worker_subprocess.generate_proxy_preview_from_source_request",
-        lambda _request, _settings: "proxy-result",
+        "xml_to_usda.proxy_mesh_worker_subprocess.generate_proxy_preview_payload_from_source_request",
+        lambda _request, _settings: ("proxy-result", "source-scene"),
     )
     write_proxy_mesh_worker_request(
         request_path,
@@ -32,7 +32,7 @@ def test_proxy_mesh_worker_reports_stage_breadcrumbs(monkeypatch, capsys, tmp_pa
                 fuse_base_mesh_vertices=True,
                 branch_prune_aggression=0.4,
             ),
-            action="preview",
+            action="preview_with_source",
             result_path=str(result_path),
             error_path=str(error_path),
             worker_token=worker_token,
@@ -49,6 +49,9 @@ def test_proxy_mesh_worker_reports_stage_breadcrumbs(monkeypatch, capsys, tmp_pa
     assert "branch_prune_aggression=0.4" in stderr
     assert "proxy-mesh-worker stage=preview.generate.end" in stderr
     assert "proxy-mesh-worker stage=result.write.end" in stderr
+    result = read_worker_payload(result_path)
+    assert result.proxy == "proxy-result"
+    assert result.source_scene == "source-scene"
     assert result_path.exists()
     assert error_path.exists() is False
 
@@ -92,7 +95,7 @@ def test_proxy_mesh_worker_can_fit_collision_without_generating_proxy(monkeypatc
         lambda _request, _settings: expected,
     )
     monkeypatch.setattr(
-        "xml_to_usda.proxy_mesh_worker_subprocess.generate_proxy_preview_from_source_request",
+        "xml_to_usda.proxy_mesh_worker_subprocess.generate_proxy_preview_payload_from_source_request",
         fail_if_proxy_regenerates,
     )
     write_proxy_mesh_worker_request(

@@ -163,12 +163,19 @@ optional one-millimeter base-mesh welding also need comparison across sparse
 trees, dense crowns, grass, and moss. These controls are targeted policies,
 not general foliage/interior/shell zoning.
 
+Proxy Preview `Silhouette Diff` currently compares rasterized geometry only.
+It does not evaluate material opacity textures or UE masked-material clip
+thresholds, so leaf cards appear as solid geometry. Blue means original-only
+(Proxy too small); red means Proxy-only (Proxy too large). Treat it as a shape
+diagnostic, not an exact UE shadow preview.
+
 Keep QEM until representative comparisons justify a replacement. Do not infer
 lighting usefulness or topology quality from successful import.
 
 Related:
 - `src/xml_to_usda/proxy_mesh_service.py`
 - `src/xml_to_usda/mesh_pruning.py`
+- `src/xml_to_usda/qt_ui/viewport.py`
 
 ## Limitation: Non-mesh LeafReferences transform space is unresolved
 

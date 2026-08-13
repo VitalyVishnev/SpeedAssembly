@@ -23,6 +23,7 @@ from .proxy_mesh_service import (
     export_proxy_usda_from_source_request,
     generate_proxy_collision_meshes_from_source_request,
     generate_proxy_preview_from_source_request,
+    generate_proxy_preview_payload_from_source_request,
 )
 from .runtime_error_mode import suppress_windows_native_error_dialogs
 from .worker_commands import PROXY_MESH_WORKER_COMMAND
@@ -73,7 +74,7 @@ def run_proxy_mesh_worker_request_file(path: str | Path) -> int:
         validate_worker_token(request.worker_token)
         _worker_stage(f"{request.action}.profile.start")
         apply_process_profile(request.request.cpu_profile)
-        if request.action == "preview":
+        if request.action in {"preview", "preview_with_source"}:
             _worker_stage(
                 "preview.generate.start",
                 final_polycount=request.settings.final_polycount,
@@ -82,9 +83,13 @@ def run_proxy_mesh_worker_request_file(path: str | Path) -> int:
                 branch_prune_aggression=request.settings.branch_prune_aggression,
                 method=request.settings.method,
             )
-            result = ProxyMeshJobResult(
-                proxy=generate_proxy_preview_from_source_request(request.request, request.settings)
-            )
+            if request.action == "preview_with_source":
+                proxy, source_scene = generate_proxy_preview_payload_from_source_request(request.request, request.settings)
+                result = ProxyMeshJobResult(proxy=proxy, source_scene=source_scene)
+            else:
+                result = ProxyMeshJobResult(
+                    proxy=generate_proxy_preview_from_source_request(request.request, request.settings)
+                )
             _worker_stage("preview.generate.end")
         elif request.action == "collision":
             _worker_stage("collision.generate.start")

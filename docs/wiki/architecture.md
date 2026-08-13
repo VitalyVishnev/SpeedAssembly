@@ -51,6 +51,13 @@ because it no longer retains per-stem skin ownership and also contains crown
 geometry.
 The Proxy viewport frames and places its grid from the render mesh and explicit
 tree pivot, never from guide collision bounds.
+Proxy Preview also carries one preview-only original-tree `ViewportScene` from
+the existing Proxy Source Projection load. The scene uploads Base Mesh and each
+unique prototype once and keeps repeated parts as GPU instances. `ProxyViewport`
+owns the `Shaded` / `Silhouette Diff` visual state and stencil comparison:
+original-only pixels are blue, Proxy-only pixels are red, overlap is neutral,
+and collision/grid rendering is omitted in Diff mode. This scene is not part of
+`ProxyMeshResult` and cannot affect Proxy USDA export.
 Proxy export is initiated from the bottom of Proxy Preview. Its editable path
 defaults to the companion path derived from the main Output USDA; an override
 is carried as the exact Proxy USDA destination through the existing worker

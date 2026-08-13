@@ -48,6 +48,7 @@ from xml_to_usda.proxy_source_projection import (
     load_proxy_source_projection,
     projection_to_tree_asset,
 )
+from xml_to_usda.proxy_viewport_scene import build_proxy_source_viewport_scene
 
 
 SIMPLE_TREE_01 = (
@@ -601,6 +602,20 @@ def test_proxy_request_generation_uses_proxy_source_projection(monkeypatch) -> N
 
     assert result.mesh.face_count > 0
     assert calls["input_path"] == "tree.xml"
+
+
+def test_proxy_source_viewport_scene_uploads_unique_geometry_once() -> None:
+    scene = build_proxy_source_viewport_scene(_model(repeated_count=6))
+
+    assert [batch.batch_id for batch in scene.mesh_batches] == [
+        "proxy:source:base",
+        "proxy:source:prototype:Mesh_7",
+    ]
+    assert scene.stats.instance_count == 6
+    assert scene.stats.uploaded_triangles == 2
+    assert scene.stats.logical_triangles == 7
+    assert not scene.mesh_batches[0].mesh.uv_components
+    assert not scene.mesh_batches[0].mesh.skel_joint_indices
 
 
 def test_proxy_request_export_uses_proxy_source_projection(monkeypatch, tmp_path) -> None:

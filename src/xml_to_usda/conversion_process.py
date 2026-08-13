@@ -421,8 +421,13 @@ def _proxy_mesh_process_entry(
             export_proxy_usda_from_source_request,
             generate_proxy_collision_meshes_from_source_request,
             generate_proxy_preview_from_source_request,
+            generate_proxy_preview_payload_from_source_request,
         )
 
+        if action == "preview_with_source":
+            proxy, source_scene = generate_proxy_preview_payload_from_source_request(request, settings)
+            message_queue.put(("result", ProxyMeshJobResult(proxy=proxy, source_scene=source_scene)))
+            return
         if action == "preview":
             proxy = generate_proxy_preview_from_source_request(request, settings)
             message_queue.put(("result", ProxyMeshJobResult(proxy=proxy)))

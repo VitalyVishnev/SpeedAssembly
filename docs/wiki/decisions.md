@@ -1387,6 +1387,31 @@ Preview. This is a 20% opacity increase over the former `0.25`; the brighter
 tint also strengthens the existing rim/Fresnel contribution without adding a
 separate shader path.
 
+## Decision: Proxy silhouette comparison is directional Viewport Visual State
+
+Status: Active
+
+Proxy Preview exposes `Shaded` and `Silhouette Diff` inside its viewport. Diff
+compares the rasterized original-tree and Proxy silhouettes for the current
+camera: original-only pixels are blue (Proxy is too small), Proxy-only pixels
+are red (Proxy is too large), and overlap is neutral. Collision and grid are
+omitted while Diff is active.
+
+The original tree remains a preview-only `ViewportScene` built from the same
+Proxy Source Projection load as the Proxy. Base Mesh and unique prototypes are
+uploaded once; repeated parts remain GPU instances. This scene is neither
+stored in `ProxyMeshResult` nor used by export. Changing Proxy parameters keeps
+the original scene resident and transports it only when the viewport does not
+already have one.
+
+The comparison is geometric. It does not claim UE shadow parity until material
+opacity textures and clip thresholds have a verified preview contract.
+
+Related files:
+- `src/xml_to_usda/proxy_viewport_scene.py`
+- `src/xml_to_usda/qt_ui/viewport.py`
+- `src/xml_to_usda/qt_ui/proxy_preview.py`
+
 ## Decision: Mouse wheel does not edit UI parameters
 
 Status: Active

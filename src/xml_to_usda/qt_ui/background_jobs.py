@@ -37,6 +37,13 @@ class _WindErrorPayload:
 class _ProxyPreviewWork:
     settings: ProxyMeshSettings
     collision_only: bool = False
+    include_source_scene: bool = False
+
+    @property
+    def action(self) -> str:
+        if self.collision_only:
+            return "collision"
+        return "preview_with_source" if self.include_source_scene else "preview"
 
 
 class QtBackgroundJobsController:
@@ -94,7 +101,7 @@ class QtBackgroundJobsController:
             start_process=lambda request, work: self._deps.start_proxy_mesh_process(
                 request,
                 work.settings,
-                action="collision" if work.collision_only else "preview",
+                action=work.action,
             ),
             drain_queue=self._deps.drain_process_queue,
             close_queue=self._deps.close_process_queue,
@@ -434,7 +441,14 @@ class QtBackgroundJobsController:
         self._window._update_action_state()
         self._ensure_polling()
 
-    def start_proxy_mesh_preview(self, request, settings, *, collision_only: bool = False) -> None:
+    def start_proxy_mesh_preview(
+        self,
+        request,
+        settings,
+        *,
+        collision_only: bool = False,
+        include_source_scene: bool = False,
+    ) -> None:
         if self.proxy_mesh_running:
             self._window._set_status("Proxy Mesh export is already running...")
             return
@@ -447,7 +461,11 @@ class QtBackgroundJobsController:
         try:
             start_result = self._proxy_preview_job.start_latest(
                 request,
-                _ProxyPreviewWork(settings=settings, collision_only=collision_only),
+                _ProxyPreviewWork(
+                    settings=settings,
+                    collision_only=collision_only,
+                    include_source_scene=include_source_scene,
+                ),
             )
         except Exception as exc:
             self._proxy_preview_job.close()
@@ -1221,7 +1239,7 @@ class QtBackgroundJobsController:
             return
         self._proxy_preview_retry_count = 0
         self._window._update_action_state()
-        self._window._handle_proxy_preview_result(proxy)
+        self._window._handle_proxy_preview_result(proxy, getattr(job_result, "source_scene", None))
 
     def _handle_proxy_preview_error(self, message: str) -> None:
         self._trace_worker("worker.error", "proxy_preview", {"message": message})
