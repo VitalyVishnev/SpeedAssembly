@@ -27,7 +27,7 @@ path remains the primary project goal and baseline import shape.
 
 ## Export modes
 
-The converter now has three supported authoring modes plus one disabled future mode:
+The converter has four supported authoring modes:
 
 - `skeletal_assembly`
   - the validated UE import contract
@@ -44,8 +44,10 @@ The converter now has three supported authoring modes plus one disabled future m
   - omits skeletons, binding arrays, and all `primvars:skel:*` fields
   - writes unique base geometry as one synthetic static prototype at the assembly pivot
 - `static_parts`
-  - remains disabled for this pass
-  - is reserved for a later static part-library export shape
+  - a reusable static part-library export mode
+  - writes one USDA file per resolved repeated-part prototype
+  - omits the assembly root API, base mesh, PointInstancer, skeleton, skinning, and instance placements
+  - is valid only when prototype payloads are present
 
 Missing base mesh and missing main skeleton are hard failures only in `skeletal_assembly` mode.
 They are expected omissions in `skeletal_parts` mode.

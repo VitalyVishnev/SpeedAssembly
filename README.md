@@ -1,4 +1,4 @@
-﻿# [SpeedAssembly](https://github.com/VitalyVishnev/SpeedAssembly)
+# [SpeedAssembly](https://github.com/VitalyVishnev/SpeedAssembly)
 
 > A standalone tool for bringing **SpeedTree Raw XML** trees into the new
 > **Unreal Engine 5.7–5.8** vegetation pipeline.
@@ -62,7 +62,10 @@ Unreal import behavior.
 The primary workflow has been validated in Unreal Engine 5.7 and 5.8. Real
 asset coverage continues to grow across different tree and vegetation forms.
 
----
+## License
 
-*A short visual walkthrough will be added here: SpeedTree → SpeedAssembly →
-Unreal Engine, ending with the imported tree moving in the viewport.*
+SpeedAssembly's original source is free and open-source software under the
+[MIT License](LICENSE). Anyone may use it privately or commercially, including
+studios, without a fee. Third-party components retain their own licenses. The
+packaged Autodesk FBX backend is proprietary and is not covered by MIT; see
+[Third-party notices](THIRD_PARTY_NOTICES.md) before redistributing a binary.

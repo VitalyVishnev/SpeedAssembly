@@ -15,6 +15,8 @@ def test_release_bundle_packages_exe_examples_and_help_assets(tmp_path: Path) ->
 
     sample_xml.parent.mkdir(parents=True)
     sample_xml.write_text("<tree/>", encoding="utf-8")
+    (repo_root / "LICENSE").write_text("MIT License", encoding="utf-8")
+    (repo_root / "THIRD_PARTY_NOTICES.md").write_text("Third-party notices", encoding="utf-8")
     sample_xml.with_name(".gitkeep").write_text("", encoding="utf-8")
     dist_path.mkdir(parents=True)
     exe_path.write_bytes(b"exe")
@@ -29,7 +31,12 @@ def test_release_bundle_packages_exe_examples_and_help_assets(tmp_path: Path) ->
         assert "XMLtoUSDAWorker.exe" not in names
         assert "build_info.json" not in names
         assert "help/How_to_use.txt" not in names
-        assert names == {"SpeedAssembly.exe", "examples/SimpleTree_01.xml"}
+        assert names == {
+            "SpeedAssembly.exe",
+            "LICENSE",
+            "THIRD_PARTY_NOTICES.md",
+            "examples/SimpleTree_01.xml",
+        }
 
 
 def test_qt_package_script_builds_release_zip() -> None:

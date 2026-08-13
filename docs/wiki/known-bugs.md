@@ -4,6 +4,25 @@ Current defects, fail-loud limits, and validation gaps only. Resolved crash
 history lives in [Encountered Crashes](encountered-crashes.md); rejected fixes
 and benchmark detail live in [Experiments](experiments.md).
 
+## Release blocker: Bundled Autodesk FBX SDK redistribution is unresolved
+
+Status: Open; legal confirmation required before the next public binary
+
+`SpeedAssembly.exe` currently embeds `fbx.cp310-win_amd64.pyd` from Autodesk
+FBX Python SDK 2020.3.4. The local Autodesk EULA permits developed products and
+requires a specific notice, but also contains an open-source distribution
+restriction that makes a blanket MIT claim for the combined EXE unsafe.
+
+Before the next public binary, either obtain written Autodesk permission for
+this exact distribution or move the Autodesk backend outside the MIT release
+and require the operator to install it under Autodesk's terms. The repository
+and non-Autodesk code can remain MIT in either case.
+
+Related:
+- `src/xml_to_usda/fbx_adapter.py`
+- `scripts/build_qt_gui_exe.ps1`
+- `THIRD_PARTY_NOTICES.md`
+
 ## Limitation: UE 5.7 foliage orientation requires a dedicated Skeleton
 
 Status: Fail-loud

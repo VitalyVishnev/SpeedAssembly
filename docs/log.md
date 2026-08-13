@@ -989,6 +989,15 @@ Major moves:
   validation entries. Detailed resolved crash history remains canonical in
   `encountered-crashes.md`.
 
+## 2026-08-14 - Public license and dependency notices
+
+- Licensed SpeedAssembly original work under MIT for unrestricted personal and
+  commercial use and corrected package authorship metadata.
+- Added third-party license/Autodesk notices to the repository, About dialog,
+  README, and mandatory release ZIP contents.
+- Confirmed that the current one-file EXE embeds Autodesk FBX SDK and recorded
+  written permission or backend separation as a public-binary release blocker.
+
 ## 2026-08-14 - Proxy silhouette comparison prototype
 
 - Added an in-viewport `Shaded` / `Silhouette Diff` switch to Proxy Preview.
@@ -999,3 +1008,7 @@ Major moves:
   preview worker action selection before commit.
 - Recorded that the prototype compares geometry silhouettes, not masked leaf
   opacity or exact UE shadow output.
+## 2026-08-14 - Corrected Static Assembly Parts contract
+
+- Updated `docs/raw/ue_import_contract.md`: `static_parts` is an implemented,
+  Unreal-validated reusable static-part export, not a disabled future mode.

@@ -26,6 +26,11 @@ def build_release_bundle(*, repo_root: str | Path, dist_path: str | Path, zip_pa
 
     with zipfile.ZipFile(resolved_zip_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.write(exe_path, "SpeedAssembly.exe")
+        for legal_name in ("LICENSE", "THIRD_PARTY_NOTICES.md"):
+            legal_path = resolved_repo_root / legal_name
+            if not legal_path.exists():
+                raise FileNotFoundError(f"Release legal notice is missing: {legal_path}")
+            archive.write(legal_path, legal_name)
         sample_path = resolved_repo_root / "samples" / "speedtree" / "simple_tree" / "variants" / "SimpleTree_01.xml"
         if not sample_path.exists():
             raise FileNotFoundError(f"Packaged example is missing: {sample_path}")

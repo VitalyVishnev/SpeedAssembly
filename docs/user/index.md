@@ -10,9 +10,6 @@ Convert SpeedTree Raw XML into Unreal-ready USDA while preserving the tree skele
 
 SpeedAssembly is built specifically for the Unreal Engine 5.7–5.8 vegetation pipeline. It is not a generic XML-to-USD converter.
 
-!!! note "Current validation boundary"
-
-    The primary Skeletal Assembly workflow has been validated in Unreal Engine 5.7 and 5.8. Some companion workflows have narrower validation; each workflow page states its current boundary explicitly.
 
 ## Choose a workflow
 

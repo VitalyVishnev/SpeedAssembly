@@ -1,55 +1,106 @@
+---
+title: Pipeline overview
+description: See where SpeedAssembly fits between a SpeedTree source and an Unreal vegetation asset.
+---
+
 # Pipeline overview
 
-SpeedAssembly separates source interpretation from operator choices and USDA authoring. That separation is what keeps the same input and settings deterministic and inspectable.
+SpeedAssembly acts as a bridge between SpeedTree and the new Nanite vegetation workflow in Unreal Engine. It keeps repeated leaves and branches as real instances, preserves the skeleton for wind animation, then writes a USDA file ready to import into Unreal.
 
 ```text
-SpeedTree Raw XML
-        ↓
-Normalized source facts
-        ↓
-Operator choices are resolved
-        ↓
-Structural and authoring validation
-        ↓
-USDA + optional companion outputs
-        ↓
-Unreal Engine USD/Interchange import
+SpeedTree tree
+    ↓
+Raw XML export
+    ↓
+SpeedAssembly: configure geometry, materials, and wind
+    ↓
+USDA and optional companion files
+    ↓
+Unreal Engine: import and validate the asset
 ```
 
-## Source facts
+!!! note "Unreal setup is required"
 
-The XML is normalized into a canonical tree model. Skeleton hierarchy, unique geometry, repeated-part prototypes, placements, and source materials remain source-level facts at this stage.
+    Unreal does not recognize this workflow by itself. Before importing, enable the required plugins and configure the project importer path. The future Unreal prerequisites guide will list the verified setup.
 
-The converter does not author USDA directly while traversing raw XML.
+## 1. Prepare and export the tree
 
-## Operator choices
+Create the tree in SpeedTree as usual, then prepare its skeleton, main trunk and branch mesh, reusable branches and leaves, materials, and UVs for export. Some tree setups need specific preparation; the future SpeedTree preparation guides will cover those requirements and export settings.
 
-Conversion mode, replacement geometry, material assignments, output naming, and related settings are resolved after normalization. A request-specific choice therefore does not change what the XML itself means.
+Export the tree as a SpeedTree Raw XML file. This is simply the export file you select in **Input XML**.
 
-## Validation
+## 2. Configure the tree in SpeedAssembly
 
-Validation is staged so errors identify the boundary that failed:
+Open SpeedAssembly, select the XML file in **Input XML**, then choose the output path and export mode.
 
-1. source interpretation;
-2. operator-choice resolution;
-3. importer-facing USDA authoring.
+| Export mode | Result |
+| --- | --- |
+| **Skeletal Assembly** | A complete tree that can use skeleton-driven wind animation. |
+| **Static Assembly** | A visually similar tree without a skeleton or wind animation. |
+| **Skeletal Assembly Parts** | A separate reusable skeletal asset for every repeated branch or leaf part. |
+| **Static Assembly Parts** | A separate reusable static asset for every repeated branch or leaf part. |
 
-When required skeleton, transform, prototype, or binding facts cannot be determined safely, conversion stops instead of emitting a guessed scene.
+The normal tree workflow uses **Skeletal Assembly**. Choose a Parts mode when you need a reusable library of branches or leaves instead of one complete tree.
 
-## Primary output shapes
+### Wind
 
-### Skeletal Assembly
+The **Wind** tab controls the base behaviour of bone groups for Dynamic Wind in Unreal. You can revise the wind settings later; use the dedicated Wind workflow when you need to inspect or edit the groups in detail.
 
-The primary workflow authors a Main Skeleton, unique Base Skeletal Tree geometry, and repeated skeletal Assembly Parts.
+### Geometry
 
-### Static Assembly
+The **Geometry** tab controls every reusable branch or leaf part. For each one, choose a source:
 
-The secondary rigid workflow uses the same normalized source facts but does not redefine the skeletal contract.
+- **Use XML Mesh** keeps the geometry exported from SpeedTree.
+- **Use FBX File** replaces that part with an external FBX mesh. For example, replace a lightweight SpeedTree branch with a higher-poly branch before import.
+- **Use Unreal Reference** reuses an already imported Unreal part asset. This lets multiple trees share the same branch asset instead of importing a new copy for each tree.
 
-### Parts libraries
+### Materials and UDIM
 
-Skeletal Parts and Static Parts write each resolved repeated prototype once for reuse. They do not write the complete placed tree.
+In **Materials**, assign Unreal material object paths to the tree and to its reusable branches and leaves. Copy the object path from the Unreal Content Browser. Required assignments must be complete before conversion can start, so Unreal can resolve the intended material slots during import.
 
-## Companion workflows
+Reusable branches and leaves can use one of these material modes:
 
-Dynamic Wind, [Proxy Mesh](../workflows/proxy-mesh.md), and Fracturing use narrower workflow-specific data when possible. They remain separate from the primary assembly export so their performance and validation boundaries do not silently change the main USDA.
+- **Single Material** assigns one material to the whole part.
+- **Material Slots** maps the material slots used by an FBX replacement to Unreal materials.
+- **Vertex Color Split** assigns two materials from the part's vertex colors. Prepare the mesh before export: exact black faces use the leaf material; every other face uses the bark material.
+
+Vertex Color Split is useful when a SpeedTree leaf node needs bark and leaf materials but the Raw XML export provides only one material assignment for that node.
+
+Each applicable material can also use a UDIM policy: keep its original UVs, shift the primary UVs to a UDIM tile, or preserve the primary UVs and write the UDIM offset to a second UV channel. Use this only when the target Unreal material is prepared for the selected policy.
+
+## 3. Convert and import
+
+Select **Convert to USDA** after the configuration is complete. SpeedAssembly writes the main USDA output ready for the configured Unreal USD/Interchange workflow.
+
+Import the file in Unreal using the project setup and import options documented for this pipeline. Then check that the expected tree geometry, repeated branches and leaves, materials, and—when applicable—the skeleton are present. A successful import confirms the file shape, not final wind, lighting, collision, or destruction quality.
+
+## Advanced workflows
+
+Use the following tools after the main tree is configured.
+
+### Wind Preview
+
+**Wind Preview** is a separate viewport for reviewing and editing wind groups. You can use XML groups, create automatic hierarchy-based groups, add manual overrides, and generate Dynamic Wind JSON from the final visible group setup.
+
+It can also load an external FBX or USD skeleton, so you can generate Dynamic Wind JSON for a skeletal plant created outside SpeedTree.
+
+### Proxy Mesh
+
+**Proxy Preview** generates a lower-cost companion Static Mesh with optional trunk collision. It is intended for collision, distance-field, and lower-cost shadow workflows around the main tree—not as a replacement for the Skeletal Assembly.
+
+Import of the Proxy Mesh as a Static Mesh is confirmed. Validate distance fields and shadow quality with the actual asset in the target Unreal scene.
+
+### Fracturing
+
+**Fracture Preview** divides the tree into root-pivoted static pieces and can export optional collision geometry with them. It is an experimental workflow for destruction-oriented asset preparation.
+
+The exported pieces are static geometry; their runtime destruction behaviour still needs validation in the target Unreal project.
+
+### Part Preview
+
+**Part Preview** opens one reusable branch or leaf part in its own viewport. Use it to inspect the part, review its material split or FBX slots, and apply modest simplification before the main conversion.
+
+## See also
+
+- [Quick start](../getting-started/quick-start.md)
+- Planned guides: SpeedTree source requirements, Raw XML export, Unreal prerequisites, Unreal import, Dynamic Wind, Proxy Mesh, and Fracturing.

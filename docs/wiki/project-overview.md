@@ -11,8 +11,9 @@ skinning fields. Static parts have been imported and reused by a full Static
 Assembly through Unreal Reference in the current Unreal target workflow.
 
 The standalone release is named `SpeedAssembly.exe` and its release bundle is
-`SpeedAssembly_release.zip`. The release ZIP contains only the executable and
-`examples/SimpleTree_01.xml`; `build_info.json` remains beside the executable
+`SpeedAssembly_release.zip`. The release ZIP contains the executable, MIT
+`LICENSE`, `THIRD_PARTY_NOTICES.md`, and `examples/SimpleTree_01.xml`;
+`build_info.json` remains beside the executable
 in `dist-next` for local diagnostics and is not distributed. The primary
 baseline workflow has been manually confirmed in UE 5.7 and UE 5.8. Proxy Mesh
 is a companion Static Mesh workflow for collision, distance-field, and

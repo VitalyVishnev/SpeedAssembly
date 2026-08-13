@@ -110,6 +110,11 @@ class SupportDialog(QDialog):
         layout.addWidget(self.title_label)
 
         self.summary_label = QLabel(
+            "Copyright © 2026 Vitaly Vishnev.\n"
+            "SpeedAssembly original code is free and open-source under the MIT "
+            "License. Personal and commercial use is permitted. Third-party "
+            "components, including Autodesk FBX SDK, retain their own licenses; "
+            "see THIRD_PARTY_NOTICES.md in the release.\n\n"
             "Diagnostics are local-only. Export a bundle when you need to share "
             "the current preset, settings snapshot, runtime log, in-app log, and "
             "latest job manifest for a reproducible bug report.",

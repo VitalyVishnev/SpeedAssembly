@@ -2,6 +2,21 @@
 
 This page stores active project contracts. Rejected or superseded approaches live in [experiments.md](experiments.md). Current limitations and bugs live in [known-bugs.md](known-bugs.md).
 
+## Decision: SpeedAssembly is MIT-licensed
+
+Status: Active
+
+SpeedAssembly original source and documentation are available under the MIT
+License: unrestricted personal and commercial use, modification, and
+redistribution with preservation of the copyright and license notice.
+Third-party code retains its own license. Every public release ZIP includes
+`LICENSE` and `THIRD_PARTY_NOTICES.md`; the About dialog and README expose the
+same status. Autodesk FBX SDK remains a separately licensed proprietary binary
+component and must retain its Autodesk notice. Do not describe a bundled FBX
+binary as wholly MIT-licensed. Public redistribution requires written Autodesk
+confirmation for the current open-source distribution model or separation of
+the FBX backend from the MIT release.
+
 ## Decision: Public standalone identity is SpeedAssembly
 
 Status: Active
@@ -11,10 +26,10 @@ The distributed executable is `SpeedAssembly.exe`; the release archive is
 runtime settings/cache root, diagnostics archive, package help, and current
 operator-facing documentation use `SpeedAssembly`.
 
-The release ZIP contains only `SpeedAssembly.exe` and
-`examples/SimpleTree_01.xml`. Keep `build_info.json` beside the local package
-for diagnostics, but do not distribute it; a concise HTML quick-start may be
-added to the archive later.
+The release ZIP contains `SpeedAssembly.exe`, `LICENSE`,
+`THIRD_PARTY_NOTICES.md`, and `examples/SimpleTree_01.xml`. Keep
+`build_info.json` beside the local package for diagnostics, but do not
+distribute it; a concise HTML quick-start may be added to the archive later.
 
 The internal Python package remains `xml_to_usda` so existing source imports,
 worker commands, and file-format contracts remain stable. Legacy
