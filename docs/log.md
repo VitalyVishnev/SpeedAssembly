@@ -1012,3 +1012,22 @@ Major moves:
 
 - Updated `docs/raw/ue_import_contract.md`: `static_parts` is an implemented,
   Unreal-validated reusable static-part export, not a disabled future mode.
+
+## 2026-08-14 - ufbx FBX migration
+
+- Replaced the proprietary Python FBX dependency with vendored official ufbx
+  v0.21.3 C source and a small local CPython bridge; retained the isolated
+  helper-process contract and updated release packaging/notices.
+- Added real-asset payload and skeleton equivalence gates. Twig and Fern retain
+  matching point/count/material/color semantics; Alder retains its 966-joint
+  hierarchy.
+- Stress-tested the 581 MB `SM_BigBranch_02_HIGH.fbx` in three fresh processes:
+  16,813,048 points and 21,029,320 triangles, identical checksum, 5.58–5.62 s.
+  The former backend required 72.61 s for the same checksum.
+- Removed the former FBX Python package from `.venv310`. External wrapper crash
+  evidence is retained as CR-015; production does not use a Python ufbx wrapper.
+- Release ZIP now carries the vendored `ufbx-LICENSE` alongside the project
+  license and notices. UE 5.7.x editor import remains explicitly unverified.
+- Final polish removed the obsolete Autodesk-specific retry branch, stopped
+  tracking reproducible `setuptools` `egg-info`, and kept the prior detailed
+  third-party notices outside the replaced FBX licensing section.

@@ -22,7 +22,7 @@ Main systems:
 - parts-library requests reuse one bundle path in `conversion_orchestrator.py`;
   each resolved prototype is isolated into its own skeletal or static USDA.
 - `src/xml_to_usda/qt_ui/` - supported PySide6 shell and preview adapters.
-- `src/xml_to_usda/fbx_adapter.py` and `src/xml_to_usda/fbx_import_supervisor.py` - Autodesk FBX integration and helper process control.
+- `src/xml_to_usda/fbx_adapter.py`, `src/xml_to_usda/_ufbx.c`, and `src/xml_to_usda/fbx_import_supervisor.py` - vendored ufbx integration and isolated helper-process control.
 - `src/xml_to_usda/discovery_service.py` and `src/xml_to_usda/source_discovery_worker_subprocess.py` - lightweight material/prototype row discovery; XML files at or above 5 MiB are inspected outside the GUI process.
 - `src/xml_to_usda/cache_maintenance.py` - bounded runtime cache maintenance for job leftovers, FBX payloads, source-model caches, Proxy Source Projection caches, legacy Fracture Preview cache files, and stale cache temp files.
 - `src/xml_to_usda/proxy_mesh_service.py`, `src/xml_to_usda/fracture_service.py`, and related workers - companion workflows.
@@ -237,7 +237,7 @@ packaged smoke/build gate for completed UI changes.
 
 5. Runtime wrappers handle worker isolation, cleanup, packaging, and diagnostics.
 
-The main shell never imports Autodesk FBX solely to build its XML discovery
+The main shell never imports the ufbx C extension solely to build its XML discovery
 panels. FBX loading is lazy at the actual FBX action boundary. Restored large
 XML inputs are shown immediately, discovered in a fresh file-backed worker,
 then inspected for Wind groups in the existing isolated Wind worker; the
@@ -265,7 +265,7 @@ Important folders:
 External dependencies:
 
 - UE 5.7.x import behavior is the final contract check.
-- Autodesk FBX Python SDK 2020.3.4 is the real FBX import backend in `.venv310`.
+- ufbx v0.21.3 is vendored as C source and compiled as `xml_to_usda._ufbx` in `.venv310` and release builds.
 - PySide6 is the supported desktop shell.
 - PyInstaller builds the packaged executable.
 

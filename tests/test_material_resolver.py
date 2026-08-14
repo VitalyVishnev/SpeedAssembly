@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 import json
-from enum import Enum
 from pathlib import Path
 
 import pytest
 
 from xml_to_usda.canonical_loader import load_canonical_model, load_resolved_assembly_model, load_source_tree_model
 from xml_to_usda.asset_paths import normalize_unreal_asset_path
-from xml_to_usda.fbx_adapter import FbxVertexColorReadError, _read_vertex_color
 from xml_to_usda.models import (
     BaseMaterialOverride,
     Color4,
@@ -610,7 +608,7 @@ def test_fbx_part_source_force_single_material_ignores_useful_vertex_color_split
 def test_fbx_part_source_with_vertex_color_warning_uses_specific_fallback_reason(tmp_path: Path) -> None:
     payload_path = _write_fbx_json_payload(tmp_path, include_vertex_colors=False)
     payload = json.loads(payload_path.read_text(encoding="utf-8"))
-    payload["vertex_color_warning"] = "Autodesk FBX SDK vertex-color access failed for prototype_payload.json"
+    payload["vertex_color_warning"] = "FBX vertex-color data is unavailable for prototype_payload.json"
     payload_path.write_text(json.dumps(payload), encoding="utf-8")
 
     _, model, diagnostics = load_canonical_model(
@@ -656,13 +654,13 @@ def test_fbx_part_source_explicit_vertex_color_split_requires_usable_colors(tmp_
         )
 
 
-def test_fbx_part_source_explicit_vertex_color_split_reports_binding_warning_reason(tmp_path: Path) -> None:
+def test_fbx_part_source_explicit_vertex_color_split_reports_backend_warning_reason(tmp_path: Path) -> None:
     payload_path = _write_fbx_json_payload(tmp_path, include_vertex_colors=False)
     payload = json.loads(payload_path.read_text(encoding="utf-8"))
-    payload["vertex_color_warning"] = "Autodesk FBX SDK vertex-color access failed for prototype_payload.json"
+    payload["vertex_color_warning"] = "FBX vertex-color data is unavailable for prototype_payload.json"
     payload_path.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="Autodesk FBX SDK vertex-color access failed"):
+    with pytest.raises(ValueError, match="FBX vertex-color data is unavailable"):
         load_canonical_model(
             str(SIMPLE_TREE_01),
             prototype_source_configs=(
@@ -852,80 +850,6 @@ def test_explicit_part_material_contract_activates_for_udim_only_xml_mesh_rows()
     assert {black_material.source_id, white_material.source_id} == {
         section.material_id for section in resolved_prototype.mesh.sections
     }
-
-
-def test_read_vertex_color_wraps_autodesk_binding_internal_error() -> None:
-    class _BrokenColorElement:
-        def GetDirectArray(self):
-            raise SystemError(r"D:\_w\1\s\Objects\dictobject.c:1514: bad argument to internal function")
-
-    class _BrokenMesh:
-        def GetElementVertexColorCount(self):
-            return 1
-
-        def GetElementVertexColor(self, _index):
-            return _BrokenColorElement()
-
-    with pytest.raises(FbxVertexColorReadError, match="Autodesk FBX SDK failed while reading vertex colors"):
-        _read_vertex_color(_BrokenMesh(), 0, 0)
-
-
-def test_read_vertex_color_accepts_python_enum_mapping_and_reference_modes() -> None:
-    class _MappingMode(Enum):
-        eByControlPoint = 1
-        eByPolygonVertex = 2
-        eAllSame = 3
-
-    class _ReferenceMode(Enum):
-        eDirect = 0
-        eIndex = 1
-        eIndexToDirect = 2
-
-    class _Color:
-        def __init__(self, red: float, green: float, blue: float, alpha: float) -> None:
-            self.mRed = red
-            self.mGreen = green
-            self.mBlue = blue
-            self.mAlpha = alpha
-
-    class _Array:
-        def __init__(self, values) -> None:
-            self._values = list(values)
-
-        def GetCount(self):
-            return len(self._values)
-
-        def GetAt(self, index):
-            return self._values[index]
-
-    class _ColorElement:
-        def GetDirectArray(self):
-            return _Array((_Color(0.0, 0.0, 0.0, 1.0), _Color(1.0, 1.0, 1.0, 1.0)))
-
-        def GetIndexArray(self):
-            return _Array((1, 0, 1))
-
-        def GetMappingMode(self):
-            return _MappingMode.eByPolygonVertex
-
-        def GetReferenceMode(self):
-            return _ReferenceMode.eIndexToDirect
-
-    class _Mesh:
-        def GetElementVertexColorCount(self):
-            return 1
-
-        def GetElementVertexColor(self, _index):
-            return _ColorElement()
-
-        def GetPolygonVertexIndex(self, _polygon_index):
-            return 0
-
-        def GetPolygonVertex(self, _polygon_index, vertex_order):
-            return vertex_order
-
-    assert _read_vertex_color(_Mesh(), 0, 0) == (1.0, 1.0, 1.0, 1.0)
-    assert _read_vertex_color(_Mesh(), 0, 1) == (0.0, 0.0, 0.0, 1.0)
 
 
 def test_conflicting_fbx_material_modes_for_same_prototype_are_rejected(tmp_path: Path) -> None:

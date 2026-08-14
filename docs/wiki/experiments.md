@@ -1,5 +1,16 @@
 # Experiments
 
+## Experiment: Python ufbx wrappers
+
+Status: Rejected.
+
+Two wrappers were evaluated before the production migration. `pyufbx` returned
+corrupt geometry values; the upstream-named Python package exited while reading
+the supplied Alder skeleton. The observed `python.exe` null-address write dialog
+is recorded as CR-015. Production uses the official ufbx C source behind a
+minimal local CPython bridge instead of exposing foreign wrapper ownership or
+ABI assumptions to workers.
+
 ## Experiment: Shared-memory process pool for FBX material partition
 
 Status: Superseded by bounded zero-copy NumPy.
@@ -14,16 +25,13 @@ The replacement views the existing `GeometryBuffer` arrays with
 Big Spruce topology (58,463 faces, 175,389 corners), the exact result improved
 from 0.03242 s to 0.00570 s, or 82.4%. Keep the scalar path below 50,000 faces.
 
-## Experiment: Bulk `FbxMesh.GetPolygonVertices()` for huge FBX topology
+## Experiment: Bulk Python-list topology for huge FBX payloads
 
 Status: Rejected for memory stability.
 
-The Autodesk binding returns a Python `list[int]`, not a zero-copy numeric
-view. A 14.2-million-triangle payload would materialize 42.5 million Python
-integers in addition to the final packed index array, creating a multi-gigabyte
-transient peak. The production path instead keeps per-face SDK index reads,
-reduces Python loop count, and vectorizes only indexed UV expansion in bounded
-chunks. Reconsider only if the binding exposes a real buffer/pointer contract.
+Any Python `list[int]` topology path would materialize tens of millions of
+objects in addition to final packed buffers, creating a multi-gigabyte
+transient peak. The production ufbx bridge writes packed buffers directly.
 
 ## Experiment: Outer parallel execution for independent Boolean components
 

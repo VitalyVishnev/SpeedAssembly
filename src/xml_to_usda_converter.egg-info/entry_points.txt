@@ -1,4 +1,0 @@
-[console_scripts]
-xml-to-usda = xml_to_usda.cli:main
-xml-to-usda-gui = xml_to_usda.qt_ui.entry:main
-xml-to-usda-gui-next = xml_to_usda.qt_ui.entry:main

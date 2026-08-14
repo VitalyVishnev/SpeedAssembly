@@ -41,7 +41,7 @@
 - `Runtime Job` - one executing conversion run with telemetry, cleanup, workers, and a job workspace.
 - `Job Workspace` - the per-run temp/cache directory and diagnostics surface.
 - `Conversion Worker` - the subprocess that owns a large conversion outside the UI process.
-- `FBX Helper` - the isolated native Autodesk FBX import helper process.
+- `FBX Helper` - the isolated process owning the ufbx C extension during prototype import.
 - `Proxy Mesh` - a companion Static Mesh USDA asset with fitted trunk Box/Capsule collision for collision, distance-field, and lower-cost shadow workflows.
 - `Collision Primitive` - an oriented Box, Capsule, Sphere, or Convex collision mesh consumed by Proxy Mesh or Fracturing; Box/Capsule mesh construction is shared while fitting policy remains workflow-specific.
 - `Proxy Source Projection` - the narrow source-facts model used by Proxy Mesh loading: base geometry and skin binding, +X skeleton, repeated-part transforms, and source prototype geometry without full material or authoring resolution state.

@@ -198,7 +198,7 @@ Evidence labels:
   the build process inherited one-core affinity. This is additional host
   instability evidence; no product runtime workaround was added.
 
-### CR-012 - Eager Autodesk import failed during packaged GUI bootstrap
+### CR-012 - Eager native FBX import failed during packaged GUI bootstrap
 
 - Date: 2026-07-27
 - Status/evidence: Mitigated; packaged startup passed / Strong boundary, exact corruption source unverified
@@ -208,7 +208,7 @@ Evidence labels:
 - Boundary: frozen GUI bootstrap before `MainWindow` construction.
 - Class: `PACKAGE-NATIVE`
 - Cause/fix: the panels imported `discovery_service`, which eagerly imported
-  the Autodesk FBX extension although startup only needed XML discovery.
+  the native FBX extension although startup only needed XML discovery.
   FBX import is now lazy and occurs only for FBX material-slot inspection.
   Bootstrap exceptions are appended to `gui_runtime.log` before re-raising.
 - Regression gate: importing `qt_ui.panels` leaves `fbx` absent from
@@ -253,6 +253,23 @@ Evidence labels:
   exit ordering and requires delivery of the result without a crash. Full
   regression passed, and ten clean packaged Big-low Conversion runs completed
   without a crash or retry.
+
+### CR-015 - Third-party Python ufbx wrappers accessed invalid memory
+
+- Date: 2026-08-14
+- Status/evidence: Avoided / Strong boundary, wrapper root cause unverified
+- Signature: `python.exe` showed a null-address write dialog while evaluating
+  the supplied `SM_Black_Alder_Field_Nanite_09_bones.fbx`; an alternate wrapper
+  returned corrupt geometry values on small FBX fixtures.
+- Boundary: interactive CPython process using external Python-native wrappers.
+- Class: `PACKAGE-NATIVE`
+- Cause: Unverified. The wrappers' ownership/ABI bridge is unsafe for this
+  workload; no product code used the resulting data.
+- Fix/workaround: vendor official ufbx C source and expose only a minimal local
+  CPython bridge. Do not install or import Python ufbx wrappers in production.
+- Regression gate: compile `xml_to_usda._ufbx`; run real Twig/Fern payload and
+  Alder skeleton contracts; execute three fresh 581 MB BigBranch reads with
+  equal checksums.
 
 ## System rules derived from the incidents
 

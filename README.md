@@ -67,5 +67,5 @@ asset coverage continues to grow across different tree and vegetation forms.
 SpeedAssembly's original source is free and open-source software under the
 [MIT License](LICENSE). Anyone may use it privately or commercially, including
 studios, without a fee. Third-party components retain their own licenses. The
-packaged Autodesk FBX backend is proprietary and is not covered by MIT; see
+packaged FBX path uses the permissively licensed ufbx library; see
 [Third-party notices](THIRD_PARTY_NOTICES.md) before redistributing a binary.

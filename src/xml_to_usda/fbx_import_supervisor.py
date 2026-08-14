@@ -264,12 +264,6 @@ def _finalize_helper(helper: _RunningHelper, *, exit_code: int):
             if error_payload is not None:
                 error_message, formatted_traceback = error_payload
                 detail = f"{error_message}\n{formatted_traceback.strip()}"
-                if _is_retryable_fbx_binding_failure(detail):
-                    raise _NativeHelperCrash(
-                        detail,
-                        partial_results={},
-                        remaining_tasks=(helper.task,),
-                    )
                 raise RuntimeError(detail)
             raise _NativeHelperCrash(
                 (
@@ -297,11 +291,6 @@ def _finalize_helper(helper: _RunningHelper, *, exit_code: int):
         _cleanup_temp_path(helper.request_path)
         _cleanup_temp_path(helper.result_path)
         _cleanup_temp_path(helper.error_path)
-
-
-def _is_retryable_fbx_binding_failure(detail: str) -> bool:
-    return "FbxVector2.__getitem__(): not enough arguments" in detail
-
 
 def _terminate_helper(helper: _RunningHelper) -> None:
     try:

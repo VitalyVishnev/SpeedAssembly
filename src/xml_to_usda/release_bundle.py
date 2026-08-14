@@ -31,6 +31,10 @@ def build_release_bundle(*, repo_root: str | Path, dist_path: str | Path, zip_pa
             if not legal_path.exists():
                 raise FileNotFoundError(f"Release legal notice is missing: {legal_path}")
             archive.write(legal_path, legal_name)
+        ufbx_license = resolved_repo_root / "src" / "xml_to_usda" / "vendor" / "ufbx" / "LICENSE"
+        if not ufbx_license.exists():
+            raise FileNotFoundError(f"Vendored ufbx license is missing: {ufbx_license}")
+        archive.write(ufbx_license, "licenses/ufbx-LICENSE")
         sample_path = resolved_repo_root / "samples" / "speedtree" / "simple_tree" / "variants" / "SimpleTree_01.xml"
         if not sample_path.exists():
             raise FileNotFoundError(f"Packaged example is missing: {sample_path}")

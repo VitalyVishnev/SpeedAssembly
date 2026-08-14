@@ -10,12 +10,32 @@ SpeedAssembly original source and documentation are available under the MIT
 License: unrestricted personal and commercial use, modification, and
 redistribution with preservation of the copyright and license notice.
 Third-party code retains its own license. Every public release ZIP includes
-`LICENSE` and `THIRD_PARTY_NOTICES.md`; the About dialog and README expose the
-same status. Autodesk FBX SDK remains a separately licensed proprietary binary
-component and must retain its Autodesk notice. Do not describe a bundled FBX
-binary as wholly MIT-licensed. Public redistribution requires written Autodesk
-confirmation for the current open-source distribution model or separation of
-the FBX backend from the MIT release.
+`LICENSE`, `THIRD_PARTY_NOTICES.md`, and the vendored `ufbx-LICENSE`; the About
+dialog and README expose the same status. The bundled ufbx source is dual
+MIT/public-domain and retains its upstream license and pinned provenance note.
+Do not claim licenses for input FBX assets, which remain the property of their
+respective owners.
+
+## Decision: FBX parsing uses a vendored ufbx C bridge
+
+Status: Active
+
+`xml_to_usda._ufbx` compiles the official ufbx v0.21.3 C source pinned at
+`83bc7cf44f76bc8622de63b809a42b5d557cd733`. `fbx_adapter.py` owns the small
+Python contract and receives only serializable geometry or skeleton facts.
+The existing isolated FBX Helper remains the native crash boundary.
+
+Rigid imports reject animation and skin deformers, preserve world-space points,
+triangulated topology, per-corner UVs, control-point colors, and deterministic
+material sections. Real fixtures prove payload/skeleton equivalence; the
+581 MB BigBranch reads deterministically in 5.58–5.62 s versus 72.61 s for the
+former implementation. Do not add a third-party Python ufbx wrapper.
+
+Related files:
+- `src/xml_to_usda/_ufbx.c`
+- `src/xml_to_usda/fbx_adapter.py`
+- `src/xml_to_usda/vendor/ufbx/UPSTREAM.md`
+- `tests/test_ufbx_equivalence.py`
 
 ## Decision: Public standalone identity is SpeedAssembly
 
@@ -486,48 +506,31 @@ Related files:
 - `src/xml_to_usda/conversion_service.py`
 - `src/xml_to_usda/qt_ui/window.py`
 
-## Decision: Known transient FBX binding failures reduce helper concurrency
+## Decision: FBX helper failures are fail-loud
 
 Status: Active
 
-Prototype FBX imports still start at the requested helper concurrency. If the
-Autodesk binding reports the observed transient
-`FbxVector2.__getitem__(): not enough arguments` failure, keep completed
-payloads and retry only the remaining FBX tasks with one fewer helper. At one
-helper the same failure remains fail-loud.
-
-This is narrower than retrying arbitrary Python or payload errors. The
-WorldTree evidence showed both HIGH FBX files overlap in the failing run, while
-the same `SM_BigBranch_02_HIGH.fbx` completed sequentially with 16,813,048
-points and 21,029,320 triangles.
+Prototype FBX imports start at the requested helper concurrency. A helper crash
+preserves completed payloads and retries only remaining tasks with one fewer
+helper; at one helper the failure remains fail-loud. This is process recovery,
+not a parser-specific workaround.
 
 Related files:
 - `src/xml_to_usda/fbx_import_supervisor.py`
 - `tests/test_fbx_prototype_sources.py`
 
-## Decision: Large FBX dense arrays use bounded NumPy paths
+## Decision: Large FBX payloads stay compact across the helper boundary
 
 Status: Active
 
-Keep `GeometryBuffer` and the Autodesk helper-process boundary unchanged.
-Above measured thresholds, transform control points in bounded NumPy chunks,
-expand indexed `eByPolygonVertex` UVs from a bounded direct table plus index
-chunks, and traverse triangle topology once per face when no per-corner work
-remains. Release the SDK control-point wrapper list before topology traversal.
-Small payloads retain the scalar path because a cold NumPy import is larger
-than their possible saving.
+Keep `GeometryBuffer` and the helper-process boundary unchanged. ufbx writes
+packed native buffers directly, then the bridge emits Python `bytes`; only the
+existing `array` buffers cross the file protocol. Material partition may view
+those arrays via `numpy.frombuffer`, without shared memory or a pool.
 
-Large vertex-color material partition views the existing `array` buffers with
-`numpy.frombuffer`; it does not copy them into shared memory or start a process
-pool. Cancellation is checked between bounded chunks. Exact-invalid topology
-and color-index behavior remains fail-safe, and the returned section order is
-unchanged.
-
-Evidence: `SM_BigBranch_01_HIGH.fbx` produced byte-identical point, face-count,
-face-index, and UV buffers while improving 97.724 s to 57.598 s. The real
-58,463-face partition improved 0.03242 s to 0.00570 s. Do not replace this with
-`FbxMesh.GetPolygonVertices()`: on the same class of asset it materializes tens
-of millions of Python integers and creates a multi-gigabyte transient peak.
+The 581 MB `SM_BigBranch_02_HIGH.fbx` completed three fresh processes with the
+same checksum at 16,813,048 points and 21,029,320 triangles. Do not replace
+the bridge with a Python list-based topology API.
 
 Related files:
 - `src/xml_to_usda/fbx_adapter.py`
@@ -549,7 +552,7 @@ Reasoning:
 Process isolation keeps the interface responsive and contains native failures. A restored 148.5 MB WorldTree must not be parsed synchronously before the main window is shown.
 
 Consequences:
-Packaged smoke and stability gates stay required for the worker path. GUI startup must also avoid importing the Autodesk FBX SDK merely to define discovery helpers; FBX is loaded lazily only when an FBX-backed action needs it. Bootstrap Python exceptions are appended to the persistent GUI runtime log before being re-raised.
+Packaged smoke and stability gates stay required for the worker path. GUI startup must also avoid importing the ufbx C extension merely to define discovery helpers; FBX is loaded lazily only when an FBX-backed action needs it. Bootstrap Python exceptions are appended to the persistent GUI runtime log before being re-raised.
 
 Related files:
 - `src/xml_to_usda/discovery_service.py`

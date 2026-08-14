@@ -17,6 +17,9 @@ def test_release_bundle_packages_exe_examples_and_help_assets(tmp_path: Path) ->
     sample_xml.write_text("<tree/>", encoding="utf-8")
     (repo_root / "LICENSE").write_text("MIT License", encoding="utf-8")
     (repo_root / "THIRD_PARTY_NOTICES.md").write_text("Third-party notices", encoding="utf-8")
+    ufbx_license = repo_root / "src" / "xml_to_usda" / "vendor" / "ufbx" / "LICENSE"
+    ufbx_license.parent.mkdir(parents=True)
+    ufbx_license.write_text("ufbx license", encoding="utf-8")
     sample_xml.with_name(".gitkeep").write_text("", encoding="utf-8")
     dist_path.mkdir(parents=True)
     exe_path.write_bytes(b"exe")
@@ -35,6 +38,7 @@ def test_release_bundle_packages_exe_examples_and_help_assets(tmp_path: Path) ->
             "SpeedAssembly.exe",
             "LICENSE",
             "THIRD_PARTY_NOTICES.md",
+            "licenses/ufbx-LICENSE",
             "examples/SimpleTree_01.xml",
         }
 

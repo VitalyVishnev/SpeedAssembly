@@ -100,9 +100,9 @@ def external_skeleton_backend_available(suffix: str) -> tuple[bool, str]:
     suffix = suffix.lower()
     if suffix == ".fbx":
         try:
-            import fbx  # noqa: F401
+            from . import _ufbx  # noqa: F401
         except ImportError:
-            return False, "Autodesk FBX SDK Python bindings are not available."
+            return False, "Bundled ufbx FBX backend is not available."
         return True, ""
     if suffix in SUPPORTED_USD_SKELETON_SUFFIXES:
         if suffix in TEXT_USD_SKELETON_SUFFIXES:

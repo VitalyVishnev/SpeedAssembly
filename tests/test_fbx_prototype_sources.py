@@ -9,11 +9,6 @@ import pytest
 from xml_to_usda.cli import main as cli_main
 from xml_to_usda.fbx_adapter import (
     FbxImportError,
-    _LayerElementReader,
-    _append_polygon_vertex_uvs,
-    _append_transformed_control_points,
-    _fbx_point_transform_coefficients,
-    _transform_control_point,
     load_fbx_geometry,
 )
 from xml_to_usda.fbx_import_supervisor import FbxImportTask, _NativeHelperCrash
@@ -78,58 +73,6 @@ def _write_fbx_json_payload(
     payload_path = tmp_path / file_name
     payload_path.write_text(json.dumps(payload), encoding="utf-8")
     return payload_path
-
-
-def test_fbx_control_points_use_matrix_coefficients_without_native_multt(monkeypatch) -> None:
-    class _Transform:
-        rows = (
-            (2.0, 0.0, 0.0, 0.0),
-            (0.0, 3.0, 0.0, 0.0),
-            (0.0, 0.0, 4.0, 0.0),
-            (10.0, 20.0, 30.0, 1.0),
-        )
-
-        def Get(self, row: int, column: int) -> float:
-            return self.rows[row][column]
-
-        def MultT(self, _vector):
-            raise AssertionError("FBX MultT must not run in the per-point loop")
-
-    coefficients = _fbx_point_transform_coefficients(_Transform())
-    transformed = array("f")
-    monkeypatch.setattr("xml_to_usda.fbx_adapter._MIN_NUMPY_CONTROL_POINT_COUNT", 1)
-    _append_transformed_control_points(
-        transformed,
-        [(1.0, 2.0, 3.0, 1.0), (-1.0, -2.0, -3.0, 1.0)],
-        coefficients,
-    )
-
-    assert _transform_control_point(coefficients, (1.0, 2.0, 3.0, 1.0)) == (12.0, 26.0, 42.0)
-    assert transformed == array("f", (12.0, 26.0, 42.0, 8.0, 14.0, 18.0))
-
-
-def test_large_fbx_uv_vectorization_preserves_polygon_vertex_order_across_chunks(monkeypatch) -> None:
-    class _Array:
-        def __init__(self, values) -> None:
-            self.values = values
-
-        def GetAt(self, index: int):
-            return self.values[index]
-
-    reader = _LayerElementReader(
-        mapping_mode="eByPolygonVertex",
-        reference_mode="eIndexToDirect",
-        direct_array=_Array(((0.0, 0.0), (1.0, 0.5))),
-        direct_count=2,
-        index_array=_Array((1, 0, 1)),
-        index_count=3,
-    )
-    target = array("f")
-    monkeypatch.setattr("xml_to_usda.fbx_adapter._MIN_NUMPY_POLYGON_VERTEX_COUNT", 1)
-    monkeypatch.setattr("xml_to_usda.fbx_adapter._NUMPY_POLYGON_VERTEX_CHUNK_SIZE", 2)
-
-    assert _append_polygon_vertex_uvs(target, reader, polygon_vertex_count=3)
-    assert target == array("f", (1.0, 0.5, 0.0, 0.0, 1.0, 0.5))
 
 
 def test_load_prototype_source_configs_from_json_reads_fbx_and_unreal_modes(tmp_path: Path) -> None:
@@ -498,7 +441,7 @@ def test_fbx_import_supervisor_retries_remaining_tasks_with_lower_concurrency(
     assert results == {0: "payload-0", 1: "payload-1"}
 
 
-def test_fbx_import_supervisor_treats_vector_binding_failure_as_retryable(
+def test_fbx_import_supervisor_does_not_retry_handled_fbx_failures(
     tmp_path: Path,
 ) -> None:
     import xml_to_usda.fbx_import_supervisor as supervisor_module
@@ -506,8 +449,8 @@ def test_fbx_import_supervisor_treats_vector_binding_failure_as_retryable(
     error_path = tmp_path / "error.json"
     write_error_payload(
         error_path,
-        message="FbxVector2.__getitem__(): not enough arguments",
-        formatted_traceback="TypeError: FbxVector2.__getitem__(): not enough arguments",
+        message="FBX parser reported malformed UV data",
+        formatted_traceback="ValueError: FBX parser reported malformed UV data",
     )
     task = FbxImportTask(
         task_id=1,
@@ -524,10 +467,8 @@ def test_fbx_import_supervisor_treats_vector_binding_failure_as_retryable(
         error_path=error_path,
     )
 
-    with pytest.raises(_NativeHelperCrash) as exc_info:
+    with pytest.raises(RuntimeError, match="malformed UV data"):
         supervisor_module._finalize_helper(helper, exit_code=1)
-
-    assert exc_info.value.remaining_tasks == (task,)
 
 
 def test_fbx_part_source_restores_authored_instance_scale_without_xml_original_scale_multiplier(tmp_path: Path) -> None:

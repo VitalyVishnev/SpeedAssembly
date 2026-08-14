@@ -72,7 +72,7 @@ group/edit/export controls.
   - `.usdc`
 - `.usdz` is out of scope for this iteration.
 - Unavailable FBX/USD backends report a short in-window error on `Load`.
-- FBX uses the available Autodesk FBX SDK path and loads skeleton data only.
+- FBX uses the bundled ufbx C path and loads skeleton data only.
 - USD uses `pxr`/OpenUSD Python support from the project `usd-core`
   dependency when available.
 - Text `.usda` and ASCII `.usd` have a deterministic fallback that reads

@@ -8,6 +8,7 @@
 .pytest_tmp/
 __pycache__/
 *.pyc
+src/xml_to_usda/_ufbx*.pyd
 
 # Build outputs
 build/

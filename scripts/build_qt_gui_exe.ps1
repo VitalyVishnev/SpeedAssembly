@@ -167,6 +167,12 @@ try {
     }
 
     if ($Package) {
+        Write-Host 'Building bundled ufbx extension ...'
+        & $pythonExe -s setup.py build_ext --inplace
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to build the bundled ufbx extension.'
+        }
+
         Write-Host 'Running packaged contract tests ...'
         & $pythonExe -m pytest -q -m packaged
         if ($LASTEXITCODE -ne 0) {
@@ -197,6 +203,7 @@ try {
             '--name', 'SpeedAssembly',
             '--icon', $iconPath,
             '--additional-hooks-dir', $hooksPath,
+            '--hidden-import', 'xml_to_usda._ufbx',
             '--paths', (Join-Path $repoRoot 'src'),
             '--add-data', "$qtUiStagingRoot;xml_to_usda/qt_ui",
             '--distpath', $distPath,

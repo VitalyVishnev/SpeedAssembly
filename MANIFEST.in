@@ -1,0 +1,7 @@
+include LICENSE
+include THIRD_PARTY_NOTICES.md
+include src/xml_to_usda/_ufbx.c
+include src/xml_to_usda/vendor/ufbx/LICENSE
+include src/xml_to_usda/vendor/ufbx/UPSTREAM.md
+include src/xml_to_usda/vendor/ufbx/ufbx.c
+include src/xml_to_usda/vendor/ufbx/ufbx.h
