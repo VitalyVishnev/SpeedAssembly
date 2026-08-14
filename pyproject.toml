@@ -12,7 +12,7 @@ authors = [
   { name = "Vitaly Vishnev" }
 ]
 license = "MIT"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "src/xml_to_usda/vendor/ufbx/LICENSE"]
 dependencies = [
   "numpy>=1.26,<2",
   "fast-simplification>=0.1.9,<1",

@@ -47,7 +47,8 @@ runtime settings/cache root, diagnostics archive, package help, and current
 operator-facing documentation use `SpeedAssembly`.
 
 The release ZIP contains `SpeedAssembly.exe`, `LICENSE`,
-`THIRD_PARTY_NOTICES.md`, and `examples/SimpleTree_01.xml`. Keep
+`THIRD_PARTY_NOTICES.md`, `licenses/ufbx-LICENSE`, and
+`examples/SimpleTree_01.xml`. Keep
 `build_info.json` beside the local package for diagnostics, but do not
 distribute it; a concise HTML quick-start may be added to the archive later.
 

@@ -1031,3 +1031,11 @@ Major moves:
 - Final polish removed the obsolete Autodesk-specific retry branch, stopped
   tracking reproducible `setuptools` `egg-info`, and kept the prior detailed
   third-party notices outside the replaced FBX licensing section.
+
+## 2026-08-14 - License setup finalized after ufbx migration
+
+- Confirmed that the current executable contains the bundled `_ufbx` extension
+  and no Autodesk FBX Python module, and that the release ZIP carries the MIT
+  project license, third-party notices, and the upstream ufbx license.
+- Included the upstream ufbx license in Python source/wheel license metadata.
+- Aligned the maintained release-content decision with the actual ZIP layout.
