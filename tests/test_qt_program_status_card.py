@@ -201,7 +201,7 @@ def test_scattered_parts_replaces_skinning_slider_contract_and_disables_cluster_
     assert panel.orient_scattered_bones_from_instances() is True
     assert panel.scattered_rig_mode() == ScatteredRigMode.PER_CLUSTER_SKINNED
     assert panel.effective_skinning_quality() == SkinningQuality.TWO_WEIGHTS
-    assert "207 joints" in panel.skinning_description_label.text()
+    assert "104 joints" in panel.skinning_description_label.text()
     assert "Warning" in panel.skinning_tick_labels.labels[3].text()
     panel.skinning_quality_slider.setValue(4)
     assert "4,224 joints" in panel.skinning_description_label.text()

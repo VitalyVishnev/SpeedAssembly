@@ -1097,3 +1097,11 @@ Major moves:
   median Whole Mesh rig resolution from 1.83 s to 0.65 s (2.8x); the new average
   path fell from its initial 3.10 s to 0.65 s (4.8x). The output contained
   320,661 points and 271,502 faces.
+
+## 2026-08-15 - Minimal Scattered Rig skeletons
+
+- Compared the existing Whole Mesh rig in Unreal against two-joint variants
+  with coincident pivots and a 1 mm deform offset; all animated identically.
+- Removed unweighted tip joints and retained coincident root/deform pivots.
+  Whole Mesh now has two joints; Per Cluster Skinned has root plus one joint
+  per cluster.

@@ -1,0 +1,24 @@
+{
+    "Joints": [
+        {
+            "JointName": "root",
+            "SimulationGroupIndex": 0
+        },
+        {
+            "JointName": "scattered_whole",
+            "SimulationGroupIndex": 0
+        }
+    ],
+    "SimulationGroups": [
+        {
+            "bUseDualInfluence": true,
+            "Influence": 0.0,
+            "MinInfluence": 0.5,
+            "MaxInfluence": 1.0,
+            "ShiftTop": 0.5,
+            "bIsTrunkGroup": false
+        }
+    ],
+    "bIsGroundCover": true,
+    "GustAttenuation": 0.0
+}

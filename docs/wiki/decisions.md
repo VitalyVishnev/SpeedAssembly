@@ -1532,11 +1532,11 @@ The Scattered Rig slider replaces Skinning Quality for eligible input. Its
 ordered modes are:
 
 1. `Whole Mesh (Skinned)`: bake every blade; structural root plus one deform
-   joint and its unweighted endpoint joint.
+   joint at the same pivot.
 2. `Per Cluster (Rigid)`: bake one cluster as the required Base Mesh and keep
    the remaining blades instanced; root plus one joint per cluster.
 3. `Per Cluster (Skinned)`: bake every blade and skin each cluster through its
-   own deform joint; structural root plus one deform/endpoint pair per cluster.
+   own deform joint; structural root plus one deform joint per cluster.
 4. `Per Instance (Rigid · Warning)`: bake one blade and keep the remainder
    instanced; root plus one joint per source instance.
 
@@ -1554,9 +1554,10 @@ cluster modes visibly coerce to Whole Mesh. Their middle slider labels remain
 disabled, muted, and never bold while only the selected endpoint is emphasized.
 Clustered sources default to Per Cluster (Skinned). Every authored binding has
 fixed width 2. Skinned modes use the existing structural-root/deform height
-blend; their endpoint joints carry no mesh weights and exist so Unreal receives
-a non-zero reference chain. Rigid modes write one non-zero weight plus zero
-padding and do not add endpoint joints.
+blend with coincident pivots. Rigid modes write one non-zero weight plus zero
+padding. An Unreal A/B test confirmed that removing the unweighted endpoint
+joints and adding no offset produces identical Dynamic Wind animation, so the
+minimal two-joint Whole Mesh topology is authoritative.
 
 By default, synthetic physical bone segments are one degree from Stage +Y.
 Their azimuths follow a deterministic golden-angle sequence by resolved chain

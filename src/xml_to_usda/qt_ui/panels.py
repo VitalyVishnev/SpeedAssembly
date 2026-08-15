@@ -672,9 +672,9 @@ class WindTabPanel(QWidget):
             return
         joint_count = self._scattered_cluster_count + 1
         descriptions = {
-            ScatteredRigMode.WHOLE_MESH_SKINNED: "All blades become one real mesh with two-weight deformation · 3 joints.",
+            ScatteredRigMode.WHOLE_MESH_SKINNED: "All blades become one real mesh with two-weight deformation · 2 joints.",
             ScatteredRigMode.PER_CLUSTER_RIGID: f"Instances stay instanced; one rigid near-up joint per cluster · {joint_count:,} joints.",
-            ScatteredRigMode.PER_CLUSTER_SKINNED: f"All blades become real geometry with one deform chain per cluster · {self._scattered_cluster_count * 2 + 1:,} joints.",
+            ScatteredRigMode.PER_CLUSTER_SKINNED: f"All blades become real geometry with one deform joint per cluster · {joint_count:,} joints.",
             ScatteredRigMode.PER_INSTANCE_RIGID: f"Warning: one rigid joint per blade · {self._scattered_instance_count + 1:,} joints.",
         }
         self.skinning_description_label.setText(descriptions[self._scattered_rig_mode])

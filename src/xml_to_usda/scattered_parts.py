@@ -154,7 +154,6 @@ def apply_scattered_parts_rig(
             global_height,
             bones,
             root_direction=global_direction,
-            include_endpoints=True,
         )
         base_mesh = _bake_instances(parts, meshes, all_indices, (1,) * len(all_indices), "ScatteredParts_BaseMesh")
         authored = replace(model, base_mesh=base_mesh, skeleton=skeleton, assembly_parts=())
@@ -194,11 +193,10 @@ def apply_scattered_parts_rig(
             global_height,
             bones,
             root_direction=global_direction,
-            include_endpoints=True,
         )
         part_indices = tuple(index for cluster in analysis.clusters for index in cluster.part_indices)
         owner_indices = tuple(
-            cluster_index * 2 + 1
+            cluster_index + 1
             for cluster_index, cluster in enumerate(analysis.clusters)
             for _index in cluster.part_indices
         )
@@ -311,7 +309,6 @@ def _synthetic_skeleton(
     bones: tuple[tuple[str, Vector3, float, Vector3 | None], ...],
     *,
     root_direction: Vector3 | None = None,
-    include_endpoints: bool = False,
 ) -> tuple[Joint, ...]:
     root = Joint(
         name="root",
@@ -325,9 +322,8 @@ def _synthetic_skeleton(
         ),
     )
     children: list[Joint] = []
-    source_id = 1
-    for direction_index, (name, pivot, height, direction) in enumerate(bones, start=1):
-        endpoint = _bone_end(pivot, height, direction, direction_index)
+    for source_id, (name, pivot, height, direction) in enumerate(bones, start=1):
+        endpoint = _bone_end(pivot, height, direction, source_id)
         children.append(
             Joint(
                 name=name,
@@ -340,23 +336,6 @@ def _synthetic_skeleton(
                 bind_end_transform=Matrix4d.from_translation(endpoint),
             )
         )
-        source_id += 1
-        if include_endpoints:
-            children.append(
-                Joint(
-                    name=f"{name}_tip",
-                    source_id=source_id,
-                    parent=name,
-                    generator_label="ScatteredParts",
-                    generator_level=0,
-                    bind_transform=Matrix4d.from_translation(endpoint),
-                    rest_transform=Matrix4d.from_translation(endpoint),
-                    bind_end_transform=Matrix4d.from_translation(
-                        _bone_end(endpoint, _MIN_BONE_LENGTH, direction, direction_index)
-                    ),
-                )
-            )
-            source_id += 1
     return orient_skeleton_x((root, *children))
 
 

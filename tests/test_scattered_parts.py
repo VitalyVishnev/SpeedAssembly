@@ -93,9 +93,9 @@ def test_scattered_parts_clusters_are_derived_from_hierarchy_not_names() -> None
 @pytest.mark.parametrize(
     ("mode", "joint_count", "base_point_count", "remaining_instance_count"),
     (
-        (ScatteredRigMode.WHOLE_MESH_SKINNED, 3, 12, 0),
+        (ScatteredRigMode.WHOLE_MESH_SKINNED, 2, 12, 0),
         (ScatteredRigMode.PER_CLUSTER_RIGID, 3, 6, 2),
-        (ScatteredRigMode.PER_CLUSTER_SKINNED, 5, 12, 0),
+        (ScatteredRigMode.PER_CLUSTER_SKINNED, 3, 12, 0),
         (ScatteredRigMode.PER_INSTANCE_RIGID, 5, 3, 3),
     ),
 )
@@ -125,7 +125,7 @@ def test_scattered_rig_modes_preserve_visible_blades_and_use_fixed_two_weight_wi
         )
 
 
-def test_scattered_rig_uses_stable_varied_azimuths_and_real_skinned_endpoints() -> None:
+def test_scattered_rig_uses_stable_varied_azimuths_without_unweighted_tips() -> None:
     source = _clustered_model()
     rigid = apply_scattered_parts_rig(source, ScatteredRigMode.PER_CLUSTER_RIGID)
     repeated = apply_scattered_parts_rig(source, ScatteredRigMode.PER_CLUSTER_RIGID)
@@ -141,12 +141,9 @@ def test_scattered_rig_uses_stable_varied_azimuths_and_real_skinned_endpoints() 
     )
     assert rigid_directions[0] != pytest.approx(rigid_directions[1])
 
-    deform_joints = skinned.skeleton[1::2]
-    endpoint_joints = skinned.skeleton[2::2]
-    assert len(deform_joints) == len(endpoint_joints) == 2
-    assert all(endpoint.parent == deform.name for deform, endpoint in zip(deform_joints, endpoint_joints, strict=True))
-    assert all(endpoint.bind_translate == deform.bind_end_translate for deform, endpoint in zip(deform_joints, endpoint_joints, strict=True))
-    assert set(skinned.base_mesh.skel_joint_indices).isdisjoint({2, 4})
+    assert [joint.parent for joint in skinned.skeleton[1:]] == ["root", "root"]
+    assert not any(joint.name.endswith("_tip") for joint in skinned.skeleton)
+    assert set(skinned.base_mesh.skel_joint_indices) == {0, 1, 2}
 
 
 def test_scattered_rig_can_derive_bone_directions_from_member_instance_axes() -> None:
@@ -177,15 +174,13 @@ def test_scattered_rig_can_derive_bone_directions_from_member_instance_axes() ->
         ),
     ).authoring_model
 
-    root, first, first_tip, second, second_tip = resolved.skeleton
+    root, first, second = resolved.skeleton
     weighted_length = math.sqrt(17.0)
     assert _joint_direction(root) == pytest.approx(
         (1.0 / weighted_length, 0.0, 4.0 / weighted_length)
     )
     assert _joint_direction(first) == pytest.approx((1.0, 0.0, 0.0))
-    assert _joint_direction(first_tip) == pytest.approx((1.0, 0.0, 0.0))
     assert _joint_direction(second) == pytest.approx((0.0, 0.0, 1.0))
-    assert _joint_direction(second_tip) == pytest.approx((0.0, 0.0, 1.0))
     assert resolved.base_mesh is not None
     assert _vector_values(resolved.base_mesh.points[1]) == pytest.approx((0.0, 0.0, 0.0))
     assert _vector_values(resolved.base_mesh.points[2]) == pytest.approx((-1.0, -0.1, 0.0))
@@ -246,7 +241,7 @@ def test_cluster_modes_coerce_to_whole_mesh_when_hosts_are_directly_scattered() 
     result = apply_scattered_parts_rig(unclustered, ScatteredRigMode.PER_CLUSTER_SKINNED)
 
     assert analyze_scattered_parts(unclustered).clustered is False
-    assert len(result.skeleton) == 3
+    assert len(result.skeleton) == 2
     assert len(result.repeated_parts) == 0
 
 

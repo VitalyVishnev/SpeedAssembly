@@ -224,7 +224,7 @@ Status: corrected; tested grass output imports and animates normally in Unreal
 The clustered and unclustered leaf-only samples now produce deterministic USDA
 for Whole Mesh, Per Cluster Rigid, Per Cluster Skinned, and Per Instance Rigid.
 Automated gates cover instance conservation, Base Mesh topology, deterministic
-near-up skeleton frames, skinned endpoint chains, fixed two-weight width,
+near-up skeleton frames, minimal skinned rigs, fixed two-weight width,
 authoring diagnostics, and Wind Preview.
 UE 5.7 rejected the first Whole Mesh output because all parts were baked while
 the root still declared `NaniteAssemblyRootAPI`. The writer now emits ordinary
@@ -238,10 +238,10 @@ Min Screen Size. `r.InstancedSkinnedMeshes.ForceRefPose 1` and
 `DynamicWind.UseSine 1` each restored the mesh. The generated joints were exact
 Stage +Y, which becomes Unreal +Z; the UE 5.7/5.8 non-trunk Dynamic Wind shader
 normalizes the zero vector `cross(BoneForward, +Z)`. Synthetic frames now use a
-deterministic one-degree tilt with varied azimuths. Skinned modes also author an
-unweighted endpoint joint per deform joint so the imported reference skeleton
-contains a real non-zero chain instead of relying only on the converter-local
-`bind_end` fact.
+deterministic one-degree tilt with varied azimuths. A controlled Unreal test of
+the current three-joint Whole Mesh, two coincident joints without a tip, and two
+joints with a 1 mm offset showed identical animation. The no-tip/no-offset
+topology is now authoritative and avoids unweighted joints.
 
 Import all four clustered outputs plus both unclustered outputs. Confirm that
 fully baked outputs import as ordinary Skeletal Meshes, rigid outputs import as

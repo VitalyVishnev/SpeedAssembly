@@ -18,8 +18,8 @@ Main systems:
 - `src/xml_to_usda/scattered_parts.py` - detects leaf-only repeated geometry
   from Object hierarchy and resolves its real base geometry plus the complete
   Dynamic-Wind-safe synthetic rig after prototype resolution; deterministic
-  near-up frames, optional size-weighted instance orientation, skinned endpoint
-  joints, and the repeated-geometry hot path stay local to this module.
+  near-up frames, optional size-weighted instance orientation, minimal
+  root/deform rigs, and the repeated-geometry hot path stay local to this module.
 - `src/xml_to_usda/prototype_resolution.py` - resolves prototype payload choice and replacement.
 - `src/xml_to_usda/usda_authoring.py` - authors the final USDA structure; a
   skeletal result uses `NaniteAssemblyRootAPI` only while resolved instanced
