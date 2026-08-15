@@ -47,6 +47,7 @@ _WORKER_PAYLOAD_MODULES = (
     "xml_to_usda.wind_viewport_scene",
     "xml_to_usda.viewport_scene",
     "xml_to_usda.discovery_service",
+    "xml_to_usda.scattered_parts",
     "xml_to_usda.settings_service",
     "xml_to_usda.source_discovery_worker_subprocess",
 )

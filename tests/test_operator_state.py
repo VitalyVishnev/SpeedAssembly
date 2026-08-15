@@ -28,7 +28,11 @@ def test_current_output_is_saved_and_restored_for_its_input() -> None:
     deps = _SettingsDeps(GuiSettingsSnapshot())
     saved = save_operator_state(
         deps,
-        OperatorState(input_path="spruce.xml", output_path="exports/custom.usda"),
+        OperatorState(
+            input_path="spruce.xml",
+            output_path="exports/custom.usda",
+            orient_scattered_bones_from_instances=True,
+        ),
         previous_snapshot=deps.snapshot,
         settings_path="unused.json",
     )
@@ -37,3 +41,4 @@ def test_current_output_is_saved_and_restored_for_its_input() -> None:
 
     assert saved.last_output_input_path == "spruce.xml"
     assert restored.output_path == "exports/custom.usda"
+    assert restored.orient_scattered_bones_from_instances is True

@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 from .dynamic_wind import build_dynamic_wind_data, write_dynamic_wind_json
-from .models import DynamicWindData, DynamicWindSimulationGroup, Joint, WindJsonResult
+from .models import ConversionMode, DynamicWindData, DynamicWindSimulationGroup, Joint, ScatteredRigMode, WindJsonResult
 from .skeleton_rules import joint_name_from_bone_id, parse_generator_label
 from .xml_reader import iterparse_source_xml
 
 
-def inspect_wind_data(input_path: str, is_ground_cover: bool = False) -> DynamicWindData:
-    skeleton = _load_wind_skeleton(input_path)
+def inspect_wind_data(
+    input_path: str,
+    is_ground_cover: bool = False,
+    scattered_rig_mode: ScatteredRigMode | str = ScatteredRigMode.PER_CLUSTER_SKINNED,
+    orient_scattered_bones_from_instances: bool = False,
+) -> DynamicWindData:
+    skeleton = _load_wind_skeleton(
+        input_path,
+        scattered_rig_mode=scattered_rig_mode,
+        orient_scattered_bones_from_instances=orient_scattered_bones_from_instances,
+    )
     return build_dynamic_wind_data(
         skeleton,
         is_ground_cover=is_ground_cover,
@@ -20,8 +29,14 @@ def generate_wind_json(
     group_settings: tuple[DynamicWindSimulationGroup, ...] = (),
     gust_attenuation: float = 0.0,
     is_ground_cover: bool = False,
+    scattered_rig_mode: ScatteredRigMode | str = ScatteredRigMode.PER_CLUSTER_SKINNED,
+    orient_scattered_bones_from_instances: bool = False,
 ) -> WindJsonResult:
-    skeleton = _load_wind_skeleton(input_path)
+    skeleton = _load_wind_skeleton(
+        input_path,
+        scattered_rig_mode=scattered_rig_mode,
+        orient_scattered_bones_from_instances=orient_scattered_bones_from_instances,
+    )
     dynamic_wind = build_dynamic_wind_data(
         skeleton,
         group_settings=group_settings,
@@ -38,7 +53,12 @@ def generate_wind_json(
     )
 
 
-def _load_wind_skeleton(input_path: str) -> tuple[Joint, ...]:
+def _load_wind_skeleton(
+    input_path: str,
+    *,
+    scattered_rig_mode: ScatteredRigMode | str = ScatteredRigMode.PER_CLUSTER_SKINNED,
+    orient_scattered_bones_from_instances: bool = False,
+) -> tuple[Joint, ...]:
     joints: list[Joint] = []
     for _event, elem in iterparse_source_xml(input_path, events=("end",)):
         if elem.tag != "Bone":
@@ -63,4 +83,19 @@ def _load_wind_skeleton(input_path: str) -> tuple[Joint, ...]:
             )
         )
         elem.clear()
-    return tuple(joints)
+    if joints:
+        return tuple(joints)
+
+    from .canonical_loader import load_resolved_assembly_model, load_source_tree_model
+    from .scattered_parts import analyze_scattered_parts
+
+    _report, source_model, _diagnostics = load_source_tree_model(input_path)
+    if not analyze_scattered_parts(source_model).eligible:
+        return ()
+    _report, resolved = load_resolved_assembly_model(
+        input_path,
+        conversion_mode=ConversionMode.SKELETAL_ASSEMBLY,
+        scattered_rig_mode=scattered_rig_mode,
+        orient_scattered_bones_from_instances=orient_scattered_bones_from_instances,
+    )
+    return resolved.authoring_model.skeleton

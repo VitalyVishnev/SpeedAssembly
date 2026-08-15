@@ -1511,6 +1511,83 @@ Related files:
 - `src/xml_to_usda/usda_authoring.py`
 - `src/xml_to_usda/qt_ui/panels.py`
 
+## Decision: Leaf-only sources use Scattered Parts resolution
+
+Status: Active; tested grass output imports and animates normally in Unreal
+
+A source is eligible for `Scattered Parts` only when it has Repeated Parts and
+resolved prototypes but no Base Mesh or skeleton. Detection is structural:
+Object and generator names are not signals. Multiple intermediate, meshless
+parents directly below the source root form clusters only when they partition
+every part host and each cluster owns more than one part. Direct-root hosts are
+unclustered.
+
+Static Assembly and both Parts modes do not synthesize skinning. In particular,
+a persisted Skinning Quality value must never be applied before Conversion Mode
+resolution. Skeletal Assembly resolves prototype geometry first, then creates a
+real Base Mesh and a deterministic synthetic skeleton. External Unreal
+Reference prototypes fail loudly because they provide no geometry to bake.
+
+The Scattered Rig slider replaces Skinning Quality for eligible input. Its
+ordered modes are:
+
+1. `Whole Mesh (Skinned)`: bake every blade; structural root plus one deform
+   joint and its unweighted endpoint joint.
+2. `Per Cluster (Rigid)`: bake one cluster as the required Base Mesh and keep
+   the remaining blades instanced; root plus one joint per cluster.
+3. `Per Cluster (Skinned)`: bake every blade and skin each cluster through its
+   own deform joint; structural root plus one deform/endpoint pair per cluster.
+4. `Per Instance (Rigid · Warning)`: bake one blade and keep the remainder
+   instanced; root plus one joint per source instance.
+
+The authored asset category follows the resolved geometry, not the selected
+slider label. When at least one Repeated Part remains, the output is a skeletal
+Nanite Assembly with `NaniteAssemblyRootAPI` and `PointInstancer`. When baking
+consumes every Repeated Part, the output is an ordinary `UsdSkel` Skeletal Mesh
+and omits the root assembly API, `unreal:naniteAssembly:meshType`, and the root
+assembly skeleton relationship. UE 5.7 defines an assembly Base Mesh as
+depending on one or more referenced Part Meshes; retaining the assembly API on
+a base-only Whole Mesh output was rejected by the importer.
+
+Unclustered sources expose only Whole Mesh and Per Instance; unavailable saved
+cluster modes visibly coerce to Whole Mesh. Their middle slider labels remain
+disabled, muted, and never bold while only the selected endpoint is emphasized.
+Clustered sources default to Per Cluster (Skinned). Every authored binding has
+fixed width 2. Skinned modes use the existing structural-root/deform height
+blend; their endpoint joints carry no mesh weights and exist so Unreal receives
+a non-zero reference chain. Rigid modes write one non-zero weight plus zero
+padding and do not add endpoint joints.
+
+By default, synthetic physical bone segments are one degree from Stage +Y.
+Their azimuths follow a deterministic golden-angle sequence by resolved chain
+order, so clusters and instances do not all animate from the same frame while
+identical input remains reproducible. `Average Instance Orientation` is an
+opt-in Scattered Rig setting: Whole Mesh averages all instances, cluster modes
+average within each structural cluster, and Per Instance uses its own axis.
+The averaged signal is each instance quaternion's rotated local +Y axis,
+weighted by scaled prototype surface area so larger geometry contributes more.
+Quaternion components are not averaged. A cancelled or invalid weighted axis
+fails loudly because it has no defined direction.
+
+Exact Stage +Y or -Y is forbidden for these non-trunk Ground Cover joints: the
+UE 5.7 and 5.8 Dynamic Wind shader normalizes `cross(BoneForward, +Z)`, and a
+parallel frame produces an undefined transform. Computed directions within one
+degree of either pole are deterministically clamped to the safe one-degree
+boundary. Cluster pivots remain deterministic means of member instance pivots
+because the observed Zone objects carry zero transforms.
+
+All synthetic joints start in one Dynamic Wind group. Wind inspection, JSON,
+Preview, and export use the same rig resolver. Proxy Mesh and Fracturing actions
+are disabled for Scattered Parts; Part Preview remains available.
+
+Related files:
+- `src/xml_to_usda/scattered_parts.py`
+- `src/xml_to_usda/assembly_resolution.py`
+- `src/xml_to_usda/usda_authoring.py`
+- `src/xml_to_usda/wind_preview_service.py`
+- `src/xml_to_usda/qt_ui/panels.py`
+- `tests/test_scattered_parts.py`
+
 ## Decision: Skeleton and influence invariants are mandatory export gates
 
 Status: Active

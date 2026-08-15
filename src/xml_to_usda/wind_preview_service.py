@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .canonical_loader import load_source_tree_model
+from .canonical_loader import load_resolved_assembly_model, load_source_tree_model
 from .dynamic_wind import build_dynamic_wind_data
-from .models import CanonicalTreeModel, DynamicWindData, ValidationIssue
+from .models import CanonicalTreeModel, ConversionMode, DynamicWindData, ScatteredRigMode, ValidationIssue
+from .scattered_parts import analyze_scattered_parts
 from .wind_viewport_scene import WindViewportGroup, build_auto_wind_viewport_data, build_wind_viewport_groups, build_wind_viewport_scene
 from .viewport_scene import ViewportScene
 
@@ -18,6 +19,8 @@ class WindPreviewError(ValueError):
 @dataclass(frozen=True)
 class WindPreviewRequest:
     input_path: str
+    scattered_rig_mode: ScatteredRigMode = ScatteredRigMode.PER_CLUSTER_SKINNED
+    orient_scattered_bones_from_instances: bool = False
 
 
 @dataclass(frozen=True)
@@ -32,10 +35,19 @@ class WindPreviewResult:
     preferred_grouping_mode: str = "xml"
 
 
-def prepare_wind_preview_request(*, input_path: str) -> WindPreviewRequest:
+def prepare_wind_preview_request(
+    *,
+    input_path: str,
+    scattered_rig_mode: ScatteredRigMode | str = ScatteredRigMode.PER_CLUSTER_SKINNED,
+    orient_scattered_bones_from_instances: bool = False,
+) -> WindPreviewRequest:
     if not input_path.strip():
         raise WindPreviewError("Select a source XML file before previewing wind groups.")
-    return WindPreviewRequest(input_path=input_path.strip())
+    return WindPreviewRequest(
+        input_path=input_path.strip(),
+        scattered_rig_mode=ScatteredRigMode.parse(scattered_rig_mode),
+        orient_scattered_bones_from_instances=bool(orient_scattered_bones_from_instances),
+    )
 
 
 def generate_wind_preview_from_request(request: WindPreviewRequest) -> WindPreviewResult:
@@ -46,6 +58,16 @@ def generate_wind_preview_from_request(request: WindPreviewRequest) -> WindPrevi
         input_path,
         source_cache_enabled=False,
     )
+    if analyze_scattered_parts(source_model).eligible:
+        _report, resolved = load_resolved_assembly_model(
+            input_path,
+            conversion_mode=ConversionMode.SKELETAL_ASSEMBLY,
+            scattered_rig_mode=request.scattered_rig_mode,
+            orient_scattered_bones_from_instances=request.orient_scattered_bones_from_instances,
+            source_cache_enabled=False,
+        )
+        source_model = resolved.authoring_model
+        diagnostics = resolved.diagnostics
     _validate_wind_preview_skeleton(source_model)
     xml_groups_available, warning = _xml_wind_groups_available(source_model)
     if xml_groups_available:

@@ -15,7 +15,16 @@ from pathlib import Path
 from .fracture_collision import FractureCollisionMode, FractureCollisionSettings
 from .fracture_preview_service import FracturePreviewSettings
 from .fracture_service import FractureSettings
-from .models import ConversionMode, CpuProfile, FbxMaterialMode, MaterialPolicy, PrototypeSourceMode, SkinningQuality, UdimMode
+from .models import (
+    ConversionMode,
+    CpuProfile,
+    FbxMaterialMode,
+    MaterialPolicy,
+    PrototypeSourceMode,
+    ScatteredRigMode,
+    SkinningQuality,
+    UdimMode,
+)
 from .proxy_collision import ProxyCollisionMode, ProxyCollisionSettings
 from .proxy_mesh_service import (
     MAX_PROXY_DENSITY_RESOLUTION,
@@ -108,6 +117,8 @@ class GuiSettingsSnapshot:
     gust_attenuation: float = 0.0
     is_ground_cover: bool = False
     skinning_quality: SkinningQuality = SkinningQuality.ONE_WEIGHT
+    scattered_rig_mode: ScatteredRigMode = ScatteredRigMode.PER_CLUSTER_SKINNED
+    orient_scattered_bones_from_instances: bool = False
     wind_group_settings: dict[str, WindGroupSettingRecord] = field(default_factory=dict)
     base_material_settings: tuple[BaseMaterialSettingRecord, ...] = ()
     part_mesh_settings: tuple[PartSourceSettingRecord, ...] = ()
@@ -164,6 +175,10 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
         gust_attenuation=_coerce_float(payload.get("gust_attenuation", 0.0), 0.0),
         is_ground_cover=bool(payload.get("is_ground_cover", False)),
         skinning_quality=_parse_skinning_quality(payload),
+        scattered_rig_mode=_parse_scattered_rig_mode(payload.get("scattered_rig_mode")),
+        orient_scattered_bones_from_instances=bool(
+            payload.get("orient_scattered_bones_from_instances", False)
+        ),
         wind_group_settings=wind_group_settings,
         base_material_settings=base_material_settings,
         part_mesh_settings=part_mesh_settings,
@@ -196,6 +211,10 @@ def save_gui_settings(settings_path: str | Path, snapshot: GuiSettingsSnapshot) 
         "gust_attenuation": round(float(snapshot.gust_attenuation), 4),
         "is_ground_cover": bool(snapshot.is_ground_cover),
         "skinning_quality": int(SkinningQuality.parse(snapshot.skinning_quality)),
+        "scattered_rig_mode": ScatteredRigMode.parse(snapshot.scattered_rig_mode).value,
+        "orient_scattered_bones_from_instances": bool(
+            snapshot.orient_scattered_bones_from_instances
+        ),
         "wind_group_settings": _serialize_wind_group_settings(snapshot.wind_group_settings),
         "base_material_settings": _serialize_base_material_settings(snapshot.base_material_settings),
         "part_mesh_settings": _serialize_part_mesh_settings(snapshot.part_mesh_settings),
@@ -279,6 +298,13 @@ def _parse_skinning_quality(payload: dict[str, object]) -> SkinningQuality:
         }.get(str(payload.get("attachment_skinning_mode", "")), SkinningQuality.TWO_WEIGHTS)
     except (TypeError, ValueError):
         return SkinningQuality.ONE_WEIGHT
+
+
+def _parse_scattered_rig_mode(raw_value) -> ScatteredRigMode:
+    try:
+        return ScatteredRigMode.parse(raw_value)
+    except (TypeError, ValueError):
+        return ScatteredRigMode.PER_CLUSTER_SKINNED
 
 
 def _parse_gui_material_policy(raw_value) -> MaterialPolicy:

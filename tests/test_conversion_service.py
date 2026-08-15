@@ -241,10 +241,12 @@ def test_prepare_conversion_plan_keeps_explicit_conversion_mode() -> None:
         base_material_overrides=(),
         prototype_source_configs=(),
         conversion_mode=ConversionMode.SKELETAL_PARTS,
+        orient_scattered_bones_from_instances=True,
         async_threshold_bytes=1_000_000_000,
     )
 
     assert plan.request.conversion_mode == ConversionMode.SKELETAL_PARTS
+    assert plan.request.orient_scattered_bones_from_instances is True
 
 
 def test_prepare_conversion_plan_forces_async_for_fbx_override(tmp_path: Path) -> None:

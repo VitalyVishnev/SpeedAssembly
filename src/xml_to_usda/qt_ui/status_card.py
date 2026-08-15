@@ -162,6 +162,8 @@ class ProgramStatusCard(QFrame):
         *,
         mode: str | None = None,
         skinning_quality: int | None = None,
+        skinning: str | None = None,
+        skinning_title: str = "Skinning Quality",
         materials: str | None = None,
         source: str | None = None,
         materials_tooltip: str | None = None,
@@ -170,8 +172,10 @@ class ProgramStatusCard(QFrame):
             (self.mode_label, "Mode", mode, None),
             (
                 self.skinning_label,
-                "Skinning Quality",
-                None if skinning_quality is None else f"{skinning_quality} weight{'s' if skinning_quality != 1 else ''}",
+                skinning_title,
+                skinning if skinning is not None else (
+                    None if skinning_quality is None else f"{skinning_quality} weight{'s' if skinning_quality != 1 else ''}"
+                ),
                 None,
             ),
             (self.material_label, "Materials", materials, materials_tooltip),

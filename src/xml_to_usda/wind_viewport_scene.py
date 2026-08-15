@@ -6,6 +6,7 @@ from array import array
 from dataclasses import dataclass, replace
 
 from .dynamic_wind import default_group_settings
+from .geometry_buffers import geometry_buffer_from_mesh
 from .models import (
     CanonicalTreeModel,
     Color4,
@@ -149,6 +150,53 @@ def build_wind_viewport_scene(
             uploaded_triangles += triangle_count
             logical_triangles += triangle_count
 
+    prototype_batches: dict[str, str] = {}
+    prototypes = {prototype.source_key: prototype for prototype in model.prototypes}
+    visible_instance_count = 0
+    preview_parts = model.repeated_parts if _has_synthetic_scattered_bindings(model) else ()
+    for part_index, part in enumerate(preview_parts):
+        prototype = prototypes.get(part.prototype_key)
+        if prototype is None:
+            raise ValueError(f"wind_preview_missing_prototype: {part.prototype_key}")
+        mesh = prototype.geometry_payload or (
+            geometry_buffer_from_mesh(prototype.mesh) if prototype.mesh is not None else None
+        )
+        if mesh is None:
+            raise ValueError(f"wind_preview_missing_prototype_geometry: {prototype.source_name}")
+        joint_token = _part_owner_joint(part.binding.joint_tokens, part.binding.weights)
+        group_index = _require_group(group_by_joint, joint_token)
+        batch_id = prototype_batches.get(part.prototype_key)
+        if batch_id is None:
+            batch_id = f"wind:prototype:{len(prototype_batches):04d}"
+            prototype_batches[part.prototype_key] = batch_id
+            batches.append(
+                ViewportMeshBatch(
+                    batch_id=batch_id,
+                    name=prototype.source_name,
+                    mesh=mesh,
+                    color=color_by_group[group_index],
+                    selectable_id=batch_id,
+                )
+            )
+            uploaded_triangles += geometry_triangle_count(mesh)
+        tint = _selection_color(
+            color_by_group[group_index], selection, group_index, joint_token, selected_joints
+        )
+        draw_calls.append(
+            ViewportDrawCall(
+                draw_id=f"wind:part:{part_index:06d}",
+                batch_id=batch_id,
+                translate=part.position,
+                orientation=part.orientation,
+                scale=part.scale,
+                tint=tint,
+                selectable_id=f"wind:joint:{joint_token}",
+                visibility_group="repeated_parts",
+            )
+        )
+        logical_triangles += geometry_triangle_count(mesh)
+        visible_instance_count += 1
+
     bone_segments = _bone_segments(model.skeleton, group_by_joint, color_by_group, selection, selected_joints)
     if not draw_calls and not bone_segments:
         raise ValueError("wind_preview_empty_skeleton: wind preview requires geometry or skeleton bone segments.")
@@ -160,7 +208,7 @@ def build_wind_viewport_scene(
         stats=ViewportStats(
             uploaded_triangles=uploaded_triangles,
             logical_triangles=logical_triangles,
-            instance_count=0,
+            instance_count=visible_instance_count,
             batch_count=len(batches),
             draw_call_count=len(draw_calls),
         ),
@@ -194,8 +242,8 @@ def recolor_wind_viewport_scene(
     draw_calls = []
     for draw in scene.draw_calls:
         joint_token = None
-        if draw.draw_id.startswith("wind:base:") and draw.draw_id.endswith(":draw"):
-            joint_token = draw.draw_id[len("wind:base:") : -len(":draw")]
+        if draw.selectable_id and draw.selectable_id.startswith("wind:joint:"):
+            joint_token = draw.selectable_id[len("wind:joint:") :]
         if joint_token is None:
             draw_calls.append(draw)
             continue
@@ -216,6 +264,21 @@ def recolor_wind_viewport_scene(
         scene,
         draw_calls=tuple(draw_calls),
         bone_segments=_bone_segments(model.skeleton, group_by_joint, color_by_group, selection, selected_joints),
+    )
+
+
+def _part_owner_joint(joint_tokens: tuple[str, ...], weights: tuple[float, ...]) -> str:
+    if not joint_tokens:
+        raise ValueError("wind_preview_missing_part_binding: repeated part has no joint binding.")
+    if len(weights) != len(joint_tokens):
+        raise ValueError("wind_preview_invalid_part_binding: repeated part binding shape is inconsistent.")
+    return joint_tokens[max(range(len(joint_tokens)), key=lambda index: (weights[index], -index))]
+
+
+def _has_synthetic_scattered_bindings(model: CanonicalTreeModel) -> bool:
+    return bool(model.repeated_parts) and all(
+        any(token.startswith("scattered_") for token in part.binding.joint_tokens)
+        for part in model.repeated_parts
     )
 
 

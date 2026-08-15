@@ -46,6 +46,7 @@ from ..models import (
     PrototypeSourceConfig,
     PrototypeSourceMode,
     SkinningQuality,
+    ScatteredRigMode,
     UdimMaterialSetting,
     UdimMode,
 )
@@ -69,6 +70,21 @@ from .material_controls import (
 )
 from .part_source_controls import PartSourceMaterialValue
 from .preview_shell import apply_compact_preview_panel_style
+
+
+_SKINNING_TICK_LABELS = (
+    ("1 weight", "Default and cheapest. Rigid skinning works well for many trees."),
+    ("2 weights", "Soft branch bending. Attachment artifacts may still be visible."),
+    ("3 weights\n(Expensive)", "Soft bending with fewer attachment artifacts, at higher runtime cost."),
+    ("4 weights\n(Expensive)", "Most visually stable deformation, with the highest runtime cost."),
+)
+_SLIDER_TO_SCATTERED_MODE = {
+    1: ScatteredRigMode.WHOLE_MESH_SKINNED,
+    2: ScatteredRigMode.PER_CLUSTER_RIGID,
+    3: ScatteredRigMode.PER_CLUSTER_SKINNED,
+    4: ScatteredRigMode.PER_INSTANCE_RIGID,
+}
+_SCATTERED_MODE_TO_SLIDER = {mode: value for value, mode in _SLIDER_TO_SCATTERED_MODE.items()}
 
 
 def _make_scroll_host(parent: QWidget) -> tuple[QWidget, QVBoxLayout]:
@@ -270,12 +286,13 @@ class SkinningTickLabel(QLabel):
     def __init__(self, value: int, text: str, tooltip: str, parent=None) -> None:
         super().__init__(text, parent)
         self.value = value
+        self.setObjectName("SkinningTickLabel")
         self.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(tooltip)
 
     def mousePressEvent(self, event) -> None:  # type: ignore[override]
-        if event.button() == Qt.MouseButton.LeftButton:
+        if self.isEnabled() and event.button() == Qt.MouseButton.LeftButton:
             self.selected.emit(self.value)
             event.accept()
             return
@@ -300,13 +317,33 @@ class SkinningTickLabels(QWidget):
         self._set_selected(slider.value())
         QTimer.singleShot(0, self._update_label_metrics)
 
+    def set_labels(
+        self,
+        labels: tuple[tuple[str, str], ...],
+        *,
+        enabled_values: frozenset[int] | None = None,
+    ) -> None:
+        if len(labels) != len(self.labels):
+            raise ValueError("Tick label count must match the slider range.")
+        enabled_values = enabled_values or frozenset(label.value for label in self.labels)
+        for label, (text, tooltip) in zip(self.labels, labels, strict=True):
+            label.setText(text)
+            label.setToolTip(tooltip)
+            label.setEnabled(label.value in enabled_values)
+            label.setCursor(
+                Qt.CursorShape.PointingHandCursor if label.isEnabled() else Qt.CursorShape.ArrowCursor
+            )
+        self._set_selected(self._slider.value())
+        self._update_label_metrics()
+
     def edge_margin(self) -> int:
         return max(label.sizeHint().width() for label in self.labels) // 2
 
-    def _set_selected(self, selected_value: int) -> None:
+    def _set_selected(self, _selected_value: int) -> None:
+        selected_value = self._slider.value()
         for label in self.labels:
             font = label.font()
-            font.setBold(label.value == selected_value)
+            font.setBold(label.isEnabled() and label.value == selected_value)
             label.setFont(font)
         self._layout_labels()
 
@@ -412,6 +449,12 @@ class WindTabPanel(QWidget):
         self._on_preview_requested = on_preview_requested
         self._persisted_settings: dict[str, WindGroupSettingRecord] = {}
         self._rows: list[WindRowWidgets] = []
+        self._scattered_parts_active = False
+        self._scattered_parts_clustered = False
+        self._scattered_cluster_count = 0
+        self._scattered_instance_count = 0
+        self._normal_skinning_quality = SkinningQuality.ONE_WEIGHT
+        self._scattered_rig_mode = ScatteredRigMode.PER_CLUSTER_SKINNED
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -426,7 +469,7 @@ class WindTabPanel(QWidget):
 
         self.ground_cover_checkbox = QCheckBox("Ground Cover", controls)
         self.ground_cover_checkbox.toggled.connect(lambda _checked: self._on_change())
-        skinning_label = QLabel("Skinning Quality", controls)
+        self.skinning_label = QLabel("Skinning Quality", controls)
         self.skinning_quality_slider = DiscreteSlider(Qt.Orientation.Horizontal, controls)
         self.skinning_quality_slider.setRange(1, 4)
         self.skinning_quality_slider.setValue(1)
@@ -435,20 +478,25 @@ class WindTabPanel(QWidget):
         self.skinning_quality_slider.setTickInterval(1)
         self.skinning_quality_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.skinning_quality_slider.setAccessibleName("Skinning Quality")
-        self.skinning_quality_slider.valueChanged.connect(lambda _value: self._on_change())
+        self.skinning_quality_slider.valueChanged.connect(self._handle_skinning_slider_changed)
         self.skinning_tick_labels = SkinningTickLabels(
             self.skinning_quality_slider,
-            (
-                ("1 weight", "Default and cheapest. Rigid skinning works well for many trees."),
-                ("2 weights", "Soft branch bending. Attachment artifacts may still be visible."),
-                ("3 weights\n(Expensive)", "Soft bending with fewer attachment artifacts, at higher runtime cost."),
-                ("4 weights\n(Expensive)", "Most visually stable deformation, with the highest runtime cost."),
-            ),
+            _SKINNING_TICK_LABELS,
             controls,
         )
-        skinning_slider_row = QHBoxLayout()
-        skinning_slider_row.setContentsMargins(self.skinning_tick_labels.edge_margin(), 0, self.skinning_tick_labels.edge_margin(), 0)
-        skinning_slider_row.addWidget(self.skinning_quality_slider)
+        self.skinning_description_label = QLabel(controls)
+        self.skinning_description_label.setWordWrap(True)
+        self.skinning_description_label.setObjectName("MutedText")
+        self.scattered_orientation_checkbox = QCheckBox(
+            "Average Instance Orientation",
+            controls,
+        )
+        self.scattered_orientation_checkbox.setChecked(False)
+        self.scattered_orientation_checkbox.toggled.connect(lambda _checked: self._on_change())
+        self.scattered_orientation_checkbox.hide()
+        self.skinning_slider_row = QHBoxLayout()
+        self.skinning_slider_row.setContentsMargins(self.skinning_tick_labels.edge_margin(), 0, self.skinning_tick_labels.edge_margin(), 0)
+        self.skinning_slider_row.addWidget(self.skinning_quality_slider)
         self.gust_spin = self._make_spin(0.0, 1.0, 0.01, 0.0)
         self.gust_spin.valueChanged.connect(lambda _value: self._on_change())
         set_tooltip(
@@ -461,8 +509,12 @@ class WindTabPanel(QWidget):
         )
         set_tooltip(
             "Maximum skinning influences per base-mesh vertex. 1 is rigid and cheapest; 2 uses the soft child-attachment collar; 3 and 4 preserve deeper inherited deformation at higher runtime cost.",
-            skinning_label,
+            self.skinning_label,
             self.skinning_quality_slider,
+        )
+        set_tooltip(
+            "Uses the surface-area-weighted average of member instances' rotated local +Y axes, so larger instances contribute more. Whole Mesh averages all instances; cluster modes average each cluster; Per Instance uses its own axis. Off keeps deterministic near-up bones.",
+            self.scattered_orientation_checkbox,
         )
         # Wind inspection is now owned by the Wind tab itself instead of the
         # global action column so the operator can tweak wind globals and refresh
@@ -478,13 +530,15 @@ class WindTabPanel(QWidget):
         controls_layout.addWidget(self.ground_cover_checkbox, 0, 0, 1, 2)
         controls_layout.addWidget(self.refresh_button, 0, 2, 1, 1)
         controls_layout.addWidget(self.preview_button, 0, 3, 1, 1)
-        controls_layout.addWidget(skinning_label, 1, 0, 1, 4)
-        controls_layout.addLayout(skinning_slider_row, 2, 0, 1, 4)
+        controls_layout.addWidget(self.skinning_label, 1, 0, 1, 4)
+        controls_layout.addLayout(self.skinning_slider_row, 2, 0, 1, 4)
         controls_layout.addWidget(self.skinning_tick_labels, 3, 0, 1, 4)
+        controls_layout.addWidget(self.skinning_description_label, 4, 0, 1, 4)
+        controls_layout.addWidget(self.scattered_orientation_checkbox, 5, 0, 1, 4)
         gust_label = QLabel("Gust Attenuation", controls)
         set_tooltip(self.gust_spin.toolTip(), gust_label)
-        controls_layout.addWidget(gust_label, 4, 0)
-        controls_layout.addWidget(self.gust_spin, 4, 1, 1, 3)
+        controls_layout.addWidget(gust_label, 6, 0)
+        controls_layout.addWidget(self.gust_spin, 6, 1, 1, 3)
         controls_layout.setColumnStretch(1, 1)
         controls_layout.setColumnStretch(3, 1)
         outer.addWidget(controls)
@@ -507,13 +561,23 @@ class WindTabPanel(QWidget):
         is_ground_cover: bool,
         gust_attenuation: float,
         skinning_quality: SkinningQuality | int = SkinningQuality.ONE_WEIGHT,
+        scattered_rig_mode: ScatteredRigMode | str = ScatteredRigMode.PER_CLUSTER_SKINNED,
+        orient_scattered_bones_from_instances: bool = False,
     ) -> None:
         with QSignalBlocker(self.ground_cover_checkbox):
             self.ground_cover_checkbox.setChecked(bool(is_ground_cover))
         with QSignalBlocker(self.gust_spin):
             self.gust_spin.setValue(float(gust_attenuation))
-        with QSignalBlocker(self.skinning_quality_slider):
-            self.skinning_quality_slider.setValue(int(SkinningQuality.parse(skinning_quality)))
+        self._normal_skinning_quality = SkinningQuality.parse(skinning_quality)
+        self._scattered_rig_mode = ScatteredRigMode.parse(scattered_rig_mode)
+        with QSignalBlocker(self.scattered_orientation_checkbox):
+            self.scattered_orientation_checkbox.setChecked(
+                bool(orient_scattered_bones_from_instances)
+            )
+        if not self._scattered_parts_active:
+            with QSignalBlocker(self.skinning_quality_slider):
+                self.skinning_quality_slider.setValue(int(self._normal_skinning_quality))
+        self._update_skinning_description()
 
     def is_ground_cover_enabled(self) -> bool:
         return bool(self.ground_cover_checkbox.isChecked())
@@ -522,7 +586,98 @@ class WindTabPanel(QWidget):
         return float(self.gust_spin.value())
 
     def skinning_quality(self) -> SkinningQuality:
-        return SkinningQuality(self.skinning_quality_slider.value())
+        return self._normal_skinning_quality
+
+    def effective_skinning_quality(self) -> SkinningQuality:
+        return SkinningQuality.TWO_WEIGHTS if self._scattered_parts_active else self._normal_skinning_quality
+
+    def scattered_rig_mode(self) -> ScatteredRigMode:
+        return self._scattered_rig_mode
+
+    def orient_scattered_bones_from_instances(self) -> bool:
+        return bool(self.scattered_orientation_checkbox.isChecked())
+
+    def set_scattered_parts_mode(
+        self,
+        *,
+        active: bool,
+        clustered: bool = False,
+        cluster_count: int = 0,
+        instance_count: int = 0,
+    ) -> None:
+        self._scattered_parts_active = bool(active)
+        self._scattered_parts_clustered = bool(active and clustered)
+        self._scattered_cluster_count = max(0, int(cluster_count))
+        self._scattered_instance_count = max(0, int(instance_count))
+        self.scattered_orientation_checkbox.setVisible(self._scattered_parts_active)
+        if self._scattered_parts_active:
+            if not self._scattered_parts_clustered and self._scattered_rig_mode in {
+                ScatteredRigMode.PER_CLUSTER_RIGID,
+                ScatteredRigMode.PER_CLUSTER_SKINNED,
+            }:
+                self._scattered_rig_mode = ScatteredRigMode.WHOLE_MESH_SKINNED
+            self.skinning_label.setText("Scattered Rig Mode")
+            self.skinning_quality_slider.setAccessibleName("Scattered Rig Mode")
+            value = _SCATTERED_MODE_TO_SLIDER[self._scattered_rig_mode]
+            with QSignalBlocker(self.skinning_quality_slider):
+                self.skinning_quality_slider.setValue(value)
+            enabled = frozenset({1, 2, 3, 4} if self._scattered_parts_clustered else {1, 4})
+            self.skinning_tick_labels.set_labels(self._scattered_tick_labels(), enabled_values=enabled)
+            tooltip = "Selects how leaf-only repeated geometry is baked and bound to the synthetic near-up skeleton."
+        else:
+            self.skinning_label.setText("Skinning Quality")
+            self.skinning_quality_slider.setAccessibleName("Skinning Quality")
+            with QSignalBlocker(self.skinning_quality_slider):
+                self.skinning_quality_slider.setValue(int(self._normal_skinning_quality))
+            self.skinning_tick_labels.set_labels(_SKINNING_TICK_LABELS)
+            tooltip = (
+                "Maximum skinning influences per base-mesh vertex. 1 is rigid and cheapest; "
+                "2 uses the soft child-attachment collar; 3 and 4 preserve deeper inherited deformation."
+            )
+        set_tooltip(tooltip, self.skinning_label, self.skinning_quality_slider)
+        margin = self.skinning_tick_labels.edge_margin()
+        self.skinning_slider_row.setContentsMargins(margin, 0, margin, 0)
+        self._update_skinning_description()
+
+    def _handle_skinning_slider_changed(self, value: int) -> None:
+        if self._scattered_parts_active:
+            if not self._scattered_parts_clustered and value in {2, 3}:
+                value = 1 if value == 2 else 4
+                with QSignalBlocker(self.skinning_quality_slider):
+                    self.skinning_quality_slider.setValue(value)
+            self._scattered_rig_mode = _SLIDER_TO_SCATTERED_MODE[value]
+        else:
+            self._normal_skinning_quality = SkinningQuality(value)
+        self._update_skinning_description()
+        self._on_change()
+
+    def _scattered_tick_labels(self) -> tuple[tuple[str, str], ...]:
+        unavailable = "Unavailable: this source has no structural clusters."
+        return (
+            ("Whole Mesh\n(Skinned)", "Bakes every instance into one deforming two-weight mesh."),
+            ("Per Cluster\n(Rigid)", "Keeps instancing and assigns one rigid near-up joint per structural cluster." if self._scattered_parts_clustered else unavailable),
+            ("Per Cluster\n(Skinned)", "Bakes every instance and applies two-weight deformation per structural cluster." if self._scattered_parts_clustered else unavailable),
+            ("Per Instance\n(Rigid · Warning)", "Assigns one rigid joint per source instance and can create a very large skeleton."),
+        )
+
+    def _update_skinning_description(self) -> None:
+        if not self._scattered_parts_active:
+            descriptions = {
+                SkinningQuality.ONE_WEIGHT: "Rigid single-weight skinning. Lowest runtime cost.",
+                SkinningQuality.TWO_WEIGHTS: "Two-weight bending at branch attachments.",
+                SkinningQuality.THREE_WEIGHTS: "Inherited three-weight deformation. Expensive.",
+                SkinningQuality.FOUR_WEIGHTS: "Inherited four-weight deformation. Most expensive.",
+            }
+            self.skinning_description_label.setText(descriptions[self._normal_skinning_quality])
+            return
+        joint_count = self._scattered_cluster_count + 1
+        descriptions = {
+            ScatteredRigMode.WHOLE_MESH_SKINNED: "All blades become one real mesh with two-weight deformation · 3 joints.",
+            ScatteredRigMode.PER_CLUSTER_RIGID: f"Instances stay instanced; one rigid near-up joint per cluster · {joint_count:,} joints.",
+            ScatteredRigMode.PER_CLUSTER_SKINNED: f"All blades become real geometry with one deform chain per cluster · {self._scattered_cluster_count * 2 + 1:,} joints.",
+            ScatteredRigMode.PER_INSTANCE_RIGID: f"Warning: one rigid joint per blade · {self._scattered_instance_count + 1:,} joints.",
+        }
+        self.skinning_description_label.setText(descriptions[self._scattered_rig_mode])
 
     def rebuild(self, groups: tuple[DynamicWindSimulationGroup, ...]) -> None:
         self._rows.clear()

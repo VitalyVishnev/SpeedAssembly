@@ -272,18 +272,21 @@ def author_usda(
         _write_line(sink, 0, "}")
         return
 
+    is_nanite_assembly = bool(context.assembly_parts)
     _write_line(sink, 1, f'def Xform "{contract.root_prim_name}" (')
-    _write_line(sink, 2, f'prepend apiSchemas = ["{contract.root_api}"]')
+    if is_nanite_assembly:
+        _write_line(sink, 2, f'prepend apiSchemas = ["{contract.root_api}"]')
     _write_line(sink, 2, f'kind = "{contract.root_kind}"')
     _write_line(sink, 0, ")")
     _write_line(sink, 0, "{")
-    _write_line(sink, 1, f'uniform token {contract.mesh_type_attr} = "{contract.mesh_type_value}"')
-    _write_line(
-        sink,
-        1,
-        f'{("custom rel" if context.base_mesh_name else "rel")} unreal:naniteAssembly:skeleton = '
-        f'</{contract.root_prim_name}/{context.resolved_base_skel_root_name}/{context.resolved_skeleton_name}>',
-    )
+    if is_nanite_assembly:
+        _write_line(sink, 1, f'uniform token {contract.mesh_type_attr} = "{contract.mesh_type_value}"')
+        _write_line(
+            sink,
+            1,
+            f'{("custom rel" if context.base_mesh_name else "rel")} unreal:naniteAssembly:skeleton = '
+            f'</{contract.root_prim_name}/{context.resolved_base_skel_root_name}/{context.resolved_skeleton_name}>',
+        )
     _write_line(sink, 0)
 
     materials = _render_materials_scope(model.materials, contract.root_prim_name)

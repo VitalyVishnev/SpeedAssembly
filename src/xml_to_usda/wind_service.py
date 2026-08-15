@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .models import DynamicWindSimulationGroup
+from .models import DynamicWindSimulationGroup, ScatteredRigMode
 from .wind_pipeline import generate_wind_json, inspect_wind_data
 
 
@@ -21,6 +21,8 @@ class WindInspectionRequest:
     """Typed request for wind-group inspection."""
     input_path: str
     is_ground_cover: bool = False
+    scattered_rig_mode: ScatteredRigMode = ScatteredRigMode.PER_CLUSTER_SKINNED
+    orient_scattered_bones_from_instances: bool = False
 
 
 @dataclass(frozen=True)
@@ -38,12 +40,16 @@ class WindGenerationRequest:
     group_settings: tuple[DynamicWindSimulationGroup, ...]
     gust_attenuation: float
     is_ground_cover: bool = False
+    scattered_rig_mode: ScatteredRigMode = ScatteredRigMode.PER_CLUSTER_SKINNED
+    orient_scattered_bones_from_instances: bool = False
 
 
 def prepare_wind_inspection_plan(
     *,
     input_path: str,
     is_ground_cover: bool,
+    scattered_rig_mode: ScatteredRigMode | str = ScatteredRigMode.PER_CLUSTER_SKINNED,
+    orient_scattered_bones_from_instances: bool = False,
     async_threshold_bytes: int,
 ) -> WindInspectionPlan:
     """Build one wind-inspection plan from operator-facing inputs."""
@@ -52,6 +58,8 @@ def prepare_wind_inspection_plan(
         request=WindInspectionRequest(
             input_path=resolved_input_path,
             is_ground_cover=is_ground_cover,
+            scattered_rig_mode=ScatteredRigMode.parse(scattered_rig_mode),
+            orient_scattered_bones_from_instances=bool(orient_scattered_bones_from_instances),
         ),
         run_async=_should_run_wind_inspection_async(
             input_path=resolved_input_path,
@@ -61,20 +69,25 @@ def prepare_wind_inspection_plan(
 
 
 def inspect_wind_groups(request: WindInspectionRequest):
-    return inspect_wind_data(
-        request.input_path,
-        is_ground_cover=request.is_ground_cover,
-    )
+    kwargs = {"is_ground_cover": request.is_ground_cover}
+    if request.scattered_rig_mode != ScatteredRigMode.PER_CLUSTER_SKINNED:
+        kwargs["scattered_rig_mode"] = request.scattered_rig_mode
+    if request.orient_scattered_bones_from_instances:
+        kwargs["orient_scattered_bones_from_instances"] = True
+    return inspect_wind_data(request.input_path, **kwargs)
 
 
 def generate_wind_json_from_request(request: WindGenerationRequest):
-    return generate_wind_json(
-        request.input_path,
-        request.output_path,
-        group_settings=request.group_settings,
-        gust_attenuation=request.gust_attenuation,
-        is_ground_cover=request.is_ground_cover,
-    )
+    kwargs = {
+        "group_settings": request.group_settings,
+        "gust_attenuation": request.gust_attenuation,
+        "is_ground_cover": request.is_ground_cover,
+    }
+    if request.scattered_rig_mode != ScatteredRigMode.PER_CLUSTER_SKINNED:
+        kwargs["scattered_rig_mode"] = request.scattered_rig_mode
+    if request.orient_scattered_bones_from_instances:
+        kwargs["orient_scattered_bones_from_instances"] = True
+    return generate_wind_json(request.input_path, request.output_path, **kwargs)
 
 
 def derive_wind_json_output_path(input_path: str, output_path: str) -> Path:

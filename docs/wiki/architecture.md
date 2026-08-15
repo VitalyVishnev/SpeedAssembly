@@ -15,8 +15,15 @@ Main systems:
 - `src/xml_to_usda/normalizer.py` - turns observed SpeedTree XML into canonical source facts.
 - `src/xml_to_usda/material_resolver.py` - resolves source materials and explicit material policy.
 - `src/xml_to_usda/assembly_resolution.py` - combines source facts with operator intent into an authored model.
+- `src/xml_to_usda/scattered_parts.py` - detects leaf-only repeated geometry
+  from Object hierarchy and resolves its real base geometry plus the complete
+  Dynamic-Wind-safe synthetic rig after prototype resolution; deterministic
+  near-up frames, optional size-weighted instance orientation, skinned endpoint
+  joints, and the repeated-geometry hot path stay local to this module.
 - `src/xml_to_usda/prototype_resolution.py` - resolves prototype payload choice and replacement.
-- `src/xml_to_usda/usda_authoring.py` - authors the final USDA structure.
+- `src/xml_to_usda/usda_authoring.py` - authors the final USDA structure; a
+  skeletal result uses `NaniteAssemblyRootAPI` only while resolved instanced
+  parts remain, otherwise the same root contains an ordinary `UsdSkel` asset.
 - `src/xml_to_usda/usda_writer.py` - writes USDA through the shared authoring contract.
 - `src/xml_to_usda/conversion_service.py` and `src/xml_to_usda/conversion_orchestrator.py` - normalize caller intent and run conversions.
 - parts-library requests reuse one bundle path in `conversion_orchestrator.py`;
@@ -142,9 +149,10 @@ so XML/external skeleton faults do not crash the Qt shell. The GUI consumes the
 worker-built initial scene directly. Selecting an external file starts loading
 immediately; a multi-skeleton USD waits only for the operator to select its
 Skeleton prim, then loads without a separate confirmation button. The worker
-result keeps only the compact
-base-mesh viewport scene and skeleton; Repeated Parts are intentionally absent
-because Wind Preview is a skeleton inspection workflow. It does not serialize
+result keeps only the compact viewport scene and skeleton. Normal tree Repeated
+Parts remain absent. A synthetic Scattered Parts rigid rig keeps its
+still-instanced blades in the scene so leaf-only Wind Preview is not empty;
+baked modes render their resolved Base Mesh. It does not serialize
 the full CanonicalTreeModel beside the scene. Grouping edits recolor that scene and
 replace its bone overlay without rebuilding source geometry. Base-mesh face
 ranges are computed once per scene rather than once per joint. The Wind Preview

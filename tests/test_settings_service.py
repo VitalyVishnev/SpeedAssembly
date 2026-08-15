@@ -106,6 +106,7 @@ def test_save_gui_settings_round_trips_current_snapshot_shape(tmp_path: Path) ->
         gust_attenuation=0.6,
         is_ground_cover=True,
         skinning_quality=SkinningQuality.FOUR_WEIGHTS,
+        orient_scattered_bones_from_instances=True,
         wind_group_settings={
             "0": WindGroupSettingRecord(
                 is_trunk_group=True,

@@ -65,7 +65,7 @@ from ..fbx_payload_cache import (
     sweep_fbx_payload_cache,
 )
 from ..gui_formatters import format_wind_group_summary, format_wind_json_result
-from ..models import CleanupPolicy, ConversionMode, ConversionRequest, OutputMode, PrototypeSourceMode
+from ..models import CleanupPolicy, ConversionMode, ConversionRequest, OutputMode, PrototypeSourceMode, ScatteredRigMode
 from ..proxy_mesh_service import (
     ProxyMeshError,
     ProxyMeshResult,
@@ -211,6 +211,15 @@ PARTS_FOLDER_SUFFIXES = {
     ConversionMode.SKELETAL_PARTS: "SkeletalParts",
     ConversionMode.STATIC_PARTS: "StaticParts",
 }
+
+
+def _scattered_rig_mode_label(mode: ScatteredRigMode) -> str:
+    return {
+        ScatteredRigMode.WHOLE_MESH_SKINNED: "Whole Mesh (Skinned)",
+        ScatteredRigMode.PER_CLUSTER_RIGID: "Per Cluster (Rigid)",
+        ScatteredRigMode.PER_CLUSTER_SKINNED: "Per Cluster (Skinned)",
+        ScatteredRigMode.PER_INSTANCE_RIGID: "Per Instance (Rigid · Warning)",
+    }[mode]
 
 
 def _conversion_mode_tooltip(mode_key: str) -> str:
@@ -827,6 +836,7 @@ class MainWindow(QWidget):
         self._proxy_source_preview_scene: ViewportScene | None = None
         self._proxy_source_preview_input_path = ""
         self._shown_bone_gap_warning: tuple[str, tuple[str, ...]] | None = None
+        self._scattered_parts_analysis = None
         self._fracture_preview_cache: OrderedDict[tuple[object, object], object] = OrderedDict()
 
         self._operator_state, self._operator_snapshot = load_operator_state(
@@ -1580,6 +1590,10 @@ class MainWindow(QWidget):
             is_ground_cover=self._operator_state.is_ground_cover,
             gust_attenuation=self._operator_state.gust_attenuation,
             skinning_quality=self._operator_state.skinning_quality,
+            scattered_rig_mode=self._operator_state.scattered_rig_mode,
+            orient_scattered_bones_from_instances=(
+                self._operator_state.orient_scattered_bones_from_instances
+            ),
         )
         self.geometry_panel.apply_proxy_settings(self._proxy_mesh_settings)
         self.geometry_panel.apply_fracture_preview_settings(self._fracture_preview_settings)
@@ -1743,9 +1757,18 @@ class MainWindow(QWidget):
                 f"Bark: {self._operator_state.bark_material_path or '<none>'}\n"
                 f"Leaves: {self._operator_state.leaves_material_path or '<none>'}"
             )
+        scattered = self._scattered_parts_analysis
+        if scattered is not None and scattered.eligible:
+            rig_mode = self.wind_panel.scattered_rig_mode()
+            skinning = _scattered_rig_mode_label(rig_mode)
+            skinning_title = "Scattered Rig"
+        else:
+            skinning = f"{int(self._operator_state.skinning_quality)} weight{'s' if self._operator_state.skinning_quality != 1 else ''}"
+            skinning_title = "Skinning Quality"
         self.program_status_card.set_summary(
             mode=mode,
-            skinning_quality=int(self._operator_state.skinning_quality),
+            skinning=skinning,
+            skinning_title=skinning_title,
             materials=materials,
             materials_tooltip=materials_tooltip,
         )
@@ -1781,10 +1804,13 @@ class MainWindow(QWidget):
             self._proxy_preview_dialog.set_export_enabled(
                 has_input and not self._conversion_running and not proxy_running
             )
-        self.geometry_panel.preview_proxy_button.setEnabled(has_input and not self._conversion_running)
+        scattered_parts = bool(self._scattered_parts_analysis is not None and self._scattered_parts_analysis.eligible)
+        self.geometry_panel.preview_proxy_button.setEnabled(
+            has_input and not scattered_parts and not self._conversion_running
+        )
         fracture_preview_running = self._background_jobs.fracture_preview_running
         self.geometry_panel.preview_fracture_button.setEnabled(
-            has_input and not self._conversion_running and not fracture_preview_running
+            has_input and not scattered_parts and not self._conversion_running and not fracture_preview_running
         )
 
     def _handle_convert_button_clicked(self) -> None:
@@ -1820,6 +1846,8 @@ class MainWindow(QWidget):
             f"Ground cover: {self._operator_state.is_ground_cover}",
             f"Gust attenuation: {self._operator_state.gust_attenuation:.2f}",
             f"Skinning quality: {int(request.skinning_quality)} weight(s)",
+            f"Scattered rig mode: {request.scattered_rig_mode.value}",
+            f"Scattered bone orientation from instances: {request.orient_scattered_bones_from_instances}",
             f"Prototype rows: {len(request.prototype_source_configs)}",
             f"Wind groups: {wind_state}",
         ]
@@ -2067,6 +2095,8 @@ class MainWindow(QWidget):
         self._operator_state = replace(self._operator_state, input_path=normalized_text)
         input_changed = normalized_text != previous_input
         if input_changed:
+            self._scattered_parts_analysis = None
+            self.wind_panel.set_scattered_parts_mode(active=False)
             self._shown_bone_gap_warning = None
             self.program_status_card.set_bone_gap_warning(())
             if normalized_text:
@@ -2177,6 +2207,10 @@ class MainWindow(QWidget):
             gust_attenuation=self.wind_panel.gust_attenuation(),
             is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
             skinning_quality=self.wind_panel.skinning_quality(),
+            scattered_rig_mode=self.wind_panel.scattered_rig_mode(),
+            orient_scattered_bones_from_instances=(
+                self.wind_panel.orient_scattered_bones_from_instances()
+            ),
         )
         self._schedule_operator_state_save()
         self._refresh_state_cards()
@@ -2238,6 +2272,7 @@ class MainWindow(QWidget):
             prototype_discovery = self._deps.discover_part_prototype_rows(input_path, persisted_records=part_records)
             base_discovery = self._deps.discover_base_material_rows(input_path, persisted_records=base_records)
             missing_bone_generator_groups = self._deps.discover_missing_bone_generator_groups(input_path)
+            scattered_parts = self._deps.discover_scattered_parts(input_path)
         except Exception as exc:
             self._clear_input_dependent_tabs()
             self.program_status_card.set_summary(source="XML inspection failed")
@@ -2258,6 +2293,7 @@ class MainWindow(QWidget):
             base_discovery=base_discovery,
             prototype_discovery=prototype_discovery,
             missing_bone_generator_groups=missing_bone_generator_groups,
+            scattered_parts=scattered_parts,
         )
         self._finish_status_activity("success", "Source rows loaded.")
 
@@ -2289,6 +2325,7 @@ class MainWindow(QWidget):
             base_discovery=result.base,
             prototype_discovery=result.prototypes,
             missing_bone_generator_groups=result.missing_bone_generator_groups,
+            scattered_parts=result.scattered_parts,
         )
         self._finish_status_activity("success", "Source rows loaded.")
         self._maybe_auto_refresh_wind_groups()
@@ -2309,17 +2346,37 @@ class MainWindow(QWidget):
         base_discovery,
         prototype_discovery,
         missing_bone_generator_groups=(),
+        scattered_parts=None,
     ) -> None:
         base_count = len(base_discovery.rows)
         prototype_count = len(prototype_discovery.rows)
         instance_count = sum(int(row.instance_count) for row in prototype_discovery.rows)
-        self.program_status_card.set_summary(
-            source=(
+        self._scattered_parts_analysis = scattered_parts
+        if scattered_parts is not None and scattered_parts.eligible:
+            structure = (
+                f"Clustered · {scattered_parts.cluster_count:,} clusters"
+                if scattered_parts.clustered
+                else "Unclustered"
+            )
+            source_summary = (
+                f"Scattered Parts · {structure}\n"
+                f"Prototypes: {prototype_count}\n"
+                f"Instances: {instance_count:,}"
+            )
+            self.wind_panel.set_scattered_parts_mode(
+                active=True,
+                clustered=scattered_parts.clustered,
+                cluster_count=scattered_parts.cluster_count,
+                instance_count=scattered_parts.instance_count,
+            )
+        else:
+            source_summary = (
                 f"Base slots: {base_count}\n"
                 f"Prototypes: {prototype_count}\n"
                 f"Instances: {instance_count:,}"
             )
-        )
+            self.wind_panel.set_scattered_parts_mode(active=False)
+        self.program_status_card.set_summary(source=source_summary)
         self.geometry_panel.load(prototype_discovery)
         self.materials_panel.load(
             input_path=input_path,
@@ -2334,6 +2391,8 @@ class MainWindow(QWidget):
         self.wind_panel.clear()
         self.program_status_card.set_bone_gap_warning(missing_bone_generator_groups)
         self._warn_about_missing_bone_generator_groups(input_path, missing_bone_generator_groups)
+        self._handle_tab_state_changed()
+        self._update_action_state()
 
     def _warn_about_missing_bone_generator_groups(
         self,
@@ -2357,6 +2416,8 @@ class MainWindow(QWidget):
         )
 
     def _clear_input_dependent_tabs(self) -> None:
+        self._scattered_parts_analysis = None
+        self.wind_panel.set_scattered_parts_mode(active=False)
         self.wind_panel.clear()
         self.geometry_panel.clear()
         self.materials_panel.clear()
@@ -2442,6 +2503,10 @@ class MainWindow(QWidget):
             prototype_source_configs=self.materials_panel.collect_prototype_source_configs(),
             conversion_mode=self._operator_state.conversion_mode,
             skinning_quality=self.wind_panel.skinning_quality(),
+            scattered_rig_mode=self.wind_panel.scattered_rig_mode(),
+            orient_scattered_bones_from_instances=(
+                self.wind_panel.orient_scattered_bones_from_instances()
+            ),
             async_threshold_bytes=self.ASYNC_CONVERSION_THRESHOLD_BYTES,
             fbx_cache_max_bytes=self._fbx_cache_max_bytes(),
             fbx_cache_max_age_seconds=self._fbx_cache_max_age_seconds(),
@@ -2483,6 +2548,10 @@ class MainWindow(QWidget):
         plan = self._deps.prepare_wind_inspection_plan(
             input_path=input_path,
             is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
+            scattered_rig_mode=self.wind_panel.scattered_rig_mode(),
+            orient_scattered_bones_from_instances=(
+                self.wind_panel.orient_scattered_bones_from_instances()
+            ),
             async_threshold_bytes=self.ASYNC_WIND_REFRESH_THRESHOLD_BYTES,
         )
         self._background_jobs.start_wind_refresh(plan.request, run_async=plan.run_async)
@@ -2507,6 +2576,10 @@ class MainWindow(QWidget):
             group_settings=self.wind_panel.collect_group_settings(),
             gust_attenuation=self.wind_panel.gust_attenuation(),
             is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
+            scattered_rig_mode=self.wind_panel.scattered_rig_mode(),
+            orient_scattered_bones_from_instances=(
+                self.wind_panel.orient_scattered_bones_from_instances()
+            ),
         )
         self._background_jobs.start_wind_json_generation(request)
 
@@ -2524,7 +2597,13 @@ class MainWindow(QWidget):
             focus_preview_dialog(self._wind_preview_dialog)
             return
         try:
-            request = self._deps.prepare_wind_preview_request(input_path=input_path)
+            request = self._deps.prepare_wind_preview_request(
+                input_path=input_path,
+                scattered_rig_mode=self.wind_panel.scattered_rig_mode(),
+                orient_scattered_bones_from_instances=(
+                    self.wind_panel.orient_scattered_bones_from_instances()
+                ),
+            )
         except ValueError as exc:
             self._report_error("Missing input", str(exc))
             return

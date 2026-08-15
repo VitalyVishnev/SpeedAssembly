@@ -12,7 +12,7 @@ pytestmark = pytest.mark.qt
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QCheckBox, QStyle, QStyleOptionSlider
 
-from xml_to_usda.models import ConversionPhase, ConversionTelemetry, PrototypeSourceMode
+from xml_to_usda.models import ConversionPhase, ConversionTelemetry, PrototypeSourceMode, ScatteredRigMode, SkinningQuality
 from xml_to_usda.qt_ui.dependencies import build_default_dependencies
 from xml_to_usda.qt_ui.panels import GeometryRowState
 from xml_to_usda.qt_ui.persistence import UiShellState
@@ -178,6 +178,54 @@ def test_main_window_uses_one_status_card_and_no_tab_summary_rows(qtbot, tmp_pat
     assert not hasattr(window.wind_panel, "summary_label")
     assert not hasattr(window.geometry_panel, "summary_label")
     assert not hasattr(window.materials_panel, "summary_label")
+
+
+def test_scattered_parts_replaces_skinning_slider_contract_and_disables_cluster_ticks_without_clusters(qtbot, tmp_path) -> None:
+    window = MainWindow(
+        load_theme(),
+        UiShellState(width=1160, height=780, help_prompt_dismissed=True),
+        dependencies=build_default_dependencies(),
+        state_path=tmp_path / "ui_next_state.json",
+        operator_settings_path=tmp_path / "gui_settings.json",
+    )
+    qtbot.addWidget(window)
+    panel = window.wind_panel
+    assert panel.scattered_orientation_checkbox.isHidden()
+    assert panel.orient_scattered_bones_from_instances() is False
+
+    panel.set_scattered_parts_mode(active=True, clustered=True, cluster_count=103, instance_count=4223)
+
+    assert panel.skinning_label.text() == "Scattered Rig Mode"
+    assert not panel.scattered_orientation_checkbox.isHidden()
+    panel.scattered_orientation_checkbox.setChecked(True)
+    assert panel.orient_scattered_bones_from_instances() is True
+    assert panel.scattered_rig_mode() == ScatteredRigMode.PER_CLUSTER_SKINNED
+    assert panel.effective_skinning_quality() == SkinningQuality.TWO_WEIGHTS
+    assert "207 joints" in panel.skinning_description_label.text()
+    assert "Warning" in panel.skinning_tick_labels.labels[3].text()
+    panel.skinning_quality_slider.setValue(4)
+    assert "4,224 joints" in panel.skinning_description_label.text()
+    panel.skinning_quality_slider.setValue(3)
+
+    panel.set_scattered_parts_mode(active=True, clustered=False, instance_count=41)
+
+    assert panel.scattered_rig_mode() == ScatteredRigMode.WHOLE_MESH_SKINNED
+    assert not panel.skinning_tick_labels.labels[1].isEnabled()
+    assert not panel.skinning_tick_labels.labels[2].isEnabled()
+    assert panel.skinning_tick_labels.labels[0].isEnabled()
+    assert panel.skinning_tick_labels.labels[3].isEnabled()
+    assert panel.skinning_tick_labels.labels[0].font().bold()
+    assert all(label.graphicsEffect() is None for label in panel.skinning_tick_labels.labels)
+
+    panel.skinning_quality_slider.setValue(2)
+    assert panel.skinning_quality_slider.value() == 1
+    assert panel.skinning_tick_labels.labels[0].font().bold()
+    assert not panel.skinning_tick_labels.labels[1].font().bold()
+
+    panel.skinning_quality_slider.setValue(3)
+    assert panel.skinning_quality_slider.value() == 4
+    assert panel.skinning_tick_labels.labels[3].font().bold()
+    assert not panel.skinning_tick_labels.labels[2].font().bold()
 
 
 def test_skinning_quality_slider_labels_align_and_control_supports_click_and_drag(qtbot, tmp_path) -> None:

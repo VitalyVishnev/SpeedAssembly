@@ -251,6 +251,7 @@ def build_stylesheet(theme: ResolvedTheme) -> str:
     tab_text = palette["tab_text"]
     window_text = palette["window_text"]
     muted_text = palette["muted_text"]
+    disabled_tick_text = _color_or_alpha(theme, "skinning_tick_disabled", "window_text", 0.38)
     menu_fill = palette["card_fill"]
     menu_text = palette["card_text"]
     panel_radius = theme.radii["control"]
@@ -298,6 +299,9 @@ QWidget#AdjustUiWindow {{
 QLabel#MutedLabel {{
     color: {muted_text};
     font-size: {theme.font_sizes['small']}px;
+}}
+QLabel#SkinningTickLabel:disabled {{
+    color: {disabled_tick_text};
 }}
 QLabel#StatusLabel {{
     color: {window_text};

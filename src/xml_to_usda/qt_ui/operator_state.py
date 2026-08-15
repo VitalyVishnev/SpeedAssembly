@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..fracture_preview_service import FracturePreviewSettings
-from ..models import ConversionMode, CpuProfile, MaterialPolicy, SkinningQuality
+from ..models import ConversionMode, CpuProfile, MaterialPolicy, ScatteredRigMode, SkinningQuality
 from ..proxy_mesh_service import ProxyMeshSettings
 from ..settings_service import (
     BaseMaterialSettingRecord,
@@ -42,6 +42,8 @@ class OperatorState:
     gust_attenuation: float = 0.0
     is_ground_cover: bool = False
     skinning_quality: SkinningQuality = SkinningQuality.ONE_WEIGHT
+    scattered_rig_mode: ScatteredRigMode = ScatteredRigMode.PER_CLUSTER_SKINNED
+    orient_scattered_bones_from_instances: bool = False
 
 
 def load_operator_state(
@@ -74,6 +76,8 @@ def load_operator_state(
             gust_attenuation=snapshot.gust_attenuation,
             is_ground_cover=snapshot.is_ground_cover,
             skinning_quality=snapshot.skinning_quality,
+            scattered_rig_mode=snapshot.scattered_rig_mode,
+            orient_scattered_bones_from_instances=snapshot.orient_scattered_bones_from_instances,
         ),
         snapshot,
     )
@@ -172,6 +176,10 @@ def _operator_snapshot_fields(state: OperatorState, previous_snapshot: GuiSettin
         "gust_attenuation": float(state.gust_attenuation),
         "is_ground_cover": bool(state.is_ground_cover),
         "skinning_quality": state.skinning_quality,
+        "scattered_rig_mode": state.scattered_rig_mode,
+        "orient_scattered_bones_from_instances": bool(
+            state.orient_scattered_bones_from_instances
+        ),
     }
 
 

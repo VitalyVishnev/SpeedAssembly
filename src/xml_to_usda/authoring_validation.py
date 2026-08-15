@@ -102,7 +102,7 @@ def _validate_skeletal_assembly_model(
             ValidationIssue(
                 severity="error",
                 code="missing_skeleton",
-                message="Skeleton data is required for skeletal nanite assembly export.",
+                message="Skeleton data is required for skeletal export.",
             )
         )
 
@@ -111,7 +111,7 @@ def _validate_skeletal_assembly_model(
             ValidationIssue(
                 severity="warning",
                 code="missing_leaf_references",
-                message="No LeafReferences / Repeated Parts found; converter will emit a base-only USDA.",
+                message="No instanced Repeated Parts remain; converter will emit an ordinary base-only Skeletal Mesh USDA.",
             )
         )
 

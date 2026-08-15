@@ -24,6 +24,7 @@ from .models import (
     OutputMode,
     PrototypeSourceConfig,
     PrototypeSourceMode,
+    ScatteredRigMode,
     SkinningQuality,
     UdimMaterialSetting,
 )
@@ -51,6 +52,8 @@ def prepare_conversion_plan(
     async_threshold_bytes: int,
     conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY,
     skinning_quality: SkinningQuality | int = SkinningQuality.ONE_WEIGHT,
+    scattered_rig_mode: ScatteredRigMode | str = ScatteredRigMode.PER_CLUSTER_SKINNED,
+    orient_scattered_bones_from_instances: bool = False,
     udim_material_settings: tuple[UdimMaterialSetting, ...] = (),
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
     fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60,
@@ -115,6 +118,8 @@ def prepare_conversion_plan(
         prototype_source_configs=prototype_source_configs,
         conversion_mode=resolved_conversion_mode,
         skinning_quality=SkinningQuality.parse(skinning_quality),
+        scattered_rig_mode=ScatteredRigMode.parse(scattered_rig_mode),
+        orient_scattered_bones_from_instances=bool(orient_scattered_bones_from_instances),
         fbx_cache_max_bytes=fbx_cache_max_bytes,
         fbx_cache_max_age_seconds=fbx_cache_max_age_seconds,
     )

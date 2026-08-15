@@ -24,6 +24,8 @@ from .source_analysis import (
     discover_part_prototypes,
     discover_source_materials,
 )
+from .canonical_loader import load_source_tree_model
+from .scattered_parts import ScatteredPartsAnalysis, analyze_scattered_parts
 
 
 @dataclass(frozen=True)
@@ -92,9 +94,11 @@ class SourceDiscoveryResult:
     base: BaseMaterialDiscovery
     prototypes: PrototypeDiscovery
     missing_bone_generator_groups: tuple[str, ...] = ()
+    scattered_parts: ScatteredPartsAnalysis = ScatteredPartsAnalysis(False, False, 0)
 
 
 def discover_source_rows(request: SourceDiscoveryRequest) -> SourceDiscoveryResult:
+    _report, source_model, _diagnostics = load_source_tree_model(request.input_path)
     return SourceDiscoveryResult(
         input_path=request.input_path,
         base=discover_base_material_rows(
@@ -106,7 +110,13 @@ def discover_source_rows(request: SourceDiscoveryRequest) -> SourceDiscoveryResu
             persisted_records=request.part_persisted_records,
         ),
         missing_bone_generator_groups=discover_missing_bone_generator_groups(request.input_path),
+        scattered_parts=analyze_scattered_parts(source_model),
     )
+
+
+def discover_scattered_parts(input_path: str) -> ScatteredPartsAnalysis:
+    _report, source_model, _diagnostics = load_source_tree_model(input_path)
+    return analyze_scattered_parts(source_model)
 
 
 def discover_base_material_rows(

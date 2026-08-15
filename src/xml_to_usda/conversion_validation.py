@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .asset_paths import is_valid_unreal_asset_path, normalize_unreal_asset_path
-from .models import ConversionRequest, MaterialPolicy, PrototypeSourceConfig, SkinningQuality, UdimMode
+from .models import ConversionRequest, MaterialPolicy, PrototypeSourceConfig, ScatteredRigMode, SkinningQuality, UdimMode
 
 
 def validate_conversion_request(request: ConversionRequest) -> None:
@@ -13,6 +13,10 @@ def validate_conversion_request(request: ConversionRequest) -> None:
         SkinningQuality.parse(request.skinning_quality)
     except (TypeError, ValueError) as exc:
         raise ValueError("Skinning quality must be an integer from 1 to 4.") from exc
+    try:
+        ScatteredRigMode.parse(request.scattered_rig_mode)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Unsupported Scattered Parts rig mode.") from exc
     for setting in request.udim_material_settings:
         _validate_udim_target(setting.mode, setting.udim_id, material_id=setting.material_id)
     for config in request.prototype_source_configs:

@@ -142,6 +142,21 @@ class SkinningQuality(IntEnum):
         return cls(int(normalized))
 
 
+class ScatteredRigMode(StrEnum):
+    WHOLE_MESH_SKINNED = "whole_mesh_skinned"
+    PER_CLUSTER_RIGID = "per_cluster_rigid"
+    PER_CLUSTER_SKINNED = "per_cluster_skinned"
+    PER_INSTANCE_RIGID = "per_instance_rigid"
+
+    @classmethod
+    def parse(cls, raw: "ScatteredRigMode | str | None") -> "ScatteredRigMode":
+        if isinstance(raw, cls):
+            return raw
+        if raw is None:
+            return cls.PER_CLUSTER_SKINNED
+        return cls(str(raw).strip())
+
+
 class UdimMode(StrEnum):
     OFF = "off"
     SHIFT_PRIMARY_UV = "shift_primary_uv"
@@ -851,6 +866,8 @@ class ConversionRequest:
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = ()
     conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
     skinning_quality: SkinningQuality = SkinningQuality.ONE_WEIGHT
+    scattered_rig_mode: ScatteredRigMode = ScatteredRigMode.PER_CLUSTER_SKINNED
+    orient_scattered_bones_from_instances: bool = False
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024
     fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60
 

@@ -19,6 +19,8 @@
 - `Attachment` - source or resolved placement relationship for a repeated part.
 - `Skeletal Binding` - the authored USD contract that binds skeletal geometry to the Main Skeleton.
 - `Skinning Quality` - operator-selected Base Mesh and Repeated Part influence width: 1 is rigid, 2 uses the soft child-attachment/two-weight Part paths, and 3/4 recursively inherit deformation at both vertex and instance positions.
+- `Scattered Parts` - source classification for repeated leaf geometry with resolved prototypes but no Base Mesh or skeleton; cluster detection comes from Object hierarchy, not names.
+- `Scattered Rig Mode` - the replacement for Skinning Quality on Scattered Parts input: Whole Mesh (Skinned), Per Cluster (Rigid), Per Cluster (Skinned), or Per Instance (Rigid).
 - `Source Material` - XML ids, names, vertex colors, and FBX slot names before overrides.
 - `Resolved Material Assignment` - material choice after source facts are combined with operator intent.
 - `Authored Material Binding` - USDA material prims, `material:binding`, and `GeomSubset` output.

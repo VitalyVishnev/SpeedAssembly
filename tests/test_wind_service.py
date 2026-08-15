@@ -27,12 +27,14 @@ def test_prepare_wind_inspection_plan_uses_threshold(tmp_path: Path) -> None:
     async_plan = prepare_wind_inspection_plan(
         input_path=str(input_path),
         is_ground_cover=True,
+        orient_scattered_bones_from_instances=True,
         async_threshold_bytes=0,
     )
 
     assert sync_plan.run_async is False
     assert async_plan.run_async is True
     assert async_plan.request.is_ground_cover is True
+    assert async_plan.request.orient_scattered_bones_from_instances is True
 
 
 def test_wind_service_formats_errors_and_retry_policy() -> None:
@@ -58,11 +60,24 @@ def test_inspect_wind_groups_wraps_pipeline(monkeypatch) -> None:
         simulation_groups=(DynamicWindSimulationGroup(group_index=0, branch_order=0, is_trunk_group=True),),
     )
 
-    monkeypatch.setattr("xml_to_usda.wind_service.inspect_wind_data", lambda input_path, is_ground_cover=False: expected)
+    captured = {}
 
-    result = inspect_wind_groups(WindInspectionRequest(input_path="tree.xml", is_ground_cover=True))
+    def inspect(_input_path, **kwargs):
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr("xml_to_usda.wind_service.inspect_wind_data", inspect)
+
+    result = inspect_wind_groups(
+        WindInspectionRequest(
+            input_path="tree.xml",
+            is_ground_cover=True,
+            orient_scattered_bones_from_instances=True,
+        )
+    )
 
     assert result == expected
+    assert captured["orient_scattered_bones_from_instances"] is True
 
 
 def test_generate_wind_json_from_request_wraps_pipeline(monkeypatch) -> None:
@@ -75,10 +90,13 @@ def test_generate_wind_json_from_request_wraps_pipeline(monkeypatch) -> None:
         ),
     )
 
-    monkeypatch.setattr(
-        "xml_to_usda.wind_service.generate_wind_json",
-        lambda input_path, output_path, group_settings=(), gust_attenuation=0.0, is_ground_cover=False: expected,
-    )
+    captured = {}
+
+    def generate(_input_path, _output_path, **kwargs):
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr("xml_to_usda.wind_service.generate_wind_json", generate)
 
     result = generate_wind_json_from_request(
         WindGenerationRequest(
@@ -87,7 +105,9 @@ def test_generate_wind_json_from_request_wraps_pipeline(monkeypatch) -> None:
             group_settings=(DynamicWindSimulationGroup(group_index=0, branch_order=0, is_trunk_group=True),),
             gust_attenuation=0.5,
             is_ground_cover=False,
+            orient_scattered_bones_from_instances=True,
         )
     )
 
     assert result == expected
+    assert captured["orient_scattered_bones_from_instances"] is True

@@ -26,6 +26,8 @@ from .models import (
     PrototypeSourceConfig,
     PrototypeStrategy,
     ResolvedAssemblyModel,
+    ScatteredRigMode,
+    SkinningQuality,
     UdimMaterialSetting,
     ValidationIssue,
 )
@@ -37,6 +39,8 @@ from .prototype_simplification import simplify_resolved_prototypes
 from .authoring_validation import validate_authoring_model
 from .resolution_validation import validate_resolution
 from .source_validation import validate_source_model
+from .scattered_parts import analyze_scattered_parts, apply_scattered_parts_rig
+from .skeleton_processing import apply_skinning_quality
 from .udim_resolver import apply_udim_settings_to_mesh_data
 
 
@@ -53,6 +57,9 @@ class AssemblyResolutionOptions:
     use_explicit_material_contract: bool = False
     prototype_source_configs: tuple[PrototypeSourceConfig, ...] = ()
     conversion_mode: ConversionMode | str = ConversionMode.SKELETAL_ASSEMBLY
+    skinning_quality: SkinningQuality | int = SkinningQuality.ONE_WEIGHT
+    scattered_rig_mode: ScatteredRigMode | str = ScatteredRigMode.PER_CLUSTER_SKINNED
+    orient_scattered_bones_from_instances: bool = False
     output_stem: str | None = None
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024
     fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60
@@ -122,6 +129,18 @@ def resolve_assembly_model(
         authoring_model,
         cancel_event=runtime.cancel_event,
     )
+    if resolved_conversion_mode == ConversionMode.SKELETAL_ASSEMBLY:
+        if analyze_scattered_parts(authoring_model).eligible:
+            authoring_model = apply_scattered_parts_rig(
+                authoring_model,
+                options.scattered_rig_mode,
+                orient_bones_from_instances=options.orient_scattered_bones_from_instances,
+            )
+        else:
+            authoring_model = apply_skinning_quality(
+                authoring_model,
+                skinning_quality=options.skinning_quality,
+            )
     if resolved_conversion_mode in {ConversionMode.STATIC_ASSEMBLY, ConversionMode.STATIC_PARTS}:
         authoring_model = replace(authoring_model, prototype_strategy=PrototypeStrategy.INLINE_STATIC_PART)
     authoring_model = replace(

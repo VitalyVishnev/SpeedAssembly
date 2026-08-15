@@ -1039,3 +1039,61 @@ Major moves:
   project license, third-party notices, and the upstream ufbx license.
 - Included the upstream ufbx license in Python source/wheel license metadata.
 - Aligned the maintained release-content decision with the actual ZIP layout.
+
+## 2026-08-15 - Scattered Parts leaf-only assemblies
+
+- Added hierarchy-based detection for leaf-only sources without a Base Mesh or
+  skeleton and exposed the classification in Source Discovery/status.
+- Replaced Skinning Quality with the four-position Scattered Rig slider when
+  clusters exist; unclustered input keeps only Whole Mesh and Per Instance.
+- Added real-geometry synthetic skeletal assembly resolution for whole-mesh,
+  rigid/skinned per-cluster, and rigid per-instance modes with fixed width 2 and
+  Stage +Y bones in one wind group.
+- Reused the rig resolver for Wind inspection, JSON, and Preview; rigid previews
+  retain GPU instances. Static/Parts exports no longer apply stale skinning.
+- Disabled Proxy Mesh and Fracturing actions for Scattered Parts and retained
+  focused backend, worker-protocol, Wind, and Qt regression coverage.
+
+## 2026-08-15 - Base-only Scattered Parts author as plain UsdSkel
+
+- Reproduced UE 5.7 rejecting a fully baked Whole Mesh that still declared a
+  Nanite Assembly root despite having no instanced Part Meshes.
+- Made skeletal root authoring depend on the resolved instance set: base-only
+  results omit all assembly metadata, while results with instances retain the
+  established Nanite Assembly and PointInstancer contract.
+- Added one four-mode regression covering both output categories and verified
+  the real unclustered sample has `SkelRoot` but no assembly markers.
+- Corrected the unclustered Scattered Rig slider so only its selected endpoint
+  is bold and both unavailable cluster labels stay disabled and translucent.
+
+## 2026-08-15 - Dynamic-Wind-safe Scattered Parts rigs
+
+- Reproduced the Ground Cover disappearance at the animated path: both forced
+  reference pose and the sine provider restored the mesh, while UE 5.7/5.8
+  shader inspection identified the exact-vertical cross-product singularity.
+- Replaced strict Stage +Y synthetic frames with reproducible one-degree
+  golden-angle tilts so different chains receive different azimuths without
+  making conversion nondeterministic.
+- Added real unweighted endpoint joints to Whole Mesh and Per Cluster Skinned
+  chains while preserving the previous rigid-mode joint cost and width-2
+  binding contract.
+
+## 2026-08-15 - Scattered Rig slider label rendering
+
+- Replaced per-label opacity effects with a disabled-state stylesheet so
+  manually aligned tick labels remain directly below the slider after layout
+  and mode changes.
+- Recorded successful Unreal import and Dynamic Wind animation of the corrected
+  grass output.
+
+## 2026-08-15 - Scattered Rig instance orientation and performance
+
+- Added persisted `Average Instance Orientation`, shared by export, Wind
+  inspection, Dynamic Wind JSON, and Wind Preview. It uses scaled-surface-area
+  weights over rotated local +Y instance axes and remains off by default.
+- Kept Dynamic Wind's vertical singularity guard for computed directions and
+  made undefined cancelled averages fail loudly.
+- On 41 instances of the attached 7,821-point / 6,622-face spruce FBX, reduced
+  median Whole Mesh rig resolution from 1.83 s to 0.65 s (2.8x); the new average
+  path fell from its initial 3.10 s to 0.65 s (4.8x). The output contained
+  320,661 points and 271,502 faces.

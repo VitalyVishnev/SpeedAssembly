@@ -216,3 +216,42 @@ Related:
 - `src/xml_to_usda/skeleton_processing.py`
 - `src/xml_to_usda/authoring_validation.py`
 - `tests/test_skeleton_processing.py`
+
+## Validation gap: Scattered Parts skeletal assemblies in UE 5.7.x
+
+Status: corrected; tested grass output imports and animates normally in Unreal
+
+The clustered and unclustered leaf-only samples now produce deterministic USDA
+for Whole Mesh, Per Cluster Rigid, Per Cluster Skinned, and Per Instance Rigid.
+Automated gates cover instance conservation, Base Mesh topology, deterministic
+near-up skeleton frames, skinned endpoint chains, fixed two-weight width,
+authoring diagnostics, and Wind Preview.
+UE 5.7 rejected the first Whole Mesh output because all parts were baked while
+the root still declared `NaniteAssemblyRootAPI`. The writer now emits ordinary
+`UsdSkel` whenever no instances remain and reserves Nanite Assembly metadata for
+outputs with a real `PointInstancer`. Operator validation now confirms that the
+corrected grass output imports and animates normally in Unreal. The complete
+four-mode clustered and two-mode unclustered matrix remains a release gate.
+
+The first imported synthetic rigs disappeared exactly when crossing Animation
+Min Screen Size. `r.InstancedSkinnedMeshes.ForceRefPose 1` and
+`DynamicWind.UseSine 1` each restored the mesh. The generated joints were exact
+Stage +Y, which becomes Unreal +Z; the UE 5.7/5.8 non-trunk Dynamic Wind shader
+normalizes the zero vector `cross(BoneForward, +Z)`. Synthetic frames now use a
+deterministic one-degree tilt with varied azimuths. Skinned modes also author an
+unweighted endpoint joint per deform joint so the imported reference skeleton
+contains a real non-zero chain instead of relying only on the converter-local
+`bind_end` fact.
+
+Import all four clustered outputs plus both unclustered outputs. Confirm that
+fully baked outputs import as ordinary Skeletal Meshes, rigid outputs import as
+Nanite Assemblies, blade and joint counts match, materials survive, wind pivots
+behave correctly, and zero-padded rigid bindings remain one effective influence.
+
+External Unreal Reference prototypes remain fail-loud in Scattered Parts
+skeletal modes because no geometry payload exists for the mandatory real Base
+Mesh. XML and resolved FBX geometry are bakeable.
+
+Related:
+- `src/xml_to_usda/scattered_parts.py`
+- `tests/test_scattered_parts.py`
