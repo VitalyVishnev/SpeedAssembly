@@ -1113,3 +1113,12 @@ Major moves:
 - Added deterministic whole-asset one-degree tilt around the root pivot for
   affected Skeletal Assembly output, plus discovery/status and conversion
   warnings. Static and already safe inputs are unchanged.
+
+## 2026-08-17 - Real-time Part Prototype display modes
+
+- Kept the prepared source mesh in the open Part Prototype Preview and moved
+  Default, Vertex Colors, and Material Colors switching out of the worker path.
+- Display-only changes now recolor locally without reloading XML/FBX,
+  re-simplifying geometry, showing `Generating preview`, or resetting the camera.
+- Removed the redundant Default-mode geometry copy; zero shader tint already
+  ignores source vertex colors.

@@ -188,6 +188,9 @@ stability or rendering fix would help more than one preview, put it in the
 shared viewport module rather than in a Wind/Fracture/Proxy-only path.
 Visual-only selection changes should update overlay/visibility state through
 the shared viewport instead of rebuilding and re-uploading static mesh buffers.
+Part Prototype Preview keeps the worker-loaded source mesh in the dialog;
+Default, Vertex Colors, and Material Colors are local projections and never
+restart XML/FBX loading, simplification, or the preview worker.
 Viewport-specific shortcuts should be shown as small contextual translucent text
 in the bottom-right corner of the viewport.
 Shared camera navigation includes left-button orbit, middle-button pan in the

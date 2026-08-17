@@ -126,7 +126,6 @@ def build_part_prototype_preview(
         )
     return _preview_result_from_payload(
         request,
-        settings,
         source_mode=prototype.source_mode,
         source_payload=source_payload,
         material_specs=getattr(resolved.authoring_model, "materials", ()),
@@ -136,7 +135,7 @@ def build_part_prototype_preview(
 
 def _build_fbx_part_preview(
     request: PartPrototypePreviewRequest,
-    settings: PartPrototypePreviewSettings,
+    _settings: PartPrototypePreviewSettings,
     *,
     cancel_event=None,
 ) -> PartPrototypePreviewResult:
@@ -171,7 +170,6 @@ def _build_fbx_part_preview(
         source_payload = replace(source_payload, name=request.source_name or request.source_key)
     return _preview_result_from_payload(
         request,
-        settings,
         source_mode=config.mode,
         source_payload=source_payload,
         material_specs=(),
@@ -181,7 +179,6 @@ def _build_fbx_part_preview(
 
 def _preview_result_from_payload(
     request: PartPrototypePreviewRequest,
-    settings: PartPrototypePreviewSettings,
     *,
     source_mode: PrototypeSourceMode,
     source_payload: GeometryBuffer,
@@ -212,25 +209,31 @@ def _preview_result_from_payload(
     else:
         payload = source_payload
     material_colors = _material_color_legend(payload, material_specs)
-    display_mode = PartPreviewDisplayMode(settings.display_mode)
-    if display_mode == PartPreviewDisplayMode.MATERIAL_COLORS:
-        display_mesh = _material_color_display_mesh(payload, material_colors)
-    elif display_mode == PartPreviewDisplayMode.VERTEX_COLORS:
-        display_mesh = payload
-    else:
-        display_mesh = _without_vertex_colors(payload)
     return PartPrototypePreviewResult(
         source_key=request.source_key,
         source_name=request.source_name,
         source_mode=source_mode,
-        mesh=display_mesh,
+        mesh=payload,
         source_triangle_count=source_triangle_count,
-        displayed_triangle_count=geometry_triangle_count(display_mesh),
+        displayed_triangle_count=geometry_triangle_count(payload),
         predicted_export_triangle_count=predicted_export_triangle_count,
         source_section_triangle_counts=source_section_triangle_counts,
         material_colors=material_colors,
         preview_limited=preview_limited,
     )
+
+
+def part_preview_display_mesh(
+    result: PartPrototypePreviewResult,
+    display_mode: PartPreviewDisplayMode,
+) -> GeometryBuffer | None:
+    """Project an already loaded preview payload into one visual mode."""
+    source_mesh = result.mesh
+    if source_mesh is None:
+        return None
+    if PartPreviewDisplayMode(display_mode) == PartPreviewDisplayMode.MATERIAL_COLORS:
+        return _material_color_display_mesh(source_mesh, result.material_colors)
+    return source_mesh
 
 
 def _predicted_export_triangle_count(
@@ -391,25 +394,6 @@ def _find_prototype(prototypes, source_key: str, source_name: str):
         if source_name and prototype.source_name == source_name:
             return prototype
     return None
-
-
-def _without_vertex_colors(mesh: GeometryBuffer) -> GeometryBuffer:
-    if not mesh.vertex_color_components:
-        return mesh
-    return GeometryBuffer(
-        name=mesh.name,
-        point_components=array("f", mesh.point_components),
-        face_vertex_counts=array("i", mesh.face_vertex_counts),
-        face_vertex_indices=array("i", mesh.face_vertex_indices),
-        uv_components=array("f", mesh.uv_components),
-        secondary_uv_components=array("f", mesh.secondary_uv_components),
-        vertex_color_warning=mesh.vertex_color_warning,
-        fbx_material_slots=mesh.fbx_material_slots,
-        sections=mesh.sections,
-        skel_joint_indices=array("i", mesh.skel_joint_indices),
-        skel_joint_weights=array("f", mesh.skel_joint_weights),
-        skel_element_size=mesh.skel_element_size,
-    )
 
 
 def _material_color_legend(

@@ -75,6 +75,7 @@ class PartSourceMaterialValue:
 class PartSourceMaterialEditor(QWidget):
     valueChanged = Signal()
     previewAffectingChanged = Signal()
+    displayModeChanged = Signal()
     simplificationReleased = Signal()
 
     def __init__(
@@ -236,7 +237,7 @@ class PartSourceMaterialEditor(QWidget):
 
         self.source_mode_combo.currentIndexChanged.connect(lambda _index: self._handle_source_mode_changed())
         self.material_mode_combo.currentIndexChanged.connect(lambda _index: self._handle_material_mode_changed())
-        self.display_mode_combo.currentIndexChanged.connect(lambda _index: self.previewAffectingChanged.emit())
+        self.display_mode_combo.currentIndexChanged.connect(lambda _index: self.displayModeChanged.emit())
         self.unreal_path_edit.textChanged.connect(lambda _text: self.valueChanged.emit())
         self.fbx_path_edit.textChanged.connect(lambda _text: self.previewAffectingChanged.emit())
         self.fbx_path_edit.editingFinished.connect(self._refresh_slot_rows)

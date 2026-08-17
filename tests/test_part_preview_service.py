@@ -19,6 +19,7 @@ from xml_to_usda.part_preview_service import (
     PartPrototypePreviewRequest,
     PartPrototypePreviewSettings,
     build_part_prototype_preview,
+    part_preview_display_mesh,
 )
 
 
@@ -63,10 +64,44 @@ def test_part_preview_material_colors_are_stable_per_material_section(monkeypatc
     assert result.mesh is not None
     assert result.displayed_triangle_count == 2
     assert [entry.material_id for entry in result.material_colors] == [10, 20]
-    assert result.mesh.vertex_color_count == result.mesh.point_count
-    first_color = tuple(result.mesh.vertex_color_components[:4])
-    second_face_color = tuple(result.mesh.vertex_color_components[12:16])
+    display_mesh = part_preview_display_mesh(result, PartPreviewDisplayMode.MATERIAL_COLORS)
+    assert display_mesh is not None
+    assert display_mesh.vertex_color_count == display_mesh.point_count
+    first_color = tuple(display_mesh.vertex_color_components[:4])
+    second_face_color = tuple(display_mesh.vertex_color_components[12:16])
     assert first_color != second_face_color
+
+
+def test_part_preview_reprojects_loaded_mesh_without_reloading_source() -> None:
+    source_mesh = replace(
+        _preview_mesh(),
+        vertex_color_components=array("f", [0.25, 0.5, 0.75, 1.0] * 6),
+    )
+    result = part_preview_service_module.PartPrototypePreviewResult(
+        source_key="Mesh_1",
+        source_name="Twig",
+        source_mode=PrototypeSourceMode.XML_MESH,
+        mesh=source_mesh,
+        material_colors=(
+            part_preview_service_module.PartMaterialPreviewColor(
+                material_id=10,
+                label="Bark",
+                color=part_preview_service_module.Color4(1.0, 0.0, 0.0, 1.0),
+            ),
+            part_preview_service_module.PartMaterialPreviewColor(
+                material_id=20,
+                label="Leaf",
+                color=part_preview_service_module.Color4(0.0, 1.0, 0.0, 1.0),
+            ),
+        ),
+    )
+
+    assert part_preview_display_mesh(result, PartPreviewDisplayMode.DEFAULT) is source_mesh
+    assert part_preview_display_mesh(result, PartPreviewDisplayMode.VERTEX_COLORS) is source_mesh
+    material_mesh = part_preview_display_mesh(result, PartPreviewDisplayMode.MATERIAL_COLORS)
+    assert material_mesh is not None
+    assert material_mesh.vertex_color_count == material_mesh.point_count
+    assert tuple(material_mesh.vertex_color_components[:4]) != tuple(material_mesh.vertex_color_components[12:16])
 
 
 def test_part_preview_samples_oversized_geometry_without_changing_export_prediction(monkeypatch) -> None:

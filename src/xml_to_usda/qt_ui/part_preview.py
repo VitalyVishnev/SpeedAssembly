@@ -6,7 +6,12 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from ..models import CpuProfile, PrototypeSourceMode
-from ..part_preview_service import PartPreviewDisplayMode, PartPrototypePreviewRequest, PartPrototypePreviewSettings
+from ..part_preview_service import (
+    PartPreviewDisplayMode,
+    PartPrototypePreviewRequest,
+    PartPrototypePreviewSettings,
+    part_preview_display_mesh,
+)
 from .part_source_controls import PartSourceMaterialEditor, PartSourceMaterialValue
 from .preview_shell import PreviewShellDialog, apply_compact_preview_panel_style
 from .viewport import MatcapViewport
@@ -35,6 +40,8 @@ class PartPrototypePreviewDialog(PreviewShellDialog):
         self._on_apply = on_apply or (lambda value: None)
         self._on_preview_requested = on_preview_requested or (lambda request, settings: None)
         self._pending_preview = False
+        self._preview_result = None
+        self._display_meshes = {}
 
         self.viewport = MatcapViewport(self)
         self.set_viewport_widget(self.viewport)
@@ -83,6 +90,7 @@ class PartPrototypePreviewDialog(PreviewShellDialog):
         settings_layout.addStretch(1)
 
         self.editor.previewAffectingChanged.connect(self.schedule_preview)
+        self.editor.displayModeChanged.connect(self._refresh_display)
         self.editor.simplificationReleased.connect(self.schedule_preview)
         self.apply_button.clicked.connect(self._apply)
         self.close_button.clicked.connect(self.close)
@@ -114,25 +122,26 @@ class PartPrototypePreviewDialog(PreviewShellDialog):
         self.status_label.setText(message)
 
     def set_error(self, message: str) -> None:
+        self._preview_result = None
+        self._display_meshes.clear()
         self.viewport.set_mesh(None)
         self.status_label.setText(message)
         self.editor.set_triangle_count_text("Preview failed.")
 
     def set_preview(self, result) -> None:
-        value = self.editor.value()
         if result.mesh is None:
+            self._preview_result = None
+            self._display_meshes.clear()
             self.viewport.set_mesh(None)
             self.status_label.setText("No inline prototype mesh is available.")
             self.editor.set_triangle_count_text("")
             return
-        tint_alpha = 0.0
-        if value.display_mode == PartPreviewDisplayMode.VERTEX_COLORS:
-            tint_alpha = 0.8
-        elif value.display_mode == PartPreviewDisplayMode.MATERIAL_COLORS:
-            tint_alpha = 0.7
-        self.viewport.set_matcap_tint_strength(1.0 if tint_alpha > 0.0 else 0.0)
-        self.viewport.set_mesh(result.mesh, tint_alpha=tint_alpha)
-        self.editor.set_material_colors(result.material_colors)
+        self._preview_result = result
+        self._display_meshes = {
+            PartPreviewDisplayMode.DEFAULT: result.mesh,
+            PartPreviewDisplayMode.VERTEX_COLORS: result.mesh,
+        }
+        self._refresh_display(frame_camera=True)
         self.editor.set_triangle_prediction_base(result.source_section_triangle_counts)
         if result.preview_limited:
             self.status_label.setText(
@@ -141,6 +150,24 @@ class PartPrototypePreviewDialog(PreviewShellDialog):
             )
         else:
             self.status_label.setText("")
+
+    def _refresh_display(self, *, frame_camera: bool = False) -> None:
+        result = self._preview_result
+        if result is None:
+            return
+        value = self.editor.value()
+        mesh = self._display_meshes.get(value.display_mode)
+        if mesh is None:
+            mesh = part_preview_display_mesh(result, value.display_mode)
+            self._display_meshes[value.display_mode] = mesh
+        tint_alpha = 0.0
+        if value.display_mode == PartPreviewDisplayMode.VERTEX_COLORS:
+            tint_alpha = 0.8
+        elif value.display_mode == PartPreviewDisplayMode.MATERIAL_COLORS:
+            tint_alpha = 0.7
+        self.viewport.set_matcap_tint_strength(1.0 if tint_alpha > 0.0 else 0.0)
+        self.viewport.set_mesh(mesh, frame_camera=frame_camera, tint_alpha=tint_alpha)
+        self.editor.set_material_colors(result.material_colors)
 
     def _preview_request(self, value: PartSourceMaterialValue) -> PartPrototypePreviewRequest:
         return PartPrototypePreviewRequest(

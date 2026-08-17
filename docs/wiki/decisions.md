@@ -833,7 +833,9 @@ row-vector arithmetic instead of calling the unstable FBX `MultT` binding for
 every control point. The viewport receives at most 50,000 evenly sampled source
 faces for oversized prototypes; source/export triangle counts remain exact and
 export geometry is unchanged. It does not redefine exported instance
-transforms, attachment, or skeletal binding.
+transforms, attachment, or skeletal binding. The worker result retains that
+prepared source mesh for the lifetime of the dialog. Display-only switches
+reuse it locally and must not start a new preview worker or reset the camera.
 
 Related files:
 - `src/xml_to_usda/part_preview_service.py`
