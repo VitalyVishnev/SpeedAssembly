@@ -28,6 +28,7 @@ class QtUiDependencies:
     discover_part_prototype_rows: object
     discover_missing_bone_generator_groups: object
     discover_scattered_parts: object
+    discover_strictly_vertical_joints: object
     inspect_fbx_material_slot_rows: object
     load_gui_settings: object
     save_gui_settings: object
@@ -67,6 +68,7 @@ def build_default_dependencies() -> QtUiDependencies:
         discover_base_material_rows,
         discover_part_prototype_rows,
         discover_scattered_parts,
+        discover_strictly_vertical_joints,
         inspect_fbx_material_slot_rows,
     )
     from ..source_analysis import discover_missing_bone_generator_groups
@@ -106,6 +108,7 @@ def build_default_dependencies() -> QtUiDependencies:
         discover_part_prototype_rows=discover_part_prototype_rows,
         discover_missing_bone_generator_groups=discover_missing_bone_generator_groups,
         discover_scattered_parts=discover_scattered_parts,
+        discover_strictly_vertical_joints=discover_strictly_vertical_joints,
         inspect_fbx_material_slot_rows=inspect_fbx_material_slot_rows,
         load_gui_settings=load_gui_settings,
         save_gui_settings=save_gui_settings,

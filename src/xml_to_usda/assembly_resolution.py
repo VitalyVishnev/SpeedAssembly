@@ -40,7 +40,7 @@ from .authoring_validation import validate_authoring_model
 from .resolution_validation import validate_resolution
 from .source_validation import validate_source_model
 from .scattered_parts import analyze_scattered_parts, apply_scattered_parts_rig
-from .skeleton_processing import apply_skinning_quality
+from .skeleton_processing import apply_skinning_quality, tilt_tree_for_dynamic_wind
 from .udim_resolver import apply_udim_settings_to_mesh_data
 
 
@@ -141,6 +141,7 @@ def resolve_assembly_model(
                 authoring_model,
                 skinning_quality=options.skinning_quality,
             )
+        authoring_model = tilt_tree_for_dynamic_wind(authoring_model)
     if resolved_conversion_mode in {ConversionMode.STATIC_ASSEMBLY, ConversionMode.STATIC_PARTS}:
         authoring_model = replace(authoring_model, prototype_strategy=PrototypeStrategy.INLINE_STATIC_PART)
     authoring_model = replace(

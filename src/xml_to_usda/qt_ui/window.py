@@ -2099,6 +2099,7 @@ class MainWindow(QWidget):
             self.wind_panel.set_scattered_parts_mode(active=False)
             self._shown_bone_gap_warning = None
             self.program_status_card.set_bone_gap_warning(())
+            self.program_status_card.set_vertical_skeleton_warning(())
             if normalized_text:
                 self.program_status_card.begin_activity("Inspecting XML", "Inspecting selected XML...")
             else:
@@ -2273,6 +2274,7 @@ class MainWindow(QWidget):
             base_discovery = self._deps.discover_base_material_rows(input_path, persisted_records=base_records)
             missing_bone_generator_groups = self._deps.discover_missing_bone_generator_groups(input_path)
             scattered_parts = self._deps.discover_scattered_parts(input_path)
+            strictly_vertical_joints = self._deps.discover_strictly_vertical_joints(input_path)
         except Exception as exc:
             self._clear_input_dependent_tabs()
             self.program_status_card.set_summary(source="XML inspection failed")
@@ -2294,6 +2296,7 @@ class MainWindow(QWidget):
             prototype_discovery=prototype_discovery,
             missing_bone_generator_groups=missing_bone_generator_groups,
             scattered_parts=scattered_parts,
+            strictly_vertical_joints=strictly_vertical_joints,
         )
         self._finish_status_activity("success", "Source rows loaded.")
 
@@ -2326,6 +2329,7 @@ class MainWindow(QWidget):
             prototype_discovery=result.prototypes,
             missing_bone_generator_groups=result.missing_bone_generator_groups,
             scattered_parts=result.scattered_parts,
+            strictly_vertical_joints=result.strictly_vertical_joints,
         )
         self._finish_status_activity("success", "Source rows loaded.")
         self._maybe_auto_refresh_wind_groups()
@@ -2347,6 +2351,7 @@ class MainWindow(QWidget):
         prototype_discovery,
         missing_bone_generator_groups=(),
         scattered_parts=None,
+        strictly_vertical_joints=(),
     ) -> None:
         base_count = len(base_discovery.rows)
         prototype_count = len(prototype_discovery.rows)
@@ -2390,6 +2395,7 @@ class MainWindow(QWidget):
         self.wind_panel.set_persisted_settings(wind_records)
         self.wind_panel.clear()
         self.program_status_card.set_bone_gap_warning(missing_bone_generator_groups)
+        self.program_status_card.set_vertical_skeleton_warning(strictly_vertical_joints)
         self._warn_about_missing_bone_generator_groups(input_path, missing_bone_generator_groups)
         self._handle_tab_state_changed()
         self._update_action_state()
@@ -2417,6 +2423,7 @@ class MainWindow(QWidget):
 
     def _clear_input_dependent_tabs(self) -> None:
         self._scattered_parts_analysis = None
+        self.program_status_card.set_vertical_skeleton_warning(())
         self.wind_panel.set_scattered_parts_mode(active=False)
         self.wind_panel.clear()
         self.geometry_panel.clear()
@@ -3318,6 +3325,7 @@ class MainWindow(QWidget):
             proxy_output_path=proxy_output_path,
             output_mode=OutputMode.SELF_CONTAINED,
             cpu_profile=self._operator_state.cpu_profile,
+            conversion_mode=self._operator_state.conversion_mode,
             fbx_cache_max_bytes=self._fbx_cache_max_bytes(),
             fbx_cache_max_age_seconds=self._fbx_cache_max_age_seconds(),
         )

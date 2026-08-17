@@ -1105,3 +1105,11 @@ Major moves:
 - Removed unweighted tip joints and retained coincident root/deform pivots.
   Whole Mesh now has two joints; Per Cluster Skinned has root plus one joint
   per cluster.
+
+## 2026-08-17 - Strictly vertical source skeleton protection
+
+- Confirmed the Scattered Rig Dynamic Wind pole singularity on an ordinary
+  Norway spruce with six exactly vertical trunk joints.
+- Added deterministic whole-asset one-degree tilt around the root pivot for
+  affected Skeletal Assembly output, plus discovery/status and conversion
+  warnings. Static and already safe inputs are unchanged.

@@ -130,11 +130,18 @@ class ProgramStatusCard(QFrame):
         self.bone_gap_warning_label.setMinimumWidth(0)
         self.bone_gap_warning_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.bone_gap_warning_label.hide()
+        self.vertical_skeleton_warning_label = QLabel(host)
+        self.vertical_skeleton_warning_label.setObjectName("ProgramStatusWarning")
+        self.vertical_skeleton_warning_label.setWordWrap(True)
+        self.vertical_skeleton_warning_label.setMinimumWidth(0)
+        self.vertical_skeleton_warning_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.vertical_skeleton_warning_label.hide()
         layout.addWidget(self.mode_label)
         layout.addWidget(self.skinning_label)
         layout.addWidget(self.material_label)
         layout.addWidget(self.source_label)
         layout.addWidget(self.bone_gap_warning_label)
+        layout.addWidget(self.vertical_skeleton_warning_label)
         layout.addStretch(1)
 
         self._reset_timer = QTimer(self)
@@ -204,6 +211,18 @@ class ProgramStatusCard(QFrame):
         self.bone_gap_warning_label.setText(text)
         self.bone_gap_warning_label.setToolTip(", ".join(groups))
         self.bone_gap_warning_label.show()
+
+    def set_vertical_skeleton_warning(self, joints: tuple[str, ...]) -> None:
+        if not joints:
+            self.vertical_skeleton_warning_label.clear()
+            self.vertical_skeleton_warning_label.setToolTip("")
+            self.vertical_skeleton_warning_label.hide()
+            return
+        self.vertical_skeleton_warning_label.setText(
+            "⚠ Strictly vertical skeleton · skeletal output will be tilted 1° around its pivot"
+        )
+        self.vertical_skeleton_warning_label.setToolTip(", ".join(joints))
+        self.vertical_skeleton_warning_label.show()
 
     def set_passive_message(self, text: str) -> None:
         if self.state_label.property("statusState") == "working":

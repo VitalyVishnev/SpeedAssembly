@@ -26,6 +26,7 @@ from .source_analysis import (
 )
 from .canonical_loader import load_source_tree_model
 from .scattered_parts import ScatteredPartsAnalysis, analyze_scattered_parts
+from .skeleton_processing import strictly_vertical_joint_names
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,7 @@ class SourceDiscoveryResult:
     prototypes: PrototypeDiscovery
     missing_bone_generator_groups: tuple[str, ...] = ()
     scattered_parts: ScatteredPartsAnalysis = ScatteredPartsAnalysis(False, False, 0)
+    strictly_vertical_joints: tuple[str, ...] = ()
 
 
 def discover_source_rows(request: SourceDiscoveryRequest) -> SourceDiscoveryResult:
@@ -111,12 +113,18 @@ def discover_source_rows(request: SourceDiscoveryRequest) -> SourceDiscoveryResu
         ),
         missing_bone_generator_groups=discover_missing_bone_generator_groups(request.input_path),
         scattered_parts=analyze_scattered_parts(source_model),
+        strictly_vertical_joints=strictly_vertical_joint_names(source_model.skeleton),
     )
 
 
 def discover_scattered_parts(input_path: str) -> ScatteredPartsAnalysis:
     _report, source_model, _diagnostics = load_source_tree_model(input_path)
     return analyze_scattered_parts(source_model)
+
+
+def discover_strictly_vertical_joints(input_path: str) -> tuple[str, ...]:
+    _report, source_model, _diagnostics = load_source_tree_model(input_path)
+    return strictly_vertical_joint_names(source_model.skeleton)
 
 
 def discover_base_material_rows(

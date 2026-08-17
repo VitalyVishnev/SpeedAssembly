@@ -48,6 +48,7 @@ from xml_to_usda.proxy_source_projection import (
     load_proxy_source_projection,
     projection_to_tree_asset,
 )
+from xml_to_usda.skeleton_processing import tilt_tree_for_dynamic_wind
 from xml_to_usda.proxy_viewport_scene import build_proxy_source_viewport_scene
 
 
@@ -652,7 +653,7 @@ def test_proxy_source_projection_matches_canonical_proxy_inputs(source_path: Pat
     assert not [issue for issue in diagnostics if issue.severity == "error"]
 
     projection = load_proxy_source_projection(str(source_path))
-    projection_model = projection_to_tree_asset(projection)
+    projection_model = tilt_tree_for_dynamic_wind(projection_to_tree_asset(projection))
 
     assert projection.skeleton
     assert projection.base_mesh is not None

@@ -243,6 +243,15 @@ the current three-joint Whole Mesh, two coincident joints without a tip, and two
 joints with a 1 mm offset showed identical animation. The no-tip/no-offset
 topology is now authoritative and avoids unweighted joints.
 
+The same disappearance was reproduced on a conventional Norway spruce whose
+first six trunk joints were exactly Stage +Y. Bind/rest reconstruction,
+skinning weights, instance bindings, and bounds were valid; remodeling the
+whole tree with a one-degree tilt made Dynamic Wind work. Skeletal Assembly
+resolution now detects the singularity and rotates the complete authored asset
+one degree around its root pivot. This fix still requires an Unreal import gate
+on the converter-generated corrected spruce; local structural validation alone
+cannot prove Dynamic Wind runtime behavior.
+
 Import all four clustered outputs plus both unclustered outputs. Confirm that
 fully baked outputs import as ordinary Skeletal Meshes, rigid outputs import as
 Nanite Assemblies, blade and joint counts match, materials survive, wind pivots

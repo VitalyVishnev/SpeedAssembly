@@ -11,6 +11,7 @@ from .models import (
     Joint,
     Matrix4d,
     MeshData,
+    Quaternion,
     RepeatedPartInstance,
     SkinningQuality,
     ValidationIssue,
@@ -23,6 +24,114 @@ _TRANSFORM_TOLERANCE = 1.0e-4
 _TWIST_WARNING_DEGREES = 75.0
 _DENSE_VERTEX_CHUNK_SIZE = 262_144
 _SOFT_ATTACHMENT_COLLAR_FRACTION = 0.2
+_DYNAMIC_WIND_TILT_RADIANS = math.radians(1.0)
+_VERTICAL_AXIS_EPSILON = 1.0e-8
+
+
+def strictly_vertical_joint_names(skeleton: tuple[Joint, ...] | None) -> tuple[str, ...]:
+    """Return joints whose authored forward axis is parallel to Stage +Y/-Y."""
+    names: list[str] = []
+    for joint in skeleton or ():
+        axis = _matrix_axis(joint.bind_transform, 0)
+        if (
+            abs(axis.y) > 1.0 - _VERTICAL_AXIS_EPSILON
+            and axis.x * axis.x + axis.z * axis.z <= _VERTICAL_AXIS_EPSILON * _VERTICAL_AXIS_EPSILON
+        ):
+            names.append(joint.name)
+    return tuple(names)
+
+
+def tilt_tree_for_dynamic_wind(model: CanonicalTreeModel) -> CanonicalTreeModel:
+    """Bake a deterministic 1-degree whole-asset tilt around the skeleton pivot."""
+    if not strictly_vertical_joint_names(model.skeleton):
+        return model
+    root = next((joint for joint in model.skeleton if joint.parent is None), model.skeleton[0])
+    pivot = root.bind_translate
+    sine = math.sin(_DYNAMIC_WIND_TILT_RADIANS)
+    cosine = math.cos(_DYNAMIC_WIND_TILT_RADIANS)
+
+    def rotate_vector(value: Vector3) -> Vector3:
+        return Vector3(
+            cosine * value.x - sine * value.y,
+            sine * value.x + cosine * value.y,
+            value.z,
+        )
+
+    def rotate_point(value: Vector3) -> Vector3:
+        offset = rotate_vector(_subtract(value, pivot))
+        return Vector3(pivot.x + offset.x, pivot.y + offset.y, pivot.z + offset.z)
+
+    def rotate_matrix(value: Matrix4d) -> Matrix4d:
+        return _transform(
+            rotate_vector(_matrix_axis(value, 0)),
+            rotate_vector(_matrix_axis(value, 1)),
+            rotate_vector(_matrix_axis(value, 2)),
+            rotate_point(value.translation),
+        )
+
+    absolute_skeleton = tuple(
+        replace(
+            joint,
+            bind_transform=rotate_matrix(joint.bind_transform),
+            bind_end_transform=(
+                rotate_matrix(joint.bind_end_transform)
+                if joint.bind_end_transform is not None
+                else None
+            ),
+        )
+        for joint in model.skeleton
+    )
+    absolute_by_name = {joint.name: joint.bind_transform for joint in absolute_skeleton}
+    skeleton = tuple(
+        replace(
+            joint,
+            rest_transform=(
+                joint.bind_transform
+                if joint.parent is None
+                else _multiply(joint.bind_transform, _rigid_inverse(absolute_by_name[joint.parent]))
+            ),
+        )
+        for joint in absolute_skeleton
+    )
+    rotation = Quaternion(
+        math.cos(_DYNAMIC_WIND_TILT_RADIANS * 0.5),
+        0.0,
+        0.0,
+        math.sin(_DYNAMIC_WIND_TILT_RADIANS * 0.5),
+    )
+
+    def rotate_mesh(mesh: MeshData) -> MeshData:
+        return replace(
+            mesh,
+            points=tuple(rotate_point(point) for point in mesh.points),
+            normals=tuple(rotate_vector(normal) for normal in mesh.normals),
+        )
+
+    def rotate_orientation(orientation: Quaternion) -> Quaternion:
+        return _multiply_quaternions(rotation, orientation)
+
+    return replace(
+        model,
+        base_mesh=rotate_mesh(model.base_mesh) if model.base_mesh is not None else None,
+        skeleton=skeleton,
+        assembly_parts=tuple(
+            replace(
+                part,
+                position=rotate_point(part.position),
+                orientation=rotate_orientation(part.orientation),
+            )
+            for part in model.repeated_parts
+        ),
+        static_collision_meshes=tuple(rotate_mesh(mesh) for mesh in model.static_collision_meshes),
+        static_collision_primitives=tuple(
+            replace(
+                primitive,
+                center=rotate_point(primitive.center),
+                orientation=rotate_orientation(primitive.orientation),
+            )
+            for primitive in model.static_collision_primitives
+        ),
+    )
 
 
 def validate_skeleton(skeleton: tuple[Joint, ...] | None) -> tuple[ValidationIssue, ...]:
@@ -728,6 +837,15 @@ def _transform(x_axis: Vector3, y_axis: Vector3, z_axis: Vector3, translate: Vec
         (z_axis.x, z_axis.y, z_axis.z, 0.0),
         (translate.x, translate.y, translate.z, 1.0),
     ))
+
+
+def _multiply_quaternions(left: Quaternion, right: Quaternion) -> Quaternion:
+    return Quaternion(
+        left.real * right.real - left.i * right.i - left.j * right.j - left.k * right.k,
+        left.real * right.i + left.i * right.real + left.j * right.k - left.k * right.j,
+        left.real * right.j - left.i * right.k + left.j * right.real + left.k * right.i,
+        left.real * right.k + left.i * right.j - left.j * right.i + left.k * right.real,
+    )
 
 
 def _multiply(left: Matrix4d, right: Matrix4d) -> Matrix4d:

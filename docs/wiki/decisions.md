@@ -1577,6 +1577,16 @@ degree of either pole are deterministically clamped to the safe one-degree
 boundary. Cluster pivots remain deterministic means of member instance pivots
 because the observed Zone objects carry zero transforms.
 
+The same singularity is importer-relevant for ordinary source skeletons, not
+only synthetic Scattered Rigs. If any source joint forward axis is strictly
+parallel to Stage +Y/-Y, Skeletal Assembly resolution bakes one deterministic
+degree of rotation into the entire authored asset around its root pivot. Base
+Mesh points and normals, absolute bind/end transforms, local rest transforms,
+Repeated Part positions/orientations, and collision payloads stay in the same
+rotated frame. Static modes and already non-vertical skeletal inputs remain
+bit-for-bit unaffected by this projection. Source discovery and conversion
+diagnostics expose the automatic correction before export.
+
 All synthetic joints start in one Dynamic Wind group. Wind inspection, JSON,
 Preview, and export use the same rig resolver. Proxy Mesh and Fracturing actions
 are disabled for Scattered Parts; Part Preview remains available.

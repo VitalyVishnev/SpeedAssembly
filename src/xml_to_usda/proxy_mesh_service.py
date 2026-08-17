@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 from .mesh_pruning import DEFAULT_BRANCH_PRUNE_AGGRESSION, select_large_connected_face_indices
 from .models import CanonicalTreeModel, GeometryBuffer, MeshData, Prototype, Quaternion, Vector3
-from .models import ConversionRequest, CpuProfile, OutputMode
+from .models import ConversionMode, ConversionRequest, CpuProfile, OutputMode
 from .naming import make_stable_prim_name
 from .output_resolution import ensure_output_path_allowed
 from .proxy_source_projection import load_proxy_source_projection, projection_to_tree_asset
@@ -34,6 +34,7 @@ from .proxy_collision import (
     prepare_proxy_collision_source,
 )
 from .qem_simplification import QemSimplificationError, simplify_geometry_buffer_qem
+from .skeleton_processing import tilt_tree_for_dynamic_wind
 
 
 DEFAULT_PROXY_POLYCOUNT = 5000
@@ -66,6 +67,7 @@ class ProxyMeshSourceRequest:
     proxy_output_path: str = ""
     output_mode: OutputMode = OutputMode.SELF_CONTAINED
     cpu_profile: CpuProfile = CpuProfile.BALANCED
+    conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024
     fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60
 
@@ -76,6 +78,7 @@ class ProxyMeshSourceRequest:
             output_path=request.output_path or "",
             output_mode=request.output_mode,
             cpu_profile=request.cpu_profile,
+            conversion_mode=request.conversion_mode,
             fbx_cache_max_bytes=request.fbx_cache_max_bytes,
             fbx_cache_max_age_seconds=request.fbx_cache_max_age_seconds,
         )
@@ -88,6 +91,7 @@ def prepare_proxy_mesh_source_request(
     proxy_output_path: str = "",
     output_mode: OutputMode = OutputMode.SELF_CONTAINED,
     cpu_profile: CpuProfile = CpuProfile.BALANCED,
+    conversion_mode: ConversionMode = ConversionMode.SKELETAL_ASSEMBLY,
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
     fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60,
 ) -> ProxyMeshSourceRequest:
@@ -99,6 +103,7 @@ def prepare_proxy_mesh_source_request(
         proxy_output_path=proxy_output_path.strip(),
         output_mode=output_mode,
         cpu_profile=cpu_profile,
+        conversion_mode=conversion_mode,
         fbx_cache_max_bytes=fbx_cache_max_bytes,
         fbx_cache_max_age_seconds=fbx_cache_max_age_seconds,
     )
@@ -1393,4 +1398,7 @@ def _load_proxy_source_projection(request: ProxyMeshSourceRequest) -> tuple[str,
     input_path = request.input_path.strip()
     if not input_path:
         raise ProxyMeshError("Proxy mesh generation requires a source XML path.")
-    return input_path, projection_to_tree_asset(load_proxy_source_projection(input_path))
+    model = projection_to_tree_asset(load_proxy_source_projection(input_path))
+    if request.conversion_mode == ConversionMode.SKELETAL_ASSEMBLY:
+        model = tilt_tree_for_dynamic_wind(model)
+    return input_path, model

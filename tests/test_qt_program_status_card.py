@@ -147,6 +147,21 @@ def test_program_status_card_keeps_missing_bone_warning_visible(qtbot) -> None:
     assert card.bone_gap_warning_label.isHidden()
 
 
+def test_program_status_card_keeps_vertical_skeleton_autofix_visible(qtbot) -> None:
+    card = ProgramStatusCard()
+    qtbot.addWidget(card)
+
+    card.set_vertical_skeleton_warning(("root", "bone_001"))
+    card.finish("success", "Source rows loaded.")
+
+    assert not card.vertical_skeleton_warning_label.isHidden()
+    assert "tilted 1°" in card.vertical_skeleton_warning_label.text()
+    assert card.vertical_skeleton_warning_label.toolTip() == "root, bone_001"
+
+    card.set_vertical_skeleton_warning(())
+    assert card.vertical_skeleton_warning_label.isHidden()
+
+
 def test_program_status_card_compacts_paths_but_keeps_full_tooltip(qtbot) -> None:
     card = ProgramStatusCard()
     qtbot.addWidget(card)

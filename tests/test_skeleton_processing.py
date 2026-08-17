@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pytest
 from dataclasses import replace
 
@@ -20,6 +22,8 @@ from xml_to_usda.skeleton_processing import (
     _rigid_inverse,
     apply_skinning_quality,
     orient_skeleton_x,
+    strictly_vertical_joint_names,
+    tilt_tree_for_dynamic_wind,
     validate_skeleton,
     validate_skinning,
 )
@@ -86,6 +90,23 @@ def test_x_oriented_bones_point_local_x_from_start_to_end_and_author_animation_r
     assert "quath[] rotations = [(1, 0, 0, 0), (1, 0, 0, 0)]" not in _render_base_animation(
         result, "Animation", None
     )
+
+
+def test_dynamic_wind_safety_tilts_the_entire_asset_around_the_root_pivot() -> None:
+    source = _model()
+    source = replace(source, skeleton=orient_skeleton_x(source.skeleton))
+
+    result = tilt_tree_for_dynamic_wind(source)
+
+    assert strictly_vertical_joint_names(source.skeleton) == ("root",)
+    assert strictly_vertical_joint_names(result.skeleton) == ()
+    assert result.skeleton[0].bind_translate == source.skeleton[0].bind_translate
+    assert result.base_mesh is not None
+    assert result.base_mesh.points[0].x == pytest.approx(-2.0 * math.sin(math.radians(1.0)))
+    assert result.base_mesh.points[0].y == pytest.approx(2.0 * math.cos(math.radians(1.0)))
+    assert result.repeated_parts[0].position == result.base_mesh.points[0]
+    assert result.repeated_parts[0].orientation.k == pytest.approx(math.sin(math.radians(0.5)))
+    assert not validate_skeleton(result.skeleton)
 
 
 def test_two_weight_skinning_blends_parent_to_current_joint_along_bone_segment() -> None:
