@@ -22,6 +22,7 @@ PyI_*.spec
 _pyi_*.py
 
 # Local documentation editor state
+.obsidian/workspace.json
 docs/user/.obsidian/
 docs/user/_drafts/
 docs/user/_templates/

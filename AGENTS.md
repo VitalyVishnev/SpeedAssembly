@@ -91,13 +91,13 @@ Rules:
 - If required structural, architectural, or importer-contract decisions are unresolved, stop and ask before coding.
 - Keep side effects at the edges. Keep core transformation logic deterministic and inspectable.
 - Minimize hidden mutable state.
-- If Goal is active, do not finish goal after first iteration.
 - After code changes, choose the build gate by risk. Use `& '.\scripts\build_qt_gui_exe.cmd' -Quick` after relevant tests for UI-only layout, styling, copy, and other small low-risk shell changes; it is a source-backed unvalidated preview, not a release. Use `& '.\scripts\build_qt_gui_exe.cmd' -Package` for backend/importer-facing behavior, worker/process/cache lifecycle, FBX/USD/OpenGL/native paths, packaging/hooks/dependencies, packaged-only failures or native crashes, and before a release. After an ordinary defect found in Quick, iterate with relevant tests plus Quick and run Package once the fix is ready; use Package for each candidate only when the defect is frozen-runtime-specific or native. If `-SkipSmoke` is used, report the reason explicitly.
 - Don't use unnecessary words, talk short and professional.
 - Не делай костыли, сделай сразу систему так, чтобы работала. Чтобы не пришлось переделывать.
 - Переиспользуй готовые решения, которые есть в проекте, не изобретай велосипед.
 - For subagents use faster, cheaper models.
 - For code use ponytail skill by default.
+- For all text on all languages use always Unslop skill.
 - If you notice, that you have to dig deep for specific information, that could be useful in the future, you can leave short notes in code for tourself and other agent to make navigation and code reserch easier and faster. But make this notes systematically, so they create sort of knowledge graph.
 
 ## Simplicity and Architecture Requirements
@@ -183,10 +183,3 @@ A test that can't fail when business logic changes is wrong.
 Do not test every implementation detail or every intermediate experiment.
 For simple edits, run the relevant existing checks instead of creating new tests by default.
 
-### Rule 8 - Match the codebase's conventions, even if you disagree
-Conformance > taste inside the codebase.
-If you think a convention is harmful, surface it. Don't fork it silently.
-
-## Final Rule
-
-If forced to choose between elegant abstraction, theoretical correctness, and what UE 5.7 actually imports, choose what UE 5.7 actually imports.

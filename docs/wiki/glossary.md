@@ -13,6 +13,7 @@
 - `Source Prototype` - a reusable repeated-part definition from `Meshes/Mesh`.
 - `Resolved Prototype` - a prototype after source facts are combined with operator intent.
 - `Authored Prototype` - the USD prototype subtree written for `PointInstancer`.
+- `PartMesh` - an authored prototype payload for a repeated Assembly Part. It can be inline or an intentional Unreal asset reference.
 - `Repeated Part Instance` - a source-level placed record from `LeafReferences`.
 - `Resolved Instance` - a repeated part instance after operator intent is applied.
 - `Authored Instance` - the per-instance data written into USDA arrays.

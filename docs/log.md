@@ -956,7 +956,7 @@ Major moves:
   tab backgrounds with `RoundedTabBar` painting. Qt now preserves the intended
   rounded tab shape independently of Windows monitor scaling.
 
-# 2026-08-12
+## 2026-08-12 - UE 5.7 foliage-bone orientation experiment
 
 - Added a UE 5.7 in-place foliage-bone Asset Action experiment with terminal
   zero-length fallback, Skeleton Asset synchronization/validation, and a
@@ -1122,3 +1122,10 @@ Major moves:
   re-simplifying geometry, showing `Generating preview`, or resetting the camera.
 - Removed the redundant Default-mode geometry copy; zero shader tint already
   ignores source vertex colors.
+
+## 2026-08-19 - Wiki navigation polish
+
+- Normalized one malformed historical log heading and added the established
+  `PartMesh` term to the glossary.
+- Checked internal Markdown links and architecture file references; no broken
+  targets found. Raw sources were not changed.
