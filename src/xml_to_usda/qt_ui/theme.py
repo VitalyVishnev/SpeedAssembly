@@ -672,6 +672,13 @@ QPushButton#WindRefreshButton:disabled {{
     background: {button_fill_disabled};
     color: rgba(26, 26, 21, 0.58);
 }}
+QLabel#WindTotalBones {{
+    background: {control_fill};
+    color: {button_text};
+    border-radius: {button_radius}px;
+    min-height: {wind_refresh_button_height}px;
+    padding: 2px 8px;
+}}
 QPushButton#SplitActionMainButton {{
     background: {button_fill};
     color: {button_text};

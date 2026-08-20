@@ -2270,11 +2270,13 @@ class MainWindow(QWidget):
 
         self._background_jobs.cancel_source_discovery()
         try:
-            prototype_discovery = self._deps.discover_part_prototype_rows(input_path, persisted_records=part_records)
-            base_discovery = self._deps.discover_base_material_rows(input_path, persisted_records=base_records)
-            missing_bone_generator_groups = self._deps.discover_missing_bone_generator_groups(input_path)
-            scattered_parts = self._deps.discover_scattered_parts(input_path)
-            strictly_vertical_joints = self._deps.discover_strictly_vertical_joints(input_path)
+            result = self._deps.discover_source_rows(
+                SourceDiscoveryRequest(
+                    input_path=input_path,
+                    base_persisted_records=base_records,
+                    part_persisted_records=part_records,
+                )
+            )
         except Exception as exc:
             self._clear_input_dependent_tabs()
             self.program_status_card.set_summary(source="XML inspection failed")
@@ -2288,15 +2290,16 @@ class MainWindow(QWidget):
             return
 
         self._apply_source_discovery(
-            input_path=input_path,
+            input_path=result.input_path,
             base_records=base_records,
             part_records=part_records,
             wind_records=wind_records,
-            base_discovery=base_discovery,
-            prototype_discovery=prototype_discovery,
-            missing_bone_generator_groups=missing_bone_generator_groups,
-            scattered_parts=scattered_parts,
-            strictly_vertical_joints=strictly_vertical_joints,
+            base_discovery=result.base,
+            prototype_discovery=result.prototypes,
+            missing_bone_generator_groups=result.missing_bone_generator_groups,
+            scattered_parts=result.scattered_parts,
+            strictly_vertical_joints=result.strictly_vertical_joints,
+            skeleton_joint_count=result.skeleton_joint_count,
         )
         self._finish_status_activity("success", "Source rows loaded.")
 
@@ -2330,6 +2333,7 @@ class MainWindow(QWidget):
             missing_bone_generator_groups=result.missing_bone_generator_groups,
             scattered_parts=result.scattered_parts,
             strictly_vertical_joints=result.strictly_vertical_joints,
+            skeleton_joint_count=result.skeleton_joint_count,
         )
         self._finish_status_activity("success", "Source rows loaded.")
         self._maybe_auto_refresh_wind_groups()
@@ -2352,6 +2356,7 @@ class MainWindow(QWidget):
         missing_bone_generator_groups=(),
         scattered_parts=None,
         strictly_vertical_joints=(),
+        skeleton_joint_count=0,
     ) -> None:
         base_count = len(base_discovery.rows)
         prototype_count = len(prototype_discovery.rows)
@@ -2366,7 +2371,8 @@ class MainWindow(QWidget):
             source_summary = (
                 f"Scattered Parts · {structure}\n"
                 f"Prototypes: {prototype_count}\n"
-                f"Instances: {instance_count:,}"
+                f"Instances: {instance_count:,}\n"
+                f"Bones: {skeleton_joint_count:,}"
             )
             self.wind_panel.set_scattered_parts_mode(
                 active=True,
@@ -2378,7 +2384,8 @@ class MainWindow(QWidget):
             source_summary = (
                 f"Base slots: {base_count}\n"
                 f"Prototypes: {prototype_count}\n"
-                f"Instances: {instance_count:,}"
+                f"Instances: {instance_count:,}\n"
+                f"Bones: {skeleton_joint_count:,}"
             )
             self.wind_panel.set_scattered_parts_mode(active=False)
         self.program_status_card.set_summary(source=source_summary)
@@ -3363,7 +3370,7 @@ class MainWindow(QWidget):
 
     def _handle_wind_data_loaded(self, dynamic_wind, *, used_retry: bool) -> None:
         self._current_dynamic_wind = dynamic_wind
-        self.wind_panel.rebuild(dynamic_wind.simulation_groups)
+        self.wind_panel.rebuild(dynamic_wind)
         self._finish_status_activity("success", f"Loaded {len(dynamic_wind.simulation_groups)} wind groups.")
         summary = format_wind_group_summary(dynamic_wind)
         if used_retry:

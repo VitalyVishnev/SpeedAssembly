@@ -97,6 +97,7 @@ class SourceDiscoveryResult:
     missing_bone_generator_groups: tuple[str, ...] = ()
     scattered_parts: ScatteredPartsAnalysis = ScatteredPartsAnalysis(False, False, 0)
     strictly_vertical_joints: tuple[str, ...] = ()
+    skeleton_joint_count: int = 0
 
 
 def discover_source_rows(request: SourceDiscoveryRequest) -> SourceDiscoveryResult:
@@ -114,6 +115,7 @@ def discover_source_rows(request: SourceDiscoveryRequest) -> SourceDiscoveryResu
         missing_bone_generator_groups=discover_missing_bone_generator_groups(request.input_path),
         scattered_parts=analyze_scattered_parts(source_model),
         strictly_vertical_joints=strictly_vertical_joint_names(source_model.skeleton),
+        skeleton_joint_count=len(source_model.skeleton),
     )
 
 

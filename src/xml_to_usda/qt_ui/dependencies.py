@@ -24,6 +24,7 @@ class QtUiDependencies:
     close_process_queue: object
     drain_process_queue: object
     convert_request: object
+    discover_source_rows: object
     discover_base_material_rows: object
     discover_part_prototype_rows: object
     discover_missing_bone_generator_groups: object
@@ -65,6 +66,7 @@ def build_default_dependencies() -> QtUiDependencies:
     )
     from ..conversion_service import prepare_conversion_plan
     from ..discovery_service import (
+        discover_source_rows,
         discover_base_material_rows,
         discover_part_prototype_rows,
         discover_scattered_parts,
@@ -104,6 +106,7 @@ def build_default_dependencies() -> QtUiDependencies:
         close_process_queue=close_process_queue,
         drain_process_queue=drain_process_queue,
         convert_request=convert_request,
+        discover_source_rows=discover_source_rows,
         discover_base_material_rows=discover_base_material_rows,
         discover_part_prototype_rows=discover_part_prototype_rows,
         discover_missing_bone_generator_groups=discover_missing_bone_generator_groups,

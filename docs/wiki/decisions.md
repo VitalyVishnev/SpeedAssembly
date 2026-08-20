@@ -1038,6 +1038,12 @@ duplicate external joint names, missing skeletons, missing or unreadable joint
 transforms, and unavailable import backends fail loudly. Wind Preview JSON
 export uses the existing Dynamic Wind JSON schema and output-path derivation
 rather than introducing a new schema.
+Every visible final group may disclose Trunk, Dual Influence, and its influence
+controls. Those values persist by source-layer key and are applied after
+compaction, so a changing final index cannot move settings to another layer.
+Base XML/Auto rows may disclose settings but are not selectable for manual bone
+picking; only a manual layer can enter edit mode, and clicking it again clears
+that selection.
 The right panel uses one global settings scroll; Layers is the only nested
 scroll, resizes vertically through a local handle even when the global scrollbar
 is visible, and owns compact `+`/`-` manual-layer actions. Wind Preview opens
@@ -1050,6 +1056,11 @@ blocks directly. Multiple USD Skeleton prims require an explicit operator
 choice through the Skeleton dropdown. The loader must not choose by largest
 joint count, prim order, or name. Binary `.usd`/`.usdc` stay behind the `pxr`
 requirement.
+External Skeleton Display Transform is viewport-only. Source/preview unit and
+Y-up/Z-up selectors transform rendered bone segments and bounds but never the
+loaded skeleton, final group assignments, or Dynamic Wind JSON. A non-blocking
+warning names non-zero parent-to-child segments parallel to the selected source
+up axis; it must not apply the main SpeedTree one-degree tilt.
 The SpeedTree worker result must not contain the full CanonicalTreeModel beside
 the already-built viewport scene. It carries only the skeleton, Dynamic Wind
 data, and compact Base Mesh scene buffers. Repeated Parts are omitted entirely:

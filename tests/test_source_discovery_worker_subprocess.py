@@ -47,4 +47,5 @@ def test_source_discovery_worker_keeps_xml_parsing_outside_the_caller(monkeypatc
     assert result.base.rows
     assert any(row.ue_asset_path == "/Game/Test/M_Bark.M_Bark" for row in result.base.rows)
     assert result.prototypes.rows
+    assert result.skeleton_joint_count > 0
     assert not error_path.exists()

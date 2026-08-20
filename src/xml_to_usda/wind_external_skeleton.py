@@ -10,11 +10,14 @@ from .fbx_adapter import FbxImportError, load_fbx_skeleton
 from .models import ExportMetadata, Joint, Matrix4d, TreeAsset, Vector3
 from .wind_preview_service import WindPreviewError, WindPreviewResult
 from .wind_viewport_scene import build_auto_wind_viewport_data, build_wind_viewport_groups, build_wind_viewport_scene
+from .viewport_scene import ViewportBoneSegment, ViewportBounds, ViewportScene
 
 
 SUPPORTED_USD_SKELETON_SUFFIXES = {".usd", ".usda", ".usdc"}
 TEXT_USD_SKELETON_SUFFIXES = {".usd", ".usda"}
 _USD_NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+_DISPLAY_UNIT_TO_METERS = {"mm": 0.001, "cm": 0.01, "m": 1.0}
+_VERTICAL_EPSILON = 1.0e-8
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +50,125 @@ class ExternalSkeletonChoicesResult:
 class _UsdSkeletonCandidate:
     choice: ExternalSkeletonChoice
     joints: tuple[Joint, ...]
+
+
+def external_vertical_bone_names(skeleton: tuple[Joint, ...], source_up_axis: str) -> tuple[str, ...]:
+    """Return external child joints whose parent segment is parallel to the selected up axis."""
+    up_axis = _display_up_axis(source_up_axis)
+    joints_by_name = {joint.name: joint for joint in skeleton}
+    names: list[str] = []
+    for joint in skeleton:
+        parent = joints_by_name.get(joint.parent or "")
+        if parent is None:
+            continue
+        offset = _subtract(joint.bind_translate, parent.bind_translate)
+        length_squared = offset.x * offset.x + offset.y * offset.y + offset.z * offset.z
+        if length_squared <= _VERTICAL_EPSILON * _VERTICAL_EPSILON:
+            continue
+        vertical = _axis_value(offset, up_axis)
+        lateral_squared = length_squared - vertical * vertical
+        if lateral_squared <= length_squared * _VERTICAL_EPSILON * _VERTICAL_EPSILON:
+            names.append(joint.name)
+    return tuple(names)
+
+
+def transform_external_skeleton_scene(
+    scene: ViewportScene,
+    *,
+    source_unit: str,
+    preview_unit: str,
+    source_up_axis: str,
+    preview_up_axis: str,
+) -> ViewportScene:
+    """Return a display-only transformed external-skeleton scene."""
+    scale = _display_unit_scale(source_unit, preview_unit)
+    source_up = _display_up_axis(source_up_axis)
+    preview_up = _display_up_axis(preview_up_axis)
+
+    def transform(point: Vector3) -> Vector3:
+        return _transform_display_point(point, scale, source_up, preview_up)
+
+    bone_segments = tuple(
+        ViewportBoneSegment(
+            segment_id=segment.segment_id,
+            parent_token=segment.parent_token,
+            child_token=segment.child_token,
+            start=transform(segment.start),
+            end=transform(segment.end),
+            color=segment.color,
+            selected=segment.selected,
+            selectable_id=segment.selectable_id,
+            explode_direction=segment.explode_direction,
+        )
+        for segment in scene.bone_segments
+    )
+    return ViewportScene(
+        scene_id=scene.scene_id,
+        mesh_batches=scene.mesh_batches,
+        draw_calls=scene.draw_calls,
+        bounds=_transformed_external_bounds(scene.bounds, bone_segments, transform),
+        stats=scene.stats,
+        bone_segments=bone_segments,
+        markers=scene.markers,
+        labels=scene.labels,
+        grid_origin=transform(scene.grid_origin) if scene.grid_origin is not None else None,
+    )
+
+
+def _display_unit_scale(source_unit: str, preview_unit: str) -> float:
+    try:
+        return _DISPLAY_UNIT_TO_METERS[source_unit] / _DISPLAY_UNIT_TO_METERS[preview_unit]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported display unit: {exc.args[0]}") from exc
+
+
+def _display_up_axis(value: str) -> str:
+    axis = value.upper()
+    if axis not in {"Y", "Z"}:
+        raise ValueError(f"Unsupported display up axis: {value}")
+    return axis
+
+
+def _transform_display_point(point: Vector3, scale: float, source_up: str, preview_up: str) -> Vector3:
+    if source_up == preview_up:
+        return Vector3(point.x * scale, point.y * scale, point.z * scale)
+    if source_up == "Y":
+        return Vector3(point.x * scale, -point.z * scale, point.y * scale)
+    return Vector3(point.x * scale, point.z * scale, -point.y * scale)
+
+
+def _transformed_external_bounds(
+    fallback: ViewportBounds,
+    bone_segments: tuple[ViewportBoneSegment, ...],
+    transform,
+) -> ViewportBounds:
+    points = tuple(
+        point
+        for segment in bone_segments
+        for point in (segment.start, segment.end)
+    ) or tuple(transform(point) for point in _bounds_corners(fallback))
+    return ViewportBounds(
+        min_point=Vector3(min(point.x for point in points), min(point.y for point in points), min(point.z for point in points)),
+        max_point=Vector3(max(point.x for point in points), max(point.y for point in points), max(point.z for point in points)),
+    )
+
+
+def _bounds_corners(bounds: ViewportBounds) -> tuple[Vector3, ...]:
+    low, high = bounds.min_point, bounds.max_point
+    return tuple(
+        Vector3(x, y, z)
+        for x in (low.x, high.x)
+        for y in (low.y, high.y)
+        for z in (low.z, high.z)
+    )
+
+
+def _axis_value(value: Vector3, axis: str) -> float:
+    return value.y if axis == "Y" else value.z
+
+
+def _subtract(left: Vector3, right: Vector3) -> Vector3:
+    return Vector3(left.x - right.x, left.y - right.y, left.z - right.z)
 
 
 def load_external_skeleton_preview(request: ExternalSkeletonPreviewRequest) -> WindPreviewResult:

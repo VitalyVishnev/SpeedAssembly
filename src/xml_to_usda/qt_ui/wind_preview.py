@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
+    QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -19,18 +21,21 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSlider,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from ..dynamic_wind import write_dynamic_wind_json
-from ..models import Color4, DynamicWindData
+from ..models import Color4, DynamicWindData, DynamicWindSimulationGroup
 from ..wind_external_skeleton import (
     ExternalSkeletonChoicesRequest,
     ExternalSkeletonPreviewRequest,
+    external_vertical_bone_names,
     external_skeleton_backend_available,
     list_external_usd_skeletons,
     load_external_skeleton_preview,
+    transform_external_skeleton_scene,
 )
 from ..wind_service import derive_wind_json_output_path
 from ..wind_preview_service import WindPreviewResult
@@ -58,6 +63,7 @@ from ..wind_viewport_scene import (
     subtree_root_from_pick_token,
 )
 from .material_controls import set_tooltip
+from .panels import SliderSpinEditor
 from .preview_shell import PreviewShellDialog, apply_compact_preview_panel_style
 from .viewport import MatcapViewport
 
@@ -74,6 +80,10 @@ GROUPING_MODE_XML = "xml"
 GROUPING_MODE_AUTO = "auto"
 SOURCE_MODE_XML = "source_xml"
 SOURCE_MODE_EXTERNAL = "source_external"
+DISPLAY_UNITS = (("Millimeters", "mm"), ("Centimeters", "cm"), ("Meters", "m"))
+DISPLAY_UP_AXES = (("Y-up", "Y"), ("Z-up", "Z"))
+_WIND_GROUP_BOOLEAN_FIELDS = frozenset({"is_trunk_group", "use_dual_influence"})
+_WIND_GROUP_NUMERIC_FIELDS = frozenset({"influence", "min_influence", "max_influence", "shift_top"})
 
 
 class WindPreviewDialog(PreviewShellDialog):
@@ -86,7 +96,7 @@ class WindPreviewDialog(PreviewShellDialog):
         wind_session_changed: Callable[[dict[str, object]], None] | None = None,
         parent=None,
     ) -> None:
-        super().__init__(title="Wind Preview", parent=parent)
+        super().__init__(title="Advanced Wind Settings", parent=parent)
         self.resize(WIND_PREVIEW_DEFAULT_WIDTH, WIND_PREVIEW_DEFAULT_HEIGHT)
         self.current_preview: WindPreviewResult | None = None
         self._external_preview_requested = external_preview_requested
@@ -97,6 +107,8 @@ class WindPreviewDialog(PreviewShellDialog):
         self._group_buttons: dict[int, QPushButton] = {}
         self._group_cards: dict[int, QFrame] = {}
         self._manual_group_cards: dict[int, QFrame] = {}
+        self._expanded_group_source_keys: set[str] = set()
+        self._group_settings_by_source_key: dict[str, dict[str, bool | float]] = {}
         self._auto_group_count = 1
         self._auto_continuous_levels: set[int] = set()
         self._manual_groups: tuple[WindManualGroup, ...] = ()
@@ -106,6 +118,10 @@ class WindPreviewDialog(PreviewShellDialog):
         self._active_scene = None
         self._external_skeleton_choices_path = ""
         self._external_skeleton_choice_count = 0
+        self._display_source_unit = "m"
+        self._display_preview_unit = "m"
+        self._display_source_up_axis = "Y"
+        self._display_preview_up_axis = "Y"
 
         self.viewport = MatcapViewport(self)
         self.viewport.set_matcap_tint_strength(WIND_MATCAP_TINT_STRENGTH)
@@ -165,7 +181,49 @@ class WindPreviewDialog(PreviewShellDialog):
         self.browse_external_button.setFixedHeight(24)
         external_layout.addWidget(self.browse_external_button, 1)
         settings_layout.addWidget(external_row)
-        self._external_controls = (self.external_path_edit, self.external_skeleton_combo, external_row)
+
+        self.external_display_transform_frame = QFrame(settings_panel)
+        self.external_display_transform_frame.setObjectName("LayerCard")
+        transform_layout = QFormLayout(self.external_display_transform_frame)
+        transform_layout.setContentsMargins(6, 5, 6, 5)
+        transform_layout.setSpacing(4)
+        transform_title = QLabel("Display Transform", self.external_display_transform_frame)
+        transform_title.setStyleSheet("font-weight: 600;")
+        transform_layout.addRow(transform_title)
+        self.source_units_combo = _display_combo(DISPLAY_UNITS, self.external_display_transform_frame)
+        self.preview_units_combo = _display_combo(DISPLAY_UNITS, self.external_display_transform_frame)
+        self.source_up_axis_combo = _display_combo(DISPLAY_UP_AXES, self.external_display_transform_frame)
+        self.preview_up_axis_combo = _display_combo(DISPLAY_UP_AXES, self.external_display_transform_frame)
+        _set_combo_data(self.source_units_combo, self._display_source_unit)
+        _set_combo_data(self.preview_units_combo, self._display_preview_unit)
+        _set_combo_data(self.source_up_axis_combo, self._display_source_up_axis)
+        _set_combo_data(self.preview_up_axis_combo, self._display_preview_up_axis)
+        transform_layout.addRow("Source Units", self.source_units_combo)
+        transform_layout.addRow("Preview Units", self.preview_units_combo)
+        transform_layout.addRow("Source Up Axis", self.source_up_axis_combo)
+        transform_layout.addRow("Preview Up Axis", self.preview_up_axis_combo)
+        self.external_vertical_warning_label = QLabel(self.external_display_transform_frame)
+        self.external_vertical_warning_label.setObjectName("ProgramStatusWarning")
+        self.external_vertical_warning_label.setWordWrap(True)
+        self.external_vertical_warning_label.hide()
+        transform_layout.addRow(self.external_vertical_warning_label)
+        for combo in (
+            self.source_units_combo,
+            self.preview_units_combo,
+            self.source_up_axis_combo,
+            self.preview_up_axis_combo,
+        ):
+            combo.currentIndexChanged.connect(lambda _index: self._on_external_display_transform_changed())
+        settings_layout.addWidget(self.external_display_transform_frame)
+        self._external_controls = (
+            self.external_path_edit,
+            self.external_skeleton_combo,
+            external_row,
+            self.external_display_transform_frame,
+        )
+        self.total_bones_label = QLabel("Total bones: —", settings_panel)
+        self.total_bones_label.setObjectName("MutedText")
+        settings_layout.addWidget(self.total_bones_label)
 
         _add_group_header(settings_layout, settings_panel, "Grouping")
         mode_label = QLabel("Mode", settings_panel)
@@ -337,10 +395,13 @@ class WindPreviewDialog(PreviewShellDialog):
 
     def set_preview(self, preview: WindPreviewResult) -> None:
         self.current_preview = preview
+        self.total_bones_label.setText(f"Total bones: {len(preview.source_model.skeleton):,}")
         self._selection = WindViewportSelection()
         self._auto_group_count = max(1, min(AUTO_WIND_GROUP_MAX_COUNT, len(preview.groups) or 1))
         self._auto_continuous_levels = set()
         self._manual_groups = ()
+        self._expanded_group_source_keys = set()
+        self._group_settings_by_source_key = {}
         self._active_manual_layer_id = None
         self._undo_stack = []
         self._redo_stack = []
@@ -360,6 +421,7 @@ class WindPreviewDialog(PreviewShellDialog):
         with QSignalBlocker(self.group_count_slider):
             self.group_count_slider.setValue(self._auto_group_count)
         self._sync_source_controls()
+        self._sync_external_skeleton_warning()
         self._sync_grouping_controls()
         self._rebuild_group_list()
         self._apply_scene(frame_camera=True)
@@ -540,8 +602,13 @@ class WindPreviewDialog(PreviewShellDialog):
         self._save_wind_session()
 
     def toggle_manual_group_edit(self, layer_id: int, final_group_index: int | None = None) -> None:
-        self._active_manual_layer_id = None if self._active_manual_layer_id == layer_id else layer_id
-        self._selection = WindViewportSelection(group_index=final_group_index) if final_group_index is not None else WindViewportSelection()
+        active = self._active_manual_layer_id != layer_id
+        self._active_manual_layer_id = layer_id if active else None
+        self._selection = (
+            WindViewportSelection(group_index=final_group_index)
+            if active and final_group_index is not None
+            else WindViewportSelection()
+        )
         self._sync_grouping_controls()
         self._apply_selection()
         self._save_wind_session()
@@ -596,6 +663,14 @@ class WindPreviewDialog(PreviewShellDialog):
                 dynamic_wind,
                 selection=self._selection,
             )
+        if _source_mode_for_preview(preview) == SOURCE_MODE_EXTERNAL:
+            scene = transform_external_skeleton_scene(
+                scene,
+                source_unit=self._display_source_unit,
+                preview_unit=self._display_preview_unit,
+                source_up_axis=self._display_source_up_axis,
+                preview_up_axis=self._display_preview_up_axis,
+            )
         self._active_scene = scene
         self.viewport.set_scene(scene, frame_camera=frame_camera, precompute_static=True)
         self.viewport.set_show_bones(True)
@@ -610,9 +685,20 @@ class WindPreviewDialog(PreviewShellDialog):
             return
         dynamic_wind = self._current_dynamic_wind()
         groups = self._current_groups()
-        self.viewport.set_bone_segments(
-            build_wind_viewport_bone_segments(preview.source_model, dynamic_wind, selection=self._selection)
+        bone_segments = build_wind_viewport_bone_segments(
+            preview.source_model,
+            dynamic_wind,
+            selection=self._selection,
         )
+        if _source_mode_for_preview(preview) == SOURCE_MODE_EXTERNAL:
+            bone_segments = transform_external_skeleton_scene(
+                replace(preview.viewport_scene, bone_segments=bone_segments),
+                source_unit=self._display_source_unit,
+                preview_unit=self._display_preview_unit,
+                source_up_axis=self._display_source_up_axis,
+                preview_up_axis=self._display_preview_up_axis,
+            ).bone_segments
+        self.viewport.set_bone_segments(bone_segments)
         self._update_summary(self._active_scene, groups)
 
     def _update_summary(self, scene, groups: tuple[WindViewportGroup, ...]) -> None:
@@ -672,26 +758,36 @@ class WindPreviewDialog(PreviewShellDialog):
         chip = QLabel(card)
         chip.setFixedSize(12, 12)
         chip.setStyleSheet(f"background: {_css_color(self._group_color(group.final_group_index))}; border: 1px solid rgba(0, 0, 0, 70);")
-        button = QPushButton(_flattened_group_button_text(group.name, group.final_group_index, len(group.joint_tokens)), card)
-        button.setObjectName("LayerButton")
-        button.setCheckable(True)
-        button.setFixedHeight(22)
-        button.setStyleSheet(
-            "QPushButton#LayerButton { text-align: left; padding: 1px 5px; border-radius: 4px; font-size: 12px; "
-            "background: rgba(148, 157, 77, 185); color: #111111; }"
-            "QPushButton#LayerButton:hover { background: rgba(166, 175, 91, 220); }"
-            "QPushButton#LayerButton:checked { font-weight: 700; background: rgba(228, 197, 75, 165); }"
-        )
+        label = _flattened_group_button_text(group.name, group.final_group_index, len(group.joint_tokens))
         if group.source_layer_id is None:
-            button.clicked.connect(lambda _checked=False, index=group.final_group_index: self.select_group(index))
+            group_control = QLabel(label, card)
+            group_control.setObjectName("LayerLabel")
+            group_control.setFixedHeight(22)
+            group_control.setStyleSheet(_layer_label_stylesheet())
+            group_control.setToolTip(f"{group.name}. XML group; assignments are read-only here.")
         else:
-            button.clicked.connect(
+            group_control = QPushButton(label, card)
+            group_control.setObjectName("LayerButton")
+            group_control.setCheckable(True)
+            group_control.setFixedHeight(22)
+            group_control.setStyleSheet(_layer_button_stylesheet())
+            group_control.clicked.connect(
                 lambda _checked=False, layer=group.source_layer_id, index=group.final_group_index: self.toggle_manual_group_edit(layer, index)
             )
-        button.setToolTip(f"{group.name}. Final visible wind group; higher rows override lower rows.")
+            group_control.setToolTip("Manual group. Click to enter Edit; click again to stop editing.")
+            self._group_buttons[group.final_group_index] = group_control
+            self._group_cards[group.final_group_index] = card
+        disclosure = QToolButton(card)
+        disclosure.setText("▾" if group.source_key in self._expanded_group_source_keys else "▸")
+        disclosure.setFixedSize(22, 22)
+        disclosure.setToolTip("Show or hide wind settings for this group.")
+        disclosure.clicked.connect(lambda _checked=False, source_key=group.source_key: self._toggle_group_settings(source_key))
         row_layout.addWidget(chip, 0)
-        row_layout.addWidget(button, 1)
+        row_layout.addWidget(group_control, 1)
+        row_layout.addWidget(disclosure, 0)
         card_layout.addWidget(row)
+        if group.source_key in self._expanded_group_source_keys:
+            card_layout.addWidget(self._make_group_settings_editor(group, card))
         if self._is_auto_mode() and group.source_group_index is not None:
             options_row = QWidget(card)
             options_layout = QHBoxLayout(options_row)
@@ -710,8 +806,6 @@ class WindPreviewDialog(PreviewShellDialog):
             options_layout.addStretch(1)
             card_layout.addWidget(options_row)
         self.group_layout.addWidget(card)
-        self._group_buttons[group.final_group_index] = button
-        self._group_cards[group.final_group_index] = card
 
     def _add_manual_group_row(self, group: WindManualGroup, *, final_group_index: int | None, visible_count: int) -> None:
         card = QFrame(self.group_host)
@@ -730,12 +824,7 @@ class WindPreviewDialog(PreviewShellDialog):
         button.setObjectName("LayerButton")
         button.setCheckable(True)
         button.setFixedHeight(22)
-        button.setStyleSheet(
-            "QPushButton#LayerButton { text-align: left; padding: 1px 5px; border-radius: 4px; font-size: 12px; "
-            "background: rgba(148, 157, 77, 185); color: #111111; }"
-            "QPushButton#LayerButton:hover { background: rgba(166, 175, 91, 220); }"
-            "QPushButton#LayerButton:checked { font-weight: 700; background: rgba(228, 197, 75, 165); }"
-        )
+        button.setStyleSheet(_layer_button_stylesheet())
         button.clicked.connect(lambda _checked=False, layer=group.layer_id, index=final_group_index: self.toggle_manual_group_edit(layer, index))
         button.setToolTip("Manual group. Click to enter Edit; click again to stop editing.")
         row_layout.addWidget(chip, 0)
@@ -772,7 +861,120 @@ class WindPreviewDialog(PreviewShellDialog):
         return self._grouping_mode() == GROUPING_MODE_AUTO
 
     def _current_dynamic_wind(self) -> DynamicWindData:
-        return self._flattened().dynamic_wind
+        flattened = self._flattened()
+        groups = tuple(
+            self._group_settings_for_flattened_group(group, fallback)
+            for group, fallback in zip(flattened.groups, flattened.dynamic_wind.simulation_groups)
+        )
+        return replace(flattened.dynamic_wind, simulation_groups=groups)
+
+    def _group_settings_for_flattened_group(
+        self,
+        group,
+        fallback: DynamicWindSimulationGroup,
+    ) -> DynamicWindSimulationGroup:
+        if group.source_group_index is not None:
+            source_group = next(
+                (
+                    item
+                    for item in self._base_dynamic_wind().simulation_groups
+                    if item.group_index == group.source_group_index
+                ),
+                fallback,
+            )
+            fallback = replace(
+                source_group,
+                group_index=fallback.group_index,
+                branch_order=fallback.branch_order,
+            )
+        values = self._group_settings_by_source_key.get(group.source_key, {})
+        return replace(fallback, **values)
+
+    def _group_settings_for_editor(self, group) -> DynamicWindSimulationGroup:
+        flattened = self._flattened()
+        return self._group_settings_for_flattened_group(
+            group,
+            flattened.dynamic_wind.simulation_groups[group.final_group_index],
+        )
+
+    def _toggle_group_settings(self, source_key: str) -> None:
+        if source_key in self._expanded_group_source_keys:
+            self._expanded_group_source_keys.remove(source_key)
+        else:
+            self._expanded_group_source_keys.add(source_key)
+        self._rebuild_group_list()
+        self._save_wind_session()
+
+    def _make_group_settings_editor(self, group, parent: QWidget) -> QFrame:
+        settings = self._group_settings_for_editor(group)
+        frame = QFrame(parent)
+        frame.setObjectName("WindGroupSettings")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(17, 2, 2, 2)
+        layout.setSpacing(4)
+        options = QHBoxLayout()
+        trunk_checkbox = QCheckBox("Trunk", frame)
+        trunk_checkbox.setChecked(settings.is_trunk_group)
+        set_tooltip("Treats this group as primary trunk wind.", trunk_checkbox)
+        dual_checkbox = QCheckBox("Dual Influence", frame)
+        dual_checkbox.setChecked(settings.use_dual_influence)
+        set_tooltip("Uses a base-to-top influence range instead of one strength.", dual_checkbox)
+        options.addWidget(trunk_checkbox, 0)
+        options.addWidget(dual_checkbox, 0)
+        options.addStretch(1)
+        layout.addLayout(options)
+
+        single_frame = QFrame(frame)
+        single_layout = QFormLayout(single_frame)
+        single_layout.setContentsMargins(0, 0, 0, 0)
+        influence_spin = SliderSpinEditor(minimum=0.0, maximum=1.0, step=0.05, value=settings.influence, parent=single_frame)
+        influence_label = QLabel("Influence", single_frame)
+        set_tooltip("Wind strength for this group.", influence_label, influence_spin)
+        single_layout.addRow(influence_label, influence_spin)
+        layout.addWidget(single_frame)
+
+        dual_frame = QFrame(frame)
+        dual_layout = QFormLayout(dual_frame)
+        dual_layout.setContentsMargins(0, 0, 0, 0)
+        min_spin = SliderSpinEditor(minimum=0.0, maximum=1.0, step=0.01, value=settings.min_influence, parent=dual_frame)
+        max_spin = SliderSpinEditor(minimum=0.0, maximum=1.0, step=0.01, value=settings.max_influence, parent=dual_frame)
+        shift_spin = SliderSpinEditor(minimum=0.0, maximum=1.0, step=0.01, value=settings.shift_top, parent=dual_frame)
+        for text, editor, tooltip in (
+            ("Min Influence", min_spin, "Lower-end wind strength."),
+            ("Max Influence", max_spin, "Upper-end wind strength."),
+            ("Shift Top", shift_spin, "Moves the high-influence zone toward the tip."),
+        ):
+            label = QLabel(text, dual_frame)
+            set_tooltip(tooltip, label, editor)
+            dual_layout.addRow(label, editor)
+        layout.addWidget(dual_frame)
+
+        trunk_checkbox.toggled.connect(lambda checked, current=group: self._set_group_setting(current.source_key, "is_trunk_group", checked))
+        dual_checkbox.toggled.connect(lambda checked, current=group: self._set_group_setting(current.source_key, "use_dual_influence", checked))
+        for field, editor in (
+            ("influence", influence_spin),
+            ("min_influence", min_spin),
+            ("max_influence", max_spin),
+            ("shift_top", shift_spin),
+        ):
+            editor.valueChanged.connect(
+                lambda value, source_key=group.source_key, name=field: self._set_group_setting(source_key, name, value)
+            )
+        single_frame.setVisible(not settings.use_dual_influence)
+        dual_frame.setVisible(settings.use_dual_influence)
+        dual_checkbox.toggled.connect(lambda checked: single_frame.setVisible(not checked))
+        dual_checkbox.toggled.connect(dual_frame.setVisible)
+        return frame
+
+    def _set_group_setting(self, source_key: str, field: str, value: bool | float) -> None:
+        if field in _WIND_GROUP_BOOLEAN_FIELDS:
+            normalized: bool | float = bool(value)
+        elif field in _WIND_GROUP_NUMERIC_FIELDS:
+            normalized = max(0.0, min(float(value), 1.0))
+        else:
+            return
+        self._group_settings_by_source_key.setdefault(source_key, {})[field] = normalized
+        self._save_wind_session()
 
     def _base_dynamic_wind(self) -> DynamicWindData:
         preview = self.current_preview
@@ -865,7 +1067,41 @@ class WindPreviewDialog(PreviewShellDialog):
 
     def _on_source_mode_changed(self) -> None:
         self._sync_source_controls()
+        self._sync_external_skeleton_warning()
         self._save_wind_session()
+
+    def _on_external_display_transform_changed(self) -> None:
+        self._display_source_unit = str(self.source_units_combo.currentData() or "m")
+        self._display_preview_unit = str(self.preview_units_combo.currentData() or "m")
+        self._display_source_up_axis = str(self.source_up_axis_combo.currentData() or "Y")
+        self._display_preview_up_axis = str(self.preview_up_axis_combo.currentData() or "Y")
+        self._sync_external_skeleton_warning()
+        preview = self.current_preview
+        if preview is not None and _source_mode_for_preview(preview) == SOURCE_MODE_EXTERNAL:
+            self._apply_scene(frame_camera=False)
+        self._save_wind_session()
+
+    def _sync_external_skeleton_warning(self) -> None:
+        preview = self.current_preview
+        if preview is None or _source_mode_for_preview(preview) != SOURCE_MODE_EXTERNAL:
+            self.external_vertical_warning_label.clear()
+            self.external_vertical_warning_label.setToolTip("")
+            self.external_vertical_warning_label.hide()
+            return
+        vertical_bones = external_vertical_bone_names(
+            preview.source_model.skeleton,
+            self._display_source_up_axis,
+        )
+        if not vertical_bones:
+            self.external_vertical_warning_label.clear()
+            self.external_vertical_warning_label.setToolTip("")
+            self.external_vertical_warning_label.hide()
+            return
+        self.external_vertical_warning_label.setText(
+            f"⚠ {len(vertical_bones)} vertical bone(s) detected. External skeleton is unchanged."
+        )
+        self.external_vertical_warning_label.setToolTip(", ".join(vertical_bones))
+        self.external_vertical_warning_label.show()
 
     def _on_external_skeleton_changed(self) -> None:
         self._save_wind_session()
@@ -950,15 +1186,24 @@ class WindPreviewDialog(PreviewShellDialog):
         if preview is None:
             return {}
         return {
-            "schema_version": 1,
+            "schema_version": 3,
             "fingerprint": _json_fingerprint(preview),
             "input_path": str(preview.input_path),
             "source_mode": self.source_mode_combo.currentData() or SOURCE_MODE_XML,
             "external_path": self.external_path_edit.text().strip(),
+            "display_source_unit": self._display_source_unit,
+            "display_preview_unit": self._display_preview_unit,
+            "display_source_up_axis": self._display_source_up_axis,
+            "display_preview_up_axis": self._display_preview_up_axis,
             "output_path": self.output_path_edit.text().strip(),
             "grouping_mode": self._grouping_mode(),
             "auto_group_count": int(self._auto_group_count),
             "auto_continuous_levels": sorted(int(level) for level in self._auto_continuous_levels),
+            "expanded_group_source_keys": sorted(self._expanded_group_source_keys),
+            "group_settings": {
+                source_key: dict(sorted(settings.items()))
+                for source_key, settings in sorted(self._group_settings_by_source_key.items())
+            },
             "active_manual_layer_id": self._active_manual_layer_id,
             "manual_groups": [
                 {
@@ -983,7 +1228,8 @@ class WindPreviewDialog(PreviewShellDialog):
         session = self._initial_wind_session_snapshot
         if not session:
             return ""
-        if session.get("schema_version") != 1:
+        session_version = session.get("schema_version")
+        if session_version not in {1, 2, 3}:
             return "Previous Wind Preview session reset: unsupported session version."
         if session.get("fingerprint") != _json_fingerprint(preview):
             return "Previous Wind Preview session reset: skeleton changed."
@@ -1001,6 +1247,27 @@ class WindPreviewDialog(PreviewShellDialog):
                 external_path = session.get("external_path")
                 if isinstance(external_path, str):
                     self.external_path_edit.setText(external_path)
+            display_values = session if session_version >= 2 else {}
+            self._display_source_unit = _restore_display_value(
+                self.source_units_combo,
+                display_values.get("display_source_unit"),
+                "m",
+            )
+            self._display_preview_unit = _restore_display_value(
+                self.preview_units_combo,
+                display_values.get("display_preview_unit"),
+                "m",
+            )
+            self._display_source_up_axis = _restore_display_value(
+                self.source_up_axis_combo,
+                display_values.get("display_source_up_axis"),
+                "Y",
+            )
+            self._display_preview_up_axis = _restore_display_value(
+                self.preview_up_axis_combo,
+                display_values.get("display_preview_up_axis"),
+                "Y",
+            )
             output_path = session.get("output_path")
             if isinstance(output_path, str) and output_path:
                 self.output_path_edit.setText(output_path)
@@ -1015,6 +1282,12 @@ class WindPreviewDialog(PreviewShellDialog):
 
             self._auto_group_count = _coerce_group_count(session.get("auto_group_count"), self._auto_group_count)
             self._auto_continuous_levels = _restore_continuous_levels(session.get("auto_continuous_levels"))
+            self._expanded_group_source_keys = _restore_expanded_group_source_keys(
+                session.get("expanded_group_source_keys") if session_version >= 3 else None
+            )
+            self._group_settings_by_source_key = _restore_group_settings(
+                session.get("group_settings") if session_version >= 3 else None
+            )
             self._manual_groups = _restore_manual_groups(session.get("manual_groups"), valid_tokens)
             active_layer = _coerce_optional_int(session.get("active_manual_layer_id"))
             self._active_manual_layer_id = (
@@ -1025,6 +1298,7 @@ class WindPreviewDialog(PreviewShellDialog):
         finally:
             self._restoring_session = False
             self._sync_source_controls()
+            self._sync_external_skeleton_warning()
         return ""
 
 
@@ -1040,7 +1314,23 @@ def _css_color(color: Color4) -> str:
 
 def _flattened_group_button_text(name: str, final_group_index: int | None, count: int) -> str:
     prefix = "Empty" if final_group_index is None else f"G{final_group_index}"
-    return f"{prefix} | {name} | {count} bones"
+    return f"{prefix} | {name} | {count} {'bone' if count == 1 else 'bones'}"
+
+
+def _layer_button_stylesheet() -> str:
+    return (
+        "QPushButton#LayerButton { text-align: left; padding: 1px 5px; border-radius: 4px; font-size: 12px; "
+        "background: rgba(148, 157, 77, 185); color: #111111; }"
+        "QPushButton#LayerButton:hover { background: rgba(166, 175, 91, 220); }"
+        "QPushButton#LayerButton:checked { font-weight: 700; background: rgba(228, 197, 75, 165); }"
+    )
+
+
+def _layer_label_stylesheet() -> str:
+    return (
+        "QLabel#LayerLabel { padding: 1px 5px; border-radius: 4px; font-size: 12px; "
+        "background: rgba(148, 157, 77, 185); color: #111111; }"
+    )
 
 
 def _layer_card_stylesheet(active: bool) -> str:
@@ -1099,6 +1389,31 @@ def _external_path_key(path: str) -> str:
     return os.path.normcase(os.path.abspath(path.strip()))
 
 
+def _display_combo(items, parent: QWidget) -> QComboBox:
+    combo = QComboBox(parent)
+    combo.setFixedHeight(24)
+    for label, value in items:
+        combo.addItem(label, value)
+    return combo
+
+
+def _set_combo_data(combo: QComboBox, value: str) -> bool:
+    index = combo.findData(value)
+    if index < 0:
+        return False
+    with QSignalBlocker(combo):
+        combo.setCurrentIndex(index)
+    return True
+
+
+def _restore_display_value(combo: QComboBox, value, default: str) -> str:
+    candidate = str(value) if isinstance(value, str) else default
+    if not _set_combo_data(combo, candidate):
+        _set_combo_data(combo, default)
+        candidate = default
+    return candidate
+
+
 def _coerce_optional_int(value) -> int | None:
     try:
         return int(value)
@@ -1149,6 +1464,37 @@ def _restore_manual_groups(value, valid_tokens: set[str]) -> tuple[WindManualGro
         groups.append(WindManualGroup(layer_id=layer_id, name=name, joint_tokens=tokens, edit_mode=edit_mode))
         used_layer_ids.add(layer_id)
     return tuple(sorted(groups, key=lambda group: group.layer_id))
+
+
+def _restore_expanded_group_source_keys(value) -> set[str]:
+    if not isinstance(value, list):
+        return set()
+    return {item for item in value if isinstance(item, str) and item}
+
+
+def _restore_group_settings(value) -> dict[str, dict[str, bool | float]]:
+    if not isinstance(value, dict):
+        return {}
+    restored: dict[str, dict[str, bool | float]] = {}
+    for source_key, raw_settings in value.items():
+        if not isinstance(source_key, str) or not source_key or not isinstance(raw_settings, dict):
+            continue
+        settings: dict[str, bool | float] = {}
+        for field in _WIND_GROUP_BOOLEAN_FIELDS:
+            raw_value = raw_settings.get(field)
+            if isinstance(raw_value, bool):
+                settings[field] = raw_value
+        for field in _WIND_GROUP_NUMERIC_FIELDS:
+            raw_value = raw_settings.get(field)
+            if isinstance(raw_value, bool):
+                continue
+            try:
+                settings[field] = max(0.0, min(float(raw_value), 1.0))
+            except (TypeError, ValueError):
+                continue
+        if settings:
+            restored[source_key] = settings
+    return restored
 
 
 def _add_group_header(layout, parent, title: str) -> None:

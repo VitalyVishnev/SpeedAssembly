@@ -137,6 +137,10 @@ deterministic wind-group stack: XML Generator Groups or Auto Hierarchy provide a
 base, manual override layers sit above it, and the flattened result writes the
 existing Dynamic Wind JSON schema. Auto Hierarchy derives groups from skeleton
 topology and SpeedTree/file joint ordering, not from XML wind generator labels.
+Each final visible group can reveal its Dynamic Wind controls in the dialog;
+settings are keyed by the stable source layer and applied only after the stack
+is flattened. XML layers remain read-only for manual bone picking, while manual
+layers alone enter the assignment-edit mode.
 Optional per-layer `Continue line` flags let endpoint-continuous child chains
 stay in the same group when explicitly enabled. A restored valid XML path
 automatically refreshes the main Wind groups after startup; the manual Refresh
@@ -163,6 +167,11 @@ is visible. External Skeleton USD loading uses OpenUSD/`pxr` from `usd-core`
 for normal USD support. Text `.usda` and ASCII `.usd` files can still be read
 through the deterministic text fallback, but multiple Skeleton prims require
 an explicit operator choice instead of any largest-skeleton heuristic.
+External Skeleton Display Transform applies only to viewport bone segments and
+bounds: the operator selects source/preview units and Y-up/Z-up axes, while the
+loaded skeleton and generated Dynamic Wind JSON remain unchanged. Vertical
+external-bone warnings inspect non-zero parent-to-child segments against the
+selected source up axis; they do not tilt or otherwise edit the skeleton.
 The SpeedTree XML worker path does not import the External Skeleton backend.
 An unexpected native Wind Preview worker exit is retried once in a clean
 process. Worker subprocesses enable Python faulthandler so a repeated native

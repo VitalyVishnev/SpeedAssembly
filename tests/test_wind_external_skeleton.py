@@ -9,9 +9,11 @@ import pytest
 from xml_to_usda.models import Joint, Matrix4d, Vector3
 from xml_to_usda.wind_external_skeleton import (
     ExternalSkeletonPreviewRequest,
+    external_vertical_bone_names,
     external_skeleton_backend_available,
     list_external_usd_skeletons,
     load_external_skeleton_preview,
+    transform_external_skeleton_scene,
 )
 from xml_to_usda.wind_preview_service import WindPreviewError
 
@@ -34,6 +36,42 @@ def test_external_fbx_skeleton_preview_is_skeleton_only(monkeypatch, tmp_path: P
     assert preview.viewport_scene.draw_calls == ()
     assert [segment.child_token for segment in preview.viewport_scene.bone_segments] == ["branch"]
     assert [assignment.simulation_group_index for assignment in preview.dynamic_wind.joint_assignments] == [0, 0]
+
+
+def test_external_skeleton_display_transform_is_viewport_only(monkeypatch, tmp_path: Path) -> None:
+    fbx_path = tmp_path / "tree.fbx"
+    fbx_path.write_bytes(b"stub")
+    skeleton = (
+        Joint("root", parent=None, bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 0.0))),
+        Joint("branch", parent="root", bind_transform=Matrix4d.from_translation(Vector3(0.0, 2.0, 0.0))),
+    )
+    monkeypatch.setattr("xml_to_usda.wind_external_skeleton.load_fbx_skeleton", lambda _path: skeleton)
+
+    preview = load_external_skeleton_preview(ExternalSkeletonPreviewRequest(str(fbx_path)))
+    transformed = transform_external_skeleton_scene(
+        preview.viewport_scene,
+        source_unit="cm",
+        preview_unit="m",
+        source_up_axis="Y",
+        preview_up_axis="Z",
+    )
+
+    assert transformed.bone_segments[0].end == Vector3(0.0, 0.0, 0.02)
+    assert preview.viewport_scene.bone_segments[0].end == Vector3(0.0, 2.0, 0.0)
+    assert preview.source_model.skeleton == skeleton
+
+
+def test_external_vertical_bones_use_parent_segments_and_ignore_zero_length() -> None:
+    skeleton = (
+        Joint("root", parent=None, bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 0.0))),
+        Joint("vertical", parent="root", bind_transform=Matrix4d.from_translation(Vector3(0.0, 2.0, 0.0))),
+        Joint("lateral", parent="root", bind_transform=Matrix4d.from_translation(Vector3(1.0, 1.0, 0.0))),
+        Joint("zero", parent="root", bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 0.0))),
+        Joint("z_vertical", parent="root", bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 3.0))),
+    )
+
+    assert external_vertical_bone_names(skeleton, "Y") == ("vertical",)
+    assert external_vertical_bone_names(skeleton, "Z") == ("z_vertical",)
 
 
 def test_external_skeleton_preview_rejects_duplicate_joint_names(monkeypatch, tmp_path: Path) -> None:

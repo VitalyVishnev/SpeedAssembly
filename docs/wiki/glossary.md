@@ -62,6 +62,6 @@
 - `Generator Continuation` - for a SpeedTree-derived skeleton, the lowest-index direct child at a fork; it continues the current generator line while the other direct children start new lines. It is commonly the bone immediately after its parent in Reference Skeleton order.
 - `Primary Stem Axis` - a geometrically selected root-to-leaf skeleton path used to represent a physical stem for Fracturing or Proxy collision. It is not the SpeedTree Generator Continuation rule.
 - `Dynamic Wind` - the separate Unreal JSON wind output generated from the normalized skeleton.
-- `Wind Preview` - the Dynamic Wind inspection and planned authoring window. V1 is an XML source inspector; V2 adds Auto Hierarchy, manual override layers, external skeleton loading, and Dynamic Wind JSON export from the final group stack.
+- `Wind Preview` - the Dynamic Wind inspection and authoring window. It supports Auto Hierarchy, manual override layers, external skeleton loading, display-only unit/up-axis conversion, and Dynamic Wind JSON export from the final group stack.
 - `Source Name` - any name observed in XML, FBX, or source filenames.
 - `Instance` - shorthand for a placed occurrence of a prototype when the stage is already obvious.

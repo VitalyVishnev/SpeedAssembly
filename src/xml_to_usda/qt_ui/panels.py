@@ -40,6 +40,7 @@ from ..fracture_preview_service import FracturePreviewSettings
 from ..models import (
     BaseMaterialOverride,
     CpuProfile,
+    DynamicWindData,
     DynamicWindSimulationGroup,
     FbxMaterialMode,
     FbxMaterialSlotOverride,
@@ -462,10 +463,9 @@ class WindTabPanel(QWidget):
 
         controls = QFrame(self)
         controls.setObjectName("PanelCard")
-        controls_layout = QGridLayout(controls)
-        controls_layout.setContentsMargins(16, 16, 16, 16)
-        controls_layout.setHorizontalSpacing(12)
-        controls_layout.setVerticalSpacing(8)
+        controls_layout = QHBoxLayout(controls)
+        controls_layout.setContentsMargins(16, 12, 16, 12)
+        controls_layout.setSpacing(12)
 
         self.ground_cover_checkbox = QCheckBox("Ground Cover", controls)
         self.ground_cover_checkbox.toggled.connect(lambda _checked: self._on_change())
@@ -516,31 +516,52 @@ class WindTabPanel(QWidget):
             "Uses the surface-area-weighted average of member instances' rotated local +Y axes, so larger instances contribute more. Whole Mesh averages all instances; cluster modes average each cluster; Per Instance uses its own axis. Off keeps deterministic near-up bones.",
             self.scattered_orientation_checkbox,
         )
-        # Wind inspection is now owned by the Wind tab itself instead of the
-        # global action column so the operator can tweak wind globals and refresh
-        # from the same focused surface.
+        # Wind inspection stays beside the controls so the group list keeps the
+        # vertical room needed for more than one group card.
         self.refresh_button = QPushButton("Refresh Wind Groups", controls)
         self.refresh_button.setObjectName("WindRefreshButton")
         self.refresh_button.clicked.connect(self._on_refresh_requested)
-        self.preview_button = QPushButton("Preview Wind", controls)
+        self.preview_button = QPushButton("Advanced Wind Settings", controls)
         self.preview_button.setObjectName("WindPreviewButton")
         self.preview_button.clicked.connect(self._on_preview_requested)
-        self.preview_button.setToolTip("Opens the read-only wind group viewport for the selected XML.")
+        self.preview_button.setToolTip("Opens advanced Wind Preview settings for the selected XML.")
 
-        controls_layout.addWidget(self.ground_cover_checkbox, 0, 0, 1, 2)
-        controls_layout.addWidget(self.refresh_button, 0, 2, 1, 1)
-        controls_layout.addWidget(self.preview_button, 0, 3, 1, 1)
-        controls_layout.addWidget(self.skinning_label, 1, 0, 1, 4)
-        controls_layout.addLayout(self.skinning_slider_row, 2, 0, 1, 4)
-        controls_layout.addWidget(self.skinning_tick_labels, 3, 0, 1, 4)
-        controls_layout.addWidget(self.skinning_description_label, 4, 0, 1, 4)
-        controls_layout.addWidget(self.scattered_orientation_checkbox, 5, 0, 1, 4)
+        skinning_controls = QWidget(controls)
+        skinning_layout = QGridLayout(skinning_controls)
+        skinning_layout.setContentsMargins(0, 0, 0, 0)
+        skinning_layout.setHorizontalSpacing(8)
+        skinning_layout.setVerticalSpacing(4)
+        skinning_layout.addWidget(self.ground_cover_checkbox, 0, 0)
+        skinning_layout.addWidget(self.skinning_label, 0, 1)
+        skinning_layout.addWidget(self.scattered_orientation_checkbox, 0, 2)
+        skinning_layout.addLayout(self.skinning_slider_row, 1, 0, 1, 3)
+        skinning_layout.addWidget(self.skinning_tick_labels, 2, 0, 1, 3)
+        self.skinning_description_label.hide()
         gust_label = QLabel("Gust Attenuation", controls)
         set_tooltip(self.gust_spin.toolTip(), gust_label)
-        controls_layout.addWidget(gust_label, 6, 0)
-        controls_layout.addWidget(self.gust_spin, 6, 1, 1, 3)
-        controls_layout.setColumnStretch(1, 1)
-        controls_layout.setColumnStretch(3, 1)
+        skinning_layout.addWidget(gust_label, 3, 0)
+        skinning_layout.addWidget(self.gust_spin, 3, 1, 1, 2)
+        skinning_layout.setColumnStretch(1, 1)
+
+        actions = QWidget(controls)
+        actions.setMinimumWidth(286)
+        actions_layout = QVBoxLayout(actions)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(6)
+        action_top_row = QHBoxLayout()
+        action_top_row.setContentsMargins(0, 0, 0, 0)
+        action_top_row.setSpacing(6)
+        self.total_bones_label = QLabel("Total bones: 0", actions)
+        self.total_bones_label.setObjectName("WindTotalBones")
+        self.total_bones_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.total_bones_label.setMinimumWidth(116)
+        action_top_row.addWidget(self.total_bones_label, 1)
+        action_top_row.addWidget(self.refresh_button, 0)
+        actions_layout.addLayout(action_top_row)
+        actions_layout.addWidget(self.preview_button)
+
+        controls_layout.addWidget(skinning_controls, 2)
+        controls_layout.addWidget(actions, 1)
         outer.addWidget(controls)
 
         self.scroll = _make_scroll_area(self)
@@ -553,6 +574,7 @@ class WindTabPanel(QWidget):
 
     def clear(self) -> None:
         self._rows.clear()
+        self.total_bones_label.setText("Total bones: 0")
         _rebuild_scroll_layout(self.scroll_layout)
 
     def set_global_options(
@@ -679,9 +701,16 @@ class WindTabPanel(QWidget):
         }
         self.skinning_description_label.setText(descriptions[self._scattered_rig_mode])
 
-    def rebuild(self, groups: tuple[DynamicWindSimulationGroup, ...]) -> None:
+    def rebuild(self, dynamic_wind: DynamicWindData) -> None:
         self._rows.clear()
         _rebuild_scroll_layout(self.scroll_layout)
+        groups = dynamic_wind.simulation_groups
+        assignments_by_group: dict[int, int] = {}
+        for assignment in dynamic_wind.joint_assignments:
+            assignments_by_group[assignment.simulation_group_index] = (
+                assignments_by_group.get(assignment.simulation_group_index, 0) + 1
+            )
+        self.total_bones_label.setText(f"Total bones: {len(dynamic_wind.joint_assignments):,}")
         if not groups:
             return
         for group in groups:
@@ -692,7 +721,9 @@ class WindTabPanel(QWidget):
             card_layout.setSpacing(10)
 
             header = QHBoxLayout()
-            title = f"Group {group.group_index} (Generator level {group.branch_order})"
+            joint_count = assignments_by_group.get(group.group_index, 0)
+            bone_label = "bone" if joint_count == 1 else "bones"
+            title = f"Group {group.group_index} (Generator level {group.branch_order}) · {joint_count:,} {bone_label}"
             header_label = QLabel(title, card)
             header_label.setStyleSheet("font-weight: 600;")
             header.addWidget(header_label, 1)

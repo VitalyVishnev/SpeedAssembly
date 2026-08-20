@@ -63,7 +63,7 @@ class ProgramStatusCard(QFrame):
         layout.setSpacing(10)
         self.scroll.setWidget(host)
 
-        title = QLabel("Program Status", host)
+        title = QLabel("Status", host)
         title.setObjectName("ProgramStatusTitle")
         layout.addWidget(title)
 

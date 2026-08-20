@@ -1129,3 +1129,21 @@ Major moves:
   `PartMesh` term to the glossary.
 - Checked internal Markdown links and architecture file references; no broken
   targets found. Raw sources were not changed.
+
+## 2026-08-20 - Wind skeleton counters and external display transform
+
+- Renamed the main status card to `Status` and added total joint counts to the
+  source summary, main Wind controls, and Wind Preview.
+- Added per-group joint counts beside the main Wind influence controls.
+- Added external Wind Preview unit and Y-up/Z-up display conversion with
+  session persistence. It transforms viewport data only; source skeletons and
+  Dynamic Wind JSON remain unchanged.
+- Added non-blocking external vertical-bone warnings based on parent-to-child
+  segments, with no automatic skeleton tilt.
+- Moved the main Wind total-bones counter into an opaque action-row badge before
+  Refresh Wind Groups, compacted the control card into slider/actions columns,
+  and renamed Preview Wind to Advanced Wind Settings.
+- Renamed the opened Wind dialog to Advanced Wind Settings. Its Layers rows now
+  keep XML groups read-only for assignment edits, support repeat-click deselect
+  for manual groups, and disclose per-final-group Dynamic Wind controls that
+  persist with the Wind Preview session.

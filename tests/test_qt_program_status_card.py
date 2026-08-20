@@ -10,11 +10,20 @@ pytest.importorskip("pytestqt")
 pytestmark = pytest.mark.qt
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QCheckBox, QStyle, QStyleOptionSlider
+from PySide6.QtWidgets import QCheckBox, QLabel, QStyle, QStyleOptionSlider
 
-from xml_to_usda.models import ConversionPhase, ConversionTelemetry, PrototypeSourceMode, ScatteredRigMode, SkinningQuality
+from xml_to_usda.models import (
+    ConversionPhase,
+    ConversionTelemetry,
+    DynamicWindData,
+    DynamicWindJointAssignment,
+    DynamicWindSimulationGroup,
+    PrototypeSourceMode,
+    ScatteredRigMode,
+    SkinningQuality,
+)
 from xml_to_usda.qt_ui.dependencies import build_default_dependencies
-from xml_to_usda.qt_ui.panels import GeometryRowState
+from xml_to_usda.qt_ui.panels import GeometryRowState, WindTabPanel
 from xml_to_usda.qt_ui.persistence import UiShellState
 from xml_to_usda.qt_ui.status_card import ProgramStatusCard
 from xml_to_usda.qt_ui.theme import load_theme
@@ -127,6 +136,35 @@ def test_program_status_card_updates_source_and_material_summary(qtbot) -> None:
     assert "Instances: 43,263" in card.source_label.text()
     assert card.material_label.toolTip() == "/Game/Tree/M_Bark.M_Bark"
     assert "<b>MATERIALS</b>" in card.material_label.text()
+
+
+def test_status_card_and_wind_panel_show_bone_totals(qtbot) -> None:
+    card = ProgramStatusCard()
+    panel = WindTabPanel(on_change=lambda: None, on_refresh_requested=lambda: None, on_preview_requested=lambda: None)
+    qtbot.addWidget(card)
+    qtbot.addWidget(panel)
+    dynamic_wind = DynamicWindData(
+        joint_assignments=(
+            DynamicWindJointAssignment("root", 0, 0),
+            DynamicWindJointAssignment("trunk", 0, 0),
+            DynamicWindJointAssignment("branch", 1, 1),
+        ),
+        simulation_groups=(
+            DynamicWindSimulationGroup(0, 0),
+            DynamicWindSimulationGroup(1, 1),
+        ),
+    )
+
+    card.set_summary(source="Bones: 3")
+    panel.rebuild(dynamic_wind)
+
+    assert any(label.text() == "Status" for label in card.findChildren(QLabel))
+    assert "Bones: 3" in card.source_label.text()
+    assert panel.total_bones_label.text() == "Total bones: 3"
+    assert any("2 bones" in label.text() for label in panel.findChildren(QLabel))
+    assert any("1 bone" in label.text() for label in panel.findChildren(QLabel))
+    assert panel.preview_button.text() == "Advanced Wind Settings"
+    assert panel.total_bones_label.parentWidget() is not panel
 
 
 def test_program_status_card_keeps_missing_bone_warning_visible(qtbot) -> None:
