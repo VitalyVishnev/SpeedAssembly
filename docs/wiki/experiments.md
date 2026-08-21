@@ -1,481 +1,188 @@
 # Experiments
 
+Rejected, superseded, and partially validated work. Current contracts live in
+[decisions.md](decisions.md); active gaps live in [known-bugs.md](known-bugs.md).
+
 ## Future external rig conversion mode
 
-Status: Unverified / deferred.
+Status: Deferred, Unverified.
 
-A future main-input mode may ingest an arbitrary skinned FBX or USD, diagnose
-and deliberately repair its rig, then author the project's UE-importable USD
-contract. This requires explicit policies for joint remapping, bind-pose
-ownership, weight normalization, axis/unit conversion, topology, materials,
-and loss reporting. The current FBX diagnostic payload is a read-only boundary,
-not yet a conversion model; viewport-only transforms must not leak into it.
+An arbitrary skinned FBX/USD input needs explicit policies for joint mapping,
+bind-pose ownership, weights, axes/units, topology, materials, and loss
+reporting. Current FBX support is read-only diagnostics. Viewport transforms
+must not enter a conversion model.
 
-## Experiment: Python ufbx wrappers
+## Python ufbx wrappers
 
 Status: Rejected.
 
-Two wrappers were evaluated before the production migration. `pyufbx` returned
-corrupt geometry values; the upstream-named Python package exited while reading
-the supplied Alder skeleton. The observed `python.exe` null-address write dialog
-is recorded as CR-015. Production uses the official ufbx C source behind a
-minimal local CPython bridge instead of exposing foreign wrapper ownership or
-ABI assumptions to workers.
-
-## Experiment: Shared-memory process pool for FBX material partition
-
-Status: Superseded by bounded zero-copy NumPy.
-
-The former large-payload path copied face counts, indices, and colors into
-three shared-memory blocks, spawned workers, then merged face buckets. Process
-startup, full-buffer copies, cleanup, and an infrastructure fallback made the
-module substantially more complex than the work required.
-
-The replacement views the existing `GeometryBuffer` arrays with
-`numpy.frombuffer` and classifies bounded face chunks in-process. On the real
-Big Spruce topology (58,463 faces, 175,389 corners), the exact result improved
-from 0.03242 s to 0.00570 s, or 82.4%. Keep the scalar path below 50,000 faces.
-
-## Experiment: Bulk Python-list topology for huge FBX payloads
-
-Status: Rejected for memory stability.
-
-Any Python `list[int]` topology path would materialize tens of millions of
-objects in addition to final packed buffers, creating a multi-gigabyte
-transient peak. The production ufbx bridge writes packed buffers directly.
-
-## Experiment: Outer parallel execution for independent Boolean components
-
-Status: Rejected on the current Windows spawn/oneTBB runtime.
-
-The available parallel unit is one connectivity component, not one arbitrary
-cut. Cuts on the same shell remain sequential. Big Spruce provided 12 and 37
-independent Boolean component groups for the measured 11- and 36-branch plans
-with a stump.
-
-Three prototypes reused the production Boolean implementation: per-cut process
-jobs, workers initialized from one read-only source context, and larger
-per-worker batches initialized from the model plus analysis cache. Every
-returned parent/child/cutter `MeshData` and diagnostic value matched the
-sequential result exactly. The prepared full 36-branch session serialized to
-about 27.6 MiB and took about 0.7-0.8 s to pickle/unpickle per worker, before
-native work.
-
-End-to-end-favorable measurements still failed the 25% gate. At 37 independent
-cuts, sequential took 6.81-6.88 s. Two spawned processes took 6.99-7.34 s
-across three batched runs; four took 7.92-8.05 s. At 12 cuts, sequential took
-2.78 s versus 4.00 s with two processes. Estimated child peak RSS was about
-382-403 MiB for two processes and 577-751 MiB for four. A shared-memory
-thread prototype also failed: 2/4/8 threads took 6.96/6.85/7.17 s against a
-6.81 s sequential baseline.
-
-Keep the sequential backend. Windows process startup, model transport, result
-transport, and oneTBB oversubscription erase the independent-cut gain. Revisit
-only after a material runtime change such as a zero-copy worker boundary or a
-different Boolean backend; do not retain a dormant parallel subsystem.
-
-## Experiment: Connectivity-first Manifold Boolean fracture
+`pyufbx` returned corrupt geometry; an upstream-named wrapper crashed reading
+the Alder skeleton, recorded as CR-015. Use vendored ufbx C through the local
+CPython bridge.
 
-Status: production integrated; broad real-tree and UE runtime validation remains open.
+## Shared-memory FBX material partition
 
-The `boolean-prototype` command isolates one whole connected branch before any face-ownership split, closes its oriented boundary loops, and splits it with a closed triangular-lattice cutter displaced by one-sided deterministic fractal noise. `manifold3d` provenance removes temporary source closures while retaining cutter-derived caps. Requested amplitude is uniformly limited before the next physical terminal, branch, or bend above `Max Bend Angle`. Exact source-triangle provenance transfers UV0/UV1, colors, material sections, and skinning; caps receive planar UVs and nearest boundary-ring attributes. Its viewer can regenerate the same source in place with editable cut/noise controls while the deterministic seed remains fixed. The synthetic open-cylinder case, Simple Tree `bone_086`, and Big Spruce `bone_508` pass locally.
+Status: Superseded.
 
-The `boolean-multi-prototype` command prepares source analysis/triangulation/connectivity once and assembles untouched faces, parent stubs, and detached branches by Fracture Plan ownership. Independent components build separately. Same-shell cuts split their current parent region sequentially with distinct cap provenance; this covers the real SimpleTree stump-plus-branch case without overlapping geometry. Structural `auto_stem_length` pieces reuse already disconnected source shells. Collision and export remain downstream consumers; any external process pool remains separate work.
+Shared-memory buffers and worker lifecycle exceeded the work. `numpy.frombuffer`
+now classifies existing packed buffers in-process. Big Spruce improved from
+0.03242 s to 0.00570 s for 58,463 faces. Keep scalar work below 50,000 faces.
 
-Big Spruce `bone_033` exposed a disconnected descendant twig crossing the same
-plane with three transition faces owned by the cut bone. The production selector
-now chooses the unique component with dominant cut-bone evidence and leaves the
-twig intact in its child piece. A local matrix covering 7/11/19/37/64 requested
-branches, height bias from -1 to +1, stump, and separate-stem variants completed.
+## Python-list topology for huge FBX payloads
 
-Big Spruce profiling showed that the former `select_component` timing mostly measured repeated planning rather than component selection: two `plan_fracture` calls consumed about 2.9 s under `cProfile`, while `_select_component` itself consumed about 35 ms. A prepared one-cut session reduced repeated `bone_508`, Density 8 regeneration to a 56 ms median. The shared planner owner lookup reduced the normal 11-cut Big Spruce plan from 122 ms to 90 ms and a 64-cut stress plan from 1695 ms to 481 ms. The sequential 11-cut Big Spruce multi session at Intensity 20 / Density 8 prepared in about 1.31 s and regenerated in about 0.88 s locally. These are local measurements, not cross-machine guarantees.
+Status: Rejected.
 
-Exact-site/result reuse reduced adding a Big Spruce stump to an already built 11-cut session to about 353 ms of replan/slicing plus 99 ms for the new stump Boolean; the 11 unchanged branch results were reused. On SimpleTree, a four-cut plan containing a stump and branch on the same shell completed sequential geometry in about 192 ms locally.
+`list[int]` materializes tens of millions of Python objects and a multi-GB
+transient peak. The ufbx bridge writes packed buffers directly.
 
-After automatic branch cuts moved to physical segment positions, a 2026-07-24
-Big Spruce pass at 11 cuts, Intensity 20, and Cut Detail 8 observed 5.60 s
-preparation and a 1.70 s three-run regeneration median before optimization.
-Caching face centroids per plan, using DFS ancestry intervals, prefiltering
-segment cuts per source bone, hashing one prebuilt source-byte payload, reusing
-the source material lookup, and skipping unused result-face normals reduced
-preparation to a 1.49 s five-run median and regeneration to a 0.835 s five-run
-median. Three fresh-process Fracture Preview runs completed in 3.30–3.47 s
-(3.32 s median). The points/indices/normals/UV signature remained unchanged.
-A per-cutter Perlin-gradient dictionary was measured, produced only a
-noise-level improvement, and was removed.
+## Outer parallel Boolean execution
 
-The 2026-07-24 Big Spruce ownership reproduction found 422 parent-dominated
-faces assigned to automatic child pieces even though none had skin influence
-from the corresponding child subtree. They were disconnected sibling collars
-whose centroids happened to project beyond another branch's cut plane. After
-binding-gated ownership, a 12-run matrix across all three local SpeedTree
-samples, 7-64 requested branches, 15-80% cut offsets, both height-bias
-directions, stump, and separate-stem modes checked 318 automatic cuts and
-133,764 assigned face observations with zero cross-subtree violations. The
-exact reported Big Spruce settings retained 38 pieces and all 36 requested
-automatic branches while reducing foreign parent-face assignments from 422 to
-zero. A full Detailed Boolean build at Intensity 33.9, Cut Scale 0.64, and Cut
-Detail 8 completed with 38 non-empty pieces and 37 cuts including the stump.
+Status: Rejected on Windows spawn/oneTBB.
 
-Detailed Repeated Part ownership was compared on the same 36-branch Big Spruce
-case. The existing flat physical-bone planes moved 26 child-owned instances;
-this is now the shared planner baseline. A maximum-amplitude plane moved 200,
-while the existing triangular cutter surfaces supported 88 total parent-side
-moves while preserving all 3,613 instances exactly once. Reusing the actual
-cutter surface added about 0.155 s under `cProfile`; point-side work itself was
-about 0.014 s. Extending a cutter from its nearest projected edge was rejected
-because it moved 230 parts, including descendant pivots for which that spatial
-calculation was not justified.
+Independent components matched sequential output exactly, but transport and
+oneTBB oversubscription lost. At 37 cuts, sequential was 6.81-6.88 s, two
+processes 6.99-7.34 s, four 7.92-8.05 s; RSS rose to 382-403 MiB and
+577-751 MiB. Same-shell cuts are always sequential. Revisit only after a
+zero-copy boundary or different backend, with speed, RSS, exact-result, and
+packaged-stability gates.
 
-This page stores rejected, superseded, or otherwise non-current approaches that still matter because they explain why the present contract exists.
+## Connectivity-first Manifold Boolean fracture
 
-## Experiment: Preview simplification by deterministic face sampling
+Status: Production integrated; broader real-tree and UE validation open.
 
-Status: Rejected
+Detailed Cuts isolate a connected branch shell, close valid degree-two loops,
+then split it with a deterministic noisy triangular cutter. `manifold3d`
+provenance removes temporary closures, retains caps, and transfers source UVs,
+colors, materials, and skinning. Multi-cut runs reuse prepared analysis;
+same-shell cuts run sequentially with distinct cap provenance.
 
-Context:
-Face sampling was tested as a cheaper alternative to QEM for Proxy Mesh and
-later reused in Fracture Preview, including after noisy clipping.
+Key retained results:
 
-Outcome:
-It produced disconnected triangle clouds and visible missing triangles. In
-Fracture Preview it could break otherwise valid clipped and capped surfaces.
+- Dominant cut-bone ownership selects one crossing shell; equal evidence fails.
+- Binding-gated automatic ownership removed 422 foreign Big Spruce faces. A
+  12-run matrix checked 318 cuts and 133,764 face assignments with no
+  cross-subtree violations.
+- Actual cutter surfaces, not extended projections, classify Detailed Repeated
+  Parts. Flat planes moved 26 parts, cutter surfaces 88, and unjustified edge
+  extension 230.
+- Prepared Big Spruce regeneration reached a 0.835 s five-run median; fresh
+  preview processes were 3.30-3.47 s. These are local measurements.
 
-Keep:
-Use the shared `fast-simplification` QEM backend for Proxy Mesh and Fracture
-Preview. Simplify only after exact fracture clipping and cap construction.
+## Face-sampled preview simplification
 
-Related files:
-- `docs/raw/DECISIONS.md`
-- `docs/wiki/known-bugs.md`
+Status: Rejected.
 
-## Experiment: Fracture Preview on a Qt background thread
+Sampling made disconnected clouds and holes, including after fracture caps.
+Use shared `fast-simplification` QEM after exact clipping.
 
-Status: Superseded
+## Fracture Preview Qt thread
 
-Context:
-An earlier version used a Qt-owned background thread for Fracture Preview.
+Status: Superseded.
 
-Outcome:
-Process isolation replaced it after native crashes were observed.
+Native crashes required isolated preview workers.
 
-Keep:
-Use isolated worker processes for preview work that can fail natively.
+## Packaged sidecar worker
 
-Related files:
-- `docs/raw/DECISIONS.md`
-- `docs/raw/ARCHITECTURE.md`
-- `docs/wiki/known-bugs.md`
+Status: Superseded.
 
-## Experiment: Packaged sidecar worker executable
+The packaged app reuses its own executable in worker mode. Worker dispatch must
+remain before Qt bootstrap.
 
-Status: Superseded
+## Normalizer and USDA micro-optimizations
 
-Context:
-The packaged release briefly used a separate worker executable.
+Status: Rejected beyond retained simple changes.
 
-Outcome:
-The current release reuses the main executable in worker mode instead.
+Single-pass UV rewrite, local child-scan rewrites, larger authoring chunks,
+`StringIO`, C-level maps, and NumPy identity factoring produced no stable
+material gain on Big Spruce. Keep split UV work, direct formatting, small
+identity/string and low-cardinality integer caches. Profile representative
+end-to-end work before adding a branch.
 
-Keep:
-Worker commands must still stay before Qt bootstrap.
+## Automatic trunk refinement and synthetic fill
 
-Related files:
-- `docs/raw/DECISIONS.md`
-- `docs/raw/troubleshooting.md`
-- `docs/wiki/known-bugs.md`
+Status: Superseded.
 
-## Experiment: Single-pass UV rewrite in the normalizer
+Hierarchy refinement and spatial face splitting shredded simple trunks. Auto
+fracture now detaches only stump, independent stems, and length-ranked branch
+bases; manual cuts handle trunk or mid-segment cuts. Candidate exhaustion clamps
+with a diagnostic.
 
-Status: Rejected
+## Noisy geometry as automatic-cut validation
 
-Context:
-Several normalizer micro-rewrites tried to collapse UV authoring into fewer passes.
+Status: Rejected.
 
-Outcome:
-The rewritten path was slower on the large `BigSpruce` sample.
+Noisy preflight rejected Big Spruce's stump and long branches, then chose six
+micro-branches. Plan from skeleton and operator settings. Noise affects only
+resolved Cut Surfaces; ownership follows skeleton attachment.
 
-Keep:
-Keep the faster split path and profile real samples before changing it again.
+## Largest USD skeleton autoselection
 
-Related files:
-- `docs/raw/REFRACTOR_LOG.md`
-- `docs/wiki/known-bugs.md`
+Status: Rejected.
 
-## Experiment: Local loop and child-scan micro-optimizations in the normalizer
+Joint count is a hidden heuristic. Enumerate USD Skeleton prims and require
+operator selection; text fallback may parse them but must not choose by size.
 
-Status: Rejected
+## UE Skeletal Mesh reorientation without reimport
 
-Context:
-Several local binding, child-scan, and payload-precompute tweaks were tried on the hot path.
+Status: UE 5.7 in-place path validated; duplicate route superseded.
 
-Outcome:
-They did not produce a stable improvement on the large sample and were reverted.
+Reorienting only a Skeletal Mesh changes editor display but not Dynamic Wind:
+UE reads the assigned Skeleton Asset reference pose. The current UE 5.7 Asset
+Action updates selected meshes and their dedicated Skeleton Assets. It refuses
+shared Skeleton Assets, performs a transient leaf rename to force reference-pose
+rebuild, restores the name in a second commit, and validates exact Mesh/Skeleton
+local-pose agreement.
 
-Keep:
-Prefer changes that remove duplicate XML work over clever local rewrites.
+SpeedTree forks use Reference Skeleton order: lowest-index child continues the
+generator line; other children start lines. Each bone +X follows that line;
+leaves use their incoming segment, coincident terminals inherit a usable line,
+and transported parent +Y controls roll. Runtime wind and branching/terminal
+orientation were manually confirmed in UE 5.7.
 
-Related files:
-- `docs/raw/REFRACTOR_LOG.md`
-- `docs/wiki/known-bugs.md`
+Limits: sockets, physics frames, authored animation, and reimport are not
+compensated. Scripts: `scripts/ue57_fix_selected_foliage_bones.py`,
+`scripts/ue57_make_foliage_asset_action_command.py`, and the console variant.
 
-## Experiment: Push USDA authoring from one-third to one-half faster
+## Proxy collision from simplified viewport mesh
 
-Status: Rejected beyond the retained stdlib hot-path changes
+Status: Rejected.
 
-Context:
-After formatting reuse and cheaper equivalent scalar formatting passed the 30%
-gate, further changes were tested against the same Big Spruce authoring model.
+Density/QEM output has crown geometry but loses base-mesh skin ownership.
+Fitting would need a new heuristic and can repeat multi-stem width errors. Keep
+the compact stem-joint/base-point source retained by preview generation.
 
-Outcome:
-Larger array chunks and `StringIO` produced no stable gain. Two-pass C-level
-maps were slower. NumPy identity factorization saved only about 26 ms, roughly
-8% of the already optimized path, while adding dependency-sensitive arrays and
-still falling short of 50%.
+## Reduce high-resolution Proxy QEM input
 
-Keep:
-Retain the simple identity/string caches, low-cardinality integer cache, direct
-matrix formatter, and equivalent `%g` formatting. Do not add a NumPy authoring
-branch or tune chunk sizes without a new representative profile showing a
-material end-to-end gain.
+Status: Rejected.
 
-Related files:
-- `src/xml_to_usda/usda_authoring.py`
-- `docs/wiki/architecture.md`
+On the 28M sample, a prepass reduced a 256 grid from 1.65M to 0.93M triangles
+but slowed QEM from 2.25 s to 3.56 s. Aggressiveness 10 was also slower than 7
+at 512, 9.30 s vs 8.98 s. Voxel-strip merging risks T-junctions. Keep direct
+QEM plus dense-grid/quadratic NumPy acceleration.
 
-## Experiment: Automatic trunk-chain and synthetic fracture fill
+## Inherited deformation at branch attachments
 
-Status: Superseded
+Status: Implemented behind Skinning Quality; UE 5.7.x Part validation open.
 
-Context:
-Earlier automatic fracturing tried to reach the requested piece count by refining hierarchy joints and, when needed, splitting base faces spatially.
+At a child attachment, inherit the parent's influence vector, then blend to
+child influence. Quality 1 is rigid; 2 uses the established two-weight collar;
+3/4 recursively inherit and clamp to three/four slots. In quality 2, the first
+20% reaches rigid parent and remaining 80% transitions parent to child. Parts
+receive the same distribution at their instance position. Earlier Base Mesh
+quality 2-4 tests passed; Part widths and runtime cost remain unverified.
 
-Outcome:
-On simple trees this could shred one trunk section while leaving the upper tree intact. V1 replaces this with natural weak-point detachment only: stump, independent stems, and branch bases ranked by skeleton length plus optional height bias.
+## `TungTungTung.fbx` after rigid PCG wind
 
-Keep:
-Manual cuts remain the explicit escape hatch for trunk or mid-segment cuts. Automatic fill clamps with a diagnostic when safe branch candidates run out.
+Status: FBX inspected; PCG cause Unverified.
 
-Related files:
-- `src/xml_to_usda/fracture_service.py`
-- `docs/wiki/decisions.md`
+The Blender FBX has eight distributed bones, one 5,218-vertex mesh, eight
+clusters, no unweighted vertices, at most four influences, coherent main-chain
++X, and no exact source-up singularity. It disproves all-root, coincident-pivot,
+and shared-bind-matrix hypotheses. Normalize weights in DCC: 1,733 vertex sums
+are outside 1.0 by >0.01, range 0.9340-1.0252. Confirm terminal axes and replace
+generic names before JSON becomes durable.
 
-## Experiment: Noisy geometry as an automatic cut validator
-
-Status: Rejected
-
-Context:
-Noisy Cut preflight rejected candidates whose Repeated Part bounds or cap loops
-crossed the displaced surface, then asked the planner for replacement cuts.
-
-Outcome:
-On BigSpruce it rejected the stump and every intended long branch, then selected
-six micro-branches. Geometry settings silently changed fracture structure.
-
-Keep:
-Plan once from skeleton length and operator settings. Apply noise only to the
-resulting Cut Surfaces; Repeated Part ownership follows skeleton attachment.
-
-## Experiment: Wind Preview USD largest-skeleton autoselection
-
-Status: Rejected
-
-Context:
-External Skeleton loading for converter-authored USDA files first used the
-largest Skeleton prim by joint count so the main tree skeleton would win over
-small repeated-part skeletons.
-
-Outcome:
-This was a hidden heuristic. Multi-skeleton USD files must show an explicit
-Skeleton choice instead.
-
-Keep:
-Enumerate Skeleton prims in the Wind Preview worker and load only the operator-
-selected index. Text USDA fallback may parse Skeleton blocks without `pxr`, but
-it must not choose a skeleton by size.
-
-Related files:
-- `src/xml_to_usda/wind_external_skeleton.py`
-- `src/xml_to_usda/qt_ui/wind_preview.py`
-- `docs/wind_viewport_working_plan.md`
-
-## Experiment: Reorient an imported UE Skeletal Mesh without reimport
-
-Status: UE 5.7 in-place path validated; duplicate-and-create path superseded
-
-Settled contracts now live in
-[Decisions](decisions.md#decision-imported-foliage-orientation-must-update-mesh-and-skeleton-reference-poses).
-This section preserves the failed and superseded routes.
-
-Context:
-Some already-imported vegetation assets use world-aligned local bone axes, which
-can invert procedural wind response across opposite sides of a tree.
-
-Approach:
-`scripts/ue_orient_selected_skeletal_mesh_x.py` duplicates one selected Skeletal
-Mesh beside its source and uses UE 5.8's native `SkeletonModifier` to orient
-primary +X along the hierarchy. Commit updates the mesh reference skeleton,
-mesh-description bone poses, and inverse bind matrices. It saves and selects the
-modified mesh in the Content Browser.
-
-Reason for the separate Skeleton:
-UE 5.8 Dynamic Wind reads bind transforms from
-`SkeletalMesh->GetSkeleton()->GetReferenceSkeleton()`, not from the Skeletal
-Mesh reference skeleton. Reorienting only the mesh therefore changes the editor
-bone display but not Dynamic Wind simulation.
-
-Python limitation:
-`USkeletonFactory::TargetSkeletalMesh` is protected and UE 5.8 rejects setting
-it through `set_editor_property`. The public Python API cannot automatically
-perform the final Skeleton creation. On the selected result use
-`Skeleton > Create Skeleton`; the native asset action initializes and
-assigns a new sibling Skeleton from that modified mesh.
-
-Outcome:
-The duplicate workflow established that changing only the Skeletal Mesh can
-rotate editor bone axes without changing Dynamic Wind. It was superseded by
-the UE 5.7 in-place Asset Action, which updates both the original mesh and its
-dedicated Skeleton Asset. Manual UE 5.7 testing confirmed correct runtime wind,
-branching-bone orientation, and terminal-bone orientation.
-
-UE 5.7 in-place Asset Action:
-`scripts/ue57_fix_selected_foliage_bones.py` edits all selected Skeletal Meshes
-and their existing dedicated Skeleton Assets. It uses a transient leaf rename
-and restores the original name to make UE 5.7 rebuild the Skeleton reference
-pose; a transform-only `SkeletonModifier` commit does not do that. It refuses
-shared Skeleton Assets because UE 5.7 otherwise preserves their old reference
-pose and would also affect unselected meshes.
-
-The native multi-child orientation policy is unsuitable for SpeedTree branch
-junctions. The repair instead uses Reference Skeleton order: the lowest-index
-child continues the current generator line, while every other child starts its
-own line. This matches the converter's automatic Wind Preview branch-order
-contract. Each bone's +X points to that continuation; a leaf uses its incoming
-segment, and coincident terminal joints inherit the nearest usable line.
-Transported parent +Y prevents arbitrary roll changes along a chain.
-
-Orientation and the temporary rename share the first commit; restoring the
-exact original name requires the second. This is the minimum available through
-pure UE 5.7 Python: transform-only commits do not update the Skeleton Asset,
-and `USkeleton::UpdateReferencePoseFromMesh` is not exposed to Python. The
-script validates exact Mesh/Skeleton local-pose agreement after both commits.
-`scripts/ue57_make_foliage_asset_action_command.py` copies the self-contained
-`exec(...)` command for an Execute Python Command node.
-
-For bug reports and Output Log reproduction,
-`scripts/ue_orient_selected_skeletal_mesh_x_console.txt` contains the same
-experiment as one self-contained Python-console line with no local file lookup.
-
-Limits:
-The in-place path intentionally preserves the existing dedicated Skeleton Asset,
-but animation tracks, sockets, and Physics Asset local frames are not
-compensated. Reimport can replace the result. Reference-pose geometry and
-Dynamic Wind are validated; sockets, physics, authored animation, and reimport
-remain operator validation items.
-
-## Experiment: Fit Proxy collision from the simplified viewport mesh
-
-Status: Rejected
-
-Context:
-Collision-only Proxy Preview updates were slow enough to suggest reusing the
-already available low-poly viewport mesh.
-
-Outcome:
-The density/QEM mesh no longer retains base-mesh skin ownership and includes
-crown geometry. Assigning its points to independent stems would require a new
-geometric heuristic and could reproduce the multi-stem width error.
-
-Keep:
-Prepare one compact source from primary-stem joints and their owned base-mesh
-points during initial preview generation, then refit collision locally. On the
-three-trunk sample it contains 19 joints and 180 points; on Big Spruce, 17
-joints and 973 points.
-
-Related files:
-- `src/xml_to_usda/proxy_collision.py`
-- `src/xml_to_usda/proxy_mesh_service.py`
-
-## Experiment: Reduce high-resolution Proxy QEM input before simplification
-
-Status: Rejected
-
-Resolution 512 on the dense 28-million sample produces about 6.77 million raw
-surface triangles before the requested 5,000-triangle QEM result. A native
-`fast-simplification` lossless prepass reduced a resolution-256 input from
-1.65 million to 0.93 million triangles, but total simplification rose from
-2.25 to 3.56 seconds. Raising QEM aggressiveness from 7 to 10 on the
-resolution-512 input changed the result and was slightly slower: 9.30 seconds
-versus 8.98 seconds.
-
-Greedy coplanar voxel-strip merging was also rejected: naïve strip boundaries
-introduce T-junctions, so making it topology-safe would require a second mesh
-algorithm and substantially more complexity. Keep direct QEM and the retained
-dense-grid/quadratic NumPy acceleration. Revisit surface reduction only with a
-measured topology-preserving implementation.
-
-Related files:
-- `src/xml_to_usda/proxy_mesh_service.py`
-- `src/xml_to_usda/qem_simplification.py`
-
-## Experiment: Inherit parent deformation at base-tree branch attachments
-
-Status: Implemented behind operator-selectable experiment; Unverified in UE 5.7.x
-
-For a child joint attached at parameter `t` inside its parent bone, evaluate
-the parent's existing influence vector at that position. Use that vector at
-the child's start and blend it toward 100% child-joint influence along the
-child segment. This preserves positional continuity between the child root and
-the already-deforming parent surface without adding synthetic skeleton joints.
-
-Base-tree recursion accumulates one additional ancestor influence at each
-branch level. Quality 3/4 evaluates that same distribution at every Assembly
-Part position; the Part remains rigid and receives one blended transform.
-
-The Wind panel exposes one discrete `Skinning Quality` slider:
-
-- `1 weight`: default rigid output and lowest runtime cost.
-- `2 weights`: the production candidate using the child attachment collar.
-- `3 weights (Expensive)`: recursively inherited base-tree weights, deterministically clamped
-  and normalized to three slots.
-- `4 weights (Expensive)`: the same propagation with four slots.
-
-The two-weight mode leaves parent geometry on its unchanged gradient. At an
-  internal child attachment, the child base starts with the parent's exact
-  `grandparent + parent` mixture. Over the first 20% of the child segment that
-  mixture smoothly reaches `100% parent`; the remaining 80% transitions
-  linearly from `parent` to `child`. This keeps two slots and avoids the
-  M-shaped parent profile produced by locally hardening parent geometry.
-
-Quality 2 keeps the established two-weight Assembly Part path. Qualities 3/4
-author matching inherited three-/four-slot Assembly Part bindings. The quality
-selection is persisted as one integer. UE 5.7.x visual wind tests passed for
-the earlier Base Mesh qualities 2-4; the new Assembly Part widths and their
-runtime cost still require UE 5.7.x validation.
-
-## Experiment: Audit `TungTungTung.fbx` after rigid PCG wind
-
-Status: FBX structure inspected; PCG cause Unverified
-
-The supplied Blender FBX contains eight distributed bones, one 5,218-vertex
-mesh, one linear skin deformer, eight distinct clusters, no unweighted vertices,
-and at most four influences. Dominant-weight spatial bands follow the body chain;
-the club-like and nose-like regions belong to separate side bones. Main-chain
-world +X follows the hierarchy and no joint is exactly vertical to source +Y.
-This rejects the initial all-root, coincident-pivot, and shared-bind-matrix
-hypotheses for the source file.
-
-The actionable source defect is weight normalization: 1,733 vertices differ
-from a total of 1.0 by more than 0.01, with sums from 0.9340 to 1.0252. Normalize
-in the DCC even if Unreal repairs weights during import. Generic bone names and
-terminal bone axes also need operator confirmation before JSON names become a
-stable asset contract.
-
-The same PCG graph was not available. The next discriminating experiment is the
-same imported Skeletal Mesh and wind data placed directly versus generated by
-PCG. If manual rotations and direct placement deform regionally while only PCG
-is rigid, capture the generated component class, referenced asset, Skeleton,
-and Dynamic Wind asset data before changing the FBX or grouping code.
-
-Full measurements and the retained checklist live in
+Next test: compare direct placement and PCG using the same Skeletal Mesh and
+wind data. If only PCG is rigid, capture component class, asset, Skeleton, and
+Dynamic Wind data before changing FBX or grouping. Full audit:
 [External Dynamic Wind Rigs](external-dynamic-wind-rigs.md).
