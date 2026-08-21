@@ -159,7 +159,7 @@ class WindPreviewDialog(PreviewShellDialog):
         self.source_mode_combo.addItem("SpeedTree XML", SOURCE_MODE_XML)
         self.source_mode_combo.addItem("External Skeleton", SOURCE_MODE_EXTERNAL)
         self.source_mode_combo.currentIndexChanged.connect(lambda _index: self._on_source_mode_changed())
-        set_tooltip("Wind Preview source. XML uses the current SpeedTree tree; External loads FBX/USD skeleton-only.", self.source_mode_combo)
+        set_tooltip("Advanced Wind Settings source. XML uses the current SpeedTree tree; External loads an FBX rig or a USD skeleton.", self.source_mode_combo)
         settings_layout.addWidget(self.source_mode_combo)
         self.external_path_edit = QLineEdit(settings_panel)
         self.external_path_edit.setPlaceholderText("FBX/USD skeleton path")
@@ -215,6 +215,20 @@ class WindPreviewDialog(PreviewShellDialog):
         ):
             combo.currentIndexChanged.connect(lambda _index: self._on_external_display_transform_changed())
         settings_layout.addWidget(self.external_display_transform_frame)
+
+        self.external_diagnostics_frame = QFrame(settings_panel)
+        self.external_diagnostics_frame.setObjectName("LayerCard")
+        diagnostics_layout = QVBoxLayout(self.external_diagnostics_frame)
+        diagnostics_layout.setContentsMargins(6, 5, 6, 5)
+        diagnostics_layout.setSpacing(4)
+        diagnostics_title = QLabel("FBX Diagnostics", self.external_diagnostics_frame)
+        diagnostics_title.setStyleSheet("font-weight: 600;")
+        diagnostics_layout.addWidget(diagnostics_title)
+        self.external_diagnostics_label = QLabel("Load an FBX rig to inspect it.", self.external_diagnostics_frame)
+        self.external_diagnostics_label.setWordWrap(True)
+        self.external_diagnostics_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        diagnostics_layout.addWidget(self.external_diagnostics_label)
+        settings_layout.addWidget(self.external_diagnostics_frame)
         self._external_controls = (
             self.external_path_edit,
             self.external_skeleton_combo,
@@ -422,6 +436,7 @@ class WindPreviewDialog(PreviewShellDialog):
             self.group_count_slider.setValue(self._auto_group_count)
         self._sync_source_controls()
         self._sync_external_skeleton_warning()
+        self._sync_external_diagnostics()
         self._sync_grouping_controls()
         self._rebuild_group_list()
         self._apply_scene(frame_camera=True)
@@ -1064,10 +1079,14 @@ class WindPreviewDialog(PreviewShellDialog):
         for widget in self._external_controls:
             widget.setVisible(external)
         self.external_skeleton_combo.setVisible(external and self._external_skeleton_choice_count > 1)
+        preview = self.current_preview
+        is_fbx = preview is not None and Path(preview.input_path).suffix.lower() == ".fbx"
+        self.external_diagnostics_frame.setVisible(external and is_fbx)
 
     def _on_source_mode_changed(self) -> None:
         self._sync_source_controls()
         self._sync_external_skeleton_warning()
+        self._sync_external_diagnostics()
         self._save_wind_session()
 
     def _on_external_display_transform_changed(self) -> None:
@@ -1102,6 +1121,24 @@ class WindPreviewDialog(PreviewShellDialog):
         )
         self.external_vertical_warning_label.setToolTip(", ".join(vertical_bones))
         self.external_vertical_warning_label.show()
+
+    def _sync_external_diagnostics(self) -> None:
+        preview = self.current_preview
+        if preview is None or Path(preview.input_path).suffix.lower() != ".fbx":
+            self.external_diagnostics_label.setText("Load an FBX rig to inspect it.")
+            self.external_diagnostics_label.setToolTip("")
+            return
+        errors = sum(issue.severity == "error" for issue in preview.diagnostics)
+        warnings = sum(issue.severity == "warning" for issue in preview.diagnostics)
+        header = f"{errors} error(s) · {warnings} warning(s)"
+        lines = [header]
+        for issue in preview.diagnostics:
+            prefix = "Error" if issue.severity == "error" else "Warning" if issue.severity == "warning" else "Info"
+            lines.append(f"{prefix}: {issue.message}")
+        self.external_diagnostics_label.setText("\n".join(lines))
+        self.external_diagnostics_label.setToolTip(
+            "\n".join(f"{issue.code}: {issue.message}" for issue in preview.diagnostics)
+        )
 
     def _on_external_skeleton_changed(self) -> None:
         self._save_wind_session()

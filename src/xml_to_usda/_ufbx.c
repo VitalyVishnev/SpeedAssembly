@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "vendor/ufbx/ufbx.h"
 
@@ -395,10 +396,263 @@ static PyObject *py_load_skeleton(PyObject *self, PyObject *args)
     return result;
 }
 
+static PyObject *matrix_tuple(ufbx_matrix matrix)
+{
+    return Py_BuildValue(
+        "(dddddddddddddddd)",
+        matrix.m00, matrix.m10, matrix.m20, 0.0,
+        matrix.m01, matrix.m11, matrix.m21, 0.0,
+        matrix.m02, matrix.m12, matrix.m22, 0.0,
+        matrix.m03, matrix.m13, matrix.m23, 1.0
+    );
+}
+
+static int bone_index(const ufbx_scene *scene, const ufbx_node *bone)
+{
+    int index = 0;
+    for (size_t i = 0; i < scene->nodes.count; i++) {
+        const ufbx_node *node = scene->nodes.data[i];
+        if (!node->bone) continue;
+        if (node == bone) return index;
+        index++;
+    }
+    return -1;
+}
+
+static int dict_set_ssize(PyObject *dict, const char *key, size_t value)
+{
+    PyObject *object = PyLong_FromSize_t(value);
+    if (!object) return 0;
+    int ok = PyDict_SetItemString(dict, key, object) == 0;
+    Py_DECREF(object);
+    return ok;
+}
+
+static int dict_set_double(PyObject *dict, const char *key, double value)
+{
+    PyObject *object = PyFloat_FromDouble(value);
+    if (!object) return 0;
+    int ok = PyDict_SetItemString(dict, key, object) == 0;
+    Py_DECREF(object);
+    return ok;
+}
+
+static int matrix_is_finite(ufbx_matrix matrix)
+{
+    const double values[] = {
+        matrix.m00, matrix.m01, matrix.m02, matrix.m03,
+        matrix.m10, matrix.m11, matrix.m12, matrix.m13,
+        matrix.m20, matrix.m21, matrix.m22, matrix.m23,
+    };
+    for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); i++) if (!isfinite(values[i])) return 0;
+    return 1;
+}
+
+static int matrices_differ(ufbx_matrix left, ufbx_matrix right)
+{
+    const double left_values[] = {
+        left.m00, left.m01, left.m02, left.m03,
+        left.m10, left.m11, left.m12, left.m13,
+        left.m20, left.m21, left.m22, left.m23,
+    };
+    const double right_values[] = {
+        right.m00, right.m01, right.m02, right.m03,
+        right.m10, right.m11, right.m12, right.m13,
+        right.m20, right.m21, right.m22, right.m23,
+    };
+    for (size_t i = 0; i < sizeof(left_values) / sizeof(left_values[0]); i++) {
+        double scale = fmax(1.0, fmax(fabs(left_values[i]), fabs(right_values[i])));
+        if (fabs(left_values[i] - right_values[i]) > 1.0e-4 * scale) return 1;
+    }
+    return 0;
+}
+
+static PyObject *py_load_skeletal_preview(PyObject *self, PyObject *args)
+{
+    const char *path;
+    if (!PyArg_ParseTuple(args, "s", &path)) return NULL;
+    ufbx_load_opts opts = { 0 };
+    opts.ignore_embedded = true;
+    opts.ignore_missing_external_files = true;
+    opts.skip_mesh_parts = true;
+    ufbx_scene *scene = load_scene(path, &opts);
+    if (!scene) return NULL;
+
+    PyObject *result = NULL, *joints = NULL, *stats = NULL;
+    FloatBuffer points = {0}, weights = {0}, unused_uvs = {0}, unused_colors = {0};
+    IntBuffer counts = {0}, indices = {0}, joint_indices = {0};
+    MaterialSlots unused_slots = {0};
+    size_t bone_count = 0, mesh_count = 0, skin_count = 0, cluster_count = 0, non_linear_skin_count = 0;
+    size_t blend_count = 0, unweighted_count = 0, non_normalized_count = 0;
+    size_t invalid_weight_count = 0, truncated_vertex_count = 0, max_influences = 0;
+    size_t invalid_bind_matrix_count = 0, bind_pose_mismatch_count = 0;
+    size_t missing_normals = 0, missing_uvs = 0, missing_tangents = 0;
+    size_t point_offset = 0;
+    double minimum_weight_sum = INFINITY, maximum_weight_sum = -INFINITY;
+    int colors_usable = 0;
+
+    for (size_t i = 0; i < scene->nodes.count; i++) if (scene->nodes.data[i]->bone) bone_count++;
+    if (!bone_count) { PyErr_SetString(PyExc_ValueError, "FBX file does not contain a skeleton."); goto done; }
+
+    joints = PyList_New(0);
+    if (!joints) goto done;
+    for (size_t i = 0; i < scene->nodes.count; i++) {
+        const ufbx_node *node = scene->nodes.data[i];
+        if (!node->bone) continue;
+        int index = bone_index(scene, node);
+        const char *name = node->name.length ? node->name.data : NULL;
+        char generated[32];
+        if (!name) { snprintf(generated, sizeof(generated), "joint_%03d", index); name = generated; }
+        const ufbx_node *parent = bone_parent(node);
+        PyObject *world = matrix_tuple(node->node_to_world);
+        PyObject *local = matrix_tuple(node->node_to_parent);
+        PyObject *scale = Py_BuildValue(
+            "(ddd)", node->local_transform.scale.x, node->local_transform.scale.y, node->local_transform.scale.z
+        );
+        PyObject *entry = world && local && scale ? Py_BuildValue(
+            "(siOOOi)", name, parent ? bone_index(scene, parent) : -1, world, local, scale,
+            node->bind_pose && node->bind_pose->is_bind_pose
+        ) : NULL;
+        Py_XDECREF(world); Py_XDECREF(local); Py_XDECREF(scale);
+        if (!entry || PyList_Append(joints, entry) < 0) { Py_XDECREF(entry); goto done; }
+        Py_DECREF(entry);
+    }
+
+    for (size_t node_index = 0; node_index < scene->nodes.count; node_index++) {
+        const ufbx_node *node = scene->nodes.data[node_index];
+        const ufbx_mesh *mesh = node->mesh;
+        if (!mesh) continue;
+        mesh_count++;
+        if (!mesh->vertex_normal.exists) missing_normals++;
+        if (!mesh->vertex_uv.exists) missing_uvs++;
+        if (!mesh->vertex_tangent.exists) missing_tangents++;
+        blend_count += mesh->blend_deformers.count;
+        skin_count += mesh->skin_deformers.count;
+        for (size_t skin_index = 0; skin_index < mesh->skin_deformers.count; skin_index++) {
+            ufbx_skinning_method method = mesh->skin_deformers.data[skin_index]->skinning_method;
+            if (method != UFBX_SKINNING_METHOD_LINEAR && method != UFBX_SKINNING_METHOD_RIGID) non_linear_skin_count++;
+        }
+        for (size_t vertex = 0; vertex < mesh->vertices.count; vertex++) {
+            if (!float_push_vec3(&points, ufbx_transform_position(&node->geometry_to_world, mesh->vertices.data[vertex]))) goto done;
+        }
+        if (!append_triangles(
+            &counts, &indices, &unused_uvs, &unused_colors, &unused_slots, node, mesh,
+            point_offset, 0, 0, &colors_usable
+        )) goto done;
+
+        const ufbx_skin_deformer *skin = mesh->skin_deformers.count ? mesh->skin_deformers.data[0] : NULL;
+        if (skin) {
+            cluster_count += skin->clusters.count;
+            if (skin->max_weights_per_vertex > max_influences) max_influences = skin->max_weights_per_vertex;
+            for (size_t cluster_index = 0; cluster_index < skin->clusters.count; cluster_index++) {
+                const ufbx_skin_cluster *cluster = skin->clusters.data[cluster_index];
+                if (!cluster || !matrix_is_finite(cluster->geometry_to_bone) || !matrix_is_finite(cluster->bind_to_world)) {
+                    invalid_bind_matrix_count++;
+                } else if (matrices_differ(cluster->geometry_to_world, node->geometry_to_world)) {
+                    bind_pose_mismatch_count++;
+                }
+            }
+        }
+        for (size_t vertex = 0; vertex < mesh->vertices.count; vertex++) {
+            int32_t selected_indices[4] = {0, 0, 0, 0};
+            float selected_weights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            size_t selected_count = 0;
+            double weight_sum = 0.0;
+            size_t source_count = 0;
+            if (skin && vertex < skin->vertices.count) {
+                ufbx_skin_vertex skin_vertex = skin->vertices.data[vertex];
+                source_count = skin_vertex.num_weights;
+                for (size_t slot = 0; slot < skin_vertex.num_weights; slot++) {
+                    ufbx_skin_weight influence = skin->weights.data[skin_vertex.weight_begin + slot];
+                    double weight = influence.weight;
+                    if (!isfinite(weight) || weight < 0.0) {
+                        invalid_weight_count++;
+                        continue;
+                    }
+                    weight_sum += weight;
+                    if (influence.cluster_index >= skin->clusters.count || weight <= 0.0) continue;
+                    const ufbx_skin_cluster *cluster = skin->clusters.data[influence.cluster_index];
+                    int mapped_index = cluster && cluster->bone_node ? bone_index(scene, cluster->bone_node) : -1;
+                    if (mapped_index < 0) { invalid_weight_count++; continue; }
+                    if (selected_count < 4) {
+                        selected_indices[selected_count] = (int32_t)mapped_index;
+                        selected_weights[selected_count] = (float)weight;
+                        selected_count++;
+                    }
+                }
+            }
+            if (source_count > 4) truncated_vertex_count++;
+            if (selected_count == 0) {
+                unweighted_count++;
+                selected_indices[0] = 0;
+                selected_weights[0] = 1.0f;
+            } else {
+                if (weight_sum < minimum_weight_sum) minimum_weight_sum = weight_sum;
+                if (weight_sum > maximum_weight_sum) maximum_weight_sum = weight_sum;
+                if (fabs(weight_sum - 1.0) > 1.0e-4) non_normalized_count++;
+            }
+            for (size_t slot = 0; slot < 4; slot++) {
+                if (!int_push(&joint_indices, selected_indices[slot]) || !float_push(&weights, selected_weights[slot])) goto done;
+            }
+        }
+        point_offset += mesh->vertices.count;
+    }
+
+    result = PyDict_New();
+    stats = PyDict_New();
+    if (!result || !stats) goto done;
+    PyObject *raw_points = bytes_from_buffer(points.data, points.count, sizeof(float));
+    PyObject *raw_counts = bytes_from_buffer(counts.data, counts.count, sizeof(int32_t));
+    PyObject *raw_indices = bytes_from_buffer(indices.data, indices.count, sizeof(int32_t));
+    PyObject *raw_joint_indices = bytes_from_buffer(joint_indices.data, joint_indices.count, sizeof(int32_t));
+    PyObject *raw_weights = bytes_from_buffer(weights.data, weights.count, sizeof(float));
+    if (!raw_points || !raw_counts || !raw_indices || !raw_joint_indices || !raw_weights ||
+        PyDict_SetItemString(result, "joints", joints) < 0 ||
+        PyDict_SetItemString(result, "point_components", raw_points) < 0 ||
+        PyDict_SetItemString(result, "face_vertex_counts", raw_counts) < 0 ||
+        PyDict_SetItemString(result, "face_vertex_indices", raw_indices) < 0 ||
+        PyDict_SetItemString(result, "skel_joint_indices", raw_joint_indices) < 0 ||
+        PyDict_SetItemString(result, "skel_joint_weights", raw_weights) < 0 ||
+        !dict_set_ssize(stats, "mesh_count", mesh_count) ||
+        !dict_set_ssize(stats, "skin_deformer_count", skin_count) ||
+        !dict_set_ssize(stats, "non_linear_skin_deformer_count", non_linear_skin_count) ||
+        !dict_set_ssize(stats, "skin_cluster_count", cluster_count) ||
+        !dict_set_ssize(stats, "blend_deformer_count", blend_count) ||
+        !dict_set_ssize(stats, "unweighted_vertex_count", unweighted_count) ||
+        !dict_set_ssize(stats, "non_normalized_vertex_count", non_normalized_count) ||
+        !dict_set_ssize(stats, "invalid_weight_count", invalid_weight_count) ||
+        !dict_set_ssize(stats, "invalid_bind_matrix_count", invalid_bind_matrix_count) ||
+        !dict_set_ssize(stats, "bind_pose_mismatch_count", bind_pose_mismatch_count) ||
+        !dict_set_ssize(stats, "truncated_vertex_count", truncated_vertex_count) ||
+        !dict_set_ssize(stats, "max_influences", max_influences) ||
+        !dict_set_ssize(stats, "missing_normals_mesh_count", missing_normals) ||
+        !dict_set_ssize(stats, "missing_uvs_mesh_count", missing_uvs) ||
+        !dict_set_ssize(stats, "missing_tangents_mesh_count", missing_tangents) ||
+        !dict_set_ssize(stats, "animation_stack_count", scene->anim_stacks.count) ||
+        !dict_set_ssize(stats, "ufbx_warning_count", scene->metadata.warnings.count) ||
+        !dict_set_double(stats, "minimum_weight_sum", isfinite(minimum_weight_sum) ? minimum_weight_sum : 0.0) ||
+        !dict_set_double(stats, "maximum_weight_sum", isfinite(maximum_weight_sum) ? maximum_weight_sum : 0.0) ||
+        !dict_set_double(stats, "unit_meters", scene->settings.unit_meters) ||
+        !dict_set_ssize(stats, "up_axis", scene->settings.axes.up) ||
+        PyDict_SetItemString(result, "stats", stats) < 0) {
+        Py_CLEAR(result);
+    }
+    Py_XDECREF(raw_points); Py_XDECREF(raw_counts); Py_XDECREF(raw_indices);
+    Py_XDECREF(raw_joint_indices); Py_XDECREF(raw_weights);
+
+done:
+    Py_XDECREF(joints); Py_XDECREF(stats);
+    PyMem_Free(points.data); PyMem_Free(weights.data); PyMem_Free(unused_uvs.data); PyMem_Free(unused_colors.data);
+    PyMem_Free(counts.data); PyMem_Free(indices.data); PyMem_Free(joint_indices.data); free_slots(&unused_slots);
+    ufbx_free_scene(scene);
+    return result;
+}
+
 static PyMethodDef methods[] = {
     { "load_geometry", (PyCFunction)py_load_geometry, METH_VARARGS | METH_KEYWORDS, "Load rigid FBX geometry through ufbx." },
     { "inspect_material_slots", py_inspect_material_slots, METH_VARARGS, "Inspect FBX material slots through ufbx." },
     { "load_skeleton", py_load_skeleton, METH_VARARGS, "Load an FBX bone hierarchy through ufbx." },
+    { "load_skeletal_preview", py_load_skeletal_preview, METH_VARARGS, "Load a skinned FBX mesh and diagnostics through ufbx." },
     { NULL, NULL, 0, NULL },
 };
 

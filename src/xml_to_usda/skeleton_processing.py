@@ -140,6 +140,7 @@ def validate_skeleton(skeleton: tuple[Joint, ...] | None) -> tuple[ValidationIss
         return ()
     issues: list[ValidationIssue] = []
     joints_by_name = {joint.name: joint for joint in skeleton}
+    joint_order = {joint.name: index for index, joint in enumerate(skeleton)}
     if len(joints_by_name) != len(skeleton):
         issues.append(_error("duplicate_skeleton_joint", "Skeleton contains duplicate joint names."))
 
@@ -149,6 +150,13 @@ def validate_skeleton(skeleton: tuple[Joint, ...] | None) -> tuple[ValidationIss
                 _error(
                     "missing_skeleton_parent",
                     f"Bone {joint.name!r} references missing parent {joint.parent!r}.",
+                )
+            )
+        elif joint.parent is not None and joint_order[joint.parent] >= joint_order[joint.name]:
+            issues.append(
+                _error(
+                    "invalid_skeleton_joint_order",
+                    f"Bone {joint.name!r} precedes parent {joint.parent!r}; UsdSkel requires parents before children.",
                 )
             )
     cycle = _first_hierarchy_cycle(skeleton, joints_by_name)

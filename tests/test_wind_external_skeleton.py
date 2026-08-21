@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from xml_to_usda.models import Joint, Matrix4d, Vector3
+from xml_to_usda.fbx_adapter import FbxSkeletalPreview
+from xml_to_usda.models import Joint, Matrix4d, MeshData, ValidationIssue, Vector3
 from xml_to_usda.wind_external_skeleton import (
     ExternalSkeletonPreviewRequest,
     external_vertical_bone_names,
@@ -18,22 +19,27 @@ from xml_to_usda.wind_external_skeleton import (
 from xml_to_usda.wind_preview_service import WindPreviewError
 
 
-def test_external_fbx_skeleton_preview_is_skeleton_only(monkeypatch, tmp_path: Path) -> None:
+def test_external_fbx_preview_includes_skinned_mesh_and_diagnostics(monkeypatch, tmp_path: Path) -> None:
     fbx_path = tmp_path / "tree.fbx"
     fbx_path.write_bytes(b"stub")
     monkeypatch.setattr(
-        "xml_to_usda.wind_external_skeleton.load_fbx_skeleton",
-        lambda _path: (
-            _joint("root", None, 0.0),
-            _joint("branch", "root", 1.0),
+        "xml_to_usda.wind_external_skeleton.load_fbx_skeletal_preview",
+        lambda _path: FbxSkeletalPreview(
+            skeleton=(
+                _joint("root", None, 0.0),
+                _joint("branch", "root", 1.0),
+            ),
+            mesh=_skinned_triangle(),
+            diagnostics=(ValidationIssue("warning", "test_rig", "Normalize weights."),),
         ),
     )
 
     preview = load_external_skeleton_preview(ExternalSkeletonPreviewRequest(str(fbx_path)))
 
     assert preview.source_model.base_mesh is None
-    assert preview.viewport_scene.mesh_batches == ()
-    assert preview.viewport_scene.draw_calls == ()
+    assert len(preview.viewport_scene.mesh_batches) == 1
+    assert len(preview.viewport_scene.draw_calls) == 1
+    assert preview.diagnostics[0].code == "test_rig"
     assert [segment.child_token for segment in preview.viewport_scene.bone_segments] == ["branch"]
     assert [assignment.simulation_group_index for assignment in preview.dynamic_wind.joint_assignments] == [0, 0]
 
@@ -45,7 +51,10 @@ def test_external_skeleton_display_transform_is_viewport_only(monkeypatch, tmp_p
         Joint("root", parent=None, bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 0.0))),
         Joint("branch", parent="root", bind_transform=Matrix4d.from_translation(Vector3(0.0, 2.0, 0.0))),
     )
-    monkeypatch.setattr("xml_to_usda.wind_external_skeleton.load_fbx_skeleton", lambda _path: skeleton)
+    monkeypatch.setattr(
+        "xml_to_usda.wind_external_skeleton.load_fbx_skeletal_preview",
+        lambda _path: FbxSkeletalPreview(skeleton, _skinned_triangle(), ()),
+    )
 
     preview = load_external_skeleton_preview(ExternalSkeletonPreviewRequest(str(fbx_path)))
     transformed = transform_external_skeleton_scene(
@@ -59,6 +68,8 @@ def test_external_skeleton_display_transform_is_viewport_only(monkeypatch, tmp_p
     assert transformed.bone_segments[0].end == Vector3(0.0, 0.0, 0.02)
     assert preview.viewport_scene.bone_segments[0].end == Vector3(0.0, 2.0, 0.0)
     assert preview.source_model.skeleton == skeleton
+    assert transformed.draw_calls[0].scale == Vector3(0.01, 0.01, 0.01)
+    assert transformed.bounds.max_point.z == pytest.approx(0.02)
 
 
 def test_external_vertical_bones_use_parent_segments_and_ignore_zero_length() -> None:
@@ -78,10 +89,14 @@ def test_external_skeleton_preview_rejects_duplicate_joint_names(monkeypatch, tm
     fbx_path = tmp_path / "tree.fbx"
     fbx_path.write_bytes(b"stub")
     monkeypatch.setattr(
-        "xml_to_usda.wind_external_skeleton.load_fbx_skeleton",
-        lambda _path: (
-            _joint("root", None, 0.0),
-            _joint("root", None, 1.0),
+        "xml_to_usda.wind_external_skeleton.load_fbx_skeletal_preview",
+        lambda _path: FbxSkeletalPreview(
+            skeleton=(
+                _joint("root", None, 0.0),
+                _joint("root", None, 1.0),
+            ),
+            mesh=None,
+            diagnostics=(),
         ),
     )
 
@@ -235,6 +250,18 @@ def _joint(name: str, parent: str | None, y: float) -> Joint:
         name=name,
         parent=parent,
         bind_transform=Matrix4d.from_translation(Vector3(0.0, y, 0.0)),
+    )
+
+
+def _skinned_triangle() -> MeshData:
+    return MeshData(
+        name="external",
+        points=(Vector3(0.0, 0.0, 0.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 2.0, 0.0)),
+        face_vertex_counts=(3,),
+        face_vertex_indices=(0, 1, 2),
+        skel_joint_indices=(0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0),
+        skel_joint_weights=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0),
+        skel_element_size=4,
     )
 
 

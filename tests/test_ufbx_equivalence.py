@@ -11,10 +11,12 @@ from __future__ import annotations
 from array import array
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from xml_to_usda.fbx_adapter import FbxImportError, _geometry_from_native_payload, inspect_fbx_material_slots, load_fbx_geometry, load_fbx_skeleton
+import xml_to_usda.fbx_adapter as fbx_adapter
+from xml_to_usda.fbx_adapter import FbxImportError, _geometry_from_native_payload, inspect_fbx_material_slots, load_fbx_geometry, load_fbx_skeletal_preview, load_fbx_skeleton
 from xml_to_usda.models import CpuProfile
 
 
@@ -58,6 +60,40 @@ def test_ufbx_bridge_rejects_malformed_native_payload() -> None:
 
     with pytest.raises(FbxImportError, match="malformed point components"):
         _geometry_from_native_payload(payload, "Broken")
+
+
+def test_skeletal_preview_reports_skin_and_bone_frame_defects(monkeypatch) -> None:
+    identity = (1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+    child = identity[:12] + (0.0, 1.0, 0.0, 1.0)
+    raw = {
+        "joints": [
+            ("root", -1, identity, identity, (1.0, 1.0, 1.0), 1),
+            ("branch", 0, child, child, (1.0, 1.0, 1.0), 1),
+        ],
+        "point_components": array("f", (0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0)).tobytes(),
+        "face_vertex_counts": array("i", (3,)).tobytes(),
+        "face_vertex_indices": array("i", (0, 1, 2)).tobytes(),
+        "skel_joint_indices": array("i", (0, 0, 0, 0) * 3).tobytes(),
+        "skel_joint_weights": array("f", (0.5, 0.0, 0.0, 0.0) * 3).tobytes(),
+        "stats": {
+            "mesh_count": 1,
+            "skin_deformer_count": 1,
+            "skin_cluster_count": 1,
+            "unweighted_vertex_count": 0,
+            "non_normalized_vertex_count": 3,
+            "minimum_weight_sum": 0.5,
+            "maximum_weight_sum": 0.5,
+            "unit_meters": 0.01,
+            "up_axis": 2,
+        },
+    }
+    monkeypatch.setattr(fbx_adapter, "_load_ufbx_native", lambda: SimpleNamespace(load_skeletal_preview=lambda _path: raw))
+
+    preview = load_fbx_skeletal_preview("broken.fbx")
+
+    codes = {issue.code for issue in preview.diagnostics}
+    assert preview.mesh is not None
+    assert {"external_fbx_unnormalized_weights", "external_fbx_misaligned_x_axis", "external_fbx_single_joint_dominance"} <= codes
 
 
 @pytest.mark.parametrize("name", tuple(_REAL_ASSETS))

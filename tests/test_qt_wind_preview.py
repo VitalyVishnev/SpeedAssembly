@@ -10,9 +10,10 @@ pytestmark = pytest.mark.qt
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QFrame, QLabel, QPushButton
 
+from xml_to_usda.fbx_adapter import FbxSkeletalPreview
 from xml_to_usda.qt_ui import wind_preview as wind_preview_module
 from xml_to_usda.qt_ui.wind_preview import WindPreviewDialog
-from xml_to_usda.models import Joint, Matrix4d, Vector3
+from xml_to_usda.models import Joint, Matrix4d, ValidationIssue, Vector3
 import xml_to_usda.wind_external_skeleton as external_skeleton_module
 from xml_to_usda.wind_external_skeleton import (
     ExternalSkeletonChoice,
@@ -75,7 +76,11 @@ def test_external_display_transform_persists_and_warns_without_mutating_skeleton
         Joint("root", parent=None, bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 0.0))),
         Joint("branch", parent="root", bind_transform=Matrix4d.from_translation(Vector3(0.0, 2.0, 0.0))),
     )
-    monkeypatch.setattr(external_skeleton_module, "load_fbx_skeleton", lambda _path: skeleton)
+    monkeypatch.setattr(
+        external_skeleton_module,
+        "load_fbx_skeletal_preview",
+        lambda _path: FbxSkeletalPreview(skeleton, None, (ValidationIssue("warning", "test_weights", "Normalize weights."),)),
+    )
     preview = load_external_skeleton_preview(ExternalSkeletonPreviewRequest(str(external_path)))
     dialog = WindPreviewDialog(preview=preview)
     qtbot.addWidget(dialog)
@@ -88,6 +93,8 @@ def test_external_display_transform_persists_and_warns_without_mutating_skeleton
     assert dialog.total_bones_label.text() == "Total bones: 2"
     assert not dialog.external_vertical_warning_label.isHidden()
     assert "branch" in dialog.external_vertical_warning_label.toolTip()
+    assert not dialog.external_diagnostics_frame.isHidden()
+    assert "Normalize weights" in dialog.external_diagnostics_label.text()
     assert dialog._active_scene.bone_segments[0].end == Vector3(0.0, 0.0, 0.02)
     assert preview.source_model.skeleton == skeleton
     assert snapshot["schema_version"] == 3
@@ -103,10 +110,14 @@ def test_version_one_wind_session_uses_safe_external_display_defaults(qtbot, mon
     external_path.write_bytes(b"stub")
     monkeypatch.setattr(
         external_skeleton_module,
-        "load_fbx_skeleton",
-        lambda _path: (
-            Joint("root", parent=None, bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 0.0))),
-            Joint("branch", parent="root", bind_transform=Matrix4d.from_translation(Vector3(1.0, 0.0, 0.0))),
+        "load_fbx_skeletal_preview",
+        lambda _path: FbxSkeletalPreview(
+            skeleton=(
+                Joint("root", parent=None, bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 0.0))),
+                Joint("branch", parent="root", bind_transform=Matrix4d.from_translation(Vector3(1.0, 0.0, 0.0))),
+            ),
+            mesh=None,
+            diagnostics=(),
         ),
     )
     preview = load_external_skeleton_preview(ExternalSkeletonPreviewRequest(str(external_path)))
@@ -129,10 +140,14 @@ def test_advanced_wind_group_controls_only_edit_manual_groups_and_persist_settin
     external_path.write_bytes(b"stub")
     monkeypatch.setattr(
         external_skeleton_module,
-        "load_fbx_skeleton",
-        lambda _path: (
-            Joint("root", parent=None, bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 0.0))),
-            Joint("branch", parent="root", bind_transform=Matrix4d.from_translation(Vector3(1.0, 0.0, 0.0))),
+        "load_fbx_skeletal_preview",
+        lambda _path: FbxSkeletalPreview(
+            skeleton=(
+                Joint("root", parent=None, bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 0.0))),
+                Joint("branch", parent="root", bind_transform=Matrix4d.from_translation(Vector3(1.0, 0.0, 0.0))),
+            ),
+            mesh=None,
+            diagnostics=(),
         ),
     )
     preview = load_external_skeleton_preview(ExternalSkeletonPreviewRequest(str(external_path)))

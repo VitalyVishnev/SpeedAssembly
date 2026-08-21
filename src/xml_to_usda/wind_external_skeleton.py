@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .fbx_adapter import FbxImportError, load_fbx_skeleton
-from .models import ExportMetadata, Joint, Matrix4d, TreeAsset, Vector3
+from .fbx_adapter import FbxImportError, FbxSkeletalPreview, load_fbx_skeletal_preview
+from .models import ExportMetadata, Joint, Matrix4d, Quaternion, TreeAsset, Vector3
 from .wind_preview_service import WindPreviewError, WindPreviewResult
 from .wind_viewport_scene import build_auto_wind_viewport_data, build_wind_viewport_groups, build_wind_viewport_scene
-from .viewport_scene import ViewportBoneSegment, ViewportBounds, ViewportScene
+from .viewport_scene import ViewportBoneSegment, ViewportBounds, ViewportScene, transformed_draw_bounds
 
 
 SUPPORTED_USD_SKELETON_SUFFIXES = {".usd", ".usda", ".usdc"}
@@ -88,6 +89,18 @@ def transform_external_skeleton_scene(
     def transform(point: Vector3) -> Vector3:
         return _transform_display_point(point, scale, source_up, preview_up)
 
+    axis_rotation = _display_axis_rotation(source_up, preview_up)
+    draw_calls = tuple(
+        replace(
+            draw,
+            translate=transform(draw.translate),
+            orientation=_multiply_quaternions(axis_rotation, draw.orientation),
+            scale=Vector3(draw.scale.x * scale, draw.scale.y * scale, draw.scale.z * scale),
+            explode_direction=_transform_display_direction(draw.explode_direction, source_up, preview_up),
+        )
+        for draw in scene.draw_calls
+    )
+
     bone_segments = tuple(
         ViewportBoneSegment(
             segment_id=segment.segment_id,
@@ -98,19 +111,20 @@ def transform_external_skeleton_scene(
             color=segment.color,
             selected=segment.selected,
             selectable_id=segment.selectable_id,
-            explode_direction=segment.explode_direction,
+            explode_direction=_transform_display_direction(segment.explode_direction, source_up, preview_up),
         )
         for segment in scene.bone_segments
     )
+    transformed_bounds = transformed_draw_bounds(scene.mesh_batches, draw_calls) if draw_calls else None
     return ViewportScene(
         scene_id=scene.scene_id,
         mesh_batches=scene.mesh_batches,
-        draw_calls=scene.draw_calls,
-        bounds=_transformed_external_bounds(scene.bounds, bone_segments, transform),
+        draw_calls=draw_calls,
+        bounds=_transformed_external_bounds(scene.bounds, bone_segments, transform, transformed_bounds),
         stats=scene.stats,
         bone_segments=bone_segments,
-        markers=scene.markers,
-        labels=scene.labels,
+        markers=tuple(replace(marker, position=transform(marker.position)) for marker in scene.markers),
+        labels=tuple(replace(label, position=transform(label.position)) for label in scene.labels),
         grid_origin=transform(scene.grid_origin) if scene.grid_origin is not None else None,
     )
 
@@ -137,16 +151,41 @@ def _transform_display_point(point: Vector3, scale: float, source_up: str, previ
     return Vector3(point.x * scale, point.z * scale, -point.y * scale)
 
 
+def _transform_display_direction(value: Vector3, source_up: str, preview_up: str) -> Vector3:
+    return _transform_display_point(value, 1.0, source_up, preview_up)
+
+
+def _display_axis_rotation(source_up: str, preview_up: str) -> Quaternion:
+    if source_up == preview_up:
+        return Quaternion(1.0, 0.0, 0.0, 0.0)
+    half = math.sqrt(0.5)
+    return Quaternion(half, half if source_up == "Y" else -half, 0.0, 0.0)
+
+
+def _multiply_quaternions(left: Quaternion, right: Quaternion) -> Quaternion:
+    return Quaternion(
+        left.real * right.real - left.i * right.i - left.j * right.j - left.k * right.k,
+        left.real * right.i + left.i * right.real + left.j * right.k - left.k * right.j,
+        left.real * right.j - left.i * right.k + left.j * right.real + left.k * right.i,
+        left.real * right.k + left.i * right.j - left.j * right.i + left.k * right.real,
+    )
+
+
 def _transformed_external_bounds(
     fallback: ViewportBounds,
     bone_segments: tuple[ViewportBoneSegment, ...],
     transform,
+    mesh_bounds: ViewportBounds | None,
 ) -> ViewportBounds:
     points = tuple(
         point
         for segment in bone_segments
         for point in (segment.start, segment.end)
-    ) or tuple(transform(point) for point in _bounds_corners(fallback))
+    )
+    if mesh_bounds is not None:
+        points += _bounds_corners(mesh_bounds)
+    if not points:
+        points = tuple(transform(point) for point in _bounds_corners(fallback))
     return ViewportBounds(
         min_point=Vector3(min(point.x for point in points), min(point.y for point in points), min(point.z for point in points)),
         max_point=Vector3(max(point.x for point in points), max(point.y for point in points), max(point.z for point in points)),
@@ -177,8 +216,13 @@ def load_external_skeleton_preview(request: ExternalSkeletonPreviewRequest) -> W
         raise WindPreviewError("external_skeleton_missing_path: Select an FBX or USD skeleton file.")
     path = Path(input_path)
     suffix = path.suffix.lower()
+    base_mesh = None
+    diagnostics = ()
     if suffix == ".fbx":
-        skeleton = _load_fbx_skeleton_for_preview(path)
+        fbx_preview = _load_fbx_skeleton_for_preview(path)
+        skeleton = fbx_preview.skeleton
+        base_mesh = fbx_preview.mesh
+        diagnostics = fbx_preview.diagnostics
     elif suffix in SUPPORTED_USD_SKELETON_SUFFIXES:
         skeleton = _load_usd_skeleton_for_preview(path, skeleton_index=request.skeleton_index)
     else:
@@ -191,20 +235,21 @@ def load_external_skeleton_preview(request: ExternalSkeletonPreviewRequest) -> W
         metadata=ExportMetadata(source_path=str(path), source_version=None),
         materials=(),
         source_objects=(),
-        base_mesh=None,
+        base_mesh=base_mesh,
         skeleton=skeleton,
         assembly_parts=(),
         prototypes=(),
     )
     dynamic_wind = build_auto_wind_viewport_data(model.skeleton, group_count=max(1, min(10, int(request.group_count))))
     groups = build_wind_viewport_groups(dynamic_wind, label_kind="Hierarchy level")
+    viewport_scene = build_wind_viewport_scene(model, dynamic_wind)
     return WindPreviewResult(
         input_path=str(path),
-        source_model=model,
+        source_model=replace(model, base_mesh=None),
         dynamic_wind=dynamic_wind,
         groups=groups,
-        diagnostics=(),
-        viewport_scene=build_wind_viewport_scene(model, dynamic_wind),
+        diagnostics=diagnostics,
+        viewport_scene=viewport_scene,
         xml_groups_available=False,
         preferred_grouping_mode="auto",
     )
@@ -237,9 +282,9 @@ def external_skeleton_backend_available(suffix: str) -> tuple[bool, str]:
     return False, "Unsupported skeleton format."
 
 
-def _load_fbx_skeleton_for_preview(path: Path):
+def _load_fbx_skeleton_for_preview(path: Path) -> FbxSkeletalPreview:
     try:
-        return load_fbx_skeleton(str(path))
+        return load_fbx_skeletal_preview(str(path))
     except FbxImportError as exc:
         raise WindPreviewError(str(exc)) from exc
 

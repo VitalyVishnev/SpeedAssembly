@@ -257,6 +257,14 @@ def test_skeleton_validation_reports_orientation_rest_and_hierarchy_failures() -
     assert any(issue.code == "cyclic_skeleton_hierarchy" for issue in cycle_issues)
 
 
+def test_skeleton_validation_rejects_child_before_parent_joint_order() -> None:
+    root, branch = orient_skeleton_x(_model().skeleton)
+
+    issues = validate_skeleton((branch, root))
+
+    assert any(issue.code == "invalid_skeleton_joint_order" for issue in issues)
+
+
 def test_skeleton_validation_warns_for_excessive_chain_twist() -> None:
     source = _model()
     root, branch = orient_skeleton_x(source.skeleton)

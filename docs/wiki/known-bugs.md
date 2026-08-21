@@ -4,6 +4,14 @@ Current defects, fail-loud limits, and validation gaps only. Resolved crash
 history lives in [Encountered Crashes](encountered-crashes.md); rejected fixes
 and benchmark detail live in [Experiments](experiments.md).
 
+## Limitation: External diagnostics stop at the source-file boundary
+
+Advanced Wind Settings cannot observe Unreal's chosen Skeleton Asset,
+reference-pose replacement, imported weight quantization, Dynamic Wind Asset
+User Data, or PCG component representation. Terminal direction, intended pivots,
+and sufficient bending topology also cannot be inferred reliably. Validate bone
+rotations after import and compare direct with PCG placement.
+
 ## Limitation: UE 5.7 foliage orientation requires a dedicated Skeleton
 
 Status: Fail-loud
@@ -30,6 +38,26 @@ Retain a real counterexample before generalizing the implementation.
 Related:
 - `src/xml_to_usda/wind_viewport_scene.py`
 - `scripts/ue57_fix_selected_foliage_bones.py`
+
+## Validation gap: Source FBX diagnostics cannot certify Unreal's imported rig
+
+Status: Open
+
+Advanced Wind Settings now inspects, without mutation, local +X, scale/bases,
+bind records, influence validity/normalization, and deforming mesh coverage.
+It still cannot observe Unreal's Skeleton Asset reuse, reference-pose import
+options, imported weight quantization, or runtime Dynamic Wind ownership. A
+successful source diagnostic does not certify the imported Unreal asset.
+
+The reported `TungTungTung.fbx` deforms as a Skeletal Mesh but appeared rigid
+after PCG scattering. Its local FBX structure does not reproduce the common
+all-root or coincident-pivot failures. The exact PCG component/spawner and asset
+data ownership are not captured, so the PCG cause remains `Unverified`.
+
+Related:
+- `src/xml_to_usda/_ufbx.c`
+- `src/xml_to_usda/fbx_adapter.py`
+- [External Dynamic Wind Rigs](external-dynamic-wind-rigs.md)
 
 ## Bug: Generic full-model cache is unsafe and slow on very large trees
 

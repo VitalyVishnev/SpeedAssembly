@@ -1147,3 +1147,25 @@ Major moves:
   keep XML groups read-only for assignment edits, support repeat-click deselect
   for manual groups, and disclose per-final-group Dynamic Wind controls that
   persist with the Wind Preview session.
+
+## 2026-08-20 - External Dynamic Wind rig audit
+
+- Added the maintained FBX/USD Dynamic Wind rig checklist and separated the
+  External Skeleton grouping/JSON contract from full skin and bind validation.
+- Audited `TungTungTung.fbx`: distributed pivots, bind clusters, and regional
+  weights reject the all-root/common-pivot diagnosis; non-normalized source
+  weights remain the concrete DCC cleanup item.
+- Audited a fresh converter USDA with OpenUSD Skeleton and Skinning queries. The
+  plain UsdSkel contract is coherent; Dynamic Wind metadata intentionally stays
+  in the separate JSON path.
+- Recorded the PCG-only rigid-motion cause as Unverified pending a controlled
+  direct-versus-PCG component and asset-ownership capture.
+
+## 2026-08-20 - External FBX diagnostics
+
+- Added read-only full-mesh FBX diagnostics to Advanced Wind Settings: visible
+  skin, bind, bone-frame, and source-metadata findings plus display-only mesh
+  unit/up-axis transforms.
+- Added parent-before-child validation to the exported UsdSkel source contract,
+  documented remaining importer-only checks, and deferred arbitrary FBX/USD rig
+  conversion as a separate future mode.

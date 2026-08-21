@@ -2,6 +2,14 @@
 
 This page stores active project contracts. Rejected or superseded approaches live in [experiments.md](experiments.md). Current limitations and bugs live in [known-bugs.md](known-bugs.md).
 
+## Decision: External FBX diagnostics are read-only and non-blocking
+
+Advanced Wind Settings may load an FBX rest mesh, skin clusters, weights, bind
+records, and bone frames for viewport diagnostics. It must not normalize,
+reorient, rescale, or rewrite that source. Display Transform remains
+viewport-only. Diagnostic errors do not block Dynamic Wind JSON generation;
+source-rig corrections belong in the DCC followed by a fresh export.
+
 ## Decision: SpeedAssembly is MIT-licensed
 
 Status: Active
@@ -1061,6 +1069,10 @@ Y-up/Z-up selectors transform rendered bone segments and bounds but never the
 loaded skeleton, final group assignments, or Dynamic Wind JSON. A non-blocking
 warning names non-zero parent-to-child segments parallel to the selected source
 up axis; it must not apply the main SpeedTree one-degree tilt.
+External Skeleton is a diagnostic/grouping/JSON input, not an FBX-to-USD
+conversion path. The FBX adapter may inspect and display mesh skinning, local
+frames, bind records, and topology, but it never repairs them. A plausible
+source-file preview still cannot prove Unreal's imported reference pose.
 The SpeedTree worker result must not contain the full CanonicalTreeModel beside
 the already-built viewport scene. It carries only the skeleton, Dynamic Wind
 data, and compact Base Mesh scene buffers. Repeated Parts are omitted entirely:

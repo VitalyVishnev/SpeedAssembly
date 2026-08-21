@@ -39,7 +39,7 @@ Main systems:
 - `src/xml_to_usda/qt_ui/boolean_prototype.py` - standalone `boolean-prototype` stage viewer and `boolean-multi-prototype` whole-tree piece viewer.
 - `src/xml_to_usda/fracture_worker_subprocess.py` - crash-isolated Fracture Preview and export worker protocol. Detailed Cuts run in one fresh worker per request so native Boolean state cannot outlive a result.
 - `src/xml_to_usda/qt_ui/preview_jobs.py` - shared latest-request lifecycle for process-backed previews. Each preview type owns at most one active job and one coalesced pending request; settings changes never terminate active native work, and stale results/errors are discarded before the latest request starts.
-- `src/xml_to_usda/wind_preview_service.py`, `src/xml_to_usda/wind_viewport_scene.py`, `src/xml_to_usda/wind_group_stack.py`, and `src/xml_to_usda/wind_external_skeleton.py` - Wind Preview source service, Qt-free viewport scene adapter, manual override stack, and skeleton-only external FBX/USD loading.
+- `src/xml_to_usda/wind_preview_service.py`, `src/xml_to_usda/wind_viewport_scene.py`, `src/xml_to_usda/wind_group_stack.py`, and `src/xml_to_usda/wind_external_skeleton.py` - Wind Preview source service, Qt-free viewport scene adapter, manual override stack, full-mesh FBX diagnostics, and skeleton-only external USD loading.
 - `src/xml_to_usda/proxy_source_projection.py` - typed Proxy Source Projection loading/cache for Proxy Mesh jobs that need base geometry and skin binding, +X-oriented skeleton facts, repeated-part transforms, and source prototype geometry.
 - `src/xml_to_usda/proxy_collision.py` - deterministic Box/Capsule fitting for Proxy Mesh trunk collision using the Fracturing stem-axis contract.
 - `src/xml_to_usda/collision_primitives.py` - shared oriented Box/Capsule mesh builders used by Proxy Mesh and Fracturing.
@@ -146,14 +146,18 @@ stay in the same group when explicitly enabled. A restored valid XML path
 automatically refreshes the main Wind groups after startup; the manual Refresh
 button remains available. A Preview request made during that refresh is queued
 until inspection finishes, so the GUI and isolated preview worker do not load
-the same large source concurrently. External Skeleton loading reads
-FBX or USD/UsdSkel payloads as skeleton-only previews. Source loading, USD
+the same large source concurrently. External Skeleton loading reads USD/UsdSkel
+payloads as skeleton-only previews. The FBX projection also builds
+a colored rest-mesh scene and non-blocking diagnostics from local bone frames,
+skin weights, bind clusters, and source metadata. It is a read-only source-file
+check, not a repair or certification of Unreal's imported rig. Source loading, USD
 Skeleton prim enumeration, and scene build run in a file-backed worker process
 so XML/external skeleton faults do not crash the Qt shell. The GUI consumes the
 worker-built initial scene directly. Selecting an external file starts loading
 immediately; a multi-skeleton USD waits only for the operator to select its
 Skeleton prim, then loads without a separate confirmation button. The worker
-result keeps only the compact viewport scene and skeleton. Normal tree Repeated
+result keeps the built viewport scene, compact skeleton facts, and diagnostics
+rather than a duplicate source MeshData. Normal tree Repeated
 Parts remain absent. A synthetic Scattered Parts rigid rig keeps its
 still-instanced blades in the scene so leaf-only Wind Preview is not empty;
 baked modes render their resolved Base Mesh. It does not serialize

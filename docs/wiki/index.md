@@ -4,6 +4,7 @@ This is the maintained entry point for project memory.
 
 - [Project Overview](project-overview.md) - what the project is and what a new agent must read first.
 - [Architecture](architecture.md) - module map, data flow, and runtime boundaries.
+- [External Dynamic Wind Rigs](external-dynamic-wind-rigs.md) - FBX/USD rig contract, audit checklist, and current external-loader limits.
 - [Decisions](decisions.md) - stable choices that should not be re-litigated casually.
 - [Known Bugs](known-bugs.md) - current fragilities, workarounds, and open validation gaps.
 - [Encountered Crashes](encountered-crashes.md) - resolved/open native failures grouped by systemic cause and regression gate.
