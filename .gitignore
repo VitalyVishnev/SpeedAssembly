@@ -28,6 +28,7 @@ docs/user/_drafts/
 docs/user/_templates/
 
 # Temporary diagnostics and generated scratch data
+/tmp/
 .tmp*/
 _smoke*/
 _tmp*
