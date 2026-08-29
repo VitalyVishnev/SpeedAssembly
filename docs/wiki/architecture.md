@@ -197,9 +197,11 @@ Neither rule may silently substitute for the other. See
 Release packaging includes only the OpenUSD modules, plugin metadata, and
 release DLLs required by `Usd.Stage`/`UsdSkel`; debug and unrelated pxr
 binaries stay outside the GUI package.
-The Windows Package build removes directories containing non-system
-`icuuc.dll` from PyInstaller's dependency-search `PATH`. PySide6 6.11 uses the
-Windows system ICU; packaging Poppler's unversioned ICU breaks `QtCore` import.
+The Windows Package build generates a PyInstaller spec, then removes every
+collected `icu*.dll` from its post-Analysis binary list before building the
+EXE. PySide6 6.11 uses the Windows system ICU; packaging Poppler's same-named
+ICU breaks `QtCore` import. The build also rejects any ICU entry remaining in
+the final package TOC before release assembly and smoke.
 
 Preview dialogs must share the same viewport system. Mode-specific dialogs
 may own controls, source loading, and Qt-free scene adapters, but rendering,

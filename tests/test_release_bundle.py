@@ -59,6 +59,9 @@ def test_qt_package_script_builds_release_zip() -> None:
     assert "scripts\\launch_worker.py" not in script_text
     assert "xml_to_usda/embedded_worker" not in script_text
     assert "'--add-binary'" not in script_text
+    assert "PyInstaller.utils.cliutils.makespec" in script_text
+    assert "a.binaries = [" in script_text
+    assert "External ICU must not be frozen into SpeedAssembly" in script_text
     assert "External worker exe must not be distributed" in script_text
     assert "smoke --scenario packaged-stability --repeat 2 --fail-on-retry" in script_text
     assert "fracture-preview-recovery" in script_text

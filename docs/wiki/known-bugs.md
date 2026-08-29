@@ -4,27 +4,6 @@ Current defects, fail-loud limits, and validation gaps only. Resolved crash
 history lives in [Encountered Crashes](encountered-crashes.md); rejected fixes
 and benchmark detail live in [Experiments](experiments.md).
 
-## Bug: Package analysis still collects an incompatible external ICU DLL
-
-Status: Confirmed in the Codex host environment
-
-`build_qt_gui_exe.cmd -Package` builds the EXE and passes its 26 contract tests,
-but PyInstaller 6.19 still records Codex Poppler's `icuuc.dll` and `icudt78.dll`
-in `Analysis-00.toc`. Packaged smoke then fails while importing `QtWidgets`
-with `The specified procedure could not be found`; Qt 6.11 expects the Windows
-System32 ICU forwarding interface, while the collected ICU 78 DLL does not
-export those unversioned procedures. Filtering `PATH` before PyInstaller did
-not remove the binary from Analysis.
-
-Do not accept `-SkipSmoke` as a release gate. Remove or override the external
-ICU entry at the PyInstaller Analysis/spec seam, then rerun the full packaged
-stability and recovery smoke.
-
-Related:
-- `scripts/build_qt_gui_exe.ps1`
-- `build-next/SpeedAssembly/Analysis-00.toc`
-- `dist-next/smoke/smoke_report.json`
-
 ## Limitation: External diagnostics stop at the source-file boundary
 
 Advanced Wind Settings cannot observe Unreal's chosen Skeleton Asset,

@@ -44,29 +44,6 @@ function Join-ProcessArguments([string[]]$Arguments) {
     return (($Arguments | ForEach-Object { Quote-ProcessArgument $_ }) -join ' ')
 }
 
-function Get-QtBuildPath([string]$PathValue) {
-    $systemDirectory = [System.IO.Path]::GetFullPath((Join-Path $env:SystemRoot 'System32')).TrimEnd('\')
-    return (@(
-        foreach ($entry in ($PathValue -split ';')) {
-            if ([string]::IsNullOrWhiteSpace($entry)) {
-                continue
-            }
-            try {
-                $resolved = [System.IO.Path]::GetFullPath($entry.Trim('"')).TrimEnd('\')
-            }
-            catch {
-                $entry
-                continue
-            }
-            if ($resolved -ne $systemDirectory -and (Test-Path -LiteralPath (Join-Path $resolved 'icuuc.dll'))) {
-                Write-Host "Ignoring external ICU during Qt packaging: $resolved"
-                continue
-            }
-            $entry
-        }
-    ) -join ';')
-}
-
 function Get-GitBuildMetadata([string]$RepoRoot) {
     $metadata = @{
         git_branch = $null
@@ -217,10 +194,8 @@ try {
             throw 'Qt UI asset staging failed.'
         }
 
-        $pyInstallerArgs = @(
-            '-m', 'PyInstaller',
-            '--noconfirm',
-            '--clean',
+        $pyInstallerSpecArgs = @(
+            '-m', 'PyInstaller.utils.cliutils.makespec',
             '--onefile',
             '--windowed',
             '--name', 'SpeedAssembly',
@@ -229,8 +204,6 @@ try {
             '--hidden-import', 'xml_to_usda._ufbx',
             '--paths', (Join-Path $repoRoot 'src'),
             '--add-data', "$qtUiStagingRoot;xml_to_usda/qt_ui",
-            '--distpath', $distPath,
-            '--workpath', $buildPath,
             '--specpath', $buildPath,
             $launcherScript
         )
@@ -278,21 +251,42 @@ try {
             'PySide6.QtNetworkAuth'
         )
         foreach ($exclude in $qtExcludes) {
-            $pyInstallerArgs += @('--exclude-module', $exclude)
+            $pyInstallerSpecArgs += @('--exclude-module', $exclude)
         }
 
         Write-Host "Building PySide6 release shell with $pythonExe ..."
-        $originalBuildPath = $env:PATH
-        try {
-            $env:PATH = Get-QtBuildPath -PathValue $originalBuildPath
-            & $pythonExe -s @pyInstallerArgs
-            $pyInstallerExitCode = $LASTEXITCODE
+        & $pythonExe -s @pyInstallerSpecArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw 'PyInstaller spec generation failed.'
         }
-        finally {
-            $env:PATH = $originalBuildPath
+
+        $specPath = Join-Path $buildPath 'SpeedAssembly.spec'
+        $specText = Get-Content -LiteralPath $specPath -Raw
+        $specMarker = 'pyz = PYZ(a.pure)'
+        if (-not $specText.Contains($specMarker)) {
+            throw "PyInstaller spec marker was not found: $specPath"
         }
-        if ($pyInstallerExitCode -ne 0) {
+        $binaryPolicy = @'
+# Windows supplies the ICU forwarding DLL used by Qt 6.11. Do not freeze an
+# unrelated same-named ICU found in the build host environment.
+a.binaries = [
+    entry for entry in a.binaries
+    if not entry[0].replace("\\", "/").rsplit("/", 1)[-1].casefold().startswith("icu")
+]
+
+'@
+        $specText = $specText.Replace($specMarker, $binaryPolicy + $specMarker)
+        Set-Content -LiteralPath $specPath -Value $specText -Encoding UTF8
+
+        & $pythonExe -s -m PyInstaller --noconfirm --clean --distpath $distPath --workpath $buildPath $specPath
+        if ($LASTEXITCODE -ne 0) {
             throw 'PyInstaller PySide6 release build failed.'
+        }
+
+        $packageTocPath = Join-Path $buildPath 'SpeedAssembly\PKG-00.toc'
+        $packageToc = Get-Content -LiteralPath $packageTocPath -Raw
+        if ($packageToc -match "(?i)\('(?:[^']*[\\/])?icu[^']*\.dll'") {
+            throw "External ICU must not be frozen into SpeedAssembly: $packageTocPath"
         }
 
         if (-not (Test-Path $exePath)) {

@@ -72,8 +72,8 @@ under `docs/raw/`; Git retains per-change detail.
 
 ## 2026-08-30 - Qt package dependency isolation
 
-- Prevented PyInstaller from packaging an unrelated Poppler `icuuc.dll` found
-  on the host `PATH`; clean packaged stability and recovery smoke now pass.
+- Added the first host-`PATH` filter for an unrelated Poppler `icuuc.dll`.
+  PyInstaller 6.19 later proved that this filter alone was insufficient.
 - Made windowed Qt import failures report the original error without assuming
   that `sys.stderr` exists.
 
@@ -96,3 +96,11 @@ under `docs/raw/`; Git retains per-change detail.
 - Reopened the package ICU issue after PyInstaller 6.19 still collected Codex
   Poppler's incompatible DLL and failed the mandatory Qt smoke; no
   `-SkipSmoke` release was accepted.
+
+## 2026-08-30 - Deterministic packaged ICU policy
+
+- Replaced the environment-only workaround with a generated PyInstaller spec
+  that removes collected `icu*.dll` binaries after Analysis and rejects ICU in
+  the final package TOC.
+- The normal Codex environment now passes 26 packaged contracts, repeated
+  Detailed Cuts smoke, and Fracture worker recovery without `-SkipSmoke`.

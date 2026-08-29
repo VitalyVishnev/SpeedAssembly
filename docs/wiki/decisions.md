@@ -116,10 +116,12 @@ Ordinary UI defects iterate in Quick and receive one full Package gate after
 the fix; defects unique to frozen/native execution validate each candidate with
 Package.
 
-On Windows, Package builds remove non-system `icuuc.dll` directories from the
-PyInstaller dependency-search `PATH`. PySide6 6.11 resolves the Windows system
-ICU, while an unrelated Poppler ICU with the same filename produces a
-`QtCore` procedure mismatch in the frozen executable.
+On Windows, Package builds must not trust the host dependency-search `PATH` for
+ICU. Generate the PyInstaller spec, remove collected `icu*.dll` entries from
+the post-Analysis binary list, and fail if the final package TOC still contains
+one. PySide6 6.11 resolves the Windows system ICU; an unrelated Poppler ICU
+with the same filename produces a `QtCore` procedure mismatch in the frozen
+executable. Do not bundle a System32 copy or bypass the packaged smoke.
 
 ## Decision: Detailed Boolean Fracture is the production cut backend
 
