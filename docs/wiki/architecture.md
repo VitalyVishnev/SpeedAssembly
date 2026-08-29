@@ -211,6 +211,10 @@ camera plane, wheel zoom, double-left-click mesh focus, and `F` frame-all.
 Wheel zoom can approach to 0.1% of the framed scene radius, with a distance-
 adaptive near plane for close cut inspection. Scene setters only mark OpenGL
 buffers dirty; GPU uploads run in `paintGL` while Qt owns the current context.
+Bone overlays clip complete 3D segments against the camera frustum before
+screen projection. A segment remains visible and pickable when either endpoint
+is outside the viewport; picking maps the clipped screen position back to the
+original segment parameter.
 Fracture Preview uploads each unique Base/Repeated Part mesh once, stores
 placement transforms in a compact GPU instance buffer, and issues one hardware-
 instanced draw per unique source mesh. The 256 MiB guard covers unique vertex

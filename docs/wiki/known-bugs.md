@@ -99,6 +99,22 @@ Related:
 - `src/xml_to_usda/fracture_worker_subprocess.py`
 - `src/xml_to_usda/qt_ui/viewport.py`
 
+## Bug: Current packaged smoke cannot load QtWidgets
+
+Status: Unverified; reproduced 2026-08-29
+
+The clean one-file package builds, but every packaged stability-smoke scenario
+fails immediately while importing `PySide6.QtWidgets` with `The specified
+procedure could not be found`. Source Qt tests and the Quick preview pass, so
+there is no evidence tying this failure to viewport bone clipping. Investigation
+is deferred because it is a separate packaging/runtime problem. Compare the
+bundled Qt6Core, Qt6Gui, Qt6Widgets, and PySide6 binary provenance before the
+next release candidate, then rerun the full packaged smoke.
+
+Related:
+- `scripts/build_qt_gui_exe.ps1`
+- `dist-next/smoke/smoke_report.json`
+
 ## Limitation: Detailed Boolean cuts need broader real-tree validation
 
 Status: Partially verified

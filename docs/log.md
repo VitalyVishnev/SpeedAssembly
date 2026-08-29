@@ -64,3 +64,10 @@ under `docs/raw/`; Git retains per-change detail.
 - Compressed decision prose, experiment history, and this log; removed duplicated
   chronology while preserving contracts, risks, evidence, outcomes, and next tests.
 - Retained detailed active contracts and crash records. No raw sources changed.
+
+## 2026-08-29 - Viewport bone clipping
+
+- Kept bone overlays visible and pickable when one endpoint leaves the camera
+  frustum by clipping complete segments before screen projection.
+- Recorded the independent clean-package `QtWidgets` import failure that blocks
+  packaged smoke; source tests and the Quick preview pass.

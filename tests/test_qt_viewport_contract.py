@@ -22,6 +22,7 @@ from xml_to_usda.qt_ui.fracture_preview import (
 )
 from xml_to_usda.qt_ui.viewport import MatcapViewport, _build_matcap_instance_batches
 from xml_to_usda.viewport_scene import (
+    ViewportBoneSegment,
     ViewportBounds,
     ViewportDrawCall,
     ViewportMeshBatch,
@@ -178,3 +179,43 @@ def test_viewport_can_focus_on_mesh_and_zoom_to_cut_detail(qtbot) -> None:
     viewport._distance = 300.0
     viewport.wheelEvent(_WheelEvent())
     assert viewport.camera_distance == pytest.approx(0.1)
+
+
+def test_viewport_keeps_offscreen_started_bone_visible_and_pickable(qtbot) -> None:
+    viewport = MatcapViewport()
+    qtbot.addWidget(viewport)
+    viewport.resize(500, 400)
+    viewport._yaw = 0.0
+    viewport._pitch = 0.0
+    segment = ViewportBoneSegment(
+        segment_id="bone:root->branch",
+        parent_token="root",
+        child_token="branch",
+        start=Vector3(-100.0, 0.0, 0.0),
+        end=Vector3(0.0, 0.0, 0.0),
+        color=Color4(1.0, 1.0, 1.0, 1.0),
+    )
+    viewport.set_scene(
+        ViewportScene(
+            scene_id="offscreen-bone",
+            mesh_batches=(),
+            draw_calls=(),
+            bounds=ViewportBounds(Vector3(-100.0, 0.0, 0.0), Vector3(0.0, 0.0, 0.0)),
+            stats=ViewportStats(uploaded_triangles=0, logical_triangles=0),
+            bone_segments=(segment,),
+        ),
+        frame_camera=False,
+    )
+
+    projected = viewport._project_segment_to_screen(segment.start, segment.end)
+    assert projected is not None
+    start, end, start_t, end_t = projected
+    assert start[0] == pytest.approx(0.0)
+    assert end == pytest.approx((250.0, 200.0))
+    assert 0.0 < start_t < end_t == 1.0
+
+    token = viewport.pick_bone_segment_child_token(125.0, 200.0)
+
+    assert token is not None
+    assert token.startswith("root->branch@")
+    assert float(token.rsplit("@", 1)[1]) > 0.5

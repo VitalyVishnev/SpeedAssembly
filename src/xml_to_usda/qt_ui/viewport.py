@@ -16,7 +16,7 @@ from typing import Callable
 import numpy as np
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QColor, QMatrix4x4, QPainter, QPen, QSurfaceFormat, QVector3D
+from PySide6.QtGui import QColor, QMatrix4x4, QPainter, QPen, QSurfaceFormat, QVector3D, QVector4D
 from PySide6.QtOpenGL import QOpenGLBuffer, QOpenGLShader, QOpenGLShaderProgram, QOpenGLVertexArrayObject
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QToolButton, QWidget
@@ -816,11 +816,12 @@ class MatcapViewport(QOpenGLWidget):
         best: tuple[float, str, str] | None = None
         for segment in bone_segments:
             segment_start, segment_end = self._exploded_bone_segment_points(segment)
-            parent = self._project_point_to_screen(segment_start)
-            child = self._project_point_to_screen(segment_end)
-            if parent is None or child is None:
+            projected = self._project_segment_to_screen(segment_start, segment_end)
+            if projected is None:
                 continue
-            distance, segment_t = _distance_to_screen_segment(float(x), float(y), parent, child)
+            parent, child, visible_start_t, visible_end_t = projected
+            distance, visible_t = _distance_to_screen_segment(float(x), float(y), parent, child)
+            segment_t = visible_start_t + (visible_end_t - visible_start_t) * visible_t
             token = _format_manual_segment_cut_token(
                 segment.parent_token,
                 segment.child_token,
@@ -1043,13 +1044,37 @@ class MatcapViewport(QOpenGLWidget):
         width = max(1, self.width())
         height = max(1, self.height())
         mapped = (self._projection_matrix() * self._view_matrix()).map(
-            QVector3D(float(point.x), float(point.y), float(point.z))
+            QVector4D(float(point.x), float(point.y), float(point.z), 1.0)
         )
-        ndc_x = float(mapped.x())
-        ndc_y = float(mapped.y())
+        w = float(mapped.w())
+        if w <= 1e-8 or float(mapped.z()) < -w or float(mapped.z()) > w:
+            return None
+        ndc_x = float(mapped.x()) / w
+        ndc_y = float(mapped.y()) / w
         if ndc_x < -1.5 or ndc_x > 1.5 or ndc_y < -1.5 or ndc_y > 1.5:
             return None
         return ((ndc_x + 1.0) * 0.5 * width, (1.0 - ndc_y) * 0.5 * height)
+
+    def _project_segment_to_screen(
+        self,
+        start: Vector3,
+        end: Vector3,
+    ) -> tuple[tuple[float, float], tuple[float, float], float, float] | None:
+        matrix = self._projection_matrix() * self._view_matrix()
+        start_clip = matrix.map(QVector4D(float(start.x), float(start.y), float(start.z), 1.0))
+        end_clip = matrix.map(QVector4D(float(end.x), float(end.y), float(end.z), 1.0))
+        clipped = _clip_homogeneous_segment(start_clip, end_clip)
+        if clipped is None:
+            return None
+        clipped_start, clipped_end, start_t, end_t = clipped
+        width = max(1, self.width())
+        height = max(1, self.height())
+        return (
+            _clip_point_to_screen(clipped_start, width, height),
+            _clip_point_to_screen(clipped_end, width, height),
+            start_t,
+            end_t,
+        )
 
     def _camera_eye(self) -> Vector3:
         cos_pitch = math.cos(self._pitch)
@@ -1113,10 +1138,10 @@ class MatcapViewport(QOpenGLWidget):
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             for segment in bone_segments:
                 segment_start, segment_end = self._exploded_bone_segment_points(segment)
-                parent = self._project_point_to_screen(segment_start)
-                child = self._project_point_to_screen(segment_end)
-                if parent is None or child is None:
+                projected = self._project_segment_to_screen(segment_start, segment_end)
+                if projected is None:
                     continue
+                parent, child, _visible_start_t, visible_end_t = projected
                 selected = segment.selected or self._selected_cut_on_segment(segment)
                 halo = QPen(QColor(6, 10, 12, 210), 7.0 if selected else 6.0)
                 halo.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -1126,7 +1151,7 @@ class MatcapViewport(QOpenGLWidget):
                 pen.setCapStyle(Qt.PenCapStyle.RoundCap)
                 painter.setPen(pen)
                 painter.drawLine(int(round(parent[0])), int(round(parent[1])), int(round(child[0])), int(round(child[1])))
-                if segment.selected:
+                if segment.selected and visible_end_t >= 1.0 - 1e-8:
                     painter.setPen(QPen(QColor(255, 245, 185, 245), 1.0))
                     painter.drawText(int(round(child[0])) + 5, int(round(child[1])) - 5, segment.child_token)
             for cut_token in self._selected_cut_tokens:
@@ -2091,6 +2116,43 @@ def _distance_to_screen_segment(
     px = sx + t * dx
     py = sy + t * dy
     return math.sqrt((x - px) ** 2 + (y - py) ** 2), t
+
+
+def _clip_homogeneous_segment(
+    start: QVector4D,
+    end: QVector4D,
+) -> tuple[QVector4D, QVector4D, float, float] | None:
+    start_values = (float(start.x()), float(start.y()), float(start.z()), float(start.w()))
+    end_values = (float(end.x()), float(end.y()), float(end.z()), float(end.w()))
+    start_t = 0.0
+    end_t = 1.0
+    for axis, sign in ((0, 1.0), (0, -1.0), (1, 1.0), (1, -1.0), (2, 1.0), (2, -1.0)):
+        start_distance = start_values[3] + sign * start_values[axis]
+        end_distance = end_values[3] + sign * end_values[axis]
+        if start_distance < 0.0 and end_distance < 0.0:
+            return None
+        if start_distance < 0.0 or end_distance < 0.0:
+            intersection_t = start_distance / (start_distance - end_distance)
+            if start_distance < 0.0:
+                start_t = max(start_t, intersection_t)
+            else:
+                end_t = min(end_t, intersection_t)
+    if start_t > end_t:
+        return None
+    return (
+        start + (end - start) * start_t,
+        start + (end - start) * end_t,
+        start_t,
+        end_t,
+    )
+
+
+def _clip_point_to_screen(point: QVector4D, width: int, height: int) -> tuple[float, float]:
+    w = float(point.w())
+    return (
+        (float(point.x()) / w + 1.0) * 0.5 * width,
+        (1.0 - float(point.y()) / w) * 0.5 * height,
+    )
 
 
 def _clamp_manual_segment_t(segment_t: float) -> float:
