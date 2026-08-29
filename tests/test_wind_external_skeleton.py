@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from xml_to_usda.fbx_adapter import FbxSkeletalPreview
+from xml_to_usda.dynamic_wind import render_dynamic_wind_payload
 from xml_to_usda.models import Joint, Matrix4d, MeshData, ValidationIssue, Vector3
 from xml_to_usda.wind_external_skeleton import (
     ExternalSkeletonPreviewRequest,
@@ -14,6 +15,7 @@ from xml_to_usda.wind_external_skeleton import (
     external_skeleton_backend_available,
     list_external_usd_skeletons,
     load_external_skeleton_preview,
+    prepare_external_dynamic_wind_export,
     transform_external_skeleton_scene,
 )
 from xml_to_usda.wind_preview_service import WindPreviewError
@@ -101,6 +103,53 @@ def test_external_skeleton_preview_rejects_duplicate_joint_names(monkeypatch, tm
     )
 
     with pytest.raises(WindPreviewError, match="external_skeleton_duplicate_joint_name"):
+        load_external_skeleton_preview(ExternalSkeletonPreviewRequest(str(fbx_path)))
+
+
+def test_external_fbx_wind_export_uses_unreal_ref_skeleton_names_without_mutating_source(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    fbx_path = tmp_path / "character.fbx"
+    fbx_path.write_bytes(b"stub")
+    monkeypatch.setattr(
+        "xml_to_usda.wind_external_skeleton.load_fbx_skeletal_preview",
+        lambda _path: FbxSkeletalPreview(
+            skeleton=(
+                _joint("Root", None, 0.0),
+                _joint("Bone.001", "Root", 1.0),
+            ),
+            mesh=None,
+            diagnostics=(),
+        ),
+    )
+
+    preview = load_external_skeleton_preview(ExternalSkeletonPreviewRequest(str(fbx_path)))
+    exported = prepare_external_dynamic_wind_export(preview, preview.dynamic_wind)
+    payload = render_dynamic_wind_payload(exported)
+
+    assert [joint.name for joint in preview.source_model.skeleton] == ["Root", "Bone.001"]
+    assert [assignment.joint_name for assignment in preview.dynamic_wind.joint_assignments] == ["Root", "Bone.001"]
+    assert [joint["JointName"] for joint in payload["Joints"]] == ["Root", "Bone_001"]
+
+
+def test_external_fbx_preview_rejects_unreal_name_collision(monkeypatch, tmp_path: Path) -> None:
+    fbx_path = tmp_path / "collision.fbx"
+    fbx_path.write_bytes(b"stub")
+    monkeypatch.setattr(
+        "xml_to_usda.wind_external_skeleton.load_fbx_skeletal_preview",
+        lambda _path: FbxSkeletalPreview(
+            skeleton=(
+                _joint("Root", None, 0.0),
+                _joint("Bone.001", "Root", 1.0),
+                _joint("Bone_001", "Root", 2.0),
+            ),
+            mesh=None,
+            diagnostics=(),
+        ),
+    )
+
+    with pytest.raises(WindPreviewError, match="external_fbx_unreal_joint_name_collision"):
         load_external_skeleton_preview(ExternalSkeletonPreviewRequest(str(fbx_path)))
 
 

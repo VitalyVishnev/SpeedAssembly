@@ -76,3 +76,23 @@ under `docs/raw/`; Git retains per-change detail.
   on the host `PATH`; clean packaged stability and recovery smoke now pass.
 - Made windowed Qt import failures report the original error without assuming
   that `sys.stderr` exists.
+
+## 2026-08-30 - Unreal Dynamic Wind lookup diagnostic
+
+- Added a read-only UE 5.7 Python diagnostic for the selected Skeletal Mesh. It
+  exposes silent Dynamic Wind joint-name mismatches and root-only mappings.
+- Confirmed that the tested FBX names `Bone.001` through `Bone.007` imported as
+  `Bone_001` through `Bone_007`; only `Root` matched the generated JSON and
+  caused the observed rigid wind rotation.
+- Reimporting a JSON with the seven actual underscore names restored correct
+  Dynamic Wind deformation, validating the mismatch as the sole cause.
+
+## 2026-08-30 - External FBX JSON joint-name adaptation
+
+- Mapped the UE 5.7-verified FBX period rewrite only at Dynamic Wind JSON
+  export, while preserving exact Source Names in the loaded rig and viewport.
+- Added a fail-loud collision gate and regression coverage for source
+  preservation, `Bone.001` to `Bone_001`, and ambiguous mapped names.
+- Reopened the package ICU issue after PyInstaller 6.19 still collected Codex
+  Poppler's incompatible DLL and failed the mandatory Qt smoke; no
+  `-SkipSmoke` release was accepted.

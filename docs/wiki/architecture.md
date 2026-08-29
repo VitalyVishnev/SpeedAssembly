@@ -176,6 +176,11 @@ bounds: the operator selects source/preview units and Y-up/Z-up axes, while the
 loaded skeleton and generated Dynamic Wind JSON remain unchanged. Vertical
 external-bone warnings inspect non-zero parent-to-child segments against the
 selected source up axis; they do not tilt or otherwise edit the skeleton.
+At the JSON export seam, external FBX Source Names are adapted to the joint
+names exposed by UE 5.7's imported RefSkeleton. The currently verified rewrite
+is `.` to `_`. It does not mutate the loaded skeleton or group stack, and an
+ambiguous rewrite collision fails before export. XML and external USD names
+remain unchanged.
 The SpeedTree XML worker path does not import the External Skeleton backend.
 An unexpected native Wind Preview worker exit is retried once in a clean
 process. Worker subprocesses enable Python faulthandler so a repeated native

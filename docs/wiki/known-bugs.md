@@ -4,6 +4,27 @@ Current defects, fail-loud limits, and validation gaps only. Resolved crash
 history lives in [Encountered Crashes](encountered-crashes.md); rejected fixes
 and benchmark detail live in [Experiments](experiments.md).
 
+## Bug: Package analysis still collects an incompatible external ICU DLL
+
+Status: Confirmed in the Codex host environment
+
+`build_qt_gui_exe.cmd -Package` builds the EXE and passes its 26 contract tests,
+but PyInstaller 6.19 still records Codex Poppler's `icuuc.dll` and `icudt78.dll`
+in `Analysis-00.toc`. Packaged smoke then fails while importing `QtWidgets`
+with `The specified procedure could not be found`; Qt 6.11 expects the Windows
+System32 ICU forwarding interface, while the collected ICU 78 DLL does not
+export those unversioned procedures. Filtering `PATH` before PyInstaller did
+not remove the binary from Analysis.
+
+Do not accept `-SkipSmoke` as a release gate. Remove or override the external
+ICU entry at the PyInstaller Analysis/spec seam, then rerun the full packaged
+stability and recovery smoke.
+
+Related:
+- `scripts/build_qt_gui_exe.ps1`
+- `build-next/SpeedAssembly/Analysis-00.toc`
+- `dist-next/smoke/smoke_report.json`
+
 ## Limitation: External diagnostics stop at the source-file boundary
 
 Advanced Wind Settings cannot observe Unreal's chosen Skeleton Asset,
@@ -57,6 +78,26 @@ data ownership are not captured, so the PCG cause remains `Unverified`.
 Related:
 - `src/xml_to_usda/_ufbx.c`
 - `src/xml_to_usda/fbx_adapter.py`
+- [External Dynamic Wind Rigs](external-dynamic-wind-rigs.md)
+
+## Limitation: External FBX name parity is verified only for periods
+
+Status: Mitigated for the confirmed UE 5.7 case
+
+On the tested `TungTungTung.fbx`, source names `Bone.001` through `Bone.007`
+became `Bone_001` through `Bone_007` in the imported RefSkeleton. Only `Root`
+matched the old JSON, producing a root-only lookup and rigid pivot rotation.
+Changing only those names restored regional deformation.
+
+External FBX JSON export now applies the verified `.` to `_` rewrite without
+mutating Source Names and fails loudly if rewritten names collide. No broader
+FBX sanitizer is claimed: namespaces or other invalid characters may still
+differ under another UE importer path. Capture the actual imported RefSkeleton
+before extending the mapping.
+
+Related:
+- `src/xml_to_usda/wind_external_skeleton.py`
+- `scripts/ue57_dump_selected_dynamic_wind.py`
 - [External Dynamic Wind Rigs](external-dynamic-wind-rigs.md)
 
 ## Bug: Generic full-model cache is unsafe and slow on very large trees

@@ -209,6 +209,37 @@ prove an artist's intended pivot, terminal-bone +X, roll continuity at a fork,
 sufficient edge-loop density, or Unreal's final reference pose. Rotating
 representative bones after import remains the decisive boundary test.
 
+For the Unreal-side boundary, select one Skeletal Mesh in Content Browser and
+run `scripts/ue57_dump_selected_dynamic_wind.py` through the Editor Python
+executor. The read-only dump always reports final RefSkeleton names and
+parents. It also reports `SimulationGroupBones`, `BoneChains`, and
+`ExtraBonesData` when the installed UE build exposes those internal properties
+to Python. The launcher UE 5.7 build tested on 2026-08-30 did not expose them.
+
+Simulation groups can exist even when their JSON joint names matched no
+imported bones. A lookup containing only bone zero explains a rigid wind
+rotation inherited from the common root; an empty lookup normally produces no
+wind deformation. The tested `TungTungTung.fbx` boundary produced source/JSON
+names `Bone.001` through `Bone.007`, but its actual UE 5.7 RefSkeleton contained
+`Bone_001` through `Bone_007`. Only `Root` matched. This is direct evidence for
+the observed rigid rotation and overrides the unverified expectation that the
+active FBX import path would preserve dots.
+
+Replacing the seven JSON names with the actual underscore names and reimporting
+the JSON restored correct regional Dynamic Wind deformation in the same
+Instance Skinned Mesh Component. This A/B result validates the name mismatch as
+the cause; FBX skinning, bind pose, wind settings, and source format were not the
+failure boundary for this asset.
+
+Advanced Wind Settings now performs that verified rewrite automatically for
+external FBX JSON export. The loaded skeleton, viewport selection, hierarchy,
+and saved group assignments retain their exact FBX Source Names; only the JSON
+copy replaces `.` with `_`. A collision such as `Bone.001` together with
+`Bone_001` is rejected during preview loading because both would address the
+same Unreal joint. External USD and SpeedTree XML names are not rewritten.
+Other possible FBX importer name changes remain unverified and must be derived
+from an actual UE 5.7 RefSkeleton before extending this rule.
+
 ## Exported USD validation coverage
 
 Before USDA authoring, the converter rejects hierarchy/name errors,

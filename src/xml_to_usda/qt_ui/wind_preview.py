@@ -35,6 +35,7 @@ from ..wind_external_skeleton import (
     external_skeleton_backend_available,
     list_external_usd_skeletons,
     load_external_skeleton_preview,
+    prepare_external_dynamic_wind_export,
     transform_external_skeleton_scene,
 )
 from ..wind_service import derive_wind_json_output_path
@@ -601,7 +602,8 @@ class WindPreviewDialog(PreviewShellDialog):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
-        written = write_dynamic_wind_json(self._current_dynamic_wind(), output_path)
+        dynamic_wind = prepare_external_dynamic_wind_export(preview, self._current_dynamic_wind())
+        written = write_dynamic_wind_json(dynamic_wind, output_path)
         self.output_path_edit.setText(str(written))
         self.summary_label.setText(f"Wrote Dynamic Wind JSON\n{written}")
         self._save_wind_session()

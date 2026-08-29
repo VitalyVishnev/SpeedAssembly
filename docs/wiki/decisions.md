@@ -7,8 +7,10 @@ This page stores active project contracts. Rejected or superseded approaches liv
 Advanced Wind Settings may load an FBX rest mesh, skin clusters, weights, bind
 records, and bone frames for viewport diagnostics. It must not normalize,
 reorient, rescale, or rewrite that source. Display Transform remains
-viewport-only. Diagnostic errors do not block Dynamic Wind JSON generation;
-source-rig corrections belong in the DCC followed by a fresh export.
+viewport-only. Diagnostic findings do not block Dynamic Wind JSON generation;
+source-rig corrections belong in the DCC followed by a fresh export. Structural
+export ambiguity, including two FBX Source Names mapping to one Unreal joint
+name, fails loudly because the JSON could not identify both joints.
 
 ## Decision: SpeedAssembly is MIT-licensed
 
@@ -852,6 +854,13 @@ Y-up/Z-up selectors transform rendered bone segments and bounds but never the
 loaded skeleton, final group assignments, or Dynamic Wind JSON. A non-blocking
 warning names non-zero parent-to-child segments parallel to the selected source
 up axis; it must not apply the main SpeedTree one-degree tilt.
+External FBX JSON export has a separate name-adaptation seam. Preserve exact
+Source Names throughout loading, diagnostics, viewport picking, and group
+editing; only the final JSON copy maps the UE 5.7-verified `.` to `_` rewrite.
+Reject collisions such as `Bone.001` plus `Bone_001` instead of guessing which
+joint Unreal intended. XML and external USD exports remain byte-semantically
+unchanged by this rule. Do not broaden the mapper until another FBX rewrite is
+observed in the actual imported RefSkeleton and covered by a regression test.
 External Skeleton is a diagnostic/grouping/JSON input, not an FBX-to-USD
 conversion path. The FBX adapter may inspect and display mesh skinning, local
 frames, bind records, and topology, but it never repairs them. A plausible

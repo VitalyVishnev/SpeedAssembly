@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .fbx_adapter import FbxImportError, FbxSkeletalPreview, load_fbx_skeletal_preview
-from .models import ExportMetadata, Joint, Matrix4d, Quaternion, TreeAsset, Vector3
+from .models import DynamicWindData, ExportMetadata, Joint, Matrix4d, Quaternion, TreeAsset, Vector3
 from .wind_preview_service import WindPreviewError, WindPreviewResult
 from .wind_viewport_scene import build_auto_wind_viewport_data, build_wind_viewport_groups, build_wind_viewport_scene
 from .viewport_scene import ViewportBoneSegment, ViewportBounds, ViewportScene, transformed_draw_bounds
@@ -129,6 +129,31 @@ def transform_external_skeleton_scene(
     )
 
 
+def prepare_external_dynamic_wind_export(
+    preview: WindPreviewResult,
+    dynamic_wind: DynamicWindData,
+) -> DynamicWindData:
+    """Map FBX Source Names to the joint names exposed by Unreal's imported RefSkeleton."""
+    if Path(preview.input_path).suffix.casefold() != ".fbx":
+        return dynamic_wind
+
+    joint_names = _unreal_fbx_joint_name_map(preview.source_model.skeleton)
+    unknown = sorted(
+        assignment.joint_name
+        for assignment in dynamic_wind.joint_assignments
+        if assignment.joint_name not in joint_names
+    )
+    if unknown:
+        raise WindPreviewError("external_fbx_unknown_joint_name: " + ", ".join(unknown))
+    return replace(
+        dynamic_wind,
+        joint_assignments=tuple(
+            replace(assignment, joint_name=joint_names[assignment.joint_name])
+            for assignment in dynamic_wind.joint_assignments
+        ),
+    )
+
+
 def _display_unit_scale(source_unit: str, preview_unit: str) -> float:
     try:
         return _DISPLAY_UNIT_TO_METERS[source_unit] / _DISPLAY_UNIT_TO_METERS[preview_unit]
@@ -231,6 +256,8 @@ def load_external_skeleton_preview(request: ExternalSkeletonPreviewRequest) -> W
         raise WindPreviewError(f"external_skeleton_not_found: {path}")
 
     _validate_unique_joint_names(skeleton)
+    if suffix == ".fbx":
+        _unreal_fbx_joint_name_map(skeleton)
     model = TreeAsset(
         metadata=ExportMetadata(source_path=str(path), source_version=None),
         materials=(),
@@ -567,3 +594,24 @@ def _validate_unique_joint_names(skeleton) -> None:
     duplicates = sorted({name for name in names if names.count(name) > 1})
     if duplicates:
         raise WindPreviewError("external_skeleton_duplicate_joint_name: " + ", ".join(duplicates))
+
+
+def _unreal_fbx_joint_name_map(skeleton: tuple[Joint, ...]) -> dict[str, str]:
+    # Verified in UE 5.7 RefSkeleton output. Keep this narrower than a guessed
+    # reimplementation of every legacy/Interchange FBX sanitizer rule.
+    mapped = {joint.name: joint.name.replace(".", "_") for joint in skeleton}
+    sources_by_target: dict[str, list[str]] = {}
+    for source_name, target_name in mapped.items():
+        sources_by_target.setdefault(target_name, []).append(source_name)
+    collisions = {
+        target_name: source_names
+        for target_name, source_names in sources_by_target.items()
+        if len(source_names) > 1
+    }
+    if collisions:
+        details = "; ".join(
+            f"{target_name} <- {', '.join(source_names)}"
+            for target_name, source_names in sorted(collisions.items())
+        )
+        raise WindPreviewError("external_fbx_unreal_joint_name_collision: " + details)
+    return mapped
