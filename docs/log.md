@@ -69,5 +69,10 @@ under `docs/raw/`; Git retains per-change detail.
 
 - Kept bone overlays visible and pickable when one endpoint leaves the camera
   frustum by clipping complete segments before screen projection.
-- Recorded the independent clean-package `QtWidgets` import failure that blocks
-  packaged smoke; source tests and the Quick preview pass.
+
+## 2026-08-30 - Qt package dependency isolation
+
+- Prevented PyInstaller from packaging an unrelated Poppler `icuuc.dll` found
+  on the host `PATH`; clean packaged stability and recovery smoke now pass.
+- Made windowed Qt import failures report the original error without assuming
+  that `sys.stderr` exists.

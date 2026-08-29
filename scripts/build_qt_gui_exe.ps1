@@ -44,6 +44,29 @@ function Join-ProcessArguments([string[]]$Arguments) {
     return (($Arguments | ForEach-Object { Quote-ProcessArgument $_ }) -join ' ')
 }
 
+function Get-QtBuildPath([string]$PathValue) {
+    $systemDirectory = [System.IO.Path]::GetFullPath((Join-Path $env:SystemRoot 'System32')).TrimEnd('\')
+    return (@(
+        foreach ($entry in ($PathValue -split ';')) {
+            if ([string]::IsNullOrWhiteSpace($entry)) {
+                continue
+            }
+            try {
+                $resolved = [System.IO.Path]::GetFullPath($entry.Trim('"')).TrimEnd('\')
+            }
+            catch {
+                $entry
+                continue
+            }
+            if ($resolved -ne $systemDirectory -and (Test-Path -LiteralPath (Join-Path $resolved 'icuuc.dll'))) {
+                Write-Host "Ignoring external ICU during Qt packaging: $resolved"
+                continue
+            }
+            $entry
+        }
+    ) -join ';')
+}
+
 function Get-GitBuildMetadata([string]$RepoRoot) {
     $metadata = @{
         git_branch = $null
@@ -259,8 +282,16 @@ try {
         }
 
         Write-Host "Building PySide6 release shell with $pythonExe ..."
-        & $pythonExe -s @pyInstallerArgs
-        if ($LASTEXITCODE -ne 0) {
+        $originalBuildPath = $env:PATH
+        try {
+            $env:PATH = Get-QtBuildPath -PathValue $originalBuildPath
+            & $pythonExe -s @pyInstallerArgs
+            $pyInstallerExitCode = $LASTEXITCODE
+        }
+        finally {
+            $env:PATH = $originalBuildPath
+        }
+        if ($pyInstallerExitCode -ne 0) {
             throw 'PyInstaller PySide6 release build failed.'
         }
 

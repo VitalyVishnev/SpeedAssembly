@@ -102,10 +102,8 @@ def main(argv: list[str] | None = None) -> int:
         from PySide6.QtCore import QTimer
         from PySide6.QtGui import QIcon
         from PySide6.QtWidgets import QApplication
-    except ImportError:
-        sys.stderr.write(
-            "PySide6 is required for the GUI shell. Install the 'ui-next' extra in .venv310.\n"
-        )
+    except ImportError as exc:
+        _report_gui_import_failure(exc)
         return 2
 
     try:
@@ -153,6 +151,14 @@ def _append_bootstrap_failure(formatted_traceback: str) -> None:
             handle.write(f"\nGUI bootstrap failure\n{formatted_traceback.rstrip()}\n")
     except OSError:
         pass
+
+
+def _report_gui_import_failure(error: ImportError) -> None:
+    message = f"SpeedAssembly could not load its Qt runtime.\n\n{error}"
+    if sys.stderr is not None:
+        sys.stderr.write(f"{message}\n")
+    elif sys.platform == "win32":
+        ctypes.windll.user32.MessageBoxW(None, message, "SpeedAssembly startup failed", 0x10)
 
 
 def _current_help_prompt_build_signature(build_info_path: Path | None) -> str:

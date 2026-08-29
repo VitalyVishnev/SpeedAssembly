@@ -114,6 +114,11 @@ Ordinary UI defects iterate in Quick and receive one full Package gate after
 the fix; defects unique to frozen/native execution validate each candidate with
 Package.
 
+On Windows, Package builds remove non-system `icuuc.dll` directories from the
+PyInstaller dependency-search `PATH`. PySide6 6.11 resolves the Windows system
+ICU, while an unrelated Poppler ICU with the same filename produces a
+`QtCore` procedure mismatch in the frozen executable.
+
 ## Decision: Detailed Boolean Fracture is the production cut backend
 
 Detailed Cuts in preview and export share connectivity-first `manifold3d`; standalone prototypes only diagnose that backend. The flat plan identifies the connected branch shell; valid degree-two loops are closed, provenance distinguishes temporary closures from cutter caps, and deterministic simplification lets child and parent reuse opposite-wound cap topology.
