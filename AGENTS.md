@@ -50,6 +50,8 @@ When docs conflict with reality, trust:
 
 If theory and UE behavior disagree, UE behavior wins.
 
+Unreal engine source files can be found in "D:\3D Personal\ue5.7 source" and "D:\3D Personal\ue5.8 source". You can use them for research. Do not change them. Thees are read only.
+
 ## Project Memory / LLM Wiki
 
 This repository uses an LLM Wiki-style documentation system.
