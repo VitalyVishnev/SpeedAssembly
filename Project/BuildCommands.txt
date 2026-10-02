@@ -1,0 +1,5 @@
+# Run from the repository root.
+.\.venv310\Scripts\Activate.ps1
+cd Project
+.\scripts\build_qt_gui_exe.cmd -Package  # primary one-file dist-next release
+.\scripts\build_qt_gui_exe.cmd -Package -Clean

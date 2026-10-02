@@ -8,7 +8,7 @@
 .pytest_tmp/
 __pycache__/
 *.pyc
-src/xml_to_usda/_ufbx*.pyd
+Project/src/xml_to_usda/_ufbx*.pyd
 
 # Build outputs
 build/
@@ -22,13 +22,23 @@ PyI_*.spec
 _pyi_*.py
 
 # Local documentation editor state
-.obsidian/workspace.json
-docs/user/.obsidian/
-docs/user/_drafts/
-docs/user/_templates/
+.obsidian/
+Project/docs/user/_drafts/
+Project/docs/user/_templates/
+
+# Local assistant instructions and settings
+.codex/
+.agents/
+.claude/
+AGENTS.md
+AGENTS.override.md
+CLAUDE.md
 
 # Temporary diagnostics and generated scratch data
 /tmp/
+/Project/tmp/
+.pytest_tmp*/
+gui_trace.jsonl
 .tmp*/
 _smoke*/
 _tmp*
@@ -36,9 +46,9 @@ tmp_*
 *.usda.partial
 
 # Package metadata
-src/*.egg-info/
+Project/src/*.egg-info/
 *.egg-info/
 
 vault/
-samples/speedtree/simple_tree/variants/*.usda
-samples/speedtree/BigSpruce/
+Project/samples/speedtree/simple_tree/variants/*.usda
+Project/samples/speedtree/BigSpruce/

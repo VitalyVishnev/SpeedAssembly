@@ -1,0 +1,319 @@
+# Architecture
+
+The codebase is organized around one deterministic conversion system with different execution strategies around the edges.
+
+For current contracts and problem tracking, see:
+
+- [Decisions](decisions.md)
+- [Known Bugs](known-bugs.md)
+- [Encountered Crashes](encountered-crashes.md)
+- [Experiments](experiments.md)
+- [Glossary](glossary.md)
+
+Main systems:
+
+- `src/xml_to_usda/normalizer.py` - turns observed SpeedTree XML into canonical source facts.
+- `src/xml_to_usda/material_resolver.py` - resolves source materials and explicit material policy.
+- `src/xml_to_usda/assembly_resolution.py` - combines source facts with operator intent into an authored model.
+- `src/xml_to_usda/scattered_parts.py` - detects leaf-only repeated geometry
+  from Object hierarchy and resolves its real base geometry plus the complete
+  Dynamic-Wind-safe synthetic rig after prototype resolution; deterministic
+  near-up frames, optional size-weighted instance orientation, minimal
+  root/deform rigs, and the repeated-geometry hot path stay local to this module.
+- `src/xml_to_usda/prototype_resolution.py` - resolves prototype payload choice and replacement.
+- `src/xml_to_usda/usda_authoring.py` - authors the final USDA structure; a
+  skeletal result uses `NaniteAssemblyRootAPI` only while resolved instanced
+  parts remain, otherwise the same root contains an ordinary `UsdSkel` asset.
+- `src/xml_to_usda/usda_writer.py` - writes USDA through the shared authoring contract.
+- `src/xml_to_usda/conversion_service.py` and `src/xml_to_usda/conversion_orchestrator.py` - normalize caller intent and run conversions.
+- parts-library requests reuse one bundle path in `conversion_orchestrator.py`;
+  each resolved prototype is isolated into its own skeletal or static USDA.
+- `src/xml_to_usda/qt_ui/` - supported PySide6 shell and preview adapters.
+- `src/xml_to_usda/fbx_adapter.py`, `src/xml_to_usda/_ufbx.c`, and `src/xml_to_usda/fbx_import_supervisor.py` - vendored ufbx integration and isolated helper-process control.
+- `src/xml_to_usda/discovery_service.py` and `src/xml_to_usda/source_discovery_worker_subprocess.py` - lightweight material/prototype row discovery; XML files at or above 5 MiB are inspected outside the GUI process.
+- `src/xml_to_usda/cache_maintenance.py` - bounded runtime cache maintenance for job leftovers, FBX payloads, source-model caches, Proxy Source Projection caches, legacy Fracture Preview cache files, and stale cache temp files.
+- `src/xml_to_usda/proxy_mesh_service.py`, `src/xml_to_usda/fracture_service.py`, and related workers - companion workflows.
+- `src/xml_to_usda/qem_simplification.py` - shared topology-preserving `fast-simplification` QEM backend used by Proxy Mesh and Fracture Preview diagnostic geometry.
+- `src/xml_to_usda/fracture_geometry.py` - deep Fracture Geometry module shared by preview and export; owns subtree-local Cut Surfaces, deterministic noisy clipping, attribute interpolation, intersection-loop caps, and manual cross-section snapping. Cut planning supplies the shared automatic physical-bone offset, so flat and Detailed Cuts start at the same site. Repeated Part attachment ownership stays outside geometry.
+- `src/xml_to_usda/boolean_fracture_prototype.py` - connectivity-first Manifold Boolean backend used by production Detailed Cuts and the standalone prototype viewers. A source context prepares analysis, triangulation, and connectivity once; prepared cut sessions own closed solids and cache their last result. Independent components build separately. Cuts sharing one shell split the current parent region sequentially in Fracture Plan order, preserving distinct cap provenance and final piece ownership. Multi-cut replans reuse unchanged independent sessions/results by exact cut-site identity.
+- `src/xml_to_usda/qt_ui/boolean_prototype.py` - standalone `boolean-prototype` stage viewer and `boolean-multi-prototype` whole-tree piece viewer.
+- `src/xml_to_usda/fracture_worker_subprocess.py` - crash-isolated Fracture Preview and export worker protocol. Detailed Cuts run in one fresh worker per request so native Boolean state cannot outlive a result.
+- `src/xml_to_usda/qt_ui/preview_jobs.py` - shared latest-request lifecycle for process-backed previews. Each preview type owns at most one active job and one coalesced pending request; settings changes never terminate active native work, and stale results/errors are discarded before the latest request starts.
+- `src/xml_to_usda/wind_preview_service.py`, `src/xml_to_usda/wind_viewport_scene.py`, `src/xml_to_usda/wind_group_stack.py`, and `src/xml_to_usda/wind_external_skeleton.py` - Wind Preview source service, Qt-free viewport scene adapter, manual override stack, full-mesh FBX diagnostics, and skeleton-only external USD loading.
+- `src/xml_to_usda/proxy_source_projection.py` - typed Proxy Source Projection loading/cache for Proxy Mesh jobs that need base geometry and skin binding, +X-oriented skeleton facts, repeated-part transforms, and source prototype geometry.
+- `src/xml_to_usda/proxy_collision.py` - deterministic Box/Capsule fitting for Proxy Mesh trunk collision using the Fracturing stem-axis contract.
+- `src/xml_to_usda/collision_primitives.py` - shared oriented Box/Capsule mesh builders used by Proxy Mesh and Fracturing.
+- `src/xml_to_usda/mesh_pruning.py` - shared deterministic percentage-based face pruning for preview/proxy workflows that need to drop the smallest disconnected base-mesh islands before their own simplification pass.
+- `docs/user/`, `mkdocs.yml`, and `.github/workflows/documentation.yml` - public
+  user documentation, isolated from the maintained engineering wiki and built
+  as a static MkDocs Material site for GitHub Pages. The workflow lives at the
+  repository root; application and documentation paths are inside `Project/`.
+  Documentation dependencies
+  stay outside the application runtime and release package.
+
+Proxy Preview prepares a compact `ProxyCollisionSource` with only primary-stem
+joints and their owned base-mesh points during render-mesh generation. The
+source remains in `ProxyMeshResult`; collision On/Off reuses retained guides and
+fit changes rebuild them locally without a worker, source reload, voxel
+extraction, or QEM. The simplified viewport mesh is not a collision source
+because it no longer retains per-stem skin ownership and also contains crown
+geometry.
+The Proxy viewport frames and places its grid from the render mesh and explicit
+tree pivot, never from guide collision bounds.
+Proxy Preview also carries one preview-only original-tree `ViewportScene` from
+the existing Proxy Source Projection load. The scene uploads Base Mesh and each
+unique prototype once and keeps repeated parts as GPU instances. `ProxyViewport`
+owns the `Shaded` / `Silhouette Diff` visual state and stencil comparison:
+original-only pixels are blue, Proxy-only pixels are red, overlap is neutral,
+and collision/grid rendering is omitted in Diff mode. This scene is not part of
+`ProxyMeshResult` and cannot affect Proxy USDA export.
+Proxy export is initiated from the bottom of Proxy Preview. Its editable path
+defaults to the companion path derived from the main Output USDA; an override
+is carried as the exact Proxy USDA destination through the existing worker
+request. A matching preview result is written directly without regenerating it.
+
+The Proxy density field uses a longest-axis grid capped at resolution `512`.
+Foliage ellipsoids are evaluated as equivalent quadratic forms into one dense
+NumPy boolean grid instead of a Python set of occupied coordinate tuples. The
+grid is bounded by `512^3` cells; surface extraction keeps only boundary cells,
+authors their triangles in deterministic first-seen order, and hands already
+triangulated buffers to the shared QEM path. Existing resolution 64/256 output
+ordering remains byte-identical.
+
+The main Qt shell installs one application-wide parameter wheel filter. Wheel
+input over sliders, spin boxes, combos, and dials scrolls the nearest settings
+panel when available and never changes the parameter; wheel input over a 3D
+viewport remains available for camera zoom.
+
+Important data flow:
+
+1. XML is parsed and normalized into canonical source facts.
+2. Operator intent is resolved into an authored assembly model.
+3. Validation checks source, resolution, and authoring invariants in order.
+4. USDA authoring emits the importer-facing scene shape.
+
+Canonical normalization keeps its public model unchanged while avoiding hot-path
+allocation churn: immutable source UV values are reused across face corners,
+normal axes are remapped in batches without temporary vectors, scalar packed
+fields use a direct parse path, schema inspection uses plain local maps, and
+cyclic GC is suspended only while the acyclic cold-load graph is built. Keep
+these choices benchmark-backed. On the 9.7 MB Big Spruce sample with source
+cache disabled, an order-balanced one-core comparison reduced the complete
+`read + inspect + normalize + validate` phase from 1.689 s to 1.114 s wall
+median and from 1.648 s to 1.078 s CPU median: 34.0% and 34.6% respectively,
+without changing model output.
+
+USDA authoring preserves the same text while avoiding repeated scalar
+formatting in its hottest arrays. Reused `MeshData` normal/UV objects share
+their formatted strings by identity, low-cardinality integer arrays reuse
+their decimal strings, matrices use one fixed 4x4 formatter, and hot float
+formatting uses CPython's equivalent `%g` path. On the same 9.7 MB Big Spruce
+sample, one-core order-balanced comparisons against the previous authoring
+module reduced authoring-only wall median from 0.525 s to 0.338 s (35.7%),
+full text generation plus an OS temporary-file write from 0.490 s to 0.329 s
+(32.8%), and the `GeometryBuffer` streaming path from 0.480 s to 0.307 s
+(36.1%). Baseline and optimized outputs matched byte-for-byte. Keep these
+paths stdlib-only and benchmark-backed.
+
+Dense numerical work stays behind the existing domain seams rather than
+changing the canonical model. `skeleton_processing.py` precomputes bone geometry
+once, evaluates base-mesh chunks and Repeated Part bindings in NumPy batches,
+then returns the unchanged canonical objects; influence validation uses the same
+bounded strategy. `payload_partition.py` views large
+`GeometryBuffer` arrays zero-copy and classifies face colors in bounded chunks.
+`fbx_adapter.py` uses NumPy only above measured size thresholds for control
+point transforms and indexed polygon-vertex UV expansion, then returns the
+same `array`-backed `GeometryBuffer` contract. On Big Spruce, full Dual
+Skinning and skin validation improved by 67.4% and 78.2%. On the 58,463-face
+real topology, material partition improved by 82.4%. A controlled sequential
+comparison on `SM_BigBranch_01_HIGH.fbx` (11,318,965 points, 14,164,402
+triangles, 42,493,206 UVs) reduced geometry/UV reading from 97.724 s to
+57.598 s (41.1%); SHA-256 matched for every output buffer. Small FBX files keep
+the scalar transform/UV path so NumPy startup cannot erase the gain.
+
+Interactive preview flows may stop earlier when they inspect source facts rather
+than authored output. Wind Preview V1 loads canonical XML source facts, derives
+Dynamic Wind groups, and adapts those facts to viewport batches for inspection.
+Wind Preview keeps the same shared viewport and worker boundary while using a
+deterministic wind-group stack: XML Generator Groups or Auto Hierarchy provide a
+base, manual override layers sit above it, and the flattened result writes the
+existing Dynamic Wind JSON schema. Auto Hierarchy derives groups from skeleton
+topology and SpeedTree/file joint ordering, not from XML wind generator labels.
+Each final visible group can reveal its Dynamic Wind controls in the dialog;
+settings are keyed by the stable source layer and applied only after the stack
+is flattened. XML layers remain read-only for manual bone picking, while manual
+layers alone enter the assignment-edit mode.
+Optional per-layer `Continue line` flags let endpoint-continuous child chains
+stay in the same group when explicitly enabled. A restored valid XML path
+automatically refreshes the main Wind groups after startup; the manual Refresh
+button remains available. A Preview request made during that refresh is queued
+until inspection finishes, so the GUI and isolated preview worker do not load
+the same large source concurrently. External Skeleton loading reads USD/UsdSkel
+payloads as skeleton-only previews. The FBX projection first mirrors the UE 5.8
+default Ufbx RefSkeleton profile (joint inclusion, hierarchy, bind-pose choice,
+name sanitizer, centimeters, and left-handed Z-up), then builds a colored
+rest-mesh scene and non-blocking diagnostics from local bone frames, skin
+weights, bind clusters, and source metadata. The preview's one canonical
+RefSkeleton-shaped model is shared by grouping and JSON validation; no
+last-minute JSON-only rename is allowed. It is a read-only source-file check,
+not a repair or certification of a custom Unreal import. Source loading, USD
+Skeleton prim enumeration, and scene build run in a file-backed worker process
+so XML/external skeleton faults do not crash the Qt shell. The GUI consumes the
+worker-built initial scene directly. Selecting an external file starts loading
+immediately; a multi-skeleton USD waits only for the operator to select its
+Skeleton prim, then loads without a separate confirmation button. The worker
+result keeps the built viewport scene, compact skeleton facts, and diagnostics
+rather than a duplicate source MeshData. Normal tree Repeated
+Parts remain absent. A synthetic Scattered Parts rigid rig keeps its
+still-instanced blades in the scene so leaf-only Wind Preview is not empty;
+baked modes render their resolved Base Mesh. It does not serialize
+the full CanonicalTreeModel beside the scene. Grouping edits recolor that scene and
+replace its bone overlay without rebuilding source geometry. Base-mesh face
+ranges are computed once per scene rather than once per joint. The Wind Preview
+right panel uses
+one global settings scroll; the Layers block is the only nested scroll and can
+be resized vertically with a local handle even when the global panel scrollbar
+is visible. External Skeleton USD loading uses OpenUSD/`pxr` from `usd-core`
+for normal USD support. Text `.usda` and ASCII `.usd` files can still be read
+through the deterministic text fallback, but multiple Skeleton prims require
+an explicit operator choice instead of any largest-skeleton heuristic.
+External Skeleton Display Transform applies only to viewport bone segments and
+bounds: the operator selects loaded/preview units and Y-up/Z-up axes, while the
+loaded skeleton and generated Dynamic Wind JSON remain unchanged. FBX starts in
+the UE-normalized `cm / Z-up` RefSkeleton space. Vertical external-bone warnings
+inspect bind-pose +X against the selected loaded-space up axis; they do not tilt
+or otherwise edit the skeleton. External JSON export validates exact joint-set
+coverage and rejects same-group forks before serializing.
+The SpeedTree XML worker path does not import the External Skeleton backend.
+An unexpected native Wind Preview worker exit is retried once in a clean
+process. Worker subprocesses enable Python faulthandler so a repeated native
+failure leaves a diagnostic stack in the captured stderr file.
+
+SpeedTree skeleton order is a semantic topology signal, not incidental file
+ordering. At a fork, the lowest-index direct child continues the current
+generator line; every other child starts a new line. The common conforming
+shape places that continuation immediately after its parent. This Generator
+Continuation contract is distinct from the geometric Primary Stem Axis used by
+Fracturing and Proxy collision, which selects a longest root-to-leaf path.
+Neither rule may silently substitute for the other. See
+[SpeedTree bone order identifies generator continuation](decisions.md#decision-speedtree-bone-order-identifies-generator-continuation).
+Release packaging includes only the OpenUSD modules, plugin metadata, and
+release DLLs required by `Usd.Stage`/`UsdSkel`; debug and unrelated pxr
+binaries stay outside the GUI package.
+The Windows Package build generates a PyInstaller spec, then removes every
+collected `icu*.dll` from its post-Analysis binary list before building the
+EXE. PySide6 6.11 uses the Windows system ICU; packaging Poppler's same-named
+ICU breaks `QtCore` import. The build also rejects any ICU entry remaining in
+the final package TOC before release assembly and smoke.
+
+Preview dialogs must share the same viewport system. Mode-specific dialogs
+may own controls, source loading, and Qt-free scene adapters, but rendering,
+upload lifecycle, camera behavior, bone overlay, picking, and static-scene
+precompute belong behind the public `MatcapViewport` interface. If a viewport
+stability or rendering fix would help more than one preview, put it in the
+shared viewport module rather than in a Wind/Fracture/Proxy-only path.
+Visual-only selection changes should update overlay/visibility state through
+the shared viewport instead of rebuilding and re-uploading static mesh buffers.
+Part Prototype Preview keeps the worker-loaded source mesh in the dialog;
+Default, Vertex Colors, and Material Colors are local projections and never
+restart XML/FBX loading, simplification, or the preview worker.
+Viewport-specific shortcuts should be shown as small contextual translucent text
+in the bottom-right corner of the viewport.
+Shared camera navigation includes left-button orbit, middle-button pan in the
+camera plane, wheel zoom, double-left-click mesh focus, and `F` frame-all.
+Wheel zoom can approach to 0.1% of the framed scene radius, with a distance-
+adaptive near plane for close cut inspection. Scene setters only mark OpenGL
+buffers dirty; GPU uploads run in `paintGL` while Qt owns the current context.
+Bone overlays clip complete 3D segments against the camera frustum before
+screen projection. A segment remains visible and pickable when either endpoint
+is outside the viewport; picking maps the clipped screen position back to the
+original segment parameter.
+Fracture Preview uploads each unique Base/Repeated Part mesh once, stores
+placement transforms in a compact GPU instance buffer, and issues one hardware-
+instanced draw per unique source mesh. The 256 MiB guard covers unique vertex
+buffers rather than logical instance-expanded geometry.
+
+The Wind Preview right panel is the compact-control reference for every
+viewport dialog. Proxy Mesh, Fracture, and Prototype Preview reuse its shared
+dropdown/popup styling, wide adjustable panel geometry, and vertically
+scrollable settings structure. Fracture groups controls into collapsible
+Preview Geometry, Automatic Cuts, Cut Surface, Viewport, Collision, and Manual
+Cuts sections. It retains its parameter-wheel filter so wheel input scrolls
+settings rather than changing an unfocused value.
+The Wind, Geometry, and Materials tabs on the main shell reuse the same
+compact controls inside their existing rounded cards. Their `RoundedTabBar`
+paints the tab fill directly because Qt stylesheet radii do not reliably clip
+`QTabBar` backgrounds across monitor DPI settings. UDIM tile IDs are styled as
+explicit editable fields rather than passive numeric labels.
+
+The main shell keeps one `ProgramStatusCard` beside those tabs. It consumes the
+existing `ConversionTelemetry` directly, groups backend phases into five
+operator-facing conversion stages, and represents other background jobs as a
+compact current operation. The same card owns the short XML/material/mode
+summary; detailed runtime settings and full paths remain in their owning tabs,
+Settings, and the conversion-start log. `MainWindow.status_label` remains an
+alias to the card's message label for packaged and adapter compatibility.
+
+For visual UI iteration, use direct PySide screenshots before packaging. Start
+a `QApplication` from `.venv310`, construct the target dialog/widget with a
+small fixture or fake result, call `show()` and `app.processEvents()`, then save
+`widget.grab()` to `tmp/*.png` and inspect it. Example shape:
+
+```python
+from pathlib import Path
+from PySide6.QtWidgets import QApplication
+
+app = QApplication.instance() or QApplication(["ui-preview"])
+dialog = build_dialog_with_fixture_data()
+dialog.resize(1000, 720)
+dialog.show()
+app.processEvents()
+Path("tmp").mkdir(exist_ok=True)
+dialog.settings_panel.grab().save("tmp/ui_preview.png")
+dialog.close()
+```
+
+This screenshot loop is a design preflight, not final validation. Keep the
+packaged smoke/build gate for completed UI changes.
+
+5. Runtime wrappers handle worker isolation, cleanup, packaging, and diagnostics.
+
+The main shell never imports the ufbx C extension solely to build its XML discovery
+panels. FBX loading is lazy at the actual FBX action boundary. Restored large
+XML inputs are shown immediately, discovered in a fresh file-backed worker,
+then inspected for Wind groups in the existing isolated Wind worker; the
+source reads do not overlap.
+
+Testing has four separate execution boundaries: Core (synthetic deterministic
+contracts), Integration (source/worker/Qt workflows), Packaged (frozen EXE and
+runtime cache/worker boundaries), and manual UE 5.7.x validation. The first
+three use pytest markers managed by `tests/conftest.py`; UE validation is never
+folded into pytest. The current contract map and commands live in
+[`testing.md`](testing.md).
+
+Important folders:
+
+- `src/xml_to_usda/` - production code.
+- `src/xml_to_usda/skeleton_processing.py` - deterministic +X bone frames, parent/current bindings, and mandatory skeleton/skinning invariant validation.
+- `tests/` - regression coverage and contract checks.
+- `samples/` - controlled XML fixtures and example outputs.
+- `vault/` - reference USDA, importer, schema, and research material.
+- `docs/raw/` - preserved historical documentation.
+- `docs/wiki/` - maintained project memory.
+- `docs/user/` - public operator documentation; this is the only `docs/`
+  subtree published by MkDocs.
+
+External dependencies:
+
+- UE 5.7.x import behavior is the final contract check.
+- ufbx v0.21.3 is vendored as C source and compiled as `xml_to_usda._ufbx` in `.venv310` and release builds.
+- PySide6 is the supported desktop shell.
+- PyInstaller builds the packaged executable.
+
+Current technical assumptions:
+
+- the same input plus the same config must produce the same logical USDA output
+- raw XML traversal must not write USDA directly
+- static and skeletal export modes share normalized source facts but not the same importer contract
+- runtime strategy may change, but conversion semantics must not
+- interactive preview/setup paths should minimize avoidable pauses and use narrow measured payloads before broad model reconstruction

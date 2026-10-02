@@ -7,7 +7,7 @@
 
 
 
-![SpeedAssembly main workspace, Dynamic Wind, Proxy Mesh, and Fracture Preview](assets/readme/speedassembly-workflows.png)
+![SpeedAssembly main workspace, Dynamic Wind, Proxy Mesh, and Fracture Preview](Project/assets/readme/speedassembly-workflows.png)
 
 SpeedAssembly converts SpeedTree Raw XML into Unreal-ready USDA and keeps skeletal structure, repeated twigs
 and leaves, materials, wind data, and optional companion assets.
@@ -68,4 +68,7 @@ SpeedAssembly's original source is free and open-source software under the
 [MIT License](LICENSE). Anyone may use it privately or commercially, including
 studios, without a fee. Third-party components retain their own licenses. The
 packaged FBX path uses the permissively licensed ufbx library; see
-[Third-party notices](THIRD_PARTY_NOTICES.md) before redistributing a binary.
+[Third-party notices](Project/THIRD_PARTY_NOTICES.md) before redistributing a binary.
+
+Source code, build instructions, and engineering documentation are in
+[Project](Project/README.md).
