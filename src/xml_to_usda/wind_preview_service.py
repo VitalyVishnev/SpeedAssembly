@@ -33,6 +33,8 @@ class WindPreviewResult:
     viewport_scene: ViewportScene
     xml_groups_available: bool = True
     preferred_grouping_mode: str = "xml"
+    display_source_unit: str = "m"
+    display_source_up_axis: str = "Y"
 
 
 def prepare_wind_preview_request(

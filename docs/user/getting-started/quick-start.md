@@ -42,7 +42,7 @@ Import success proves that the file satisfies the tested importer shape. It does
 
 After the main tree is configured, use the dedicated preview windows for:
 
-- Dynamic Wind JSON;
+- Dynamic Wind settings;
 - [Proxy Mesh](../workflows/proxy-mesh.md);
 - Fracturing and collision pieces.
 

@@ -35,7 +35,15 @@ theme:
     - content.code.copy
 
 nav:
-  - Overview: index.md
+  - Overview:
+      - index.md
+      - What is SpeedAssembly?: overview/what-is-speedassembly.md
+  - Basic workflow:
+      - Prepare Unreal Engine: workflows/prepare-unreal.md
+      - Prepare SpeedTree: workflows/prepare-speedtree.md
+  - Wiki:
+      - Choosing what to instance: wiki/choosing-assembly-parts.md
+      - How Dynamic Wind works: wiki/how-dynamic-wind-works.md
   - Getting started:
       - Quick start: getting-started/quick-start.md
   - Concepts:

@@ -9,8 +9,17 @@ records, and bone frames for viewport diagnostics. It must not normalize,
 reorient, rescale, or rewrite that source. Display Transform remains
 viewport-only. Diagnostic findings do not block Dynamic Wind JSON generation;
 source-rig corrections belong in the DCC followed by a fresh export. Structural
-export ambiguity, including two FBX Source Names mapping to one Unreal joint
-name, fails loudly because the JSON could not identify both joints.
+export ambiguity fails loudly because the JSON could not identify every
+RefSkeleton joint exactly once.
+
+The external FBX model mirrors the UE 5.8 default Ufbx import profile before
+the user sees or groups it: UE joint inclusion and hierarchy, default bind-pose
+priority, Interchange joint-name sanitation/collision suffixes, and the Ufbx
+left-handed Z-up centimeter conversion. That canonical projected model is the
+only source for viewport selection, group persistence, and JSON. Do not retain
+raw source names and add a JSON-only rewrite seam. Changed importer settings or
+a reused Skeleton Asset are outside this profile and must be checked with the
+UE-side RefSkeleton dump.
 
 ## Decision: SpeedAssembly is MIT-licensed
 
@@ -78,9 +87,38 @@ Documentation dependencies are pinned in `requirements-docs.txt` and remain
 outside the application runtime and packaged EXE. Local authoring uses the
 canonical `.venv310` environment and `scripts/preview_documentation.cmd`.
 
+Light mode defines the article geometry at every responsive breakpoint. Dark
+mode changes colors only; article padding, borders, width, and text wrapping
+must stay identical. Desktop search uses the bundled Qt control radius of
+18 px, including its results panel; mobile search keeps Material's full-screen
+layout. Back to Top is centered with auto margins without a CSS transform so
+its text does not depend on hover to be rasterized clearly. Validate site-only
+style changes with `mkdocs build --strict` and browser checks, independently
+from Qt executable packaging.
+
 Contextual application help will target explicit stable anchors such as
 `reference/proxy-mesh/#density-resolution`; heading copy may change without
 removing an anchor already used by a released application.
+
+Overview articles explain artist tasks and visible results in familiar terms.
+Keep workflow-specific technical limits in their dedicated guides. Apply
+Unslop to wording and the Google Developer Documentation Style Guide to
+concrete procedures. The supported-workflows table lives inside
+`overview/what-is-speedassembly.md` rather than a separate overview page.
+Add every new user article to `mkdocs.yml` navigation as soon as its first
+draft exists so the author can review it through the local site preview.
+The editorial plan uses Overview, Basic workflow, and Advanced workflows.
+Basic workflow covers Unreal preparation, SpeedTree preparation, conversion,
+and Unreal import, followed by Wind/Geometry/Materials articles. Quick Start
+and Getting Started are excluded from the planned structure; existing pages
+are migrated separately while preserving useful links and anchors.
+
+The Unreal preparation guide uses the same UI setup for UE 5.7 and 5.8:
+Nanite Foliage plus Dynamic Wind, Procedural Vegetation Editor, and Interchange
+OpenUSD. Plugin display names and the Nanite Foliage restart requirement were
+checked against both local engine source trees. This documents the operator's
+project setup, not a claim that every plugin is required by every export mode
+or that engine behavior is identical between versions.
 
 Related files:
 - `mkdocs.yml`
@@ -851,18 +889,20 @@ blocks directly. Multiple USD Skeleton prims require an explicit operator
 choice through the Skeleton dropdown. The loader must not choose by largest
 joint count, prim order, or name. Binary `.usd`/`.usdc` stay behind the `pxr`
 requirement.
-External Skeleton Display Transform is viewport-only. Source/preview unit and
+External Skeleton Display Transform is viewport-only. Loaded/preview unit and
 Y-up/Z-up selectors transform rendered bone segments and bounds but never the
-loaded skeleton, final group assignments, or Dynamic Wind JSON. A non-blocking
-warning names non-zero parent-to-child segments parallel to the selected source
-up axis; it must not apply the main SpeedTree one-degree tilt.
-External FBX JSON export has a separate name-adaptation seam. Preserve exact
-Source Names throughout loading, diagnostics, viewport picking, and group
-editing; only the final JSON copy maps the UE 5.7-verified `.` to `_` rewrite.
-Reject collisions such as `Bone.001` plus `Bone_001` instead of guessing which
-joint Unreal intended. XML and external USD exports remain byte-semantically
-unchanged by this rule. Do not broaden the mapper until another FBX rewrite is
-observed in the actual imported RefSkeleton and covered by a regression test.
+loaded skeleton, final group assignments, or Dynamic Wind JSON. The default FBX
+loaded space is UE's `cm / Z-up`; old sessions reset to this safe profile. A
+non-blocking warning names bind-pose +X vectors parallel to the selected loaded
+up axis; it must not apply the main SpeedTree one-degree tilt. This mirrors
+`DynamicWindEval.usf`, which derives Bone Forward from bind-pose rotation and
+local +X; Pivot Painter is not evidence for this rule.
+External JSON is validated against the same RefSkeleton-shaped model before
+serialization: every joint must occur exactly once, no unknown name may occur,
+and two direct children of one parent cannot remain in the same group. The
+last rule is an intentional export gate because Dynamic Wind represents groups
+as chains and cannot encode that fork deterministically. XML and external USD
+exports remain byte-semantically unchanged by FBX sanitation.
 External Skeleton is a diagnostic/grouping/JSON input, not an FBX-to-USD
 conversion path. The FBX adapter may inspect and display mesh skinning, local
 frames, bind records, and topology, but it never repairs them. A plausible

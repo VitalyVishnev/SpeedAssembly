@@ -8,7 +8,7 @@ import pytest
 
 from xml_to_usda.fbx_adapter import FbxSkeletalPreview
 from xml_to_usda.dynamic_wind import render_dynamic_wind_payload
-from xml_to_usda.models import Joint, Matrix4d, MeshData, ValidationIssue, Vector3
+from xml_to_usda.models import DynamicWindData, DynamicWindJointAssignment, DynamicWindSimulationGroup, Joint, Matrix4d, MeshData, ValidationIssue, Vector3
 from xml_to_usda.wind_external_skeleton import (
     ExternalSkeletonPreviewRequest,
     external_vertical_bone_names,
@@ -42,6 +42,7 @@ def test_external_fbx_preview_includes_skinned_mesh_and_diagnostics(monkeypatch,
     assert len(preview.viewport_scene.mesh_batches) == 1
     assert len(preview.viewport_scene.draw_calls) == 1
     assert preview.diagnostics[0].code == "test_rig"
+    assert (preview.display_source_unit, preview.display_source_up_axis) == ("cm", "Z")
     assert [segment.child_token for segment in preview.viewport_scene.bone_segments] == ["branch"]
     assert [assignment.simulation_group_index for assignment in preview.dynamic_wind.joint_assignments] == [0, 0]
 
@@ -74,13 +75,12 @@ def test_external_skeleton_display_transform_is_viewport_only(monkeypatch, tmp_p
     assert transformed.bounds.max_point.z == pytest.approx(0.02)
 
 
-def test_external_vertical_bones_use_parent_segments_and_ignore_zero_length() -> None:
+def test_external_vertical_bones_use_bind_pose_forward_axis() -> None:
     skeleton = (
         Joint("root", parent=None, bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 0.0))),
-        Joint("vertical", parent="root", bind_transform=Matrix4d.from_translation(Vector3(0.0, 2.0, 0.0))),
-        Joint("lateral", parent="root", bind_transform=Matrix4d.from_translation(Vector3(1.0, 1.0, 0.0))),
-        Joint("zero", parent="root", bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 0.0))),
-        Joint("z_vertical", parent="root", bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 3.0))),
+        _joint_with_forward("vertical", "root", Vector3(0.0, 1.0, 0.0), Vector3(0.0, 2.0, 0.0)),
+        _joint_with_forward("lateral", "root", Vector3(1.0, 0.0, 0.0), Vector3(1.0, 1.0, 0.0)),
+        _joint_with_forward("z_vertical", "root", Vector3(0.0, 0.0, 1.0), Vector3(0.0, 0.0, 3.0)),
     )
 
     assert external_vertical_bone_names(skeleton, "Y") == ("vertical",)
@@ -128,12 +128,12 @@ def test_external_fbx_wind_export_uses_unreal_ref_skeleton_names_without_mutatin
     exported = prepare_external_dynamic_wind_export(preview, preview.dynamic_wind)
     payload = render_dynamic_wind_payload(exported)
 
-    assert [joint.name for joint in preview.source_model.skeleton] == ["Root", "Bone.001"]
-    assert [assignment.joint_name for assignment in preview.dynamic_wind.joint_assignments] == ["Root", "Bone.001"]
+    assert [joint.name for joint in preview.source_model.skeleton] == ["Root", "Bone_001"]
+    assert [assignment.joint_name for assignment in preview.dynamic_wind.joint_assignments] == ["Root", "Bone_001"]
     assert [joint["JointName"] for joint in payload["Joints"]] == ["Root", "Bone_001"]
 
 
-def test_external_fbx_preview_rejects_unreal_name_collision(monkeypatch, tmp_path: Path) -> None:
+def test_external_fbx_preview_uses_unreal_name_collision_suffix(monkeypatch, tmp_path: Path) -> None:
     fbx_path = tmp_path / "collision.fbx"
     fbx_path.write_bytes(b"stub")
     monkeypatch.setattr(
@@ -149,8 +149,45 @@ def test_external_fbx_preview_rejects_unreal_name_collision(monkeypatch, tmp_pat
         ),
     )
 
-    with pytest.raises(WindPreviewError, match="external_fbx_unreal_joint_name_collision"):
-        load_external_skeleton_preview(ExternalSkeletonPreviewRequest(str(fbx_path)))
+    preview = load_external_skeleton_preview(ExternalSkeletonPreviewRequest(str(fbx_path)))
+
+    assert [joint.name for joint in preview.source_model.skeleton] == ["Root", "Bone_001", "Bone_0011"]
+
+
+def test_external_export_rejects_unmatched_or_forked_ref_skeleton_groups(monkeypatch, tmp_path: Path) -> None:
+    fbx_path = tmp_path / "fork.fbx"
+    fbx_path.write_bytes(b"stub")
+    monkeypatch.setattr(
+        "xml_to_usda.wind_external_skeleton.load_fbx_skeletal_preview",
+        lambda _path: FbxSkeletalPreview(
+            skeleton=(
+                _joint("Root", None, 0.0),
+                _joint("Left", "Root", 1.0),
+                _joint("Right", "Root", 2.0),
+            ),
+            mesh=None,
+            diagnostics=(),
+        ),
+    )
+    preview = load_external_skeleton_preview(ExternalSkeletonPreviewRequest(str(fbx_path)))
+    group = DynamicWindSimulationGroup(group_index=0, branch_order=0)
+    forked = DynamicWindData(
+        joint_assignments=tuple(
+            DynamicWindJointAssignment(joint_name=joint.name, simulation_group_index=0, branch_order=0)
+            for joint in preview.source_model.skeleton
+        ),
+        simulation_groups=(group,),
+    )
+
+    with pytest.raises(WindPreviewError, match="dynamic_wind_same_group_fork"):
+        prepare_external_dynamic_wind_export(preview, forked)
+
+    unmatched = DynamicWindData(
+        joint_assignments=(DynamicWindJointAssignment(joint_name="Missing", simulation_group_index=0, branch_order=0),),
+        simulation_groups=(group,),
+    )
+    with pytest.raises(WindPreviewError, match="dynamic_wind_unknown_joint"):
+        prepare_external_dynamic_wind_export(preview, unmatched)
 
 
 def test_text_usd_external_skeleton_backend_does_not_require_pxr() -> None:
@@ -191,10 +228,10 @@ def test_external_usd_skeleton_preview_reads_usdskel_without_mesh(monkeypatch, t
     assert preview.viewport_scene.mesh_batches == ()
     assert [(joint.name, joint.parent, joint.bind_translate.y) for joint in preview.source_model.skeleton] == [
         ("Root", None, 0.0),
-        ("Root/Branch", "Root", 2.0),
-        ("Root/Branch/Tip", "Root/Branch", 5.0),
+        ("Branch", "Root", 2.0),
+        ("Tip", "Branch", 5.0),
     ]
-    assert [segment.child_token for segment in preview.viewport_scene.bone_segments] == ["Root/Branch", "Root/Branch/Tip"]
+    assert [segment.child_token for segment in preview.viewport_scene.bone_segments] == ["Branch", "Tip"]
 
 
 @pytest.mark.parametrize(
@@ -262,8 +299,8 @@ def Xform "Tree"
     preview = load_external_skeleton_preview(ExternalSkeletonPreviewRequest(str(usd_path), group_count=2, skeleton_index=0))
     assert [(joint.name, joint.parent, joint.bind_translate.x, joint.bind_translate.y, joint.bind_translate.z) for joint in preview.source_model.skeleton] == [
         ("Root", None, 0.0, 0.0, 0.0),
-        ("Root/Branch", "Root", 1.0, 2.0, 3.0),
-        ("Root/Branch/Tip", "Root/Branch", 4.0, 5.0, 6.0),
+        ("Branch", "Root", 1.0, 2.0, 3.0),
+        ("Tip", "Branch", 4.0, 5.0, 6.0),
     ]
     assert preview.source_model.base_mesh is None
 
@@ -291,7 +328,34 @@ def Skeleton "SkeletonB"
 
     preview = load_external_skeleton_preview(ExternalSkeletonPreviewRequest(str(usd_path), group_count=2, skeleton_index=1))
 
-    assert [joint.name for joint in preview.source_model.skeleton] == ["C", "C/D"]
+    assert [joint.name for joint in preview.source_model.skeleton] == ["C", "D"]
+
+
+def test_external_text_usda_keeps_full_bind_pose_and_mirrors_synthetic_root(monkeypatch, tmp_path: Path) -> None:
+    usd_path = tmp_path / "multi-root.usda"
+    usd_path.write_text(
+        """#usda 1.0
+def Skeleton "Skeleton"
+{
+    uniform matrix4d[] bindTransforms = [
+        ( (0, 1, 0, 0), (1, 0, 0, 0), (0, 0, -1, 0), (1, 2, 3, 1) ),
+        ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (4, 5, 6, 1) )
+    ]
+    uniform token[] joints = ["A", "B"]
+}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(sys.modules, "pxr", None)
+
+    preview = load_external_skeleton_preview(ExternalSkeletonPreviewRequest(str(usd_path)))
+
+    root, first, second = preview.source_model.skeleton
+    assert (root.name, root.parent, root.bind_transform) == ("Root", None, Matrix4d.identity())
+    assert (first.name, first.parent, first.bind_transform.rows[0], first.bind_translate) == (
+        "A", "Root", (0.0, 1.0, 0.0, 0.0), Vector3(1.0, 2.0, 3.0)
+    )
+    assert (second.name, second.parent, second.bind_translate) == ("B", "Root", Vector3(4.0, 5.0, 6.0))
 
 
 def _joint(name: str, parent: str | None, y: float) -> Joint:
@@ -300,6 +364,16 @@ def _joint(name: str, parent: str | None, y: float) -> Joint:
         parent=parent,
         bind_transform=Matrix4d.from_translation(Vector3(0.0, y, 0.0)),
     )
+
+
+def _joint_with_forward(name: str, parent: str, forward: Vector3, translate: Vector3) -> Joint:
+    if forward == Vector3(0.0, 1.0, 0.0):
+        rows = ((0.0, 1.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0), (0.0, 0.0, -1.0, 0.0))
+    elif forward == Vector3(0.0, 0.0, 1.0):
+        rows = ((0.0, 0.0, 1.0, 0.0), (0.0, 1.0, 0.0, 0.0), (-1.0, 0.0, 0.0, 0.0))
+    else:
+        rows = ((1.0, 0.0, 0.0, 0.0), (0.0, 1.0, 0.0, 0.0), (0.0, 0.0, 1.0, 0.0))
+    return Joint(name=name, parent=parent, bind_transform=Matrix4d(rows=(*rows, (translate.x, translate.y, translate.z, 1.0))))
 
 
 def _skinned_triangle() -> MeshData:

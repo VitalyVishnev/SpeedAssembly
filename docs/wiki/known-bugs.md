@@ -4,6 +4,22 @@ Current defects, fail-loud limits, and validation gaps only. Resolved crash
 history lives in [Encountered Crashes](encountered-crashes.md); rejected fixes
 and benchmark detail live in [Experiments](experiments.md).
 
+## Limitation: Shared Skeleton Assets do not isolate Dynamic Wind metadata
+
+Status: Source-verified in UE 5.8.2; runtime A/B not reproduced
+
+`DynamicWindProvider.cpp::RegisterProxy` keys bone data by Skeleton GUID and
+bone-map storage mode. Meshes with this shared key and different wind-data hashes
+upload into the same entry; mesh-local Asset User Data does not isolate their
+runtime bone response. Use separate Skeleton Assets when variants require
+different wind metadata. Upstream behavior is unchanged; validation is deferred
+because this task documents the plugin rather than modifying it. Next gate:
+two meshes sharing a Skeleton, different group settings, both registration
+orders, compared with dedicated Skeleton Assets.
+
+See [Dynamic Wind runtime overview](experiments.md#dynamic-wind-runtime-overview)
+and the public `docs/user/wiki/how-dynamic-wind-works.md` guide.
+
 ## Limitation: External diagnostics stop at the source-file boundary
 
 Advanced Wind Settings cannot observe Unreal's chosen Skeleton Asset,
@@ -59,20 +75,21 @@ Related:
 - `src/xml_to_usda/fbx_adapter.py`
 - [External Dynamic Wind Rigs](external-dynamic-wind-rigs.md)
 
-## Limitation: External FBX name parity is verified only for periods
+## Limitation: External FBX parity models only the UE 5.8 default import profile
 
-Status: Mitigated for the confirmed UE 5.7 case
+Status: Mitigated for the confirmed UE 5.7 name failure and source-backed for UE 5.8 defaults
 
 On the tested `TungTungTung.fbx`, source names `Bone.001` through `Bone.007`
 became `Bone_001` through `Bone_007` in the imported RefSkeleton. Only `Root`
 matched the old JSON, producing a root-only lookup and rigid pivot rotation.
 Changing only those names restored regional deformation.
 
-External FBX JSON export now applies the verified `.` to `_` rewrite without
-mutating Source Names and fails loudly if rewritten names collide. No broader
-FBX sanitizer is claimed: namespaces or other invalid characters may still
-differ under another UE importer path. Capture the actual imported RefSkeleton
-before extending the mapping.
+External FBX preview now models the UE 5.8 default Ufbx RefSkeleton name rules,
+skeleton inclusion, hierarchy, bind-pose priority, cm/Z-up conversion, and
+JSON joint-set validation before the user creates groups. It does not model
+changed Interchange import options, a non-Ufbx translator, a reused Skeleton
+Asset, retargeting, or future UE importer revisions. Capture the actual imported
+RefSkeleton with the UE dump before treating a custom path as equivalent.
 
 Related:
 - `src/xml_to_usda/wind_external_skeleton.py`

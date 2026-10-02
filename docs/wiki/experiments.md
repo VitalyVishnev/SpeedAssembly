@@ -186,3 +186,93 @@ Next test: compare direct placement and PCG using the same Skeletal Mesh and
 wind data. If only PCG is rigid, capture component class, asset, Skeleton, and
 Dynamic Wind data before changing FBX or grouping. Full audit:
 [External Dynamic Wind Rigs](external-dynamic-wind-rigs.md).
+
+## Dynamic Wind transform addressing budget
+
+Status: Source-verified encoding/allocation; aggregate capacity estimate only.
+
+Both local UE 5.7 and 5.8 trees allocate
+`UniqueAnimationCount * MaxTransformCount * 2` transform records in
+`Renderer/Private/Skinning/SkinningSceneExtension.cpp` (5.7:925, 5.8:1311).
+Dynamic Wind defines eight directionality slices in
+`Plugins/Experimental/DynamicWind/Shaders/Shared/DynamicWindCommon.ush`.
+The multiplier two stores current and previous transforms, not two simulations.
+
+`Shaders/Shared/SkinningDefinitions.h` encodes TransformBufferOffset in 22 bits
+(5.7:80-90, 5.8:161-173), with offset checks in SkinningSceneExtension.h.
+`2^22 / (8 * 2) = 262144` therefore estimates the aggregate bone budget for
+densely packed Dynamic-Wind-only transform allocations. It is not an exact
+universal scene limit: the encoded restriction is on allocation start offsets,
+the final allocation can cross the range, other providers share storage, and
+allocator holes affect offsets. UE 5.7's check also admits the unrepresentable
+`2^22` boundary; UE 5.8's maximum correctly uses `2^22 - 1`.
+
+This is separate from the wind dispatch limit
+`sum(ceil(BatchBones / 64) * 8)` in DynamicWindProvider.cpp. Do not present the
+dispatch-derived roughly 524k count as the complete scene budget. No runtime
+overflow reproduction or link to the author's earlier bug has been established.
+
+SpeedTree preparation guidance uses author-recommended bone counts, not a
+guaranteed engine limit. The author also confirmed that Leaf Flip does not
+survive the tested XML workflow; its mechanism remains unverified.
+
+## Nanite Assembly part sizing budgets
+
+Status: Source-verified in local UE 5.7 and 5.8; performance advice needs scene profiling.
+
+Public guide: `docs/user/wiki/choosing-assembly-parts.md`, adapted from the
+author's `nanite_assembly_foliage_guide.html`. Keep public Wiki separate from
+this engineering memory.
+
+Source navigation in both engines:
+- `Source/Developer/NaniteBuilder/Private/NaniteAssemblyBuild.cpp` rejects final
+  transform counts above `NANITE_HIERARCHY_MAX_ASSEMBLY_TRANSFORMS` (65535).
+- `Source/Runtime/Renderer/Private/Nanite/NaniteShared.cpp` defaults
+  `r.Nanite.MaxVisibleAssemblyParts` to `256 * 1024`.
+- `Shaders/Private/Nanite/NaniteClusterCulling.usf` requests three transform
+  records with active skinning, otherwise one, then checks capacity.
+- `Shaders/Private/Nanite/NanitePrintStats.usf` prints
+  `AssemblyTransformsWriteOffset` as Assembly Parts / Visible. This is requested
+  transform demand, including overflow requests, not unweighted part count.
+
+The roughly 87k fully active part estimate is distinct from Dynamic Wind bone
+storage and dispatch limits. A 70-75% reserve and cluster sizes are authoring
+recommendations, not engine guarantees. Test actual placement density/motion.
+
+## Dynamic Wind runtime overview
+
+Status: Source-verified in local UE 5.8.2; not a new runtime validation.
+
+Public guide: `docs/user/wiki/how-dynamic-wind-works.md`, registered beside
+Choosing what to instance. The article explains mechanisms, dependencies, and
+failure causes; procedural setup belongs in the workflow guides. Engine paths
+below are relative to `Engine/`.
+
+- `Plugins/Experimental/DynamicWind/Source/DynamicWindEditor/Private/DynamicWindImportData.cpp`
+  matches JSON names against the mesh RefSkeleton and groups same-group ancestry
+  under one chain origin. Same-group forks aggregate both paths into one count;
+  chain-length data sums differences of parent/current local-pose translations,
+  so do not describe it as a verified physical branch length.
+- `DynamicWind/Private/DynamicWindSkeletalData.cpp` ramps dual influence by chain
+  index, not distance. `Shaders/DynamicWindEval.usf` applies influence to branch
+  motion, not trunk sway; Ground Cover removes final branch-height attenuation.
+  Zero branch influence still inherits ancestor motion. Sine mode bypasses
+  groups, influences, pivots, and amplitude; it only tests provider/render motion.
+- `DynamicWind/Private/DynamicWindProvider.cpp` reads the assigned Skeleton Asset
+  pose and keys bone data by Skeleton GUID plus bone-map mode. Distinct metadata
+  on meshes sharing this key overwrites the same entry. Runtime reproduction is
+  still open; see Known Bugs.
+- `DynamicWind/Private/DynamicWindData.cpp` provides eight shared yaw slices,
+  GPU-only transforms, and no animation-specific bounds. This is not an
+  independent phase/simulation per placed instance or a CPU collision update.
+- `DynamicWind/Public/DynamicWindParameters.h` contains SimulationCenter/Extents,
+  but the provider does not forward them to the evaluation shader. Stock noise
+  uses time and skeleton-relative positions, not a per-instance world wind field.
+- The six `DynamicWind.*` console variables are defined in Provider/Subsystem.
+  Enable is read-only and gates subsystem creation; rate-of-change smooths the
+  amplitude override, not arbitrary Blueprint parameter updates. Renderer
+  provider/cutoff defaults live in `SkinningSceneExtension.cpp`; instanced debug
+  drawing lives in `SkinnedMeshDebugView.cpp`.
+
+Paths abbreviated as `DynamicWind/Private` or `DynamicWind/Public` above are
+inside `Plugins/Experimental/DynamicWind/Source/`.

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import re
 import math
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -18,7 +18,13 @@ SUPPORTED_USD_SKELETON_SUFFIXES = {".usd", ".usda", ".usdc"}
 TEXT_USD_SKELETON_SUFFIXES = {".usd", ".usda"}
 _USD_NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
 _DISPLAY_UNIT_TO_METERS = {"mm": 0.001, "cm": 0.01, "m": 1.0}
-_VERTICAL_EPSILON = 1.0e-8
+_VERTICAL_EPSILON = 1.0e-4
+_UE58_INVALID_OBJECT_NAME_CHARACTERS = "\"' ,/.:|&!~\n\r\t@#(){}[]=;^%$`"
+_UE58_RESERVED_OBJECT_NAMES = frozenset({
+    "none", "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5",
+    "com6", "com7", "com8", "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5",
+    "lpt6", "lpt7", "lpt8", "lpt9",
+})
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,19 +60,15 @@ class _UsdSkeletonCandidate:
 
 
 def external_vertical_bone_names(skeleton: tuple[Joint, ...], source_up_axis: str) -> tuple[str, ...]:
-    """Return external child joints whose parent segment is parallel to the selected up axis."""
+    """Return joints whose bind-pose +X is parallel to the selected up axis."""
     up_axis = _display_up_axis(source_up_axis)
-    joints_by_name = {joint.name: joint for joint in skeleton}
     names: list[str] = []
     for joint in skeleton:
-        parent = joints_by_name.get(joint.parent or "")
-        if parent is None:
-            continue
-        offset = _subtract(joint.bind_translate, parent.bind_translate)
-        length_squared = offset.x * offset.x + offset.y * offset.y + offset.z * offset.z
+        forward = _matrix_axis(joint.bind_transform, 0)
+        length_squared = _dot_vector(forward, forward)
         if length_squared <= _VERTICAL_EPSILON * _VERTICAL_EPSILON:
             continue
-        vertical = _axis_value(offset, up_axis)
+        vertical = _axis_value(forward, up_axis)
         lateral_squared = length_squared - vertical * vertical
         if lateral_squared <= length_squared * _VERTICAL_EPSILON * _VERTICAL_EPSILON:
             names.append(joint.name)
@@ -133,25 +135,18 @@ def prepare_external_dynamic_wind_export(
     preview: WindPreviewResult,
     dynamic_wind: DynamicWindData,
 ) -> DynamicWindData:
-    """Map FBX Source Names to the joint names exposed by Unreal's imported RefSkeleton."""
-    if Path(preview.input_path).suffix.casefold() != ".fbx":
-        return dynamic_wind
+    """Validate JSON against the RefSkeleton-shaped external preview model."""
+    from .dynamic_wind import validate_dynamic_wind_data
 
-    joint_names = _unreal_fbx_joint_name_map(preview.source_model.skeleton)
-    unknown = sorted(
-        assignment.joint_name
-        for assignment in dynamic_wind.joint_assignments
-        if assignment.joint_name not in joint_names
-    )
-    if unknown:
-        raise WindPreviewError("external_fbx_unknown_joint_name: " + ", ".join(unknown))
-    return replace(
-        dynamic_wind,
-        joint_assignments=tuple(
-            replace(assignment, joint_name=joint_names[assignment.joint_name])
-            for assignment in dynamic_wind.joint_assignments
-        ),
-    )
+    try:
+        validate_dynamic_wind_data(
+            dynamic_wind,
+            skeleton=preview.source_model.skeleton,
+            require_linear_groups=True,
+        )
+    except ValueError as exc:
+        raise WindPreviewError(str(exc)) from exc
+    return dynamic_wind
 
 
 def _display_unit_scale(source_unit: str, preview_unit: str) -> float:
@@ -231,10 +226,6 @@ def _axis_value(value: Vector3, axis: str) -> float:
     return value.y if axis == "Y" else value.z
 
 
-def _subtract(left: Vector3, right: Vector3) -> Vector3:
-    return Vector3(left.x - right.x, left.y - right.y, left.z - right.z)
-
-
 def load_external_skeleton_preview(request: ExternalSkeletonPreviewRequest) -> WindPreviewResult:
     input_path = request.input_path.strip()
     if not input_path:
@@ -243,11 +234,16 @@ def load_external_skeleton_preview(request: ExternalSkeletonPreviewRequest) -> W
     suffix = path.suffix.lower()
     base_mesh = None
     diagnostics = ()
+    display_source_unit = "m"
+    display_source_up_axis = "Y"
     if suffix == ".fbx":
         fbx_preview = _load_fbx_skeleton_for_preview(path)
-        skeleton = fbx_preview.skeleton
+        skeleton = _unreal_fbx_ref_skeleton(fbx_preview.skeleton)
         base_mesh = fbx_preview.mesh
         diagnostics = fbx_preview.diagnostics
+        # UE 5.8 Ufbx normalizes its reference skeleton to cm, left-handed Z-up.
+        display_source_unit = "cm"
+        display_source_up_axis = "Z"
     elif suffix in SUPPORTED_USD_SKELETON_SUFFIXES:
         skeleton = _load_usd_skeleton_for_preview(path, skeleton_index=request.skeleton_index)
     else:
@@ -256,8 +252,6 @@ def load_external_skeleton_preview(request: ExternalSkeletonPreviewRequest) -> W
         raise WindPreviewError(f"external_skeleton_not_found: {path}")
 
     _validate_unique_joint_names(skeleton)
-    if suffix == ".fbx":
-        _unreal_fbx_joint_name_map(skeleton)
     model = TreeAsset(
         metadata=ExportMetadata(source_path=str(path), source_version=None),
         materials=(),
@@ -279,6 +273,8 @@ def load_external_skeleton_preview(request: ExternalSkeletonPreviewRequest) -> W
         viewport_scene=viewport_scene,
         xml_groups_available=False,
         preferred_grouping_mode="auto",
+        display_source_unit=display_source_unit,
+        display_source_up_axis=display_source_up_axis,
     )
 
 
@@ -378,11 +374,13 @@ def _load_text_usda_skeleton_candidates(path: Path) -> tuple[_UsdSkeletonCandida
             "external_skeleton_backend_unavailable: OpenUSD Python module 'pxr' is required for binary USD files."
         )
     candidates: list[_UsdSkeletonCandidate] = []
-    for name, block in _text_usda_skeleton_blocks(text):
-        joints = _parse_text_usda_skeleton_block(block)
+    for index, (name, block) in enumerate(_text_usda_skeleton_blocks(text)):
+        try:
+            joints = _parse_text_usda_skeleton_block(block)
+        except WindPreviewError:
+            continue
         if not joints:
             continue
-        index = len(candidates)
         prim_path = f"/{name}"
         candidates.append(
             _UsdSkeletonCandidate(
@@ -411,21 +409,9 @@ def _parse_text_usda_skeleton_block(block: str) -> tuple[Joint, ...]:
     joint_paths = tuple(_parse_usda_string_array(_extract_usda_array(block, "joints")))
     if not joint_paths:
         return ()
-    transforms_payload = _extract_usda_array(block, "bindTransforms") or _extract_usda_array(block, "restTransforms")
-    positions = _parse_usda_matrix_translations(transforms_payload)
-    if len(positions) != len(joint_paths):
-        positions = tuple(Vector3(0.0, 0.0, 0.0) for _joint in joint_paths)
-    all_paths = set(joint_paths)
-    return tuple(
-        Joint(
-            name=joint_path,
-            source_id=index,
-            parent=_usd_joint_parent(joint_path, all_paths),
-            bind_transform=Matrix4d.from_translation(positions[index]),
-            rest_transform=Matrix4d.from_translation(positions[index]),
-        )
-        for index, joint_path in enumerate(joint_paths)
-    )
+    bind_transforms = _parse_usda_matrix_array(_extract_usda_array(block, "bindTransforms"))
+    rest_transforms = _parse_usda_matrix_array(_extract_usda_array(block, "restTransforms"))
+    return _unreal_usd_ref_skeleton(joint_paths, bind_transforms, rest_transforms)
 
 
 def _extract_usda_array(block: str, attr_name: str) -> str:
@@ -479,18 +465,19 @@ def _parse_usda_string_array(payload: str) -> tuple[str, ...]:
     return tuple(values)
 
 
-def _parse_usda_matrix_translations(payload: str) -> tuple[Vector3, ...]:
+def _parse_usda_matrix_array(payload: str) -> tuple[Matrix4d, ...]:
     if not payload:
         return ()
     pattern = re.compile(
         rf"\(\s*\(([^()]*)\)\s*,\s*\(([^()]*)\)\s*,\s*\(([^()]*)\)\s*,\s*\(([^()]*)\)\s*\)"
     )
-    translations: list[Vector3] = []
+    transforms: list[Matrix4d] = []
     for match in pattern.finditer(payload):
-        row = _parse_usda_number_row(match.group(4))
-        if len(row) >= 3:
-            translations.append(Vector3(row[0], row[1], row[2]))
-    return tuple(translations)
+        rows = tuple(_parse_usda_number_row(match.group(index)) for index in range(1, 5))
+        if any(len(row) != 4 for row in rows):
+            raise WindPreviewError("external_skeleton_invalid_joint_transform: USDA matrix must have four numeric rows.")
+        transforms.append(Matrix4d(rows=rows))
+    return tuple(transforms)
 
 
 def _parse_usda_number_row(payload: str) -> tuple[float, ...]:
@@ -518,50 +505,9 @@ def _joints_from_usd_skeleton(skeleton) -> tuple[Joint, ...]:
     joint_paths = tuple(str(joint) for joint in (skeleton.GetJointsAttr().Get() or ()))
     if not joint_paths:
         return ()
-    transforms = tuple(skeleton.GetBindTransformsAttr().Get() or ())
-    accumulate_parent = False
-    if len(transforms) != len(joint_paths):
-        transforms = tuple(skeleton.GetRestTransformsAttr().Get() or ())
-        accumulate_parent = True
-    if len(transforms) != len(joint_paths):
-        raise WindPreviewError(
-            "external_skeleton_missing_joint_transforms: "
-            f"expected {len(joint_paths)} bind or rest transforms, found {len(transforms)}"
-        )
-    positions = _usd_joint_positions(joint_paths, transforms, accumulate_parent=accumulate_parent)
-    return tuple(
-        Joint(
-            name=joint_path,
-            source_id=index,
-            parent=_usd_joint_parent(joint_path, set(joint_paths)),
-            bind_transform=Matrix4d.from_translation(positions[index]),
-            rest_transform=Matrix4d.from_translation(positions[index]),
-        )
-        for index, joint_path in enumerate(joint_paths)
-    )
-
-
-def _usd_joint_positions(
-    joint_paths: tuple[str, ...],
-    transforms: tuple[object, ...],
-    *,
-    accumulate_parent: bool,
-) -> tuple[Vector3, ...]:
-    positions_by_path: dict[str, Vector3] = {}
-    all_paths = set(joint_paths)
-    positions: list[Vector3] = []
-    for joint_path, transform in zip(joint_paths, transforms):
-        local = _usd_transform_translation(transform)
-        parent_path = _usd_joint_parent(joint_path, all_paths)
-        parent = positions_by_path.get(parent_path) if accumulate_parent and parent_path is not None else None
-        position = Vector3(
-            local.x + (parent.x if parent is not None else 0.0),
-            local.y + (parent.y if parent is not None else 0.0),
-            local.z + (parent.z if parent is not None else 0.0),
-        )
-        positions_by_path[joint_path] = position
-        positions.append(position)
-    return tuple(positions)
+    bind_transforms = tuple(_matrix_from_usd_transform(value) for value in (skeleton.GetBindTransformsAttr().Get() or ()))
+    rest_transforms = tuple(_matrix_from_usd_transform(value) for value in (skeleton.GetRestTransformsAttr().Get() or ()))
+    return _unreal_usd_ref_skeleton(joint_paths, bind_transforms, rest_transforms)
 
 
 def _usd_joint_parent(joint_path: str, all_paths: set[str]) -> str | None:
@@ -572,17 +518,20 @@ def _usd_joint_parent(joint_path: str, all_paths: set[str]) -> str | None:
     return parent if parent in all_paths else None
 
 
-def _usd_transform_translation(transform: object) -> Vector3:
+def _matrix_from_usd_transform(transform: object) -> Matrix4d:
     if isinstance(transform, Matrix4d):
-        return transform.translation
+        return transform
     try:
-        translation = transform.ExtractTranslation()
-        return Vector3(float(translation[0]), float(translation[1]), float(translation[2]))
+        rows = tuple(
+            tuple(float(transform[row][column]) for column in range(4))
+            for row in range(4)
+        )
+        return Matrix4d(rows=rows)
     except Exception:
         pass
     try:
-        row = transform[3]
-        return Vector3(float(row[0]), float(row[1]), float(row[2]))
+        translation = transform.ExtractTranslation()
+        return Matrix4d.from_translation(Vector3(float(translation[0]), float(translation[1]), float(translation[2])))
     except Exception as exc:
         raise WindPreviewError(
             f"external_skeleton_invalid_joint_transform: unsupported transform value {type(transform).__name__}"
@@ -596,22 +545,173 @@ def _validate_unique_joint_names(skeleton) -> None:
         raise WindPreviewError("external_skeleton_duplicate_joint_name: " + ", ".join(duplicates))
 
 
-def _unreal_fbx_joint_name_map(skeleton: tuple[Joint, ...]) -> dict[str, str]:
-    # Verified in UE 5.7 RefSkeleton output. Keep this narrower than a guessed
-    # reimplementation of every legacy/Interchange FBX sanitizer rule.
-    mapped = {joint.name: joint.name.replace(".", "_") for joint in skeleton}
-    sources_by_target: dict[str, list[str]] = {}
-    for source_name, target_name in mapped.items():
-        sources_by_target.setdefault(target_name, []).append(source_name)
-    collisions = {
-        target_name: source_names
-        for target_name, source_names in sources_by_target.items()
-        if len(source_names) > 1
-    }
-    if collisions:
-        details = "; ".join(
-            f"{target_name} <- {', '.join(source_names)}"
-            for target_name, source_names in sorted(collisions.items())
+def _unreal_usd_ref_skeleton(
+    joint_paths: tuple[str, ...],
+    bind_transforms: tuple[Matrix4d, ...],
+    rest_transforms: tuple[Matrix4d, ...],
+) -> tuple[Joint, ...]:
+    """Mirror UE 5.8 UsdSkel ref-skeleton naming, roots, and bind-pose choice."""
+    if len(set(joint_paths)) != len(joint_paths):
+        raise WindPreviewError("external_usd_duplicate_joint_path: USD Skeleton joints must be unique.")
+    if bind_transforms and len(bind_transforms) != len(joint_paths):
+        raise WindPreviewError(
+            f"external_skeleton_missing_joint_transforms: expected {len(joint_paths)} bind transforms, found {len(bind_transforms)}"
         )
-        raise WindPreviewError("external_fbx_unreal_joint_name_collision: " + details)
-    return mapped
+    if rest_transforms and len(rest_transforms) != len(joint_paths):
+        raise WindPreviewError(
+            f"external_skeleton_missing_joint_transforms: expected {len(joint_paths)} rest transforms, found {len(rest_transforms)}"
+        )
+    if not bind_transforms and not rest_transforms:
+        raise WindPreviewError(f"external_skeleton_missing_joint_transforms: expected {len(joint_paths)} bind or rest transforms, found 0")
+
+    paths = set(joint_paths)
+    parent_by_path = {path: _usd_joint_parent(path, paths) for path in joint_paths}
+    _require_parent_first_joint_paths(joint_paths, parent_by_path)
+    if not bind_transforms:
+        absolute_by_path: dict[str, Matrix4d] = {}
+        for path, local in zip(joint_paths, rest_transforms):
+            parent = parent_by_path[path]
+            absolute_by_path[path] = local if parent is None else _multiply_matrices(local, absolute_by_path[parent])
+        bind_transforms = tuple(absolute_by_path[path] for path in joint_paths)
+    if not rest_transforms:
+        bind_by_path = dict(zip(joint_paths, bind_transforms))
+        rest_transforms = tuple(
+            bind if parent_by_path[path] is None else _multiply_matrices(bind, _inverse_affine_matrix(bind_by_path[parent_by_path[path]]))
+            for path, bind in zip(joint_paths, bind_transforms)
+        )
+
+    names_by_path = {path: _usd_joint_basename(path) for path in joint_paths}
+    target_names = tuple(names_by_path[path] for path in joint_paths)
+    duplicates = sorted({name for name in target_names if target_names.count(name) > 1})
+    if duplicates:
+        raise WindPreviewError("external_usd_unreal_joint_name_collision: " + ", ".join(duplicates))
+    joints = [
+        Joint(
+            name=names_by_path[path],
+            source_id=index,
+            parent=names_by_path[parent_by_path[path]] if parent_by_path[path] is not None else None,
+            bind_transform=bind,
+            rest_transform=rest,
+        )
+        for index, (path, bind, rest) in enumerate(zip(joint_paths, bind_transforms, rest_transforms))
+    ]
+    roots = [joint for joint in joints if joint.parent is None]
+    if len(roots) <= 1:
+        return tuple(joints)
+
+    root_name = _unreal_usd_unique_name("Root", set(target_names))
+    synthetic_root = Joint(name=root_name, source_id=-1, bind_transform=Matrix4d.identity(), rest_transform=Matrix4d.identity())
+    return (synthetic_root, *(replace(joint, parent=root_name) if joint.parent is None else joint for joint in joints))
+
+
+def _require_parent_first_joint_paths(joint_paths: tuple[str, ...], parent_by_path: dict[str, str | None]) -> None:
+    seen: set[str] = set()
+    for path in joint_paths:
+        parent = parent_by_path[path]
+        if parent is not None and parent not in seen:
+            raise WindPreviewError(f"external_usd_joint_order: parent {parent!r} must precede child {path!r}.")
+        seen.add(path)
+
+
+def _usd_joint_basename(path: str) -> str:
+    name = path.rsplit("/", 1)[-1]
+    if not name:
+        raise WindPreviewError(f"external_usd_invalid_joint_path: {path!r}")
+    return name
+
+
+def _unreal_usd_unique_name(name: str, used_names: set[str]) -> str:
+    if name not in used_names:
+        return name
+    base = re.sub(r"_\d+$", "", name)
+    if base not in used_names:
+        return base
+    suffix = 0
+    while f"{base}_{suffix}" in used_names:
+        suffix += 1
+    return f"{base}_{suffix}"
+
+
+def _unreal_fbx_ref_skeleton(skeleton: tuple[Joint, ...]) -> tuple[Joint, ...]:
+    """Apply UE 5.8 default Interchange joint-name rules without changing transforms."""
+    source_names = tuple(joint.name for joint in skeleton)
+    target_names = _unreal_fbx_joint_names(source_names)
+    name_by_source = dict(zip(source_names, target_names))
+    return tuple(
+        replace(joint, name=name_by_source[joint.name], parent=name_by_source.get(joint.parent) if joint.parent is not None else None)
+        for joint in skeleton
+    )
+
+
+def _unreal_fbx_joint_names(source_names: tuple[str, ...]) -> tuple[str, ...]:
+    if len(set(source_names)) != len(source_names):
+        raise WindPreviewError("external_skeleton_duplicate_joint_name: FBX source joints must be unique.")
+    used_names: set[str] = set()
+    names: list[str] = []
+    for source_name in source_names:
+        base = _unreal_fbx_sanitize_joint_name(source_name)
+        name = base
+        suffix = 1
+        while name in used_names:
+            name = f"{base}{suffix}"
+            suffix += 1
+        used_names.add(name)
+        names.append(name)
+    casefolded = [name.casefold() for name in names]
+    collisions = sorted({name for name in names if casefolded.count(name.casefold()) > 1})
+    if collisions:
+        raise WindPreviewError("external_fbx_unreal_joint_name_collision: " + ", ".join(collisions))
+    return tuple(names)
+
+
+def _unreal_fbx_sanitize_joint_name(value: str) -> str:
+    name = value.rsplit(":", 1)[-1]
+    name = name.replace(" ", "-").replace("+", "_")
+    for character in _UE58_INVALID_OBJECT_NAME_CHARACTERS:
+        name = name.replace(character, "_")
+    if not name or name.casefold() in _UE58_RESERVED_OBJECT_NAMES:
+        name = "Null"
+    if re.fullmatch(r"_\d+", name):
+        name = "Null" + name
+    return name
+
+
+def _matrix_axis(matrix: Matrix4d, index: int) -> Vector3:
+    row = matrix.rows[index]
+    return Vector3(row[0], row[1], row[2])
+
+
+def _dot_vector(left: Vector3, right: Vector3) -> float:
+    return left.x * right.x + left.y * right.y + left.z * right.z
+
+
+def _multiply_matrices(left: Matrix4d, right: Matrix4d) -> Matrix4d:
+    return Matrix4d(rows=tuple(
+        tuple(sum(left.rows[row][index] * right.rows[index][column] for index in range(4)) for column in range(4))
+        for row in range(4)
+    ))
+
+
+def _inverse_affine_matrix(matrix: Matrix4d) -> Matrix4d:
+    rows = matrix.rows
+    if any(abs(rows[row][3]) > 1.0e-8 for row in range(3)) or abs(rows[3][3] - 1.0) > 1.0e-8:
+        raise WindPreviewError("external_skeleton_invalid_joint_transform: expected an affine joint transform.")
+    a, b, c = rows[0][:3]
+    d, e, f = rows[1][:3]
+    g, h, i = rows[2][:3]
+    determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+    if not math.isfinite(determinant) or abs(determinant) <= 1.0e-12:
+        raise WindPreviewError("external_skeleton_noninvertible_bind_transform: joint bind transform cannot be inverted.")
+    inverse = (
+        ((e * i - f * h) / determinant, (c * h - b * i) / determinant, (b * f - c * e) / determinant),
+        ((f * g - d * i) / determinant, (a * i - c * g) / determinant, (c * d - a * f) / determinant),
+        ((d * h - e * g) / determinant, (b * g - a * h) / determinant, (a * e - b * d) / determinant),
+    )
+    translate = rows[3][:3]
+    inverse_translate = tuple(-sum(translate[index] * inverse[index][column] for index in range(3)) for column in range(3))
+    return Matrix4d(rows=(
+        (*inverse[0], 0.0),
+        (*inverse[1], 0.0),
+        (*inverse[2], 0.0),
+        (*inverse_translate, 1.0),
+    ))

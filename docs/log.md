@@ -7,6 +7,18 @@ routes belong in [wiki/decisions.md](wiki/decisions.md),
 [wiki/experiments.md](wiki/experiments.md). Original documentation is retained
 under `docs/raw/`; Git retains per-change detail.
 
+## 2026-09-07 - External RefSkeleton parity
+
+- Reworked external FBX/USD preview around the UE 5.8 default RefSkeleton
+  contract: imported names, hierarchy, bind pose, and FBX cm/Z-up conversion
+  are now established before grouping and JSON authoring.
+- Replaced the JSON-only period rewrite with the predicted UE name set shared by
+  preview, persistence, and export; reject incomplete/unknown assignments and
+  same-group forks before JSON is written.
+- Bound vertical-bone diagnostics to Dynamic Wind shader bind-pose +X, not
+  Pivot Painter or parent-child geometry. Old Wind Preview sessions reset their
+  display transform to the canonical FBX loaded space.
+
 ## 2026-07-01 - 2026-07-05: memory split, preview foundations
 
 - Migrated active memory to `docs/wiki/`; preserved old docs in `docs/raw/`.
@@ -104,3 +116,98 @@ under `docs/raw/`; Git retains per-change detail.
   the final package TOC.
 - The normal Codex environment now passes 26 packaged contracts, repeated
   Detailed Cuts smoke, and Fracture worker recovery without `-SkipSmoke`.
+
+## 2026-10-01 - What is SpeedAssembly overview draft
+
+- Added the artist-facing introduction and Supported Workflows table in
+  `docs/user/overview/what-is-speedassembly.md`.
+- Consolidated the supported-workflows page into that article in the editorial
+  plan and recorded the audience and writing conventions.
+- Added the article to Overview navigation and made immediate navigation
+  registration the authoring rule for new drafts in the local preview.
+
+## 2026-10-01 - Simplified documentation plan
+
+- Replaced the extensive page inventory with Overview, four Basic workflow
+  stages, three tab guides, and three Advanced workflow articles.
+- Removed Quick Start and Getting Started from the planned structure and
+  retained the authoring rules and existing article addresses.
+
+## 2026-10-02 - Unreal preparation guide
+
+- Added `workflows/prepare-unreal.md` with four author-provided screenshots
+  and immediate Basic workflow navigation registration.
+- Checked plugin names and the Nanite Foliage setting/restart metadata in local
+  UE 5.7 and 5.8 sources. Kept import options for the separate import article.
+
+## 2026-10-02 - SpeedTree preparation guide and wind budget research
+
+- Added Prepare SpeedTree with seven supplied screenshots, recommended bone
+  budgets, group naming, and exact export settings; registered Basic workflow
+  navigation and linked from Unreal preparation.
+- Recorded the separate 22-bit transform offset budget and eight-direction,
+  current/previous allocation formula in experiments. The roughly 262k estimate
+  is not a tested scene-wide hard limit and stays out of the public guide.
+- Included the author's verified Leaf Flip limitation alongside per-leaf
+  deformations that the repeated-part workflow does not preserve.
+
+## 2026-10-02 - Public Wiki and Assembly part sizing
+
+- Added Choosing what to instance, adapted from the author's HTML guide, to a
+  new public Wiki navigation section and linked it from Prepare SpeedTree.
+- Verified asset/runtime transform limits, active-skinning record costs, and
+  NaniteStats counter semantics in UE 5.7/5.8. Kept profiling advice distinct
+  from engine limits and recorded source navigation in experiments.
+- Capped the CD PROJEKT RED skeleton screenshot at 500 px display height
+  without resampling or modifying its source image.
+
+## 2026-10-02 - Assembly sizing editorial revision
+
+- Rechecked the English guide against the author's Russian original, merged
+  repeated explanations, and made budget warnings name the actual console
+  setting and intended plant density.
+- Reframed the branch example as two construction choices for the same visible
+  geometry, explicitly keeping twigs in the main mesh in the leaf-only option.
+- Preserved verified limits, counter semantics, motion constraints, and reserve
+  recommendations. The strict documentation build passed.
+
+## 2026-10-02 - Documentation theme geometry and controls
+
+- Shared Light Mode article geometry with Dark Mode at desktop and mobile
+  breakpoints; switching themes changes colors without changing text wrapping.
+- Applied the Qt theme's 18 px control radius to desktop search and its results
+  panel. Preserved Material's mobile full-screen search layout.
+- Replaced Back to Top transform positioning/animation with auto-margin
+  centering and an opacity transition; checked unhovered text after deep scroll.
+- Validation: strict MkDocs build, browser geometry comparisons at 1440 px and
+  390 px, and a search returning eight matching documents for `wind`.
+
+## 2026-10-02 - Assembly sizing symptoms and practical guidelines
+
+- Clarified that transform-budget overflow omits parts from the affected pass
+  and can appear as missing foliage or grass in the camera view.
+- Noted the main-camera scope of bare NaniteStats without expanding the guide
+  into shadow-stat filtering instructions.
+- Added the author's polygon/reuse planning guidelines, explicitly separate
+  from engine thresholds and benchmark evidence.
+
+## 2026-10-02 - Dynamic Wind user overview
+
+- Added How Dynamic Wind works beside Choosing what to instance in public Wiki
+  navigation, based on local UE 5.8 source with Build.version 5.8.2.
+- Covered reference-pose ownership, group chains, response controls, GPU motion,
+  eight shared yaw variants, setup requirements, limitations, console variables,
+  and ordered diagnostics. Included a collapsed engine source map and Epic API
+  links; kept source evidence distinct from runtime confirmation.
+- Recorded source findings and the shared-Skeleton metadata limitation in
+  maintained memory. Validation: strict MkDocs build and live preview page;
+  light/dark browser checks.
+
+## 2026-10-02 - Dynamic Wind overview tone
+
+- Replaced reader commands with descriptions of asset flow, runtime dependencies,
+  settings, and failure boundaries in How Dynamic Wind works.
+- Converted the diagnostic checklist to a cause-and-effect table; retained
+  technical facts, console references, and stable section anchors.
+- Validation: strict MkDocs build and updated live preview with all ten stable
+  section anchors preserved.

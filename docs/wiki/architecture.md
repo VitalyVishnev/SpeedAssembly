@@ -147,10 +147,14 @@ automatically refreshes the main Wind groups after startup; the manual Refresh
 button remains available. A Preview request made during that refresh is queued
 until inspection finishes, so the GUI and isolated preview worker do not load
 the same large source concurrently. External Skeleton loading reads USD/UsdSkel
-payloads as skeleton-only previews. The FBX projection also builds
-a colored rest-mesh scene and non-blocking diagnostics from local bone frames,
-skin weights, bind clusters, and source metadata. It is a read-only source-file
-check, not a repair or certification of Unreal's imported rig. Source loading, USD
+payloads as skeleton-only previews. The FBX projection first mirrors the UE 5.8
+default Ufbx RefSkeleton profile (joint inclusion, hierarchy, bind-pose choice,
+name sanitizer, centimeters, and left-handed Z-up), then builds a colored
+rest-mesh scene and non-blocking diagnostics from local bone frames, skin
+weights, bind clusters, and source metadata. The preview's one canonical
+RefSkeleton-shaped model is shared by grouping and JSON validation; no
+last-minute JSON-only rename is allowed. It is a read-only source-file check,
+not a repair or certification of a custom Unreal import. Source loading, USD
 Skeleton prim enumeration, and scene build run in a file-backed worker process
 so XML/external skeleton faults do not crash the Qt shell. The GUI consumes the
 worker-built initial scene directly. Selecting an external file starts loading
@@ -172,15 +176,12 @@ for normal USD support. Text `.usda` and ASCII `.usd` files can still be read
 through the deterministic text fallback, but multiple Skeleton prims require
 an explicit operator choice instead of any largest-skeleton heuristic.
 External Skeleton Display Transform applies only to viewport bone segments and
-bounds: the operator selects source/preview units and Y-up/Z-up axes, while the
-loaded skeleton and generated Dynamic Wind JSON remain unchanged. Vertical
-external-bone warnings inspect non-zero parent-to-child segments against the
-selected source up axis; they do not tilt or otherwise edit the skeleton.
-At the JSON export seam, external FBX Source Names are adapted to the joint
-names exposed by UE 5.7's imported RefSkeleton. The currently verified rewrite
-is `.` to `_`. It does not mutate the loaded skeleton or group stack, and an
-ambiguous rewrite collision fails before export. XML and external USD names
-remain unchanged.
+bounds: the operator selects loaded/preview units and Y-up/Z-up axes, while the
+loaded skeleton and generated Dynamic Wind JSON remain unchanged. FBX starts in
+the UE-normalized `cm / Z-up` RefSkeleton space. Vertical external-bone warnings
+inspect bind-pose +X against the selected loaded-space up axis; they do not tilt
+or otherwise edit the skeleton. External JSON export validates exact joint-set
+coverage and rejects same-group forks before serializing.
 The SpeedTree XML worker path does not import the External Skeleton backend.
 An unexpected native Wind Preview worker exit is retried once in a clean
 process. Worker subprocesses enable Python faulthandler so a repeated native

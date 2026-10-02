@@ -10,7 +10,15 @@ JSON authoring tool. Its External Skeleton path does not convert an FBX mesh to
 USDA and does not repair the source. For FBX it reads the rest mesh, skin
 clusters, weights, bind records, local bone frames, and source metadata. Display
 Transform changes only viewport draw calls, bone segments, and bounds; it never
-changes the source skeleton, mesh, joint names, group assignments, or JSON.
+changes the source file, its imported RefSkeleton model, group assignments, or
+JSON.
+
+For FBX, the preview model is intentionally not raw FBX space. It follows the
+UE 5.8 Ufbx parser profile used for the default Interchange path:
+`ADJUST_TRANSFORMS`, left-handed Z-up, centimeters, Y mirror, and reversed
+winding. The report still records the source file's units and up axis. Thus an
+FBX preview starts with loaded `cm / Z-up` and display defaults of `m / Y-up`.
+The display controls remain display-only.
 
 Evidence levels used below:
 
@@ -25,9 +33,10 @@ A usable rig needs all of these systems to agree:
 
 1. Skeleton topology: unique stable joint names, valid parents, no cycles, and
    physically distributed joint pivots.
-2. Bone frames: orthonormal transforms with unit scale and local +X pointing
-   along the functional bone segment. This is a validated Dynamic Wind forward
-   axis, not a DCC display convention.
+2. Bone frames: a stable reference-pose rotation with local +X pointing along
+   the functional bone segment. `DynamicWindEval.usf` constructs Bone Forward
+   from that bind-pose rotation and local +X; this is shader behavior, not a
+   Pivot Painter convention.
 3. Bind state: mesh, skeleton reference pose, and inverse bind matrices describe
    the same pose and transform space.
 4. Skinning: every deforming vertex has valid, finite, normalized influences on
@@ -41,11 +50,12 @@ A usable rig needs all of these systems to agree:
 7. Unreal ownership: the Skeletal Mesh used at runtime owns the imported Dynamic
    Wind asset data, and its assigned Skeleton Asset has the same reference pose.
 
-The local +X rule and Skeleton Asset ownership are validated in UE 5.7. The
+The local +X rule and Skeleton Asset ownership are source-backed by UE 5.8. The
 non-trunk shader also has a pole singularity when Bone Forward is exactly
 parallel to Unreal +Z. Converter-authored SpeedTree assets receive a coherent
 one-degree correction. External skeletons are only warned about and are never
-edited.
+edited. The warning tests the bind-pose +X vector, not parent-to-child geometry;
+roots, terminals, and zero-length links are not substituted for that fact.
 
 One logical root is recommended for an independently authored wind object.
 UsdSkel and this converter support multiple roots, but that does not prove that
@@ -154,7 +164,7 @@ behavior not reproduced.
 | --- | --- |
 | Audited file | 506,156 bytes; SHA-256 `D5370B108512BE859D198E9DE55D079ADC647A780CD5ABFA519A0AB027A48548` |
 | Producer | Blender 5.2.0 LTS FBX exporter |
-| FBX metadata | binary 7.4, centimeters, Y-up |
+| FBX metadata | binary 7.4, centimeters, Z-up in ufbx scene settings |
 | Skeleton | 8 unique bones, one hierarchy, distinct bind pivots |
 | Mesh | 5,218 vertices, 10,448 triangles, one connected component |
 | Shading data | one material, normals and one UV set; no tangents |
@@ -170,10 +180,13 @@ Confirmed strengths:
   the full mesh. The main chain owns successive vertical regions.
 - `Bone.007` owns the large diagonal side region consistent with the club;
   `Bone.006` owns the small upper side region consistent with the nose.
-- Main-chain world +X axes follow their child segments. Bone scales are unity
-  within floating-point export noise, and ufbx reported no scene warnings.
-- No segment is exactly parallel to source +Y. `Bone.005` is the closest at
-  about 1.10 degrees, so the exact vertical singularity was not found.
+- Main-chain local +X axes follow their child segments. The root has a uniform
+  scale of 100 in the imported reference pose; child local frames are unit
+  within floating-point export noise. This is a diagnostic for the importer
+  boundary, not evidence of a broken skin by itself.
+- The Dynamic Wind pole check is bind-pose +X against UE +Z, not a segment test
+  against the file up axis. Terminal axes remain unverified without an Unreal
+  runtime check.
 
 Required cleanup:
 
@@ -198,10 +211,10 @@ the remaining defect is downstream of FBX skinning.
 
 The FBX report is non-blocking and does not mutate the file. It checks mesh and
 rig counts, source units/up axis, parser warnings, animation and shading data;
-hierarchy, coincident pivots, local scale, basis handedness, and local +X;
+hierarchy, coincident pivots, local scale, basis handedness, and bind-pose +X;
 bind-pose coverage and cluster-matrix consistency; and unweighted, invalid,
 non-normalized, excessive, collapsed, or unused skin influences. Exact vertical
-links remain tied to the operator-selected Source Up Axis.
+warnings compare bind-pose +X with the selected loaded-space up axis.
 
 The viewport uses the four strongest influences only for diagnostic color
 ownership. It does not normalize or write them back. Automatic checks cannot
@@ -231,14 +244,21 @@ Instance Skinned Mesh Component. This A/B result validates the name mismatch as
 the cause; FBX skinning, bind pose, wind settings, and source format were not the
 failure boundary for this asset.
 
-Advanced Wind Settings now performs that verified rewrite automatically for
-external FBX JSON export. The loaded skeleton, viewport selection, hierarchy,
-and saved group assignments retain their exact FBX Source Names; only the JSON
-copy replaces `.` with `_`. A collision such as `Bone.001` together with
-`Bone_001` is rejected during preview loading because both would address the
-same Unreal joint. External USD and SpeedTree XML names are not rewritten.
-Other possible FBX importer name changes remain unverified and must be derived
-from an actual UE 5.7 RefSkeleton before extending this rule.
+Advanced Wind Settings now creates its external FBX model with predicted UE 5.8
+default RefSkeleton names before grouping or JSON authoring. It removes FBX
+namespaces, replaces the default Interchange-invalid characters, applies the
+same fallback for empty/reserved names, and uses UE-style numeric collision
+suffixes. The visible skeleton, viewport selection, saved groups, and JSON all
+therefore address one RefSkeleton-shaped name set. It rejects case-insensitive
+name ambiguity instead of silently exporting a lossy lookup. External USD uses
+the UE UsdSkel basename rule, preserves full bind/rest matrices, and adds the
+same synthetic root as the importer for multiple roots.
+
+Before external JSON is written, every RefSkeleton joint must be assigned once,
+no JSON name may be unknown, and a same-group parent cannot have two same-group
+children. The latter is rejected because Dynamic Wind's chain data cannot
+represent that fork deterministically. Unreal's JSON import otherwise drops
+unmatched names without a blocking error.
 
 ## Exported USD validation coverage
 
@@ -257,7 +277,10 @@ representation.
 
 External USD mesh skinning is not diagnosed yet; the USD path remains
 skeleton-only. FBX diagnostics do not repair weights, frames, bind poses, or
-topology, and cannot inspect the Skeleton Asset that Unreal may reuse.
+topology, and cannot inspect the Skeleton Asset that Unreal may reuse. The FBX
+profile mirrors UE 5.8 defaults only: changed importer settings, another
+translator, or a reused/retargeted Skeleton Asset still require the UE-side
+RefSkeleton dump.
 
 The exact PCG component/spawner used for the reported rigid result was not
 captured. The PCG cause remains `Unverified`; record the generated component

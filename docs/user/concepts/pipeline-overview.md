@@ -5,10 +5,10 @@ description: See where SpeedAssembly fits between a SpeedTree source and an Unre
 
 # Pipeline overview
 
-SpeedAssembly acts as a bridge between SpeedTree and the new Nanite vegetation workflow in Unreal Engine. It keeps repeated leaves and branches as real instances, preserves the skeleton for wind animation, then writes a USDA file ready to import into Unreal.
+SpeedAssembly acts as a bridge between SpeedTree and the new Nanite vegetation workflow in Unreal Engine. It keeps repeated leaves and branches as real nanite assembly instances, preserves the skeleton for wind animation, then writes a USDA file ready to import into Unreal.
 
 ```text
-SpeedTree tree
+SpeedTree
     ↓
 Raw XML export
     ↓

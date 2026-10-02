@@ -410,6 +410,10 @@ class WindPreviewDialog(PreviewShellDialog):
 
     def set_preview(self, preview: WindPreviewResult) -> None:
         self.current_preview = preview
+        self._display_source_unit = preview.display_source_unit
+        self._display_source_up_axis = preview.display_source_up_axis
+        _set_combo_data(self.source_units_combo, self._display_source_unit)
+        _set_combo_data(self.source_up_axis_combo, self._display_source_up_axis)
         self.total_bones_label.setText(f"Total bones: {len(preview.source_model.skeleton):,}")
         self._selection = WindViewportSelection()
         self._auto_group_count = max(1, min(AUTO_WIND_GROUP_MAX_COUNT, len(preview.groups) or 1))
@@ -1225,7 +1229,7 @@ class WindPreviewDialog(PreviewShellDialog):
         if preview is None:
             return {}
         return {
-            "schema_version": 3,
+            "schema_version": 4,
             "fingerprint": _json_fingerprint(preview),
             "input_path": str(preview.input_path),
             "source_mode": self.source_mode_combo.currentData() or SOURCE_MODE_XML,
@@ -1268,7 +1272,7 @@ class WindPreviewDialog(PreviewShellDialog):
         if not session:
             return ""
         session_version = session.get("schema_version")
-        if session_version not in {1, 2, 3}:
+        if session_version not in {1, 2, 3, 4}:
             return "Previous Wind Preview session reset: unsupported session version."
         if session.get("fingerprint") != _json_fingerprint(preview):
             return "Previous Wind Preview session reset: skeleton changed."
@@ -1286,11 +1290,13 @@ class WindPreviewDialog(PreviewShellDialog):
                 external_path = session.get("external_path")
                 if isinstance(external_path, str):
                     self.external_path_edit.setText(external_path)
-            display_values = session if session_version >= 2 else {}
+            # v4 stores a display space for the UE-normalized external FBX RefSkeleton.
+            # Older sessions used raw-file defaults and must not rotate/scale it silently.
+            display_values = session if session_version >= 4 else {}
             self._display_source_unit = _restore_display_value(
                 self.source_units_combo,
                 display_values.get("display_source_unit"),
-                "m",
+                preview.display_source_unit,
             )
             self._display_preview_unit = _restore_display_value(
                 self.preview_units_combo,
@@ -1300,7 +1306,7 @@ class WindPreviewDialog(PreviewShellDialog):
             self._display_source_up_axis = _restore_display_value(
                 self.source_up_axis_combo,
                 display_values.get("display_source_up_axis"),
-                "Y",
+                preview.display_source_up_axis,
             )
             self._display_preview_up_axis = _restore_display_value(
                 self.preview_up_axis_combo,

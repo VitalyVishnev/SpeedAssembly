@@ -74,7 +74,16 @@ def test_external_display_transform_persists_and_warns_without_mutating_skeleton
     external_path.write_bytes(b"stub")
     skeleton = (
         Joint("root", parent=None, bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 0.0))),
-        Joint("branch", parent="root", bind_transform=Matrix4d.from_translation(Vector3(0.0, 2.0, 0.0))),
+        Joint(
+            "branch",
+            parent="root",
+            bind_transform=Matrix4d(rows=(
+                (0.0, 1.0, 0.0, 0.0),
+                (-1.0, 0.0, 0.0, 0.0),
+                (0.0, 0.0, 1.0, 0.0),
+                (0.0, 2.0, 0.0, 1.0),
+            )),
+        ),
     )
     monkeypatch.setattr(
         external_skeleton_module,
@@ -87,6 +96,7 @@ def test_external_display_transform_persists_and_warns_without_mutating_skeleton
 
     dialog.source_units_combo.setCurrentIndex(dialog.source_units_combo.findData("cm"))
     dialog.preview_units_combo.setCurrentIndex(dialog.preview_units_combo.findData("m"))
+    dialog.source_up_axis_combo.setCurrentIndex(dialog.source_up_axis_combo.findData("Y"))
     dialog.preview_up_axis_combo.setCurrentIndex(dialog.preview_up_axis_combo.findData("Z"))
     snapshot = dialog.wind_session_snapshot()
 
@@ -97,7 +107,7 @@ def test_external_display_transform_persists_and_warns_without_mutating_skeleton
     assert "Normalize weights" in dialog.external_diagnostics_label.text()
     assert dialog._active_scene.bone_segments[0].end == Vector3(0.0, 0.0, 0.02)
     assert preview.source_model.skeleton == skeleton
-    assert snapshot["schema_version"] == 3
+    assert snapshot["schema_version"] == 4
 
     restored = WindPreviewDialog(preview=preview, wind_session_snapshot=snapshot)
     qtbot.addWidget(restored)
@@ -129,9 +139,9 @@ def test_version_one_wind_session_uses_safe_external_display_defaults(qtbot, mon
     dialog = WindPreviewDialog(preview=preview, wind_session_snapshot=legacy_session)
     qtbot.addWidget(dialog)
 
-    assert dialog.source_units_combo.currentData() == "m"
+    assert dialog.source_units_combo.currentData() == "cm"
     assert dialog.preview_units_combo.currentData() == "m"
-    assert dialog.source_up_axis_combo.currentData() == "Y"
+    assert dialog.source_up_axis_combo.currentData() == "Z"
     assert dialog.preview_up_axis_combo.currentData() == "Y"
 
 

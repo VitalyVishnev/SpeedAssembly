@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import replace
 from pathlib import Path
 
@@ -66,6 +67,7 @@ def write_dynamic_wind_json(dynamic_wind: DynamicWindData, output_path: str | Pa
 
 
 def render_dynamic_wind_payload(dynamic_wind: DynamicWindData) -> dict:
+    validate_dynamic_wind_data(dynamic_wind)
     return {
         "Joints": [
             {
@@ -146,14 +148,12 @@ def _resolve_generator_levels(skeleton: tuple[Joint, ...]) -> dict[str, int]:
 
     missing: list[str] = []
     invalid: list[str] = []
-
     for joint in skeleton:
         if joint.name not in generator_levels:
             if joint.generator_label is None:
                 missing.append(joint.name)
             else:
                 invalid.append(f"{joint.name}={joint.generator_label!r}")
-            continue
 
     if missing or invalid:
         detail_parts: list[str] = []
@@ -162,8 +162,86 @@ def _resolve_generator_levels(skeleton: tuple[Joint, ...]) -> dict[str, int]:
         if invalid:
             detail_parts.append(f"malformed Generator labels: {', '.join(invalid)}")
         raise ValueError("missing_generator_level: " + "; ".join(detail_parts))
-
     return generator_levels
+
+
+def validate_dynamic_wind_data(
+    dynamic_wind: DynamicWindData,
+    *,
+    skeleton: tuple[Joint, ...] = (),
+    require_linear_groups: bool = False,
+) -> None:
+    """Reject Dynamic Wind data that Unreal accepts but cannot simulate as intended."""
+    groups = tuple(sorted(dynamic_wind.simulation_groups, key=lambda group: group.group_index))
+    expected_group_indices = tuple(range(len(groups)))
+    actual_group_indices = tuple(group.group_index for group in groups)
+    if actual_group_indices != expected_group_indices:
+        raise ValueError("dynamic_wind_group_indices: Simulation groups must use each contiguous index from zero exactly once.")
+    for group in groups:
+        _validate_wind_group_values(group)
+    if not math.isfinite(dynamic_wind.gust_attenuation):
+        raise ValueError("dynamic_wind_gust_attenuation: Gust Attenuation must be finite.")
+    for assignment in dynamic_wind.joint_assignments:
+        if assignment.simulation_group_index not in expected_group_indices:
+            raise ValueError(f"dynamic_wind_unknown_group: joint {assignment.joint_name!r} references group {assignment.simulation_group_index}.")
+    if not skeleton:
+        return
+
+    expected_names = tuple(joint.name for joint in skeleton)
+    if len(set(expected_names)) != len(expected_names):
+        raise ValueError("dynamic_wind_duplicate_skeleton_joint: RefSkeleton joint names must be unique.")
+    assignments_by_name: dict[str, DynamicWindJointAssignment] = {}
+    duplicate_names: list[str] = []
+    for assignment in dynamic_wind.joint_assignments:
+        if assignment.joint_name in assignments_by_name:
+            duplicate_names.append(assignment.joint_name)
+        assignments_by_name[assignment.joint_name] = assignment
+    if duplicate_names:
+        raise ValueError("dynamic_wind_duplicate_joint: " + ", ".join(sorted(set(duplicate_names))))
+    expected_name_set = set(expected_names)
+    unknown = sorted(set(assignments_by_name) - expected_name_set)
+    if unknown:
+        raise ValueError("dynamic_wind_unknown_joint: " + ", ".join(unknown))
+    missing = [name for name in expected_names if name not in assignments_by_name]
+    if missing:
+        raise ValueError("dynamic_wind_unassigned_joint: " + ", ".join(missing))
+    if require_linear_groups:
+        _validate_linear_group_chains(skeleton, assignments_by_name)
+
+
+def _validate_wind_group_values(group: DynamicWindSimulationGroup) -> None:
+    values = {
+        "Influence": group.influence,
+        "Min Influence": group.min_influence,
+        "Max Influence": group.max_influence,
+        "Shift Top": group.shift_top,
+    }
+    for label, value in values.items():
+        if not math.isfinite(value):
+            raise ValueError(f"dynamic_wind_group_value: group {group.group_index} {label} must be finite.")
+    if group.use_dual_influence and group.min_influence > group.max_influence:
+        raise ValueError(f"dynamic_wind_dual_range: group {group.group_index} Min Influence cannot exceed Max Influence.")
+
+
+def _validate_linear_group_chains(
+    skeleton: tuple[Joint, ...],
+    assignments_by_name: dict[str, DynamicWindJointAssignment],
+) -> None:
+    children_by_parent: dict[str, list[str]] = {}
+    for joint in skeleton:
+        if joint.parent is not None:
+            children_by_parent.setdefault(joint.parent, []).append(joint.name)
+    forks: list[str] = []
+    for parent, children in children_by_parent.items():
+        parent_group = assignments_by_name[parent].simulation_group_index
+        matching_children = [
+            child for child in children
+            if assignments_by_name[child].simulation_group_index == parent_group
+        ]
+        if len(matching_children) > 1:
+            forks.append(f"group {parent_group}: {parent} -> {', '.join(sorted(matching_children))}")
+    if forks:
+        raise ValueError("dynamic_wind_same_group_fork: " + "; ".join(forks))
 
 
 def _resolve_simulation_groups(
