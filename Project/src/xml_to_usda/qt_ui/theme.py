@@ -512,6 +512,11 @@ QFrame#TitleBar[windowExpanded=\"true\"] {{
     border-bottom-left-radius: 0px;
     border-bottom-right-radius: 0px;
 }}
+QLabel#ApplicationVersionLabel {{
+    color: {button_text};
+    font-size: {theme.font_sizes['body']}px;
+    padding: 0px 8px;
+}}
 QFrame#PanelCard,
 QFrame#EditorPanelCard {{
     background: {card_fill};

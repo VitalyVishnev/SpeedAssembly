@@ -18,7 +18,11 @@ The standalone release is named `SpeedAssembly.exe` and its release bundle is
 `SpeedAssembly_release.zip`. The release ZIP contains the executable, MIT
 `LICENSE`, `THIRD_PARTY_NOTICES.md`, and `examples/SimpleTree_01.xml`;
 `build_info.json` remains beside the executable
-in `dist-next` for local diagnostics and is not distributed. The primary
+in `dist-next` for local diagnostics and is not distributed. The
+application version comes from `src/xml_to_usda/version.py`; the EXE embeds
+portable commit/time identity and shows the version in the top bar and About.
+Repeated Package builds do not increment the version. GitHub release work stops
+at a draft for operator review and manual publication. The primary
 baseline workflow has been manually confirmed in UE 5.7 and UE 5.8. Proxy Mesh
 is a companion Static Mesh workflow for collision, distance-field, and
 lower-cost shadow use; detailed lighting quality validation remains separate

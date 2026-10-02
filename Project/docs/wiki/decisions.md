@@ -90,6 +90,35 @@ Proxy Mesh exists as a companion Static Mesh for collision, distance-field, and
 lower-cost shadow workflows; import confirmation does not by itself validate
 lighting quality.
 
+## Decision: Release versions are independent of build attempts
+
+Root `AGENTS.md` contains the agent instructions and is intentionally Git-ignored.
+The persistent contract is: full builds run required source checks, Package,
+packaged contracts, and real-result smoke without changing the version or
+uploading to GitHub. Only an explicit version-change request assigns a candidate;
+rebuilds keep it fixed. Choose the next version from all changes since the last
+published release: compatible fixes use PATCH, new capabilities use MINOR,
+incompatible public-contract changes use MAJOR after 1.0 and MINOR before it.
+Use numbered alpha/beta/rc suffixes and `v`-prefixed tags; release-stage changes
+require operator instruction and validation.
+
+Requested GitHub release work stops at a draft, even if phrased as publication.
+The operator reviews and publishes manually. Match the version/tag to the exact
+clean source commit available on GitHub, upload the validated Package ZIP, and
+verify the downloaded attachment's SHA-256. Published tags/assets are preserved.
+Use title `SpeedAssembly v<version>` and Pre-release for alpha/beta/rc.
+Descriptions contain only a short Markdown bullet list of user-visible changes
+since the last published release, without headings or extended explanations.
+
+`src/xml_to_usda/version.py::__version__` is the single editable release version.
+Setuptools derives Python metadata from it and normalizes prerelease spelling;
+the app, Windows version strings, and GitHub tag retain the supplied spelling.
+An explicit version such as `0.5.0-beta` takes precedence over the default numbered
+suffix convention. The top bar/native title and About show the version; source
+previews add DEV. Package embeds commit/time/dirty identity in the EXE, includes
+it in diagnostics, and exposes `--build-info PATH` without starting Qt. Unreal
+compatibility and build identity remain separate from the visible version.
+
 ## Decision: Public user documentation is an isolated MkDocs site
 
 Public operator documentation lives only in `docs/user/`. MkDocs Material

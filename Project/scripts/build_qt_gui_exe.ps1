@@ -99,6 +99,7 @@ function Write-BuildInfo(
     $buildInfoPath = Join-Path $DistPath 'build_info.json'
     $gitMetadata = Get-GitBuildMetadata -RepoRoot $RepoRoot
     $payload = [ordered]@{
+        version = $appVersion
         built_at = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
         build_mode = $BuildMode
         exe_path = $ExePath
@@ -128,6 +129,10 @@ $hooksPath = Join-Path $repoRoot 'hooks'
 Push-Location $repoRoot
 try {
     $pythonExe = Get-VenvExecutable -RepoRoot $repoRoot
+    $appVersion = & $pythonExe -s -c "from xml_to_usda.version import __version__; print(__version__)"
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Application version could not be read.'
+    }
     if (-not $SkipBootstrap) {
         $bootstrapCheck = if ($Quick) { 'import PySide6' } else { 'import PySide6, PyInstaller' }
         & $pythonExe -s -c $bootstrapCheck 2>$null
@@ -189,7 +194,7 @@ try {
             Remove-Item -Recurse -Force $distPath
         }
 
-        & $pythonExe -s -m xml_to_usda.qt_ui.release_build --source-ui-root $qtUiSourceRoot --staging-root $qtUiStagingRoot --jpeg-quality 85
+        & $pythonExe -s -m xml_to_usda.qt_ui.release_build --source-ui-root $qtUiSourceRoot --staging-root $qtUiStagingRoot --jpeg-quality 85 --build-metadata-root $buildPath --repo-root $repoRoot
         if ($LASTEXITCODE -ne 0) {
             throw 'Qt UI asset staging failed.'
         }
@@ -200,10 +205,12 @@ try {
             '--windowed',
             '--name', 'SpeedAssembly',
             '--icon', $iconPath,
+            '--version-file', (Join-Path $buildPath 'windows_version.txt'),
             '--additional-hooks-dir', $hooksPath,
             '--hidden-import', 'xml_to_usda._ufbx',
             '--paths', (Join-Path $repoRoot 'src'),
             '--add-data', "$qtUiStagingRoot;xml_to_usda/qt_ui",
+            '--add-data', "$(Join-Path $buildPath 'build_identity.json');xml_to_usda",
             '--specpath', $buildPath,
             $launcherScript
         )

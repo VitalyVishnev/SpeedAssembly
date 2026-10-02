@@ -84,6 +84,7 @@ from ..fracture_preview_service import (
 )
 from ..fracture_viewport_scene import build_fracture_viewport_scene
 from ..runtime_paths import resolve_runtime_paths
+from ..version import application_title, build_details
 from ..wind_external_skeleton import ExternalSkeletonChoicesResult
 from ..settings_service import (
     FACTORY_DEFAULT_PRESET_NAME,
@@ -428,6 +429,11 @@ class TitleBar(QFrame):
         self._layout.addWidget(self.settings_button)
         self._layout.addStretch(1)
 
+        self.version_label = QLabel(application_title(), self)
+        self.version_label.setObjectName("ApplicationVersionLabel")
+        self.version_label.setToolTip(build_details())
+        self._layout.addWidget(self.version_label)
+
         self.minimize_button = WindowControlButton("minimize", self)
         self.minimize_button.setObjectName("WindowButton")
         self.minimize_button.clicked.connect(window.showMinimized)
@@ -447,6 +453,8 @@ class TitleBar(QFrame):
 
     def apply_theme(self, theme: ResolvedTheme) -> None:
         spacing = theme.spacing["control_gap"]
+        self.version_label.ensurePolished()
+        self.version_label.setFixedWidth(self.version_label.sizeHint().width())
         edge_padding = max(spacing, 18)
         self._layout.setContentsMargins(edge_padding, 2, edge_padding, 2)
         self._layout.setSpacing(max(8, spacing - 2))
@@ -927,7 +935,7 @@ class MainWindow(QWidget):
             runtime_paths=self._runtime_paths,
         )
 
-        self.setWindowTitle("SpeedAssembly")
+        self.setWindowTitle(application_title())
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -1540,6 +1548,8 @@ class MainWindow(QWidget):
         )
         self.preset_combo.setFixedSize(title_preset_width, title_preset_height)
         self.preset_menu_button.setFixedSize(max(32, title_preset_height), title_preset_height)
+        self.title_bar._layout.invalidate()
+        self.setMinimumWidth(max(1160, self.title_bar._layout.minimumSize().width()))
 
         action_width = int(self._theme.layout.get("action_column_width", 148))
         self.parts_folder_button.setFixedSize(max(132, int(round(action_width * 0.72))), file_button_height)

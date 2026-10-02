@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import argparse
 import shutil
+import json
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QImageReader, QImageWriter
+from ..version import __version__
 
 
 JPEG_QUALITY_DEFAULT = 85
@@ -92,23 +96,73 @@ def build_release_data_tree(
     return resolved_staging_root
 
 
+def write_release_build_metadata(*, repo_root: Path, staging_root: Path) -> None:
+    """Embed only portable identity; local paths remain in build_info.json."""
+    from PyInstaller.utils.win32.versioninfo import (
+        FixedFileInfo, StringFileInfo, StringStruct, StringTable,
+        VarFileInfo, VarStruct, VSVersionInfo,
+    )
+
+    def git_output(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo_root), *args], check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+    identity = {
+        "version": __version__,
+        "build_mode": "package",
+        "git_commit": git_output("rev-parse", "HEAD"),
+        "git_dirty": bool(git_output("status", "--porcelain")),
+        "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    staging_root.mkdir(parents=True, exist_ok=True)
+    (staging_root / "build_identity.json").write_text(
+        json.dumps(identity, indent=2, sort_keys=True) + "\n", encoding="utf-8",
+    )
+    numeric_version = (*map(int, __version__.split("-", 1)[0].split(".")), 0)
+    strings = {
+        "CompanyName": "Vitaly Vishnev",
+        "FileDescription": "SpeedAssembly",
+        "FileVersion": __version__,
+        "InternalName": "SpeedAssembly",
+        "OriginalFilename": "SpeedAssembly.exe",
+        "ProductName": "SpeedAssembly",
+        "ProductVersion": __version__,
+    }
+    resource = VSVersionInfo(
+        ffi=FixedFileInfo(filevers=numeric_version, prodvers=numeric_version, flags=2 if "-" in __version__ else 0),
+        kids=[
+            StringFileInfo([StringTable("040904B0", [StringStruct(key, value) for key, value in strings.items()])]),
+            VarFileInfo([VarStruct("Translation", [1033, 1200])]),
+        ],
+    )
+    (staging_root / "windows_version.txt").write_text(str(resource), encoding="utf-8")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Stage Qt UI release assets into a build directory.")
     parser.add_argument("--source-ui-root", required=True)
     parser.add_argument("--staging-root", required=True)
     parser.add_argument("--jpeg-quality", type=int, default=JPEG_QUALITY_DEFAULT)
+    parser.add_argument("--build-metadata-root", type=Path)
+    parser.add_argument("--repo-root", type=Path)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.build_metadata_root is not None and args.repo_root is None:
+        parser.error("--build-metadata-root requires --repo-root")
     staged_root = build_release_data_tree(
         source_ui_root=args.source_ui_root,
         staging_root=args.staging_root,
         jpeg_quality=args.jpeg_quality,
     )
     print(f"Staged Qt UI release assets: {staged_root}")
+    if args.build_metadata_root is not None:
+        write_release_build_metadata(repo_root=args.repo_root, staging_root=args.build_metadata_root)
     return 0
 
 

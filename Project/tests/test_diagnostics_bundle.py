@@ -9,6 +9,7 @@ from xml_to_usda.diagnostics_bundle import (
     export_diagnostics_bundle,
 )
 from xml_to_usda.runtime_paths import RuntimeCleanupSummary, RuntimePaths
+from xml_to_usda.version import __version__
 
 
 def test_diagnostics_bundle_exports_local_reproduction_artifacts(tmp_path) -> None:
@@ -72,12 +73,14 @@ def test_diagnostics_bundle_exports_local_reproduction_artifacts(tmp_path) -> No
             "logs/gui_trace.1.jsonl",
             "logs/in_app_log.txt",
             "build/build_info.json",
+            "build/build_identity.json",
             "runtime/runtime_summary.json",
             "runtime/latest_job_manifest.json",
             "smoke/smoke_report.json",
             "smoke/smoke_stdout.txt",
         }.issubset(names)
         summary = json.loads(archive.read("runtime/runtime_summary.json"))
+        assert json.loads(archive.read("build/build_identity.json"))["version"] == __version__
         assert summary["active_preset_name"] == "Artist Preset"
         assert summary["selected_output_path"] == str(output_path)
         assert summary["runtime_summary"]["cache_root"] == str(cache_root)

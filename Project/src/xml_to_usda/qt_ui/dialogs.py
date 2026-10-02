@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout
 
 from .help_deck import HELP_SLIDES, HelpSlide
 from .scrollbars import keep_vertical_scrollbar_visible
+from ..version import application_title, build_details
 
 
 class TextDialog(QDialog):
@@ -105,9 +107,13 @@ class SupportDialog(QDialog):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
 
-        self.title_label = QLabel("SpeedAssembly", self)
+        self.title_label = QLabel(application_title(), self)
         self.title_label.setProperty("typographyRole", "heading")
         layout.addWidget(self.title_label)
+
+        self.build_label = QLabel(build_details(), self)
+        self.build_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.build_label)
 
         self.summary_label = QLabel(
             "Copyright © 2026 Vitaly Vishnev.\n"

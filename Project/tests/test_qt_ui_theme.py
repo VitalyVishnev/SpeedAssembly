@@ -13,6 +13,8 @@ pytestmark = pytest.mark.qt
 from xml_to_usda.qt_ui.dependencies import build_default_dependencies
 from xml_to_usda.qt_ui.persistence import UiShellState
 from xml_to_usda.qt_ui.window import MainWindow, RoundedTabBar
+from xml_to_usda.qt_ui.dialogs import SupportDialog
+from xml_to_usda.version import application_title
 from xml_to_usda.qt_ui.widget_style import install_widget_style
 from xml_to_usda.qt_ui.theme import (
     ThemeOverrides,
@@ -135,6 +137,11 @@ def test_main_shell_corners_follow_external_window_state_changes(qtbot, tmp_path
     window.show()
 
     # Caption marks center their visible ink, independently of font metrics.
+    assert window.windowTitle() == application_title()
+    assert window.title_bar.version_label.text() == application_title()
+    about = SupportDialog(on_export_diagnostics=lambda: None, parent=window)
+    assert about.title_label.text() == application_title()
+    about.close()
     mark_bounds = {}
     for button in (window.title_bar.minimize_button, window.title_bar.maximize_button, window.title_bar.close_button):
         image = button.grab().toImage()

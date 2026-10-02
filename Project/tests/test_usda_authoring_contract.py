@@ -411,8 +411,8 @@ def test_multi_root_skeleton_keeps_unique_root_joint_names_in_usda() -> None:
     assert inventory.has_relationship("/Tree/MultiRootFern_Geo/MultiRootFern_Skeleton", "skel:animationSource")
 
 
-def test_inline_part_skeleton_uses_prototype_name_for_single_joint() -> None:
-    result = convert_file(str(SIMPLE_TREE_01), output_path=None)
+def test_inline_part_skeleton_uses_prototype_name_for_single_joint(tmp_path) -> None:
+    result = convert_file(str(SIMPLE_TREE_01), output_path=str(tmp_path / "tree.usda"))
     inventory = UsdaInventory.from_text(result.usda_document.text)
 
     assert result.usda_document is not None

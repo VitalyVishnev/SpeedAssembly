@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
+import subprocess
 
 import pytest
 
@@ -8,7 +10,8 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtGui import QColor, QImage
 
-from xml_to_usda.qt_ui.release_build import build_release_data_tree
+from xml_to_usda.qt_ui.release_build import build_release_data_tree, write_release_build_metadata
+from xml_to_usda.version import __version__
 
 
 def test_release_build_reencodes_jpegs_and_copies_non_noise_assets(tmp_path: Path) -> None:
@@ -41,6 +44,24 @@ def test_release_build_reencodes_jpegs_and_copies_non_noise_assets(tmp_path: Pat
     assert staged_theme.read_text(encoding="utf-8") == theme_path.read_text(encoding="utf-8")
     assert staged_jpeg.stat().st_size < source_jpeg.stat().st_size
     assert staged_png.read_bytes() == source_png.read_bytes()
+
+
+def test_release_identity_and_windows_resource_share_the_application_version(tmp_path: Path) -> None:
+    from PyInstaller.utils.win32.versioninfo import load_version_info_from_text_file
+
+    write_release_build_metadata(repo_root=Path.cwd(), staging_root=tmp_path)
+    identity = json.loads((tmp_path / "build_identity.json").read_text(encoding="utf-8"))
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+    assert identity["version"] == __version__
+    assert identity["git_commit"] == commit
+    assert identity["build_mode"] == "package"
+    assert isinstance(identity["git_dirty"], bool)
+    assert set(identity) == {"version", "build_mode", "git_commit", "git_dirty", "built_at"}
+    resource = load_version_info_from_text_file(str(tmp_path / "windows_version.txt"))
+    assert __version__.encode("utf-16le") in resource.toRaw()
+    major, minor, patch = map(int, __version__.split("-", 1)[0].split("."))
+    assert resource.ffi.fileVersionMS == (major << 16) | minor
+    assert resource.ffi.fileVersionLS == patch << 16
 
 
 def _write_image(path: Path, *, format_name: str, width: int, height: int, quality: int, color: QColor) -> None:

@@ -206,6 +206,14 @@ EXE. PySide6 6.11 uses the Windows system ICU; packaging Poppler's same-named
 ICU breaks `QtCore` import. The build also rejects any ICU entry remaining in
 the final package TOC before release assembly and smoke.
 
+`src/xml_to_usda/version.py` owns the application version and reads portable
+frozen build identity. `qt_ui/release_build.py` generates the embedded
+`build_identity.json` and Windows version resource from that version and Git
+state. The Package script bundles both; local-only `build_info.json` retains
+developer paths outside the release ZIP. TitleBar, native title, About, and
+diagnostics reuse the runtime version module. `--build-info PATH` exports the
+running build's identity before Qt bootstrap; source previews identify as DEV.
+
 Preview dialogs must share the same viewport system. Mode-specific dialogs
 may own controls, source loading, and Qt-free scene adapters, but rendering,
 upload lifecycle, camera behavior, bone overlay, picking, and static-scene

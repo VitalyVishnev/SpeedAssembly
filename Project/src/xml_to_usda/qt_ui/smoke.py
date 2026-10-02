@@ -180,7 +180,19 @@ def _run_startup_smoke(context: SmokeContext) -> dict[str, Any]:
     try:
         _pump_events(150)
         _assert(window.isVisible(), "startup window is visible")
-        return _passed(name=SMOKE_SCENARIO_STARTUP, checks=("window.visible",))
+        from ..version import application_title, build_identity
+        from .dialogs import SupportDialog
+
+        _assert(window.windowTitle() == application_title(), "native title identifies the release")
+        _assert(window.title_bar.version_label.text() == application_title(), "top bar identifies the release")
+        about = SupportDialog(on_export_diagnostics=lambda: None, parent=window)
+        _assert(about.title_label.text() == application_title(), "About identifies the release")
+        about.close()
+        return _passed(
+            name=SMOKE_SCENARIO_STARTUP,
+            checks=("window.visible", "version.title", "version.about"),
+            data={"build_identity": build_identity()},
+        )
     finally:
         _close_window(window)
 
@@ -683,9 +695,14 @@ def _run_diagnostics_export_smoke(context: SmokeContext) -> dict[str, Any]:
             )
         )
         _assert(exported.exists(), "diagnostics bundle exists")
+        import zipfile
+        from ..version import build_identity
+
+        with zipfile.ZipFile(exported) as archive:
+            _assert(json.loads(archive.read("build/build_identity.json")) == build_identity(), "diagnostics identify the running build")
         return _passed(
             name=SMOKE_SCENARIO_DIAGNOSTICS_EXPORT,
-            checks=("diagnostics.bundle",),
+            checks=("diagnostics.bundle", "diagnostics.build_identity"),
             data={"bundle_path": str(exported)},
         )
     finally:

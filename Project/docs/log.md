@@ -290,3 +290,26 @@ under `docs/raw/`; Git retains per-change detail.
   normal/maximized main windows; full Package, 26 packaged contracts, repeated
   Detailed Cuts stability smoke and worker recovery smoke. No smoke bypass.
   Temporary diagnostic scripts removed.
+
+## 2026-10-03 - Version and release draft policy
+
+- Recorded in AGENTS.md: explicit version changes only, full builds without
+  automatic bumps, one version source, embedded build identity, and verified
+  GitHub drafts with concise bullet-only notes. The operator publishes manually.
+- Preserved the policy in maintained decisions and recorded the existing
+  package/runtime version gap. Version implementation remains deferred.
+- Validation: documentation diff and whitespace checks; no code or build changes.
+
+## 2026-10-03 - Prepare SpeedAssembly v0.5.0-beta
+
+- Added one release version source shared by Python metadata, Qt titles/About,
+  and Windows EXE version strings. Package embeds portable commit/time/dirty
+  identity; diagnostics and `--build-info PATH` expose it without local sidecars.
+- Source previews add DEV. The title bar reserves readable version width and
+  derives the minimum window width from its controls, including at scale 1.75.
+- Isolated the existing inline Part Skeleton test output in its temporary
+  directory after a permission failure writing alongside the sample XML.
+  Converter/importer behavior is unchanged.
+- Validation: 619 Core/Integration checks; source rendering at scales 0.90,
+  1.00, and 1.75; editable metadata resolves to Python-normalized `0.5.0b0`.
+  Full Package and frozen-runtime evidence will be recorded after the build.

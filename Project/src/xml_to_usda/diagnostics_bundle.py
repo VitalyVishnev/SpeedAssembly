@@ -17,6 +17,7 @@ from typing import Any
 
 from .runtime_paths import RuntimeCleanupSummary, RuntimePaths, capture_runtime_context
 from .runtime_trace import rotated_trace_paths, trace_path_for_settings_dir
+from .version import build_identity
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,7 @@ def export_diagnostics_bundle(request: DiagnosticsBundleRequest) -> Path:
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
 
     with zipfile.ZipFile(bundle_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        _write_json(archive, "build/build_identity.json", build_identity())
         _write_file_or_note(
             archive,
             source_path=request.settings_path,

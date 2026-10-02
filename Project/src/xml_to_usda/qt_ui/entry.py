@@ -12,6 +12,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from ..diagnostics_bundle import default_build_info_path
+from ..version import __version__, build_identity
 from ..runtime_error_mode import suppress_windows_native_error_dialogs
 from ..worker_commands import (
     CONVERSION_WORKER_COMMAND,
@@ -29,6 +30,8 @@ WINDOWS_APP_USER_MODEL_ID = "SpeedAssembly.SpeedAssembly"
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="xml-to-usda-gui")
+    parser.add_argument("--version", action="version", version=f"SpeedAssembly v{__version__}")
+    parser.add_argument("--build-info", metavar="PATH", help="Write portable build identity as JSON and exit.")
     parser.add_argument("--theme", default=None, help="Bundled theme name to load for the PySide6 shell.")
     parser.add_argument("--smoke-exit-ms", type=int, default=0, help=argparse.SUPPRESS)
     return parser
@@ -97,6 +100,9 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.build_info:
+        Path(args.build_info).write_text(json.dumps(build_identity(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return 0
 
     try:
         from PySide6.QtCore import QTimer
@@ -125,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
         configure_windows_taskbar_identity()
         app = QApplication.instance() or QApplication(sys.argv[:1])
         app.setApplicationName("SpeedAssembly")
+        app.setApplicationVersion(__version__)
         app.setWindowIcon(QIcon(application_icon_path()))
         window = MainWindow(
             theme,

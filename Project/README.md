@@ -37,6 +37,20 @@ Quick creates a source-backed preview in `dist-preview/`. Package builds the
 standalone executable and release ZIP in `dist-next/`, runs packaged contracts,
 and validates real results through the packaged smoke tests.
 
+## Versions and release drafts
+
+Edit only `src/xml_to_usda/version.py::__version__` when a new release version
+is explicitly requested. Full builds preserve it. Setuptools derives the Python
+package version; packaging embeds the same application version and portable Git
+commit/time identity in the EXE. The top bar and About display it, and source
+previews add DEV. `SpeedAssembly.exe --build-info PATH` writes that build's
+identity as JSON without opening Qt.
+
+After the full test/Package gate, prepare a GitHub draft with a `v`-prefixed tag
+on the exact source commit, title `SpeedAssembly v<version>`, the verified ZIP,
+and a short bullet-only change list. Mark alpha/beta/rc as Pre-release. The
+operator reviews and publishes manually; published tags/assets are preserved.
+
 ## Documentation
 
 ```powershell
