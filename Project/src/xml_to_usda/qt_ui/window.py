@@ -18,7 +18,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QFont, QLinearGradient, QPainter, QPainterPath, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractScrollArea,
     QAbstractSlider,
@@ -121,7 +121,9 @@ from .preview_shell import configure_preview_dialog, focus_preview_dialog
 from .proxy_preview import ProxyPreviewDialog
 from .status_card import ProgramStatusCard
 from .wind_preview import WindPreviewDialog
+from .widget_style import install_widget_style
 from .theme import (
+    BUTTON_OUTLINE_COLOR,
     ResolvedTheme,
     ThemeOverrides,
     ThemeSpec,
@@ -171,11 +173,15 @@ class RoundedTabBar(QTabBar):
         painter.setPen(Qt.PenStyle.NoPen)
         for index in range(self.count()):
             rect = self.tabRect(index)
-            painted_rect = QRectF(rect).adjusted(0, 0, -self._tab_gap, 0)
+            painted_rect = QRectF(rect).adjusted(0.5, 0.5, -self._tab_gap - 0.5, -0.5)
             fill = self._selected_fill if index == self.currentIndex() else self._hover_fill if index == self._hovered_index else self._tab_fill
             painter.setBrush(fill)
+            painter.setPen(QPen(QColor(BUTTON_OUTLINE_COLOR), 1.0))
             painter.drawRoundedRect(painted_rect, self._radius, self._radius)
             painter.setPen(self._text_color)
+            font = self.font()
+            font.setWeight(QFont.Weight.DemiBold if index == self.currentIndex() else QFont.Weight.Normal)
+            painter.setFont(font)
             painter.drawText(painted_rect, Qt.AlignmentFlag.AlignCenter, self.tabText(index))
             painter.setPen(Qt.PenStyle.NoPen)
         painter.end()
@@ -353,6 +359,32 @@ class PathLineEdit(QLineEdit):
         return f"...\\{parts[-2]}\\{parts[-1]}"
 
 
+class WindowControlButton(QPushButton):
+    """Draw caption marks without font baseline or glyph-bearing offsets."""
+
+    def __init__(self, symbol: str, parent: QWidget) -> None:
+        super().__init__(parent)
+        self._symbol = symbol
+        self.setAccessibleName(symbol.capitalize())
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        extent = self.iconSize().width()
+        rect = QRectF((self.width() - extent) / 2, (self.height() - extent) / 2, extent, extent)
+        pen = QPen(self.palette().color(QPalette.ColorRole.ButtonText))
+        pen.setWidthF(max(1.0, extent / 8))
+        painter.setPen(pen)
+        if self._symbol == "minimize":
+            painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+        elif self._symbol == "maximize":
+            painter.drawRect(rect)
+        else:
+            painter.drawLine(rect.topLeft(), rect.bottomRight())
+            painter.drawLine(rect.topRight(), rect.bottomLeft())
+
+
 class TitleBar(QFrame):
     def __init__(self, window: "MainWindow", theme: ResolvedTheme) -> None:
         super().__init__(window)
@@ -396,17 +428,17 @@ class TitleBar(QFrame):
         self._layout.addWidget(self.settings_button)
         self._layout.addStretch(1)
 
-        self.minimize_button = QPushButton("\u2212", self)
+        self.minimize_button = WindowControlButton("minimize", self)
         self.minimize_button.setObjectName("WindowButton")
         self.minimize_button.clicked.connect(window.showMinimized)
         self._layout.addWidget(self.minimize_button)
 
-        self.maximize_button = QPushButton("\u25a1", self)
+        self.maximize_button = WindowControlButton("maximize", self)
         self.maximize_button.setObjectName("WindowButton")
         self.maximize_button.clicked.connect(window.toggle_maximized)
         self._layout.addWidget(self.maximize_button)
 
-        self.close_button = QPushButton("\u00d7", self)
+        self.close_button = WindowControlButton("close", self)
         self.close_button.setObjectName("CloseWindowButton")
         self.close_button.clicked.connect(window.close)
         self._layout.addWidget(self.close_button)
@@ -419,7 +451,8 @@ class TitleBar(QFrame):
         self._layout.setContentsMargins(edge_padding, 2, edge_padding, 2)
         self._layout.setSpacing(max(8, spacing - 2))
         titlebar_height = int(theme.control_heights["titlebar"])
-        button_size = int(theme.chrome.get("window_button_size", 22))
+        icon_font_size = int(theme.chrome.get("icon_font_size", round(theme.font_sizes['body'] * 12 / 13)))
+        button_size = max(int(theme.chrome.get("window_button_size", 38)), icon_font_size * 3)
         pill_height = max(
             int(theme.chrome.get("title_pill_height", 24)),
             self._minimum_text_button_height(
@@ -448,8 +481,11 @@ class TitleBar(QFrame):
         self.adjust_button.setFixedHeight(adjust_height)
         self.preset_host.setFixedHeight(max(button_size, pill_height, adjust_height))
         self.settings_button.setFixedSize(button_size, button_size)
+        caption_button_size = round(button_size / 2)
         for button in (self.minimize_button, self.maximize_button, self.close_button):
-            button.setFixedSize(button_size, button_size)
+            button.setFixedSize(caption_button_size, caption_button_size)
+            symbol_size = round(icon_font_size * 1.25 / 2)
+            button.setIconSize(QSize(symbol_size, symbol_size))
 
     @staticmethod
     def _minimum_text_button_height(*buttons: QPushButton) -> int:
@@ -606,7 +642,7 @@ class GlobalSettingsDialog(QDialog):
         layout.setSpacing(10)
 
         title = QLabel("Cache", self)
-        title.setStyleSheet("font-weight: 700;")
+        title.setProperty("typographyRole", "section")
         layout.addWidget(title)
 
         form = QFormLayout()
@@ -790,6 +826,7 @@ class MainWindow(QWidget):
         theme_overrides_path=None,
         build_signature: str | None = None,
     ) -> None:
+        install_widget_style()
         super().__init__()
         self._design_theme = theme
         self._ui_scale = self._compute_current_screen_scale()
@@ -1497,7 +1534,10 @@ class MainWindow(QWidget):
         self.source_button.setFixedSize(file_button_width, file_button_height)
         self.output_button.setFixedSize(file_button_width, file_button_height)
         title_preset_width = self._title_preset_width()
-        title_preset_height = int(self._theme.chrome.get("title_preset_height", self._theme.chrome.get("window_button_size", 28)))
+        title_preset_height = max(
+            int(self._theme.chrome.get("title_preset_height", self._theme.chrome.get("window_button_size", 38))),
+            int(self._theme.chrome.get("icon_font_size", round(self._theme.font_sizes['body'] * 12 / 13))) * 3,
+        )
         self.preset_combo.setFixedSize(title_preset_width, title_preset_height)
         self.preset_menu_button.setFixedSize(max(32, title_preset_height), title_preset_height)
 
@@ -1516,9 +1556,9 @@ class MainWindow(QWidget):
         self.generate_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.generate_button.setFixedSize(action_width, button_height)
 
-        refresh_width = int(self._theme.chrome.get("wind_refresh_button_width", 164))
         refresh_height = int(self._theme.chrome.get("wind_refresh_button_height", 28))
-        self.wind_panel.refresh_button.setFixedSize(refresh_width, refresh_height)
+        self.wind_panel.total_bones_label.setFixedHeight(refresh_height)
+        self.wind_panel.refresh_button.setFixedHeight(refresh_height)
 
         left_column_width = int(self._theme.layout.get("left_column_width", 280))
         self.program_status_card.setFixedWidth(left_column_width)
@@ -3485,6 +3525,11 @@ class MainWindow(QWidget):
         self._position_help_callout()
         QTimer.singleShot(0, self._refresh_layout_after_show)
 
+    def changeEvent(self, event) -> None:  # type: ignore[override]
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            self._update_window_shape()
+
     def moveEvent(self, event) -> None:  # type: ignore[override]
         super().moveEvent(event)
         if not self.isMaximized():
@@ -3506,12 +3551,13 @@ class MainWindow(QWidget):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         full_rect = QRectF(self.rect())
         border_rect = full_rect.adjusted(0.5, 0.5, -0.5, -0.5)
-        if not self.isMaximized():
+        expanded = self.isMaximized() or self.isFullScreen()
+        if not expanded:
             path = QPainterPath()
             path.addRoundedRect(full_rect, self._theme.radii["window"], self._theme.radii["window"])
             painter.setClipPath(path)
         _draw_cover_pixmap(painter, self.rect(), self._assets.background)
-        if not self.isMaximized():
+        if not expanded:
             painter.setClipping(False)
             border_color = QColor(str(self._theme.glass["border_color"]))
             border_color.setAlphaF(border_color.alphaF() * float(self._theme.glass.get("border_opacity", 0.45)))
@@ -3601,9 +3647,10 @@ class MainWindow(QWidget):
             self.unsetCursor()
 
     def _update_window_shape(self) -> None:
-        maximized = self.isMaximized()
-        self.title_bar.setProperty("maximized", maximized)
-        self._apply_title_bar_style(maximized)
+        expanded = self.isMaximized() or self.isFullScreen()
+        # QWidget.maximized is read-only; chrome state needs its own property.
+        self.title_bar.setProperty("windowExpanded", expanded)
+        self._apply_title_bar_style(expanded)
         self.title_bar.style().unpolish(self.title_bar)
         self.title_bar.style().polish(self.title_bar)
         self.update()
@@ -3622,8 +3669,8 @@ class MainWindow(QWidget):
         if target_width > 0:
             self.panel.setFixedWidth(target_width)
 
-    def _apply_title_bar_style(self, maximized: bool) -> None:
-        radius = 0 if maximized else self._theme.radii["window"]
+    def _apply_title_bar_style(self, expanded: bool) -> None:
+        radius = 0 if expanded else self._theme.radii["window"]
         self.title_bar.setStyleSheet(
             "\n".join(
                 (

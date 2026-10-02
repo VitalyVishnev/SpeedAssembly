@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPoint, QSignalBlocker, QTimer, Qt, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QCheckBox,
@@ -344,7 +345,7 @@ class SkinningTickLabels(QWidget):
         selected_value = self._slider.value()
         for label in self.labels:
             font = label.font()
-            font.setBold(label.isEnabled() and label.value == selected_value)
+            font.setWeight(QFont.Weight.DemiBold if label.isEnabled() and label.value == selected_value else QFont.Weight.Normal)
             label.setFont(font)
         self._layout_labels()
 
@@ -369,11 +370,11 @@ class SkinningTickLabels(QWidget):
     def _update_label_metrics(self) -> None:
         bold_heights: list[int] = []
         for label in self.labels:
-            selected = label.font().bold()
+            selected = label.font().weight() == QFont.Weight.DemiBold
             normal_font = label.font()
-            normal_font.setBold(False)
+            normal_font.setWeight(QFont.Weight.Normal)
             bold_font = label.font()
-            bold_font.setBold(True)
+            bold_font.setWeight(QFont.Weight.DemiBold)
             label.setMinimumWidth(0)
             label.setMaximumWidth(16_777_215)
             label.setFont(bold_font)
@@ -544,20 +545,15 @@ class WindTabPanel(QWidget):
         skinning_layout.setColumnStretch(1, 1)
 
         actions = QWidget(controls)
-        actions.setMinimumWidth(286)
         actions_layout = QVBoxLayout(actions)
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(6)
-        action_top_row = QHBoxLayout()
-        action_top_row.setContentsMargins(0, 0, 0, 0)
-        action_top_row.setSpacing(6)
         self.total_bones_label = QLabel("Total bones: 0", actions)
         self.total_bones_label.setObjectName("WindTotalBones")
         self.total_bones_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.total_bones_label.setMinimumWidth(116)
-        action_top_row.addWidget(self.total_bones_label, 1)
-        action_top_row.addWidget(self.refresh_button, 0)
-        actions_layout.addLayout(action_top_row)
+        self.total_bones_label.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        actions_layout.addWidget(self.total_bones_label)
+        actions_layout.addWidget(self.refresh_button)
         actions_layout.addWidget(self.preview_button)
 
         controls_layout.addWidget(skinning_controls, 2)
@@ -725,7 +721,7 @@ class WindTabPanel(QWidget):
             bone_label = "bone" if joint_count == 1 else "bones"
             title = f"Group {group.group_index} (Generator level {group.branch_order}) · {joint_count:,} {bone_label}"
             header_label = QLabel(title, card)
-            header_label.setStyleSheet("font-weight: 600;")
+            header_label.setProperty("typographyRole", "group")
             header.addWidget(header_label, 1)
             trunk_checkbox = QCheckBox("Trunk", card)
             trunk_checkbox.setChecked(self._persisted_group_bool(group.group_index, "is_trunk_group", group.is_trunk_group))
@@ -920,7 +916,7 @@ class GeometryTabPanel(QWidget):
         actions_layout.setHorizontalSpacing(10)
         actions_layout.setVerticalSpacing(8)
         actions_title = QLabel("Preview", actions_card)
-        actions_title.setStyleSheet("font-weight: 600;")
+        actions_title.setProperty("typographyRole", "section")
         self.preview_proxy_button = QPushButton("Preview Proxy Mesh", actions_card)
         self.preview_proxy_button.clicked.connect(self._on_preview_proxy_requested)
         self.preview_proxy_button.setToolTip(
@@ -960,7 +956,7 @@ class GeometryTabPanel(QWidget):
             card_layout.setVerticalSpacing(8)
 
             name_label = QLabel(f"{spec.source_name}  ({spec.instance_count} instance(s))", card)
-            name_label.setStyleSheet("font-weight: 600;")
+            name_label.setProperty("typographyRole", "group")
             card_layout.addWidget(name_label, 0, 0, 1, 4)
             mesh_label = QLabel(
                 f"Mesh ID: {spec.source_mesh_id if spec.source_mesh_id is not None else '<none>'}",
@@ -1578,7 +1574,7 @@ class MaterialsTabPanel(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
         title = QLabel("Base Mesh Materials", card)
-        title.setStyleSheet("font-weight: 600;")
+        title.setProperty("typographyRole", "group")
         layout.addWidget(title)
         if not discovery.rows:
             layout.addWidget(QLabel("No base XML material slots found in this file.", card))
@@ -1615,7 +1611,7 @@ class MaterialsTabPanel(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
         title = QLabel("Instanced Part Materials", card)
-        title.setStyleSheet("font-weight: 600;")
+        title.setProperty("typographyRole", "group")
         layout.addWidget(title)
         if not discovery.rows:
             layout.addWidget(QLabel("No repeated branch prototypes found in this XML.", card))
@@ -1627,7 +1623,7 @@ class MaterialsTabPanel(QWidget):
             row_card_layout.setSpacing(8)
 
             header_label = QLabel(spec.source_name, row_card)
-            header_label.setStyleSheet("font-weight: 600;")
+            header_label.setProperty("typographyRole", "group")
             row_card_layout.addWidget(header_label)
 
             form = QGridLayout()

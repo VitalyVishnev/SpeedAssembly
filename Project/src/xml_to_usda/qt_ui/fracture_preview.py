@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSlider,
+    QSizePolicy,
     QSpinBox,
     QToolButton,
     QVBoxLayout,
@@ -166,7 +167,7 @@ class FracturePreviewDialog(PreviewShellDialog):
         self.loading_label.setStyleSheet(
             "background: rgba(20, 24, 26, 180);"
             "color: #f2f2f2;"
-            "font-weight: 700;"
+            "font-weight: 600;"
             "padding: 14px 18px;"
             "border-radius: 6px;"
         )
@@ -188,11 +189,12 @@ class FracturePreviewDialog(PreviewShellDialog):
         settings_shell_layout.addWidget(settings_scroll)
 
         title = QLabel("Fracturing", settings_panel)
-        title.setStyleSheet("font-weight: 700;")
+        title.setProperty("typographyRole", "section")
         settings_layout.addWidget(title)
 
         mode_label = QLabel("Manual Fracturing", settings_panel)
-        mode_label.setStyleSheet("font-weight: 700; color: #2b3032;")
+        mode_label.setProperty("typographyRole", "group")
+        mode_label.setStyleSheet("color: #2b3032;")
         settings_layout.addWidget(mode_label)
 
         self.preview_geometry_section = _CollapsibleSettingsSection(
@@ -1209,7 +1211,8 @@ def _build_int_slider_row(
     spin.setValue(max(minimum, min(maximum, value)))
     spin.setKeyboardTracking(False)
     spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-    spin.setFixedWidth(92)
+    spin.setMinimumWidth(92)
+    spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
 
     slider.valueChanged.connect(lambda raw: _sync_int_spin(spin, raw, step))
     spin.editingFinished.connect(lambda: _sync_int_slider(slider, spin.value()))
@@ -1238,7 +1241,8 @@ def _build_float_slider_row(
     spin.setValue(max(minimum, min(maximum, value)))
     spin.setKeyboardTracking(False)
     spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-    spin.setFixedWidth(70)
+    spin.setMinimumWidth(70)
+    spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
 
     slider.valueChanged.connect(lambda raw: _sync_float_spin(spin, raw, scale))
     spin.editingFinished.connect(lambda: _sync_float_slider(slider, spin.value(), scale))
@@ -1259,7 +1263,8 @@ def _build_branch_prune_slider_row(parent, *, value: float) -> tuple[QSlider, QD
     spin.setValue(max(0.0, min(1.0, value)))
     spin.setKeyboardTracking(False)
     spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-    spin.setFixedWidth(82)
+    spin.setMinimumWidth(82)
+    spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
 
     slider.valueChanged.connect(lambda raw: _sync_branch_prune_spin(spin, raw))
     spin.editingFinished.connect(lambda: _sync_branch_prune_slider(slider, spin.value()))

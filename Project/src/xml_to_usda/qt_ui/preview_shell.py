@@ -13,6 +13,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QFrame, QGridLayout, QSplitter, QVBoxLayout, QWidget
 
+from .theme import BUTTON_OUTLINE_COLOR
 
 _DROPDOWN_ARROW_ICON = Path(__file__).with_name("themes") / "default" / "assets" / "dropdown_arrow.svg"
 
@@ -110,9 +111,9 @@ def apply_compact_preview_panel_style(panel: QWidget) -> None:
 QPushButton {{
     background: rgba(148, 157, 77, 210);
     color: #111111;
-    border: 0px;
+    border: 1px solid {BUTTON_OUTLINE_COLOR};
     min-height: 20px;
-    max-height: 24px;
+    min-width: 0px;
     padding: 2px 8px;
     border-radius: 5px;
 }}
@@ -127,7 +128,6 @@ QComboBox, QLineEdit {{
     border: 1px solid rgba(0, 0, 0, 55);
     border-radius: 5px;
     min-height: 22px;
-    max-height: 26px;
     padding: 1px 7px;
 }}
 QComboBox:hover, QComboBox:focus, QLineEdit:hover, QLineEdit:focus {{
@@ -165,7 +165,6 @@ QSpinBox#UdimIdSpin {{
     border: 1px solid rgba(0, 0, 0, 55);
     border-radius: 5px;
     min-height: 22px;
-    max-height: 26px;
     padding: 1px 7px;
 }}
 QSpinBox#UdimIdSpin:hover, QSpinBox#UdimIdSpin:focus {{
@@ -182,14 +181,13 @@ QFrame#LayersPane {{
 QCheckBox {{
     spacing: 5px;
     min-height: 16px;
-    font-size: 11px;
     color: rgba(0, 0, 0, 190);
 }}
 QToolButton#SettingsSectionToggle {{
     background: transparent;
-    border: 0px;
+    border: 1px solid {BUTTON_OUTLINE_COLOR};
+    border-radius: 5px;
     color: rgba(0, 0, 0, 190);
-    font-weight: 700;
     min-height: 22px;
     padding: 1px 0px;
     text-align: left;

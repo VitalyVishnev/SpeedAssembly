@@ -405,7 +405,9 @@ class PartSourceMaterialEditor(QWidget):
         if not specs:
             self.slots_layout.addWidget(QLabel("No face-used FBX material slots were found in this file.", self.slots_frame))
             return
-        self.slots_layout.addWidget(QLabel("FBX Material Slots", self.slots_frame))
+        slots_title = QLabel("FBX material slots", self.slots_frame)
+        slots_title.setProperty("typographyRole", "group")
+        self.slots_layout.addWidget(slots_title)
         for spec in specs:
             slot_name = str(getattr(spec, "slot_name", ""))
             if not slot_name:

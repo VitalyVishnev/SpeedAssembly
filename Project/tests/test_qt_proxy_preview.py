@@ -81,6 +81,7 @@ def test_proxy_preview_switches_viewport_silhouette_mode(qtbot) -> None:
     qtbot.addWidget(dialog)
 
     assert dialog.viewport.mode_switch.height() <= 26
+    assert dialog.viewport.shaded_button.height() >= dialog.viewport.shaded_button.fontMetrics().height() + 2
     assert dialog.viewport.mode_switch.pos().x() == 8
     assert dialog.viewport.mode_switch.pos().y() == 8
     assert dialog.viewport.silhouette_button.isEnabled()

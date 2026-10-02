@@ -62,7 +62,8 @@ class PartPrototypePreviewDialog(PreviewShellDialog):
         settings_shell_layout.addWidget(settings_scroll, 1)
 
         title = QLabel(value.source_name or value.source_key, settings_panel)
-        title.setStyleSheet("font-weight: 700;")
+        title.setProperty("typographyRole", "section")
+        title.setWordWrap(True)
         settings_layout.addWidget(title)
         self.editor = PartSourceMaterialEditor(
             value=value,
@@ -79,6 +80,7 @@ class PartPrototypePreviewDialog(PreviewShellDialog):
         actions.setContentsMargins(14, 10, 14, 14)
         actions.addStretch(1)
         self.apply_button = QPushButton("Apply", settings_panel)
+        self.apply_button.setProperty("typographyRole", "emphasis")
         self.close_button = QPushButton("Close", settings_panel)
         for button in (self.apply_button, self.close_button):
             button.setObjectName("PreviewActionButton")

@@ -11,6 +11,7 @@ This is the maintained entry point for project memory.
 - [Experiments](experiments.md) - rejected or uncertain technical experiments worth preserving.
 - [Glossary](glossary.md) - project terms, workflows, and abbreviations.
 - [Test Policy](testing.md) - execution layers, fixture limits, and system-contract map.
+- [Typography](typography.md) - current Qt font audit and proposed text roles, pending visual approval.
 - [Documentation Log](../log.md) - migration and maintenance history.
 
 Legacy source material is preserved in [../raw/](../raw/).

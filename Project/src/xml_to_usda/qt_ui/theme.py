@@ -13,6 +13,8 @@ from typing import Any, Mapping, TypeVar
 
 from importlib.resources import files
 
+BUTTON_OUTLINE_COLOR = "#25000000"
+
 _ThemeT = TypeVar("_ThemeT", bound="_ThemeBase")
 _THEME_SECTION_KEYS = (
     "colors",
@@ -227,6 +229,51 @@ def build_ui_palette(theme: ResolvedTheme) -> dict[str, str]:
     }
 
 
+def build_typography_stylesheet(theme: ResolvedTheme) -> str:
+    """Shared text roles; legacy `title` stays loadable but no longer sizes headings."""
+    from PySide6.QtGui import QFontDatabase, QGuiApplication
+
+    ui_family, code_family = "Segoe UI", "Consolas"
+    if QGuiApplication.instance() is not None:
+        families = QFontDatabase.families()
+        if ui_family not in families:
+            ui_family = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont).family()
+        if code_family not in families:
+            code_family = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family()
+    return f"""
+QWidget {{
+    font-family: "{ui_family}";
+    font-size: {theme.font_sizes['body']}px;
+}}
+QLabel[typographyRole="heading"] {{
+    font-size: {theme.font_sizes['heading']}px;
+    font-weight: 600;
+}}
+QLabel[typographyRole="section"] {{
+    font-size: {theme.font_sizes['section']}px;
+    font-weight: 600;
+}}
+QLabel[typographyRole="group"], QLabel[typographyRole="emphasis"],
+QToolButton#SettingsSectionToggle {{
+    font-size: {theme.font_sizes['body']}px;
+    font-weight: 600;
+}}
+QWidget[typographyRole="supporting"], QLabel#LayerLabel, QPushButton#LayerButton {{
+    font-size: {theme.font_sizes['small']}px;
+}}
+QPlainTextEdit {{
+    font-family: "{code_family}";
+    font-size: {theme.font_sizes['code']}px;
+    font-weight: 400;
+}}
+QPushButton#PrimaryActionButton, QPushButton#GenerateWindButton,
+QPushButton#SplitActionMainButton, QPushButton[typographyRole="emphasis"],
+QPushButton:checked, QToolButton:checked, QTabBar::tab:selected {{
+    font-weight: 600;
+}}
+"""
+
+
 def build_stylesheet(theme: ResolvedTheme) -> str:
     palette = build_ui_palette(theme)
     titlebar_fill = palette["titlebar_fill"]
@@ -266,13 +313,17 @@ def build_stylesheet(theme: ResolvedTheme) -> str:
     file_button_height = int(theme.chrome.get("file_button_height", input_height))
     wind_refresh_button_width = int(theme.chrome.get("wind_refresh_button_width", 164))
     wind_refresh_button_height = int(theme.chrome.get("wind_refresh_button_height", 28))
-    window_button_size = int(theme.chrome.get("window_button_size", 22))
+    icon_font_size = int(theme.chrome.get("icon_font_size", round(theme.font_sizes['body'] * 12 / 13)))
+    chrome_icon_size = icon_font_size * 2
+    gear_icon_size = round(icon_font_size * 1.5)
+    window_button_size = max(int(theme.chrome.get("window_button_size", 38)), icon_font_size * 3)
+    caption_button_size = round(window_button_size / 2)
     title_pill_width = int(theme.chrome.get("title_pill_width", 78))
     title_pill_height = max(int(theme.chrome.get("title_pill_height", 24)), theme.font_sizes["body"] + 10)
     adjust_ui_button_width = int(theme.chrome.get("adjust_ui_button_width", 104))
     adjust_ui_button_height = max(int(theme.chrome.get("adjust_ui_button_height", title_pill_height)), theme.font_sizes["body"] + 10)
     title_preset_width = int(theme.chrome.get("title_preset_width", 136))
-    title_preset_height = int(theme.chrome.get("title_preset_height", window_button_size))
+    title_preset_height = max(int(theme.chrome.get("title_preset_height", window_button_size)), icon_font_size * 3)
     tab_min_width = int(theme.layout.get("tab_min_width", 120))
     tab_content_gap = int(theme.spacing["section_gap"])
     button_fill_disabled = palette["button_fill_disabled"]
@@ -281,10 +332,9 @@ def build_stylesheet(theme: ResolvedTheme) -> str:
     warning_fill = palette["warning_fill"]
     danger_fill_soft = palette["danger_fill_soft"]
 
-    return f"""
+    return build_typography_stylesheet(theme) + f"""
 QWidget {{
     color: {window_text};
-    font-size: {theme.font_sizes['body']}px;
 }}
 QWidget:focus {{
     outline: none;
@@ -296,7 +346,7 @@ QWidget#ScrollViewport {{
 QWidget#AdjustUiWindow {{
     background: {card_fill};
 }}
-QLabel#MutedLabel {{
+QLabel#MutedLabel, QLabel#MutedText {{
     color: {muted_text};
     font-size: {theme.font_sizes['small']}px;
 }}
@@ -306,7 +356,7 @@ QLabel#SkinningTickLabel:disabled {{
 QLabel#StatusLabel {{
     color: {window_text};
     font-size: {theme.font_sizes['body']}px;
-    font-weight: 600;
+    font-weight: 400;
     padding: 2px 0px;
 }}
 QScrollArea#ProgramStatusScroll,
@@ -317,18 +367,18 @@ QWidget#ProgramStatusHost {{
 QLabel#ProgramStatusTitle {{
     color: {card_text};
     font-size: {theme.font_sizes['body']}px;
-    font-weight: 700;
+    font-weight: 600;
 }}
 QLabel#ProgramStatusState {{
     color: {card_text};
-    font-size: {theme.font_sizes['title']}px;
-    font-weight: 700;
+    font-size: {theme.font_sizes['body']}px;
+    font-weight: 600;
 }}
 QLabel#ProgramStatusIndicator {{
     min-width: 14px;
     max-width: 14px;
-    font-size: {theme.font_sizes['title']}px;
-    font-weight: 700;
+    font-size: {theme.font_sizes['body']}px;
+    font-weight: 600;
 }}
 QLabel#ProgramStatusIndicator[statusState="ready"] {{ color: {muted_text}; }}
 QLabel#ProgramStatusIndicator[statusState="working"] {{ color: {accent_fill}; }}
@@ -340,8 +390,8 @@ QLabel#ProgramStatusIndicator[statusState="cancelled"],
 QLabel#ProgramStatusState[statusState="cancelled"] {{ color: {muted_text}; }}
 QLabel#ProgramStatusSectionTitle {{
     color: {card_text};
-    font-size: {theme.font_sizes['small']}px;
-    font-weight: 700;
+    font-size: {theme.font_sizes['body']}px;
+    font-weight: 600;
     border-top: 1px solid {card_border};
     padding-top: 12px;
 }}
@@ -353,7 +403,7 @@ QLabel#ProgramStatusSummary {{
 QLabel#ProgramStatusWarning {{
     color: {warning_fill};
     font-size: {theme.font_sizes['small']}px;
-    font-weight: 700;
+    font-weight: 600;
     padding: 5px 0px;
 }}
 QLabel#ProgramStatusStep,
@@ -369,14 +419,14 @@ QLabel#ProgramStatusStepMarker {{
 QLabel#ProgramStatusStep[stepState="active"],
 QLabel#ProgramStatusStepMarker[stepState="active"] {{
     color: {card_text};
-    font-weight: 700;
+    font-weight: 600;
 }}
 QLabel#ProgramStatusStep[stepState="complete"],
 QLabel#ProgramStatusStepMarker[stepState="complete"] {{ color: {success_fill}; }}
 QLabel#ProgramStatusStep[stepState="failed"],
 QLabel#ProgramStatusStepMarker[stepState="failed"] {{
     color: {danger_fill};
-    font-weight: 700;
+    font-weight: 600;
 }}
 QProgressBar#ProgramStatusProgress {{
     background: {input_fill};
@@ -391,12 +441,12 @@ QProgressBar#ProgramStatusProgress::chunk {{
 }}
 QLabel#TitleLabel {{
     color: {titlebar_text};
-    font-size: {theme.font_sizes['title']}px;
+    font-size: {theme.font_sizes['heading']}px;
     font-weight: 600;
 }}
 QLabel#EditorSectionTitle {{
     color: {window_text};
-    font-size: {theme.font_sizes['body']}px;
+    font-size: {theme.font_sizes['section']}px;
     font-weight: 600;
 }}
 QLineEdit {{
@@ -429,7 +479,10 @@ QPushButton {{
     min-height: {button_height}px;
     min-width: 132px;
     padding: 6px 18px;
-    border: none;
+    border: 1px solid {BUTTON_OUTLINE_COLOR};
+}}
+QToolButton {{
+    border: 1px solid {BUTTON_OUTLINE_COLOR};
 }}
 QPushButton:hover {{
     background: {accent_fill};
@@ -453,7 +506,7 @@ QFrame#TitleBar {{
     border-bottom-right-radius: 0px;
     min-height: {titlebar_height}px;
 }}
-QFrame#TitleBar[maximized=\"true\"] {{
+QFrame#TitleBar[windowExpanded=\"true\"] {{
     border-top-left-radius: 0px;
     border-top-right-radius: 0px;
     border-bottom-left-radius: 0px;
@@ -475,7 +528,7 @@ QFrame#TutorialCallout {{
 QLabel#TutorialCalloutTitle {{
     color: {button_text};
     font-size: {theme.font_sizes['body']}px;
-    font-weight: 700;
+    font-weight: 600;
 }}
 QLabel#TutorialCalloutBody {{
     color: {button_text};
@@ -490,21 +543,22 @@ QPushButton#TutorialCalloutCloseButton {{
     min-height: {window_button_size}px;
     max-height: {window_button_size}px;
     padding: 0px;
-    font-size: 12px;
-    font-weight: 700;
+    font-size: {icon_font_size}px;
+    font-weight: 600;
 }}
 QPushButton#TutorialCalloutCloseButton:hover {{
     background: rgba(255, 255, 255, 0.38);
 }}
 QPushButton#WindowButton {{
     background: transparent;
-    border-radius: {window_button_size // 2}px;
-    min-width: {window_button_size}px;
-    max-width: {window_button_size}px;
-    min-height: {window_button_size}px;
-    max-height: {window_button_size}px;
+    border: none;
+    border-radius: {caption_button_size // 2}px;
+    min-width: {caption_button_size}px;
+    max-width: {caption_button_size}px;
+    min-height: {caption_button_size}px;
+    max-height: {caption_button_size}px;
     padding: 0px;
-    font-size: 12px;
+    font-size: {chrome_icon_size}px;
     font-weight: 600;
 }}
 QPushButton#WindowButton:hover {{
@@ -512,13 +566,14 @@ QPushButton#WindowButton:hover {{
 }}
 QPushButton#CloseWindowButton {{
     background: transparent;
-    border-radius: {window_button_size // 2}px;
-    min-width: {window_button_size}px;
-    max-width: {window_button_size}px;
-    min-height: {window_button_size}px;
-    max-height: {window_button_size}px;
+    border: none;
+    border-radius: {caption_button_size // 2}px;
+    min-width: {caption_button_size}px;
+    max-width: {caption_button_size}px;
+    min-height: {caption_button_size}px;
+    max-height: {caption_button_size}px;
     padding: 0px;
-    font-size: 13px;
+    font-size: {chrome_icon_size}px;
     font-weight: 600;
 }}
 QPushButton#CloseWindowButton:hover {{
@@ -528,7 +583,7 @@ QPushButton#CloseWindowButton:hover {{
 QPushButton#TitlePillButton,
 QPushButton#HelpTitleButton {{
     background: {chrome_control_fill};
-    border-radius: {button_radius}px;
+    border-radius: {min(button_radius, title_pill_height // 2)}px;
     min-width: {title_pill_width}px;
     max-width: {title_pill_width}px;
     min-height: {title_pill_height}px;
@@ -540,7 +595,7 @@ QPushButton#HelpTitleButton {{
 }}
 QPushButton#AdjustUiButton {{
     background: {chrome_control_fill};
-    border-radius: {button_radius}px;
+    border-radius: {min(button_radius, adjust_ui_button_height // 2)}px;
     min-width: {adjust_ui_button_width}px;
     max-width: {adjust_ui_button_width}px;
     min-height: {adjust_ui_button_height}px;
@@ -553,20 +608,26 @@ QPushButton#AdjustUiButton:hover {{
 }}
 QPushButton#GlobalSettingsButton {{
     background: {chrome_control_fill};
+    border: none;
     border-radius: {window_button_size // 2}px;
     min-width: {window_button_size}px;
     max-width: {window_button_size}px;
     min-height: {window_button_size}px;
     max-height: {window_button_size}px;
     padding: 0px;
-    font-size: 13px;
+    font-size: {gear_icon_size}px;
     font-weight: 700;
 }}
 QPushButton#GlobalSettingsButton:hover {{
     background: {chrome_control_hover_fill};
 }}
-QComboBox#TitlePresetCombo {{
+QWidget#TitlePresetHost {{
     background: {chrome_control_fill};
+    border: 1px solid {BUTTON_OUTLINE_COLOR};
+    border-radius: {title_preset_height // 2}px;
+}}
+QComboBox#TitlePresetCombo {{
+    background: transparent;
     color: {input_text};
     border-top-left-radius: {title_preset_height // 2}px;
     border-bottom-left-radius: {title_preset_height // 2}px;
@@ -587,7 +648,7 @@ QComboBox#TitlePresetCombo::drop-down {{
     width: 22px;
 }}
 QToolButton#TitlePresetMenuButton {{
-    background: {chrome_control_fill};
+    background: transparent;
     color: {button_text};
     border-top-left-radius: 0px;
     border-bottom-left-radius: 0px;
@@ -599,6 +660,8 @@ QToolButton#TitlePresetMenuButton {{
     max-height: {title_preset_height}px;
     padding: 0px;
     border: none;
+    font-size: {chrome_icon_size}px;
+    font-weight: 600;
 }}
 QToolButton#TitlePresetMenuButton:hover {{
     background: {chrome_control_hover_fill};
@@ -625,6 +688,7 @@ QCheckBox#PartsFolderButton {{
     min-width: 0px;
     padding: 4px 10px;
     spacing: 7px;
+    border: 1px solid {BUTTON_OUTLINE_COLOR};
 }}
 QCheckBox#PartsFolderButton:hover,
 QCheckBox#PartsFolderButton:checked {{
@@ -660,7 +724,6 @@ QPushButton#WindRefreshButton {{
     color: {button_text};
     border-radius: {button_radius}px;
     min-width: {wind_refresh_button_width}px;
-    max-width: {wind_refresh_button_width}px;
     min-height: {wind_refresh_button_height}px;
     max-height: {wind_refresh_button_height}px;
     padding: 4px 10px;
@@ -675,6 +738,7 @@ QPushButton#WindRefreshButton:disabled {{
 QLabel#WindTotalBones {{
     background: {control_fill};
     color: {button_text};
+    font-size: {theme.font_sizes['small']}px;
     border-radius: {button_radius}px;
     min-height: {wind_refresh_button_height}px;
     padding: 2px 8px;
@@ -706,7 +770,7 @@ QToolButton#SplitActionMenuButton {{
     border-bottom-right-radius: {button_radius}px;
     min-width: 34px;
     padding: 0px;
-    border: none;
+    border: 1px solid {BUTTON_OUTLINE_COLOR};
 }}
 QToolButton#SplitActionMenuButton::menu-indicator {{
     image: none;
@@ -759,7 +823,7 @@ QDoubleSpinBox {{
     border-radius: {panel_radius}px;
     min-height: {input_height}px;
     padding: 6px 12px;
-    border: none;
+    border: 1px solid {BUTTON_OUTLINE_COLOR};
 }}
 QComboBox::drop-down {{
     border: none;
@@ -783,7 +847,7 @@ QComboBox#InteractiveCombo {{
     border-radius: {button_radius}px;
     min-height: {input_height}px;
     padding: 6px 12px;
-    border: none;
+    border: 1px solid {BUTTON_OUTLINE_COLOR};
 }}
 QComboBox#InteractiveCombo:hover,
 QComboBox#InteractiveCombo:focus {{
@@ -808,7 +872,7 @@ QTabBar {{
 QTabBar::tab {{
     background: transparent;
     color: {tab_text};
-    border: none;
+    border: 1px solid {BUTTON_OUTLINE_COLOR};
     min-width: {tab_min_width}px;
     padding: 8px 16px;
     margin-right: 8px;
@@ -943,7 +1007,7 @@ def _theme_from_payload(payload: Mapping[str, Any], *, cls: type[_ThemeT]) -> _T
         name=str(payload["name"]),
         display_name=str(payload["display_name"]),
         colors={str(key): str(value) for key, value in payload["colors"].items()},
-        font_sizes={str(key): int(value) for key, value in payload["font_sizes"].items()},
+        font_sizes={"heading": 20, "section": 16, "code": 12, **{str(key): int(value) for key, value in payload["font_sizes"].items()}},
         radii={str(key): int(value) for key, value in payload["radii"].items()},
         spacing={str(key): int(value) for key, value in payload["spacing"].items()},
         control_heights={str(key): int(value) for key, value in payload["control_heights"].items()},

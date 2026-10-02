@@ -55,13 +55,13 @@ class HelpDeckDialog(QDialog):
         layout.addLayout(topic_row)
 
         self.slide_title_label = QLabel(self)
-        self.slide_title_label.setStyleSheet("font-size: 20px; font-weight: 700;")
+        self.slide_title_label.setProperty("typographyRole", "heading")
+        self.slide_title_label.setWordWrap(True)
         layout.addWidget(self.slide_title_label)
 
         self.slide_body_label = QLabel(self)
         self.slide_body_label.setWordWrap(True)
         self.slide_body_label.setMinimumHeight(220)
-        self.slide_body_label.setStyleSheet("font-size: 13px; line-height: 1.35;")
         layout.addWidget(self.slide_body_label, 1)
 
         footer = QHBoxLayout()
@@ -106,7 +106,7 @@ class SupportDialog(QDialog):
         layout.setSpacing(12)
 
         self.title_label = QLabel("SpeedAssembly", self)
-        self.title_label.setStyleSheet("font-size: 20px; font-weight: 700;")
+        self.title_label.setProperty("typographyRole", "heading")
         layout.addWidget(self.title_label)
 
         self.summary_label = QLabel(

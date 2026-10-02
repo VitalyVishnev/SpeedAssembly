@@ -224,3 +224,53 @@ under `docs/raw/`; Git retains per-change detail.
   technical facts, console references, and stable section anchors.
 - Validation: strict MkDocs build and updated live preview with all ten stable
   section anchors preserved.
+
+## 2026-10-03 - Main-window chrome and Wind count layout
+
+- Stacked Total bones, Refresh, and Advanced Wind Settings across the action
+  column; kept Total bones at Refresh height and verified counts through 262,144.
+- Enlarged caption glyphs, preset dots, and the top settings gear. Preserved
+  the Convert gear size and bounded icon targets by readable runtime font size.
+- Updated corners on every Qt window-state transition. Maximized/FullScreen
+  windows are square; normal windows retain rounded corners. Replaced the
+  read-only QWidget `maximized` styling property with `windowExpanded`.
+- Validation: 29 focused Qt tests; direct screenshots and width checks at
+  runtime scales 0.90, 1.00, 1.25, and 1.75; Quick; Package with 26 packaged
+  contract tests, repeated Detailed Cuts stability smoke, and worker recovery
+  smoke. No smoke bypass. Temporary visual-check files removed.
+
+## 2026-10-03 - Intermediate caption size and shared button outlines
+
+- Reduced caption targets from 48 to 38 px and reduced top gear/preset dots.
+  Caption marks now use geometric drawing: square/cross contours are centered,
+  and the minimize bar matches the square's bottom edge.
+- Added one shared subtle dark 1 px button outline to main/preview actions,
+  tabs, section toggles, and compound presets. Caption controls and the top
+  settings gear remain explicit exceptions. Recorded the rule in AGENTS.md
+  and maintained decisions.
+- Kept left title pills rounded at high runtime scale and made the bundled
+  preset width scale explicitly so Factory Defaults remains readable.
+- Validation: 36 focused Qt checks, including rendered caption alignment and
+  window-state corners; direct normal/hover-fill screenshots and preset text
+  bounds at scales 0.90, 1.00, and 1.75; Quick; full Package with 26 packaged
+  contracts, Detailed Cuts stability and worker recovery smoke. No smoke bypass.
+  Temporary visual-check files removed.
+
+## 2026-10-03 - Half-size caption controls and UI preview cadence
+
+- Halved the three right caption targets and marks, retaining geometric
+  alignment and circular hover fills. Default targets are now 19 px; left
+  controls and both settings gears retain their prior sizes.
+- Recorded the operator's build preference: ordinary UI polish uses tests
+  plus Quick until final visual approval, then one full Package build.
+- Validation: 8 focused Qt checks, direct hover-fill rendering at scales
+  1.00 and 1.75, and Quick. Temporary visual-check files removed.
+
+## 2026-10-03 - Typography audit and review proposal
+
+- Audited inherited Segoe UI, inverted title/body theme sizes, scattered local
+  font rules and text-driven caption geometry. Verified local family/600 weight
+  resolution through QFontInfo.
+- Added typography.md with proposed roles, family rationale, migration bounds
+  and references to Taste, Fluent and Qt. Proposal remains unapproved; runtime
+  styles and builds are unchanged. Rendered a comparison specimen using Qt.

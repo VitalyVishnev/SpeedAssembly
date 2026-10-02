@@ -117,7 +117,7 @@ class ProgramStatusCard(QFrame):
         self.steps_frame.hide()
         layout.addWidget(self.steps_frame)
 
-        summary_title = QLabel("CURRENT SETUP", host)
+        summary_title = QLabel("Current setup", host)
         summary_title.setObjectName("ProgramStatusSectionTitle")
         layout.addWidget(summary_title)
         self.mode_label = self._summary_label(host, "Mode", "Skeletal Assembly")
@@ -343,7 +343,7 @@ class ProgramStatusCard(QFrame):
 
 def _summary_html(title: str, value: str) -> str:
     escaped_value = escape(value).replace("\n", "<br>")
-    return f"<b>{escape(title.upper())}</b><br>{escaped_value}"
+    return f'<span style="font-weight:600">{escape(title)}</span><br>{escaped_value}'
 
 
 def _compact_path(text: str) -> str:

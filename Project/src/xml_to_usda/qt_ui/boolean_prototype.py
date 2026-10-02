@@ -7,6 +7,8 @@ import sys
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
+from .theme import build_typography_stylesheet, load_theme
+from .widget_style import install_widget_style
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -178,8 +180,10 @@ class BooleanPrototypeWindow(QMainWindow):
         source_label: str,
         session: BooleanCutPrototypeSession | None = None,
     ) -> None:
+        install_widget_style()
         super().__init__()
         self.setWindowTitle("Boolean Fracture Prototype")
+        self.setStyleSheet(build_typography_stylesheet(load_theme()))
         self.resize(1280, 820)
         self._model = model
         self._result = result
@@ -212,7 +216,8 @@ class BooleanPrototypeWindow(QMainWindow):
         content = QWidget()
         layout = QVBoxLayout(content)
         title = QLabel("Boolean Fracture Prototype")
-        title.setStyleSheet("font-size: 18px; font-weight: 700;")
+        title.setProperty("typographyRole", "heading")
+        title.setWordWrap(True)
         layout.addWidget(title)
 
         form = QFormLayout()
@@ -268,7 +273,8 @@ class BooleanPrototypeWindow(QMainWindow):
         layout.addWidget(self._regenerate_button)
 
         layer_title = QLabel("Layers")
-        layer_title.setStyleSheet("font-weight: 700; margin-top: 8px;")
+        layer_title.setProperty("typographyRole", "group")
+        layer_title.setStyleSheet("margin-top: 8px;")
         layout.addWidget(layer_title)
         for name, _mesh in self._layers:
             check = QCheckBox(name)
@@ -450,8 +456,10 @@ class BooleanMultiPrototypeWindow(QMainWindow):
         source_label: str,
         session: BooleanMultiPrototypeSession,
     ) -> None:
+        install_widget_style()
         super().__init__()
         self.setWindowTitle("Boolean Multi-Cut Prototype")
+        self.setStyleSheet(build_typography_stylesheet(load_theme()))
         self.resize(1400, 860)
         self._model = model
         self._result = result
@@ -477,7 +485,8 @@ class BooleanMultiPrototypeWindow(QMainWindow):
         content = QWidget()
         layout = QVBoxLayout(content)
         title = QLabel("Boolean Multi-Cut Prototype")
-        title.setStyleSheet("font-size: 18px; font-weight: 700;")
+        title.setProperty("typographyRole", "heading")
+        title.setWordWrap(True)
         layout.addWidget(title)
 
         form = QFormLayout()

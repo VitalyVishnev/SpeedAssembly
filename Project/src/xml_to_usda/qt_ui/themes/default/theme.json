@@ -33,6 +33,9 @@
   },
   "font_sizes": {
     "title": 11,
+    "heading": 20,
+    "section": 16,
+    "code": 12,
     "body": 13,
     "small": 12
   },
@@ -87,9 +90,11 @@
     "noise_scale": 0.5
   },
   "chrome": {
+    "icon_font_size": 12,
     "titlebar_fill": "#DCE5E8",
     "titlebar_text": "#13130F",
-    "window_button_size": 28,
+    "window_button_size": 38,
+    "title_preset_width": 172,
     "title_pill_width": 50,
     "title_pill_height": 10,
     "adjust_ui_button_width": 104,

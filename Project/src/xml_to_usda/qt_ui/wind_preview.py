@@ -140,7 +140,7 @@ class WindPreviewDialog(PreviewShellDialog):
         panel_layout.setContentsMargins(10, 10, 10, 10)
         panel_layout.setSpacing(6)
         title = QLabel("Wind Groups", settings_panel)
-        title.setStyleSheet("font-weight: 700;")
+        title.setProperty("typographyRole", "section")
         panel_layout.addWidget(title)
 
         self.global_scroll = QScrollArea(settings_panel)
@@ -169,7 +169,7 @@ class WindPreviewDialog(PreviewShellDialog):
         set_tooltip("Selected external skeleton file. Use Browse to select and load another file.", self.external_path_edit)
         settings_layout.addWidget(self.external_path_edit)
         self.external_skeleton_combo = QComboBox(settings_panel)
-        self.external_skeleton_combo.setFixedHeight(24)
+        self.external_skeleton_combo.setMinimumHeight(24)
         self.external_skeleton_combo.currentIndexChanged.connect(lambda _index: self._on_external_skeleton_changed())
         set_tooltip("Skeleton prim to load from this USD file. Shown only when the file contains multiple skeletons.", self.external_skeleton_combo)
         settings_layout.addWidget(self.external_skeleton_combo)
@@ -179,7 +179,7 @@ class WindPreviewDialog(PreviewShellDialog):
         external_layout.setSpacing(6)
         self.browse_external_button = QPushButton("Browse", external_row)
         self.browse_external_button.clicked.connect(self.browse_external_path)
-        self.browse_external_button.setFixedHeight(24)
+        self.browse_external_button.setMinimumHeight(24)
         external_layout.addWidget(self.browse_external_button, 1)
         settings_layout.addWidget(external_row)
 
@@ -189,7 +189,7 @@ class WindPreviewDialog(PreviewShellDialog):
         transform_layout.setContentsMargins(6, 5, 6, 5)
         transform_layout.setSpacing(4)
         transform_title = QLabel("Display Transform", self.external_display_transform_frame)
-        transform_title.setStyleSheet("font-weight: 600;")
+        transform_title.setProperty("typographyRole", "group")
         transform_layout.addRow(transform_title)
         self.source_units_combo = _display_combo(DISPLAY_UNITS, self.external_display_transform_frame)
         self.preview_units_combo = _display_combo(DISPLAY_UNITS, self.external_display_transform_frame)
@@ -223,7 +223,7 @@ class WindPreviewDialog(PreviewShellDialog):
         diagnostics_layout.setContentsMargins(6, 5, 6, 5)
         diagnostics_layout.setSpacing(4)
         diagnostics_title = QLabel("FBX Diagnostics", self.external_diagnostics_frame)
-        diagnostics_title.setStyleSheet("font-weight: 600;")
+        diagnostics_title.setProperty("typographyRole", "group")
         diagnostics_layout.addWidget(diagnostics_title)
         self.external_diagnostics_label = QLabel("Load an FBX rig to inspect it.", self.external_diagnostics_frame)
         self.external_diagnostics_label.setWordWrap(True)
@@ -281,7 +281,7 @@ class WindPreviewDialog(PreviewShellDialog):
             edit_mode_label,
             self.edit_mode_combo,
         )
-        self.edit_mode_combo.setFixedHeight(24)
+        self.edit_mode_combo.setMinimumHeight(24)
         settings_layout.addWidget(self.edit_mode_combo)
         edit_actions_row = QWidget(settings_panel)
         edit_actions_layout = QHBoxLayout(edit_actions_row)
@@ -289,7 +289,7 @@ class WindPreviewDialog(PreviewShellDialog):
         edit_actions_layout.setSpacing(6)
         self.clear_group_button = QPushButton("Clear", edit_actions_row)
         self.clear_group_button.clicked.connect(self.clear_active_manual_group)
-        self.clear_group_button.setFixedSize(54, 22)
+        self.clear_group_button.setMinimumSize(54, 22)
         self.clear_group_button.setToolTip("Clears assignments from the active manual group. Undo is available.")
         edit_actions_layout.addWidget(self.clear_group_button, 0)
         edit_actions_layout.addStretch(1)
@@ -312,13 +312,13 @@ class WindPreviewDialog(PreviewShellDialog):
         layers_header_layout.setContentsMargins(0, 0, 0, 0)
         layers_header_layout.setSpacing(5)
         layers_label = QLabel("Layers", layers_header)
-        layers_label.setStyleSheet("font-weight: 700;")
+        layers_label.setProperty("typographyRole", "group")
         self.add_group_button = QPushButton("+", layers_header)
-        self.add_group_button.setFixedSize(24, 21)
+        self.add_group_button.setMinimumSize(24, 21)
         self.add_group_button.clicked.connect(self.add_manual_group)
         self.add_group_button.setToolTip("Adds a new empty manual group at the top of the layer stack.")
         self.remove_group_button = QPushButton("-", layers_header)
-        self.remove_group_button.setFixedSize(24, 21)
+        self.remove_group_button.setMinimumSize(24, 21)
         self.remove_group_button.clicked.connect(self.delete_active_manual_group)
         self.remove_group_button.setToolTip("Deletes the active manual group after confirmation.")
         layers_header_layout.addWidget(layers_label, 0)
@@ -362,11 +362,12 @@ class WindPreviewDialog(PreviewShellDialog):
         export_layout.setSpacing(6)
         self.browse_output_button = QPushButton("Browse", export_row)
         self.browse_output_button.clicked.connect(self.browse_output_path)
-        self.browse_output_button.setFixedHeight(24)
+        self.browse_output_button.setMinimumHeight(24)
         self.browse_output_button.setToolTip("Choose where to write the Dynamic Wind JSON file.")
         self.generate_json_button = QPushButton("Generate JSON", export_row)
         self.generate_json_button.clicked.connect(self.generate_json)
-        self.generate_json_button.setFixedHeight(24)
+        self.generate_json_button.setMinimumHeight(24)
+        self.generate_json_button.setProperty("typographyRole", "emphasis")
         self.generate_json_button.setToolTip("Writes Dynamic Wind JSON from the final visible group stack.")
         export_layout.addWidget(self.browse_output_button, 0)
         export_layout.addWidget(self.generate_json_button, 1)
@@ -783,14 +784,14 @@ class WindPreviewDialog(PreviewShellDialog):
         if group.source_layer_id is None:
             group_control = QLabel(label, card)
             group_control.setObjectName("LayerLabel")
-            group_control.setFixedHeight(22)
+            group_control.setMinimumHeight(22)
             group_control.setStyleSheet(_layer_label_stylesheet())
             group_control.setToolTip(f"{group.name}. XML group; assignments are read-only here.")
         else:
             group_control = QPushButton(label, card)
             group_control.setObjectName("LayerButton")
             group_control.setCheckable(True)
-            group_control.setFixedHeight(22)
+            group_control.setMinimumHeight(22)
             group_control.setStyleSheet(_layer_button_stylesheet())
             group_control.clicked.connect(
                 lambda _checked=False, layer=group.source_layer_id, index=group.final_group_index: self.toggle_manual_group_edit(layer, index)
@@ -844,7 +845,7 @@ class WindPreviewDialog(PreviewShellDialog):
         button = QPushButton(_flattened_group_button_text(group.name, final_group_index, visible_count), card)
         button.setObjectName("LayerButton")
         button.setCheckable(True)
-        button.setFixedHeight(22)
+        button.setMinimumHeight(22)
         button.setStyleSheet(_layer_button_stylesheet())
         button.clicked.connect(lambda _checked=False, layer=group.layer_id, index=final_group_index: self.toggle_manual_group_edit(layer, index))
         button.setToolTip("Manual group. Click to enter Edit; click again to stop editing.")
@@ -1364,16 +1365,16 @@ def _flattened_group_button_text(name: str, final_group_index: int | None, count
 
 def _layer_button_stylesheet() -> str:
     return (
-        "QPushButton#LayerButton { text-align: left; padding: 1px 5px; border-radius: 4px; font-size: 12px; "
+        "QPushButton#LayerButton { text-align: left; padding: 1px 5px; border-radius: 4px; "
         "background: rgba(148, 157, 77, 185); color: #111111; }"
         "QPushButton#LayerButton:hover { background: rgba(166, 175, 91, 220); }"
-        "QPushButton#LayerButton:checked { font-weight: 700; background: rgba(228, 197, 75, 165); }"
+        "QPushButton#LayerButton:checked { background: rgba(228, 197, 75, 165); }"
     )
 
 
 def _layer_label_stylesheet() -> str:
     return (
-        "QLabel#LayerLabel { padding: 1px 5px; border-radius: 4px; font-size: 12px; "
+        "QLabel#LayerLabel { padding: 1px 5px; border-radius: 4px; "
         "background: rgba(148, 157, 77, 185); color: #111111; }"
     )
 
@@ -1436,7 +1437,7 @@ def _external_path_key(path: str) -> str:
 
 def _display_combo(items, parent: QWidget) -> QComboBox:
     combo = QComboBox(parent)
-    combo.setFixedHeight(24)
+    combo.setMinimumHeight(24)
     for label, value in items:
         combo.addItem(label, value)
     return combo
@@ -1549,7 +1550,7 @@ def _add_group_header(layout, parent, title: str) -> None:
     line.setStyleSheet("color: rgba(0, 0, 0, 85);")
     label = QLabel(title, parent)
     label.setObjectName("MutedLabel")
-    label.setStyleSheet("font-weight: 700;")
+    label.setProperty("typographyRole", "group")
     layout.addSpacing(5)
     layout.addWidget(line)
     layout.addSpacing(3)

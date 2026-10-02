@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QSpinBox,
+    QSizePolicy,
     QWidget,
 )
 
@@ -89,22 +90,24 @@ def make_udim_controls(parent: QWidget, *, mode: UdimMode, udim_id: int) -> tupl
         mode_combo.addItem(label, value)
     mode_combo.setToolTip("Controls UDIM handling for this material. Off keeps UVs; stronger modes shift or write a second UV channel.")
     set_combo_value(mode_combo, mode.value)
-    mode_combo.setFixedWidth(UDIM_MODE_COMBO_WIDTH)
+    mode_combo.setMinimumWidth(UDIM_MODE_COMBO_WIDTH)
+    mode_combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
     udim_id_spin = QSpinBox(parent)
     udim_id_spin.setRange(1001, 1999)
     udim_id_spin.setValue(int(udim_id))
     udim_id_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
     udim_id_spin.setAlignment(Qt.AlignmentFlag.AlignRight)
     udim_id_spin.setObjectName("UdimIdSpin")
-    udim_id_spin.setFixedWidth(UDIM_ID_SPIN_WIDTH)
+    udim_id_spin.setMinimumWidth(UDIM_ID_SPIN_WIDTH)
+    udim_id_spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
     udim_id_spin.setToolTip("Target UDIM tile number. Lower uses earlier tiles; higher moves this material to later tiles.")
     return mode_combo, udim_id_spin
 
 
 def make_compact_udim_controls(parent: QWidget, *, mode: UdimMode, udim_id: int) -> tuple[NoWheelComboBox, QSpinBox]:
     mode_combo, udim_id_spin = make_udim_controls(parent, mode=mode, udim_id=udim_id)
-    mode_combo.setFixedWidth(142)
-    udim_id_spin.setFixedWidth(64)
+    mode_combo.setMinimumWidth(142)
+    udim_id_spin.setMinimumWidth(64)
     return mode_combo, udim_id_spin
 
 

@@ -10,6 +10,7 @@ pytest.importorskip("pytestqt")
 pytestmark = pytest.mark.qt
 
 from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QCheckBox, QLabel, QStyle, QStyleOptionSlider
 
 from xml_to_usda.models import (
@@ -135,7 +136,7 @@ def test_program_status_card_updates_source_and_material_summary(qtbot) -> None:
     assert "1 weight" in card.skinning_label.text()
     assert "Instances: 43,263" in card.source_label.text()
     assert card.material_label.toolTip() == "/Game/Tree/M_Bark.M_Bark"
-    assert "<b>MATERIALS</b>" in card.material_label.text()
+    assert 'font-weight:600">Materials</span>' in card.material_label.text()
 
 
 def test_status_card_and_wind_panel_show_bone_totals(qtbot) -> None:
@@ -232,6 +233,16 @@ def test_main_window_uses_one_status_card_and_no_tab_summary_rows(qtbot, tmp_pat
     assert not hasattr(window.geometry_panel, "summary_label")
     assert not hasattr(window.materials_panel, "summary_label")
 
+    window.show()
+    for total in (814, 262_144):
+        window.wind_panel.total_bones_label.setText(f"Total bones: {total:,}")
+        qtbot.waitUntil(
+            lambda: window.wind_panel.total_bones_label.width() >= window.wind_panel.total_bones_label.sizeHint().width()
+        )
+        for widget in (window.wind_panel.total_bones_label, window.wind_panel.refresh_button):
+            assert widget.parentWidget().rect().contains(widget.geometry())
+        assert window.wind_panel.total_bones_label.height() == window.wind_panel.refresh_button.height()
+
 
 def test_scattered_parts_replaces_skinning_slider_contract_and_disables_cluster_ticks_without_clusters(qtbot, tmp_path) -> None:
     window = MainWindow(
@@ -267,18 +278,18 @@ def test_scattered_parts_replaces_skinning_slider_contract_and_disables_cluster_
     assert not panel.skinning_tick_labels.labels[2].isEnabled()
     assert panel.skinning_tick_labels.labels[0].isEnabled()
     assert panel.skinning_tick_labels.labels[3].isEnabled()
-    assert panel.skinning_tick_labels.labels[0].font().bold()
+    assert panel.skinning_tick_labels.labels[0].font().weight() == QFont.Weight.DemiBold
     assert all(label.graphicsEffect() is None for label in panel.skinning_tick_labels.labels)
 
     panel.skinning_quality_slider.setValue(2)
     assert panel.skinning_quality_slider.value() == 1
-    assert panel.skinning_tick_labels.labels[0].font().bold()
-    assert not panel.skinning_tick_labels.labels[1].font().bold()
+    assert panel.skinning_tick_labels.labels[0].font().weight() == QFont.Weight.DemiBold
+    assert panel.skinning_tick_labels.labels[1].font().weight() == QFont.Weight.Normal
 
     panel.skinning_quality_slider.setValue(3)
     assert panel.skinning_quality_slider.value() == 4
-    assert panel.skinning_tick_labels.labels[3].font().bold()
-    assert not panel.skinning_tick_labels.labels[2].font().bold()
+    assert panel.skinning_tick_labels.labels[3].font().weight() == QFont.Weight.DemiBold
+    assert panel.skinning_tick_labels.labels[2].font().weight() == QFont.Weight.Normal
 
 
 def test_skinning_quality_slider_labels_align_and_control_supports_click_and_drag(qtbot, tmp_path) -> None:
@@ -332,7 +343,7 @@ def test_skinning_quality_slider_labels_align_and_control_supports_click_and_dra
     slider.setValue(1)
     qtbot.mouseClick(slider, Qt.MouseButton.LeftButton, pos=QPoint(slider.width() - 2, slider.height() // 2))
     assert slider.value() == 4
-    assert labels.labels[3].font().bold()
+    assert labels.labels[3].font().weight() == QFont.Weight.DemiBold
 
     qtbot.mouseClick(labels.labels[1], Qt.MouseButton.LeftButton)
     assert slider.value() == 2

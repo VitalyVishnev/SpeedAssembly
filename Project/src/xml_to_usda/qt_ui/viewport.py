@@ -19,7 +19,9 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor, QMatrix4x4, QPainter, QPen, QSurfaceFormat, QVector3D, QVector4D
 from PySide6.QtOpenGL import QOpenGLBuffer, QOpenGLShader, QOpenGLShaderProgram, QOpenGLVertexArrayObject
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
-from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QToolButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLayout, QSizePolicy, QToolButton, QWidget
+
+from .theme import BUTTON_OUTLINE_COLOR
 
 from ..models import Color4, GeometryBuffer, Quaternion, Vector3
 from ..viewport_scene import ViewportBoneSegment, ViewportDrawCall, ViewportScene
@@ -1172,8 +1174,8 @@ class MatcapViewport(QOpenGLWidget):
         try:
             painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
             text = "   ".join(self._shortcut_hints)
-            font = painter.font()
-            font.setPointSize(max(8, font.pointSize() - 1))
+            font = self.font()
+            font.setPixelSize(max(1, round(self.fontInfo().pixelSize() * 12 / 13)))
             painter.setFont(font)
             metrics = painter.fontMetrics()
             margin = 10
@@ -1286,11 +1288,13 @@ class ProxyViewport(MatcapViewport):
         self.shaded_button = QToolButton(self.mode_switch)
         self.shaded_button.setText("Shaded")
         self.shaded_button.setObjectName("ProxyShadedButton")
-        self.shaded_button.setFixedSize(62, 22)
+        self.shaded_button.setMinimumSize(62, 22)
+        self.shaded_button.setProperty("typographyRole", "supporting")
         self.silhouette_button = QToolButton(self.mode_switch)
         self.silhouette_button.setText("Silhouette Diff")
         self.silhouette_button.setObjectName("ProxySilhouetteButton")
-        self.silhouette_button.setFixedSize(92, 22)
+        self.silhouette_button.setMinimumSize(92, 22)
+        self.silhouette_button.setProperty("typographyRole", "supporting")
         for button in (self.shaded_button, self.silhouette_button):
             button.setCheckable(True)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1300,15 +1304,18 @@ class ProxyViewport(MatcapViewport):
         self.silhouette_button.setToolTip("Blue: Proxy is smaller. Red: Proxy is larger.")
         self.mode_switch.setStyleSheet(
             "QWidget#ProxyModeSwitch { background: rgba(12, 16, 18, 190); border-radius: 5px; }"
-            "QToolButton { color: rgba(235, 240, 235, 180); background: transparent; border: 0; "
-            "padding: 0; font-size: 11px; }"
+            "QToolButton { color: rgba(235, 240, 235, 180); background: transparent; "
+            f"border: 1px solid {BUTTON_OUTLINE_COLOR}; "
+            "padding: 0; }"
             "QToolButton#ProxyShadedButton { border-top-left-radius: 3px; border-bottom-left-radius: 3px; }"
             "QToolButton#ProxySilhouetteButton { border-top-right-radius: 3px; border-bottom-right-radius: 3px; }"
             "QToolButton:checked { color: white; background: rgba(148, 157, 77, 220); }"
             "QToolButton:disabled { color: rgba(235, 240, 235, 60); }"
         )
         self._sync_mode_buttons()
-        self.mode_switch.setFixedSize(158, 26)
+        mode_layout.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
+        self.mode_switch.ensurePolished()
+        self.mode_switch.adjustSize()
         self.mode_switch.move(8, 8)
 
     @property

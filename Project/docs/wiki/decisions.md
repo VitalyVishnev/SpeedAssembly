@@ -165,9 +165,9 @@ evidence about frozen behavior or as `dist-next/SpeedAssembly.exe`.
 The full `-Package` gate remains mandatory for importer-facing/backend work,
 worker and cache lifecycle, FBX/USD/OpenGL/native boundaries, packaging or
 dependency changes, packaged-only failures, native crashes, and releases.
-Ordinary UI defects iterate in Quick and receive one full Package gate after
-the fix; defects unique to frozen/native execution validate each candidate with
-Package.
+Ordinary UI defects and visual polish iterate in Quick until the operator
+approves the final UI, then receive one full Package gate. Defects unique to
+frozen/native execution validate each candidate with Package.
 
 On Windows, Package builds must not trust the host dependency-search `PATH` for
 ICU. Generate the PyInstaller spec, remove collected `icu*.dll` entries from
@@ -1478,3 +1478,30 @@ Related files:
 - `src/xml_to_usda/qt_ui/operator_state.py`
 - `src/xml_to_usda/qt_ui/window.py`
 - `src/xml_to_usda/settings_service.py`
+
+## Decision: Main-shell chrome follows window state and readable content
+
+Window corners are square whenever Qt reports Maximized or FullScreen and
+rounded only in normal mode. Update chrome on `WindowStateChange`, including
+Windows shortcuts and restored startup state. `windowExpanded` is a separate
+title-bar property because QWidget's built-in `maximized` property is read-only.
+
+Caption marks are drawn geometrically: maximize and close center their visible
+contours, and minimize aligns with the square's lower edge. Default caption
+targets are 19 px (half the shared 38 px chrome size), with caption marks also
+halved; preset dots and the top gear retain their intermediate sizes.
+The Convert gear keeps its original size. Icon hit targets
+must accommodate the glyph even when an older theme override requests a smaller
+button. Wind Total bones, Refresh, and Advanced Wind Settings occupy separate
+full-width rows; Total bones shares Refresh's compact fixed height. Counts and
+button text must fit without clipping at supported runtime scales.
+
+## Decision: Clickable buttons have one subtle outline
+
+Clickable button surfaces use a 1 px dark outline at about 22% opacity, shared
+through `theme.BUTTON_OUTLINE_COLOR`. This applies to main actions, tabs,
+compound preset controls, preview actions, and section toggles. A compound
+control may draw one perimeter on its shared owner instead of separate borders
+on its segments. The main caption controls and top settings gear are explicit
+operator-requested exceptions and remain borderless. Keep this rule in AGENTS.md
+and shared styles when adding controls.

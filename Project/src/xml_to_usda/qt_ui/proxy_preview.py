@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSlider,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -99,7 +100,7 @@ class ProxyPreviewDialog(PreviewShellDialog):
         settings_shell_layout.addWidget(self.global_scroll)
 
         title = QLabel("Proxy Mesh", settings_panel)
-        title.setStyleSheet("font-weight: 700;")
+        title.setProperty("typographyRole", "section")
         settings_layout.addWidget(title)
 
         _add_group_header(settings_layout, settings_panel, "Simplification")
@@ -290,11 +291,12 @@ class ProxyPreviewDialog(PreviewShellDialog):
         export_layout.setSpacing(6)
         self.browse_output_button = QPushButton("Browse", export_row)
         self.browse_output_button.clicked.connect(self.browse_output_path)
-        self.browse_output_button.setFixedHeight(24)
+        self.browse_output_button.setMinimumHeight(24)
         self.browse_output_button.setToolTip("Choose where to write the Proxy USDA file.")
         self.generate_proxy_button = QPushButton("Generate Proxy", export_row)
         self.generate_proxy_button.clicked.connect(self.generate_proxy)
-        self.generate_proxy_button.setFixedHeight(24)
+        self.generate_proxy_button.setMinimumHeight(24)
+        self.generate_proxy_button.setProperty("typographyRole", "emphasis")
         self.generate_proxy_button.setToolTip("Writes the current Proxy Mesh and collision to USDA.")
         export_layout.addWidget(self.browse_output_button, 0)
         export_layout.addWidget(self.generate_proxy_button, 1)
@@ -471,7 +473,8 @@ def _build_int_slider_row(
     spin.setKeyboardTracking(False)
     spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
     digit_width = spin.fontMetrics().horizontalAdvance(str(maximum))
-    spin.setFixedWidth(max(92, digit_width + 24))
+    spin.setMinimumWidth(max(92, digit_width + 24))
+    spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
 
     slider.valueChanged.connect(lambda raw: _sync_int_spin(spin, raw, step))
     spin.editingFinished.connect(lambda: _sync_int_slider(slider, spin.value()))
@@ -484,7 +487,7 @@ def _add_group_header(layout, parent, title: str) -> None:
     line.setFrameShadow(QFrame.Shadow.Plain)
     label = QLabel(title, parent)
     label.setObjectName("MutedLabel")
-    label.setStyleSheet("font-weight: 700;")
+    label.setProperty("typographyRole", "group")
     layout.addSpacing(6)
     layout.addWidget(line)
     layout.addSpacing(4)
@@ -513,7 +516,8 @@ def _build_float_slider_row(
     spin.setValue(value)
     spin.setKeyboardTracking(False)
     spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-    spin.setFixedWidth(70)
+    spin.setMinimumWidth(70)
+    spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
 
     slider.valueChanged.connect(lambda raw: _sync_float_spin(spin, raw, scale))
     spin.editingFinished.connect(lambda: _sync_float_slider(slider, spin.value(), scale))
@@ -534,7 +538,8 @@ def _build_branch_prune_slider_row(parent, *, value: float) -> tuple[QSlider, QD
     spin.setValue(max(0.0, min(1.0, value)))
     spin.setKeyboardTracking(False)
     spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-    spin.setFixedWidth(82)
+    spin.setMinimumWidth(82)
+    spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
 
     slider.valueChanged.connect(lambda raw: _sync_branch_prune_spin(spin, raw))
     spin.editingFinished.connect(lambda: _sync_branch_prune_slider(slider, spin.value()))
