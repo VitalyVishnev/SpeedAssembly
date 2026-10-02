@@ -3591,6 +3591,8 @@ class MainWindow(QWidget):
     def closeEvent(self, event) -> None:  # type: ignore[override]
         self._source_refresh_timer.stop()
         self._settings_save_timer.stop()
+        if self._fracture_preview_dialog is not None:
+            self._fracture_preview_dialog.close()
         if self._proxy_preview_dialog is not None:
             self._proxy_preview_dialog.close()
         if self._part_preview_dialog is not None:

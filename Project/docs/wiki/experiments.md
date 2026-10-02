@@ -3,6 +3,21 @@
 Rejected, superseded, and partially validated work. Current contracts live in
 [decisions.md](decisions.md); active gaps live in [known-bugs.md](known-bugs.md).
 
+## Reparenting a populated viewport dialog into the main shell
+
+Status: Rejected; reproduced with Qt 6.11 on Windows.
+
+`configure_preview_dialog` previously called `dialog.setParent(owner, Window)`
+after constructing its QOpenGLWidget. The owner emitted Hide, surface destruction,
+HWND changes, surface creation, and Show, changing from RasterSurface to
+OpenGLSurface. This was window recreation, not a process crash. Creating the
+preview's native window independently and assigning a QWindow transient owner
+keeps the shell raster surface and HWND intact while preserving WindowModal
+blocking and reopening. Do not hide/show the shell to work around this lifecycle.
+
+Qt documents native-window recreation on dynamic OpenGL widget insertion in
+[QOpenGLWidget limitations](https://doc.qt.io/qt-6/qopenglwidget.html#limitations-and-other-considerations).
+
 ## Future external rig conversion mode
 
 Status: Deferred, Unverified.

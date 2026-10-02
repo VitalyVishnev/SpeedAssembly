@@ -86,11 +86,16 @@ class PreviewShellDialog(QDialog):
 
 
 def configure_preview_dialog(dialog: QDialog, *, owner: QWidget, stylesheet: str) -> None:
-    dialog.setParent(owner, dialog.windowFlags() | Qt.WindowType.Window)
+    # QWidget reparenting propagates the viewport's texture composition to the
+    # visible shell, recreating its native window. Native ownership avoids this.
+    dialog.setParent(None, dialog.windowFlags() | Qt.WindowType.Window)
+    dialog.winId()
+    owner.winId()
+    dialog.windowHandle().setTransientParent(owner.windowHandle())
     dialog.setWindowModality(Qt.WindowModality.WindowModal)
-    dialog.setModal(True)
     dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
     owner.destroyed.connect(dialog.close)
+    owner.destroyed.connect(dialog.deleteLater)
     dialog.setStyleSheet(stylesheet)
 
 

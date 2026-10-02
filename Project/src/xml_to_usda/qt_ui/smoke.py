@@ -308,6 +308,8 @@ def _run_fracture_preview_smoke(context: SmokeContext) -> dict[str, Any]:
 def _run_fracture_preview_interactive_smoke(context: SmokeContext) -> dict[str, Any]:
     window = _create_smoke_window(context)
     try:
+        original_handle = int(window.winId())
+        original_surface = window.windowHandle().surfaceType()
         input_path, output_path = _resolve_input_output(context, suffix=".usda")
         window.source_input.setText(str(input_path))
         window.output_input.setText(str(output_path))
@@ -322,6 +324,9 @@ def _run_fracture_preview_interactive_smoke(context: SmokeContext) -> dict[str, 
         _assert(dialog is not None, "fracture dialog exists")
         _assert(dialog.isModal(), "fracture dialog is modal")
         _assert(window.isVisible(), "main window remains visible")
+        _assert(int(window.winId()) == original_handle, "main native window remains intact")
+        _assert(window.windowHandle().surfaceType() == original_surface, "main surface type remains unchanged")
+        _assert(dialog.windowHandle().transientParent() is window.windowHandle(), "preview retains native owner")
         dialog.piece_count_spin.setValue(26)
         dialog.piece_count_spin.editingFinished.emit()
         _wait_until(
@@ -388,6 +393,8 @@ def _run_fracture_preview_interactive_smoke(context: SmokeContext) -> dict[str, 
                 "initial.result",
                 "dialog.modal",
                 "window.visible",
+                "window.surface_stable",
+                "dialog.native_owner",
                 "branch_count.update",
                 "height_bias.update",
                 "caps.update",

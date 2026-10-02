@@ -274,3 +274,19 @@ under `docs/raw/`; Git retains per-change detail.
 - Added typography.md with proposed roles, family rationale, migration bounds
   and references to Taste, Fluent and Qt. Proposal remains unapproved; runtime
   styles and builds are unchanged. Rendered a comparison specimen using Qt.
+
+## 2026-10-03 - Keep the main window visible when opening viewport previews
+
+- Reproduced Hide/Show, native surface destruction and HWND replacement when
+  reparenting a populated OpenGL dialog to the visible raster shell in Qt 6.11.
+  This was window recreation, not a process crash.
+- Replaced QWidget parenting with native QWindow transient ownership in the
+  shared preview shell. WindowModal blocking, close/reopen and owner cleanup
+  remain explicit; main-window exit now also closes Fracture Preview.
+- Extended the existing ownership regression with native handle, surface,
+  Hide-event, normal/maximized, modal-scope and reopen checks. Packaged
+  interactive smoke now checks stable main HWND/surface and native ownership.
+- Validation: 19 focused Qt checks; all four real preview dialog classes in
+  normal/maximized main windows; full Package, 26 packaged contracts, repeated
+  Detailed Cuts stability smoke and worker recovery smoke. No smoke bypass.
+  Temporary diagnostic scripts removed.

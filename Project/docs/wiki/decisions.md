@@ -684,6 +684,14 @@ All operational viewport previews use Qt `WindowModal` ownership through the
 shared preview shell. A preview stays above the SpeedAssembly main window and
 blocks its controls until the preview is closed.
 
+Construct viewport dialogs with `parent=None` and bind native ownership with
+`QWindow.setTransientParent(owner.windowHandle())`. Do not reparent a populated
+OpenGL dialog into the shell's QWidget hierarchy. On Qt 6.11 that propagates
+texture composition to the visible raster shell, recreates its native window,
+and emits Hide/Show. The main HWND and surface type must remain stable across
+preview creation, show, close, and reopen. The shell closes all previews on exit;
+owner destruction also closes and schedules deletion of detached dialogs.
+
 Preview dialogs must not use popup dismissal behavior or be configured
 individually as non-modal. The modality is scoped to this application window;
 it does not force the preview above unrelated desktop applications.
