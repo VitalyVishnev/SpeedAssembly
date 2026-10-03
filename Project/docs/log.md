@@ -313,3 +313,9 @@ under `docs/raw/`; Git retains per-change detail.
 - Validation: 619 Core/Integration checks; source rendering at scales 0.90,
   1.00, and 1.75; editable metadata resolves to Python-normalized `0.5.0b0`.
   Full Package and frozen-runtime evidence will be recorded after the build.
+
+- The first Package passed 27 packaged contracts, repeated Detailed Cuts, and
+  worker recovery. Additional high-risk smoke on the extracted ZIP found stale
+  scenarios: automatic Wind groups were counted through manual-layer buttons,
+  and conversion omitted required Base Mesh material assignments. Updated only
+  smoke setup/assertions to the existing contracts; the release needs rebuilding.

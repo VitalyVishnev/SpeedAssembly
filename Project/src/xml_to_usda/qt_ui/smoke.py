@@ -234,7 +234,7 @@ def _run_wind_preview_smoke(context: SmokeContext) -> dict[str, Any]:
         dialog.group_count_slider.setValue(2)
         _pump_events(25)
         _assert(dialog.viewport.has_mesh(), "wind auto hierarchy keeps viewport mesh")
-        _assert(len(dialog._group_buttons) == 2, "wind auto hierarchy uses integer group count")
+        _assert(len(dialog._base_dynamic_wind().simulation_groups) == 2, "wind auto hierarchy uses integer group count")
         trace_text = _trace_text(context)
         for milestone in (
             '"job":"wind_preview"',
@@ -258,7 +258,7 @@ def _run_wind_preview_smoke(context: SmokeContext) -> dict[str, Any]:
             ),
             data={
                 "group_count": len(dialog.current_preview.groups),
-                "auto_group_count": len(dialog._group_buttons),
+                "auto_group_count": len(dialog._base_dynamic_wind().simulation_groups),
                 "bone_vertices": dialog.viewport.bone_vertex_count,
                 "vertex_count": dialog.viewport.vertex_count,
             },
@@ -661,6 +661,14 @@ def _run_conversion_worker_smoke(context: SmokeContext) -> dict[str, Any]:
         window.source_input.setText(str(input_path))
         window.output_input.setText(str(output_path))
         window.ASYNC_CONVERSION_THRESHOLD_BYTES = 0
+        window._reload_input_dependent_tabs()
+        _wait_until(
+            lambda: not window._background_jobs.source_discovery_running,
+            timeout_ms=context.timeout_ms,
+            label="conversion source discovery",
+        )
+        for row in window.materials_panel._base_rows:
+            row.path_edit.setText("/Game/Smoke/M_Smoke.M_Smoke")
         window.run_conversion()
         _wait_until(
             lambda: "Wrote USDA to" in window.status_label.text(),
