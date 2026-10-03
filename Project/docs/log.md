@@ -319,3 +319,21 @@ under `docs/raw/`; Git retains per-change detail.
   scenarios: automatic Wind groups were counted through manual-layer buttons,
   and conversion omitted required Base Mesh material assignments. Updated only
   smoke setup/assertions to the existing contracts; the release needs rebuilding.
+
+## 2026-10-03 - SpeedAssembly v0.5.0-beta draft verified
+
+- Built the final Package from clean source commit
+  `c10131f0fce0862cb0cf725bc28a7e4f55158b03`, tagged `v0.5.0-beta`.
+  Windows FileVersion/ProductVersion are `0.5.0-beta`; the prerelease flag is set.
+- Validation: 619 Core/Integration checks, 27 packaged contracts, repeated
+  Detailed Cuts stability, and injected worker recovery. The extracted public
+  ZIP passed all eight high-risk scenarios with fail-on-retry, including
+  version/About and embedded diagnostics, without a local build_info sidecar.
+  No smoke bypass. Evidence: `dist-next/smoke/` and
+  `tmp/release-0.5.0-beta-c10131f/high_risk_report.json`.
+- Created an unpublished GitHub Pre-release draft with four bullet-only notes:
+  https://github.com/VitalyVishnev/SpeedAssembly/releases/tag/untagged-b27b23b4772796cf342c
+  Downloaded its ZIP and verified SHA-256 matches the validated local artifact:
+  `cfe1a5d809bc6c2d4aa22f8db7abd98ac503f28f5484e85b9b679f9772747c26`.
+  The operator reviews and publishes manually. This later evidence entry does
+  not change the tagged build's source commit or its artifacts.
