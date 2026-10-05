@@ -561,7 +561,7 @@ class FracturePreviewDialog(PreviewShellDialog):
         )
         self.reset_cuts_button = QPushButton("Reset Cuts", settings_panel)
         self.reset_cuts_button.clicked.connect(self._reset_manual_cuts)
-        self.reset_cuts_button.setToolTip("Clears manual cuts. Fewer cuts lets auto-fill decide; more manual cuts pins split sites.")
+        self.reset_cuts_button.setToolTip("Clears all manual cuts and their undo history, then updates the fracture preview.")
         viewport_layout.addWidget(self.show_bones_check)
         viewport_layout.addWidget(self.hide_repeated_parts_check)
         automatic_cuts_layout.addWidget(self.stump_piece_check)

@@ -73,7 +73,7 @@ def make_path_edit(
     edit = QLineEdit(text, parent)
     edit.setObjectName("PathInput")
     edit.setPlaceholderText(placeholder)
-    edit.setToolTip("Unreal asset path assigned to this slot. Empty keeps the source/default; filled forces that asset.")
+    edit.setToolTip("Unreal asset path assigned to this slot.")
     if max_width is not None:
         edit.setMaximumWidth(int(max_width))
     return edit
@@ -88,7 +88,10 @@ def make_udim_controls(parent: QWidget, *, mode: UdimMode, udim_id: int) -> tupl
         ("Write UV1 Offset", UdimMode.WRITE_SECONDARY_UV_OFFSET.value),
     ):
         mode_combo.addItem(label, value)
-    mode_combo.setToolTip("Controls UDIM handling for this material. Off keeps UVs; stronger modes shift or write a second UV channel.")
+    mode_combo.setToolTip(
+        "UDIM Off keeps UVs unchanged. Shift UV moves the primary UVs to the selected tile. "
+        "Write UV1 Offset stores the tile offset in a second UV channel."
+    )
     set_combo_value(mode_combo, mode.value)
     mode_combo.setMinimumWidth(UDIM_MODE_COMBO_WIDTH)
     mode_combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
@@ -162,7 +165,7 @@ class MaterialUdimRow(QWidget):
         make_udims = make_compact_udim_controls if self._stacked_udim else make_udim_controls
         self.udim_mode_combo, self.udim_id_spin = make_udims(self, mode=resolved.udim_mode, udim_id=resolved.udim_id)
         set_tooltip(
-            f"Material override for {label}. Empty keeps generated/source material; filled forces this Unreal material.",
+            f"Unreal material asset path assigned to {label}.",
             label_cell,
             self.label,
             self.path_edit,

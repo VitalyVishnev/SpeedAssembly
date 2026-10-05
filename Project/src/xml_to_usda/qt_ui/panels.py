@@ -920,12 +920,12 @@ class GeometryTabPanel(QWidget):
         self.preview_proxy_button = QPushButton("Preview Proxy Mesh", actions_card)
         self.preview_proxy_button.clicked.connect(self._on_preview_proxy_requested)
         self.preview_proxy_button.setToolTip(
-            "Opens proxy settings and preview. Lower proxy values make cheaper meshes; higher values preserve more shape."
+            "Opens Proxy Mesh settings and preview."
         )
         self.preview_fracture_button = QPushButton("Preview Fracturing", actions_card)
         self.preview_fracture_button.clicked.connect(self._on_preview_fracture_requested)
         self.preview_fracture_button.setToolTip(
-            "Opens fracture settings and preview. Auto Branches detaches natural branch bases; stump and stems are separate."
+            "Opens Fracturing settings and preview."
         )
         actions_layout.addWidget(actions_title, 0, 0)
         actions_layout.addWidget(self.preview_proxy_button, 1, 0)
@@ -996,7 +996,7 @@ class GeometryTabPanel(QWidget):
             browse_button.clicked.connect(lambda _checked=False, edit=fbx_edit: self._browse_fbx(edit))
             preview_button = QPushButton("Preview/Edit", card)
             browse_button.setToolTip("Pick an FBX replacement file for this prototype.")
-            preview_button.setToolTip("Preview and edit this prototype. Lower simplification exports less detail; higher keeps more.")
+            preview_button.setToolTip("Opens this prototype's preview and editing settings.")
 
             source_mode_label = QLabel("Source Mode", card)
             set_tooltip(mode_combo.toolTip(), source_mode_label)
@@ -1592,6 +1592,11 @@ class MaterialsTabPanel(QWidget):
                 parent=card,
             )
             row.valueChanged.connect(self._on_change)
+            set_tooltip(
+                "Unreal material assigned to this Base Mesh slot. An asset path is required for conversion.",
+                row.label,
+                row.path_edit,
+            )
             self._base_rows.append(
                 BaseMaterialRowWidgets(
                     source_id=spec.source_id,
@@ -1687,12 +1692,12 @@ class MaterialsTabPanel(QWidget):
                 mode_combo,
             )
             set_tooltip(
-                "Material used when Single Material is active. Empty keeps generated material; filled forces one asset.",
+                "Unreal material applied to the whole prototype. An asset path is required in Single Material mode.",
                 single_label,
                 single_edit,
             )
             set_tooltip(
-                "UDIM mode for the single material. Off keeps UVs; higher modes shift or write UV1 offsets.",
+                single_udim_mode_combo.toolTip(),
                 single_udim_label,
                 single_udim_mode_combo,
             )
@@ -1701,12 +1706,13 @@ class MaterialsTabPanel(QWidget):
                 single_udim_id_cell,
             )
             set_tooltip(
-                "Material for black vertex-color faces. Empty keeps generated material; filled forces that bucket.",
+                "Unreal material for black vertex-color faces. Both Black and White paths are required for FBX, "
+                "or for XML when either split material path or any UDIM setting is assigned.",
                 black_label,
                 black_edit,
             )
             set_tooltip(
-                "UDIM mode for black faces. Off keeps UVs; higher modes shift or write UV1 offsets.",
+                black_udim_mode_combo.toolTip(),
                 black_udim_label,
                 black_udim_mode_combo,
             )
@@ -1715,12 +1721,13 @@ class MaterialsTabPanel(QWidget):
                 black_udim_id_cell,
             )
             set_tooltip(
-                "Material for white vertex-color faces. Empty keeps generated material; filled forces that bucket.",
+                "Unreal material for white vertex-color faces. Both Black and White paths are required for FBX, "
+                "or for XML when either split material path or any UDIM setting is assigned.",
                 white_label,
                 white_edit,
             )
             set_tooltip(
-                "UDIM mode for white faces. Off keeps UVs; higher modes shift or write UV1 offsets.",
+                white_udim_mode_combo.toolTip(),
                 white_udim_label,
                 white_udim_mode_combo,
             )
@@ -1899,13 +1906,9 @@ class MaterialsTabPanel(QWidget):
         )
         udim_mode_combo, udim_id_spin = make_udim_controls(widget, mode=slot_spec.udim_mode, udim_id=slot_spec.udim_id)
         set_tooltip(
-            "Material override for this FBX slot. Empty may reuse another filled slot; filled forces this slot.",
+            "Unreal material assigned to this FBX slot. An asset path is required for every used slot in Material Slots mode.",
             label,
             edit,
-        )
-        set_tooltip(
-            "UDIM handling for this FBX slot. Off keeps UVs; higher modes shift or write UV1 offsets.",
-            udim_mode_combo,
         )
         set_tooltip(
             "UDIM tile for this FBX slot. Lower uses earlier tiles; higher uses later tiles.",

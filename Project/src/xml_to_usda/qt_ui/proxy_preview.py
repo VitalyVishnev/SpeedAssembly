@@ -203,7 +203,8 @@ class ProxyPreviewDialog(PreviewShellDialog):
         self.collision_check = QCheckBox("Generate Collision", settings_panel)
         self.collision_check.setChecked(bool(settings.collision.enabled))
         set_tooltip(
-            "On exports one trunk collision primitive; off exports only the visible Proxy Mesh.",
+            "Adds trunk collision to the Proxy Mesh export. One Primitive per Stem controls whether stems share a primitive. "
+            "Off exports only the visible Proxy Mesh.",
             self.collision_check,
         )
         settings_layout.addWidget(self.collision_check)
@@ -214,7 +215,7 @@ class ProxyPreviewDialog(PreviewShellDialog):
         self.collision_type_combo.addItem("Capsule", ProxyCollisionMode.CAPSULE.value)
         self.collision_type_combo.setCurrentIndex(self.collision_type_combo.findData(settings.collision.mode.value))
         set_tooltip(
-            "Box exports one UBX primitive; Capsule exports one UCP primitive along the fitted trunk axis.",
+            "Chooses Box or Capsule collision. Box uses UBX primitives; Capsule uses UCP primitives along fitted trunk axes.",
             collision_type_label,
             self.collision_type_combo,
         )

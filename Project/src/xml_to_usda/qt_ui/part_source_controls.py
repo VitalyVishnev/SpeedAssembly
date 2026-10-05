@@ -185,6 +185,18 @@ class PartSourceMaterialEditor(QWidget):
             stacked_udim=True,
             parent=self.material_frame,
         )
+        set_tooltip(
+            "Unreal material applied to the whole prototype. An asset path is required in Single Material mode.",
+            self.single_row.label,
+            self.single_row.path_edit,
+        )
+        for row, color in ((self.black_row, "black"), (self.white_row, "white")):
+            set_tooltip(
+                f"Unreal material for {color} vertex-color faces. Both Black and White paths are required for FBX, "
+                "or for XML when either split material path or any UDIM setting is assigned.",
+                row.label,
+                row.path_edit,
+            )
         material_layout.addWidget(self.single_row)
         material_layout.addWidget(self.black_row)
         material_layout.addWidget(self.white_row)
@@ -204,7 +216,8 @@ class PartSourceMaterialEditor(QWidget):
         self.display_mode_combo.addItem("Material Colors", PartPreviewDisplayMode.MATERIAL_COLORS.value)
         set_combo_value(self.display_mode_combo, value.display_mode.value)
         set_tooltip(
-            "Preview coloring mode only. Default shows shaded mesh; higher debug modes reveal vertex/material buckets.",
+            "Preview coloring only. Default shows the shaded mesh; Vertex Colors shows source vertex colors; "
+            "Material Colors distinguishes material assignments.",
             display_label,
             self.display_mode_combo,
         )
@@ -423,6 +436,11 @@ class PartSourceMaterialEditor(QWidget):
                 ),
                 stacked_udim=True,
                 parent=self.slots_frame,
+            )
+            set_tooltip(
+                "Unreal material assigned to this FBX slot. An asset path is required for every used slot in Material Slots mode.",
+                row.label,
+                row.path_edit,
             )
             row.valueChanged.connect(lambda: self.valueChanged.emit())
             self.slots_layout.addWidget(row)

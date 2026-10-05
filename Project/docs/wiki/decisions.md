@@ -680,9 +680,17 @@ Related files:
 
 The main PySide6 UI exposes export-tree parameters for wind, prototype source assignment, material overrides, Proxy Mesh, and Fracture Preview. Dense ungrouped lists made it hard to tell whether a value affected source loading, preview mesh quality, fracture planning, viewport-only display, or collision output.
 
-Every operator-facing export parameter in the main UI should have a short English tooltip. Sliders and numeric fields should state what the value controls and what lower versus higher values do. Dense parameter panels should use functional groups with a subtle divider and compact group label.
+Every operator-facing export parameter in the main UI should have a short English tooltip. Each tooltip must describe the control it belongs to unless the operator explicitly requests otherwise. Button tooltips explain the button's action and result, including the output destination when relevant. Parameter tooltips explain what that parameter controls; lower/higher effects belong only to sliders and numeric inputs where changing the value has that meaning. Checkboxes and combos describe their actual states or choices. Do not attach unrelated parameter advice to an action button. Dense parameter panels should use functional groups with a subtle divider and compact group label.
 
 The operator should not need code knowledge to distinguish preview-only controls from exported geometry contracts.
+
+Material-path tooltips must match conversion validation. Base Mesh and Single
+Material paths are required. FBX Vertex Color Split requires both Black and
+White; XML split overrides require both when either split path or any UDIM
+setting is assigned. Material Slots requires paths for the used slots. Shared
+material controls must not promise a fallback that their caller rejects.
+Proxy collision help must account for One Primitive per Stem rather than
+promise a single primitive for every configuration.
 
 Do not add new main-UI export sliders, checkboxes, combos, path fields, or material/UDIM controls without a concise tooltip. Keep UI-settings controls separate from this rule unless they affect exported tree data.
 

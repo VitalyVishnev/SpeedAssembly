@@ -337,3 +337,27 @@ under `docs/raw/`; Git retains per-change detail.
   `cfe1a5d809bc6c2d4aa22f8db7abd98ac503f28f5484e85b9b679f9772747c26`.
   The operator reviews and publishes manually. This later evidence entry does
   not change the tagged build's source commit or its artifacts.
+
+## 2026-10-05 - Generate Wind JSON tooltip
+
+- Replaced unrelated lower/higher wind advice with the button's action: create
+  bone group assignments and per-group wind settings for Unreal Dynamic Wind,
+  saved beside Output USDA.
+- Clarified the existing tooltip decision and root agent rules: describe the
+  owning control; lower/higher guidance belongs only to suitable numeric inputs,
+  unless the operator explicitly requests different text.
+- Validation: 16 existing wind-service and Qt theme checks passed; `-Quick`
+  completed. Source-backed preview only; no Package build.
+
+## 2026-10-05 - UI tooltip audit corrections
+
+- Removed unrelated parameter advice from Proxy/Fracturing/Prototype preview
+  and Reset Cuts buttons. Display and UDIM now explain their named choices;
+  material panels reuse the shared UDIM tooltip.
+- Removed false empty-path fallback promises. Base Mesh, Single Material,
+  Black/White, and FBX slot help now reflects conversion validation; shared
+  material rows keep neutral text where the caller owns the policy.
+- Proxy collision help now covers shared and per-stem primitives. Updated the
+  maintained tooltip decision with material/collision constraints.
+- Validation: 42 existing Qt and conversion-service checks passed; `-Quick`
+  completed. Source-backed preview only; no Package build.

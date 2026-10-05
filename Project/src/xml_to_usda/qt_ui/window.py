@@ -395,7 +395,7 @@ class TitleBar(QFrame):
 
         self._layout = QHBoxLayout(self)
 
-        self.help_button = QPushButton("How to use", self)
+        self.help_button = QPushButton("Documentation", self)
         self.help_button.setObjectName("HelpTitleButton")
         self.help_button.clicked.connect(window.open_help_dialog)
         self._layout.addWidget(self.help_button, 0, Qt.AlignmentFlag.AlignLeft)
@@ -1153,7 +1153,10 @@ class MainWindow(QWidget):
         self.generate_button = QPushButton("Generate\nWind JSON", self)
         self.generate_button.setObjectName("GenerateWindButton")
         self.generate_button.clicked.connect(self.run_generate_wind_json)
-        self.generate_button.setToolTip("Writes Dynamic Wind JSON. Lower wind values calm motion; higher values bend groups more.")
+        self.generate_button.setToolTip(
+            "Creates a JSON file with bone group assignments and per-group wind settings for import into Unreal's Dynamic Wind. "
+            "Saves it next to the Output USDA file."
+        )
 
         self.generate_action_frame = QFrame(self)
         self.generate_action_frame.setObjectName("SplitActionFrame")
