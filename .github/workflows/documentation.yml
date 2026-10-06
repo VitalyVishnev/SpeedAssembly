@@ -6,8 +6,10 @@ on:
       - master
     paths:
       - "Project/docs/user/**"
+      - "Project/docs/overrides/**"
       - "Project/mkdocs.yml"
       - "Project/requirements-docs.txt"
+      - "Project/scripts/check_documentation.py"
       - ".github/workflows/documentation.yml"
   workflow_dispatch:
 
@@ -45,6 +47,9 @@ jobs:
 
       - name: Build documentation
         run: python -m mkdocs build --strict
+
+      - name: Check bilingual documentation
+        run: python scripts/check_documentation.py
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v4

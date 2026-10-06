@@ -7,10 +7,13 @@ edit_uri: edit/master/Project/docs/user/
 docs_dir: docs/user
 site_dir: site
 strict: true
+watch:
+  - docs/overrides
 
 theme:
   name: material
   language: en
+  custom_dir: docs/overrides
   font: false
   palette:
     - scheme: speedassembly
@@ -54,6 +57,32 @@ nav:
 
 plugins:
   - search
+  - i18n:
+      docs_structure: suffix
+      fallback_to_default: true
+      languages:
+        - locale: en
+          default: true
+          name: ENG
+          build: true
+        - locale: ru
+          name: RU
+          build: true
+          site_name: Документация SpeedAssembly
+          site_description: Руководство пользователя SpeedAssembly для работы с растительностью.
+          nav_translations:
+            Overview: Обзор
+            What is SpeedAssembly?: Что такое SpeedAssembly?
+            Pipeline overview: Обзор pipeline
+            Basic workflow: Основной workflow
+            Prepare Unreal Engine: Подготовка Unreal Engine
+            Prepare SpeedTree: Подготовка SpeedTree
+            Convert in SpeedAssembly: Конвертация в SpeedAssembly
+            Import into Unreal Engine: Импорт в Unreal Engine
+            Wiki: Вики
+            XML, USD, USDA, and JSON: XML, USD, USDA и JSON
+            Choosing what to instance: Выбор геометрии для инстансинга
+            How Dynamic Wind works: Как работает Dynamic Wind
 
 markdown_extensions:
   - abbr
@@ -76,6 +105,7 @@ exclude_docs: |
   _drafts/
   _templates/
   troubleshooting/faq.md
+  troubleshooting/faq.ru.md
 
 copyright: Copyright &copy; 2026 Vitaly Vishnev
 

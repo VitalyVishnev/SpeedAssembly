@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% if i18n_page_locale == "ru" and i18n_file_locale != "ru" %}
+    <aside class="admonition note" lang="ru">
+      <p class="admonition-title">Перевод пока не готов</p>
+      <p>Эта страница пока доступна на английском. ENG откроет оригинал.</p>
+    </aside>
+    <div lang="en">{{ super() }}</div>
+  {% else %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}

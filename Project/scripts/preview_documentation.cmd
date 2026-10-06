@@ -10,7 +10,7 @@ if not exist "%PYTHON_EXE%" (
     exit /b 1
 )
 
-"%PYTHON_EXE%" -c "import mkdocs" >nul 2>&1
+"%PYTHON_EXE%" -c "import mkdocs, mkdocs_static_i18n" >nul 2>&1
 if errorlevel 1 (
     echo Documentation dependencies are not installed.
     echo Run: "%PYTHON_EXE%" -m pip install -r "%REPO_ROOT%\requirements-docs.txt"

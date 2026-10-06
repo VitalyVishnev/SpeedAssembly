@@ -214,6 +214,34 @@ Related files:
 - `docs/user/`
 - `scripts/preview_documentation.cmd`
 
+## Decision: English originals own public documentation
+
+Write all new or updated user documentation in English first. Unsuffixed
+`docs/user/**/*.md` files are authoritative; sibling `.ru.md` files are
+translations only. Resolve content disagreements against the English original.
+Review an existing translation when its original changes. Preserve technical
+identifiers, UI labels, explicit anchor IDs, and logical link/image paths.
+
+ENG is the site default at the existing URLs; RU lives under `/ru/`.
+Pinned `mkdocs-static-i18n` handles locale builds, navigation, contextual
+language links, assets, and search. Small Material overrides provide visible
+ENG/RU header links and mark missing translations with a Russian notice while
+showing the English content. No browser-language detection or saved preference
+redirects the English entry point. Engineering wiki/raw sources stay private.
+
+The operator approved the language-switching preview on 2026-10-07 and
+requested translations of all user articles. Russian copy uses familiar 3D
+artist language: retain workflow, pipeline, pivot, viewport, skinning, bounds,
+distance fields, shadow proxy, and exact UI labels in English. General
+descriptions may adapt naturally; procedures, structure, limits, numbers,
+formulas, and technical identifiers stay close to the English source.
+Describe Fracturing as creating static pieces for destruction in Unreal.
+Describe Proxy Mesh as a simplified companion mesh rather than through formal
+"computational cost" wording. Hidden FAQ translations stay excluded.
+Validate changes with strict MkDocs build,
+`scripts/check_documentation.py`, and browser review. The Pages workflow tracks
+theme overrides and runs the same generated-site check before upload.
+
 ## Decision: Tests are organized by system contract and execution boundary
 
 Core tests protect fast deterministic invariants with synthetic fixtures.

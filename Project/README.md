@@ -56,12 +56,32 @@ operator reviews and publishes manually; published tags/assets are preserved.
 ```powershell
 python -m pip install -r requirements-docs.txt
 python -m mkdocs build --strict
+python scripts/check_documentation.py
 .\scripts\preview_documentation.cmd
 ```
 
 The [engineering wiki](docs/wiki/index.md) records architecture, contracts,
 known limitations, and validation evidence. Public documentation lives in
 `docs/user/`; GitHub Actions publishes it independently of the application.
+
+Write public user documentation in English first. Unsuffixed `.md` files are
+the authoritative originals; sibling `.ru.md` files are Russian translations
+only. Keep technical identifiers, UI labels, explicit anchors, and link/image
+paths aligned with the original. When an English page changes, review its
+translation in the same change.
+
+Russian guides use the language of 3D artists. Keep familiar terms such as
+workflow, pipeline, pivot, viewport, skinning, bounds, distance fields, and
+shadow proxy in English, alongside exact UI labels. Adapt general descriptions
+naturally; keep procedures, structure, constraints, numbers, and formulas close
+to the English source. Describe what an artist creates or does, without formal
+phrases such as "computational cost" where "simplified mesh" says enough.
+
+ENG is the default at the existing site URLs. RU uses `/ru/`; the header
+switches languages without changing the article. Pages without a Russian
+translation show English content with a Russian notice. To add a translation,
+create `article.ru.md` beside `article.md`; navigation continues to reference
+`article.md`. Theme overrides live in `docs/overrides/`, outside public sources.
 
 Paths in engineering documents are relative to `Project/` unless stated
 otherwise. Historical notes in `docs/raw/` may describe the former layout.

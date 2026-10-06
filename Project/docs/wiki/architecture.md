@@ -55,6 +55,10 @@ Main systems:
   repository root; application and documentation paths are inside `Project/`.
   Documentation dependencies
   stay outside the application runtime and release package.
+  `mkdocs-static-i18n` builds English originals at the existing URLs and Russian
+  `.ru.md` translations at `/ru/`. `docs/overrides/` owns the shared ENG/RU links
+  and untranslated-page notice; `scripts/check_documentation.py` checks the
+  generated routing, fallback, image, search, and publication-isolation contract.
 
 Proxy Preview prepares a compact `ProxyCollisionSource` with only primary-stem
 joints and their owned base-mesh points during render-mesh generation. The

@@ -48,6 +48,36 @@ body {
   box-shadow: 0 0.2rem 1rem rgb(19 19 15 / 18%);
 }
 
+.sa-language {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.15rem;
+  margin-inline: 0.4rem;
+}
+
+.sa-language a {
+  border: 1px solid rgb(0 0 0 / 25%);
+  border-radius: 0.2rem;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.65rem;
+  line-height: 1;
+}
+
+.sa-language a[aria-current],
+.sa-language a:hover,
+.sa-language a:focus-visible {
+  background: rgb(0 0 0 / 16%);
+}
+
+.sa-language a[aria-current] {
+  font-weight: 700;
+}
+
+.sa-language a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
 .md-main__inner {
   margin-top: 1.2rem;
 }

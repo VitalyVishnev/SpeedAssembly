@@ -4,6 +4,15 @@ Current defects, fail-loud limits, and validation gaps only. Resolved crash
 history lives in [Encountered Crashes](encountered-crashes.md); rejected fixes
 and benchmark detail live in [Experiments](experiments.md).
 
+## Pending publication: bilingual public documentation
+
+All 12 registered public articles have Russian `.ru.md` translations as of
+2026-10-07; the hidden FAQ also has a translation and stays excluded. The
+operator approved the switcher and requested artist-oriented Russian copy.
+These changes await public deployment. Review existing translations when their
+English originals change, then publish the reviewed site and verify ENG/RU
+routes on GitHub Pages.
+
 ## Pending publication: UDIM contextual help page
 
 On 2026-10-06, the public site home and `workflows/proxy-mesh/` returned HTTP

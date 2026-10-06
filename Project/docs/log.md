@@ -501,3 +501,33 @@ under `docs/raw/`; Git retains per-change detail.
   the Pages workflow builds Project/docs/user after documentation pushes to
   master. Prepared public documentation and screenshots for the next commit;
   no commit, push, or deployment performed in this task.
+
+## 2026-10-07 - English originals and Russian documentation preview
+
+- Established English-first public authoring; Russian sibling `.ru.md` files
+  are translations only. Recorded the rule in developer setup, decisions,
+  and local agent guidance.
+- Added pinned MkDocs static i18n builds, visible ENG/RU header links, Russian
+  navigation, and a notice on untranslated articles. English URLs remain the
+  default; RU uses `/ru/`. Translated only the home page for operator review.
+- Added a generated-site contract check to Pages CI and watched isolated theme
+  overrides in local preview. The preview helper detects the new dependency.
+- Validation: strict build and all 24 generated-page checks passed. Browser
+  review confirmed same-article switching, fallback notices, responsive header,
+  and Russian search for `коллизий`. Public deployment remains pending.
+
+## 2026-10-07 - Complete Russian user documentation
+
+- Translated all 12 registered public pages and the still-hidden FAQ after
+  operator approval of the switcher. Reworked home-page descriptions: simpler
+  Proxy Mesh wording and Fracturing as creating static pieces for destruction.
+- Kept familiar 3D terms and UI labels in English; adapted overview prose
+  naturally while preserving technical instructions, settings, and caveats.
+  Recorded this style in developer setup, decisions, and local agent guidance.
+- Preserved all section anchors, link/image targets, inline identifiers, and
+  executable code. Extended the existing site check to protect translation
+  anchors. Kept both FAQ sources excluded from publication and search.
+- Validation: strict build and 24-page bilingual check passed; all 12 Russian
+  articles are indexed and none use the untranslated-page fallback. Browser
+  review checked home copy and the translated Proxy parameter table. English
+  article sources are unchanged; public publication remains pending.
