@@ -13,6 +13,21 @@ These changes await public deployment. Review existing translations when their
 English originals change, then publish the reviewed site and verify ENG/RU
 routes on GitHub Pages.
 
+## Pending publication: documentation navigation optimization
+
+Instant article navigation and cancellable hover/focus preloading passed local
+browser and strict-build checks on 2026-10-07. Deployment was not requested.
+Publish the reviewed documentation, then check actual Pages cache behavior and
+ENG/RU navigation. Local timing results are recorded in Experiments.
+
+Material 9.7.7 also probes `<article>/sitemap.xml` for contextual head alternate
+links, producing two non-blocking 404 requests on article changes. This existed
+before the optimization; `integrations/alternate/index.ts` in the installed
+bundle source map identifies the caller. Deferred to preserve correct per-page
+`hreflang` metadata without patching vendor code. Check an upstream fix before
+changing alternate-link semantics. These requests do not fetch article bodies
+or prevent cache-backed transitions.
+
 ## Pending publication: UDIM contextual help page
 
 On 2026-10-06, the public site home and `workflows/proxy-mesh/` returned HTTP

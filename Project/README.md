@@ -60,6 +60,21 @@ python scripts/check_documentation.py
 .\scripts\preview_documentation.cmd
 ```
 
+After navigation changes, run the optional browser contract with Playwright
+available to Node.js and a browser installed. Set `DOCS_BROWSER_CHANNEL=msedge`
+to use an existing Microsoft Edge installation on Windows.
+
+```powershell
+node scripts/check_documentation_navigation.cjs site check 240
+node scripts/check_documentation_navigation.cjs site click 120
+node scripts/check_documentation_navigation.cjs site hover 120
+```
+
+The last two commands measure seven cold-target transitions with a 120 ms
+server delay and report click-to-article-paint medians. `hover` gives preloading
+500 ms before clicking. Run against a separately saved baseline build to
+compare changes; these measurements do not represent deployed Pages latency.
+
 The [engineering wiki](docs/wiki/index.md) records architecture, contracts,
 known limitations, and validation evidence. Public documentation lives in
 `docs/user/`; GitHub Actions publishes it independently of the application.

@@ -1,6 +1,6 @@
 <nav class="sa-language" aria-label="{{ lang.t('select.language') }}">
   {% for alt in config.extra.alternate %}
-    <a href="{{ alt.link | url }}" hreflang="{{ alt.lang }}" lang="{{ alt.lang }}"
+    <a href="{{ alt.link | url }}" hreflang="{{ alt.lang }}" lang="{{ alt.lang }}" target="_self"
        {% if alt.lang == config.theme.language %}aria-current="true"{% endif %}>
       {{ alt.name }}
     </a>

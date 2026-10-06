@@ -59,6 +59,11 @@ Main systems:
   `.ru.md` translations at `/ru/`. `docs/overrides/` owns the shared ENG/RU links
   and untranslated-page notice; `scripts/check_documentation.py` checks the
   generated routing, fallback, image, search, and publication-isolation contract.
+  Material owns instant article navigation. `docs/user/assets/javascripts/navigation.js`
+  adds cancellable hover/focus HTTP-cache warming and keeps the retained language
+  switcher current; language changes reload the translated shell. The optional
+  `scripts/check_documentation_navigation.cjs` browser gate exercises navigation
+  and measures click-to-article paint under controlled server latency.
 
 Proxy Preview prepares a compact `ProxyCollisionSource` with only primary-stem
 joints and their owned base-mesh points during render-mesh generation. The

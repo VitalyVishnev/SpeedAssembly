@@ -295,3 +295,41 @@ below are relative to `Engine/`.
 
 Paths abbreviated as `DynamicWind/Private` or `DynamicWind/Public` above are
 inside `Plugins/Experimental/DynamicWind/Source/`.
+
+## Documentation article navigation
+
+Status: Locally browser-validated on 2026-10-07; public deployment pending.
+
+Compared the unchanged static build with Material instant navigation plus
+cancellable hover/focus preloading. Headless Microsoft Edge, 1440x1000 viewport,
+seven fresh browser contexts per mode; home and shared assets loaded first,
+target article initially cold. Local HTTP server adds 120 ms per uncached
+successful request and uses `Cache-Control: public, max-age=600`. Target:
+home to `wiki/xml-usd-usda-json/`. Timing starts at the click event and ends at
+the second animation frame after the target article heading appears. Images
+finishing later are outside this metric. No CPU or bandwidth throttle.
+
+| Mode | Median | Range |
+| --- | --- | --- |
+| Original full navigation | 200.7 ms | 187.6-206.9 ms |
+| Instant navigation, no hover | 153.1 ms | 150.3-161.9 ms |
+| Instant navigation, 500 ms hover before click | 29.5 ms | 26.4-33.0 ms |
+
+The improvements are 23.7% without hover and 85.3% after preloading. Warm
+transitions made no article network request and preserved `performance.timeOrigin`.
+These are controlled local results, not measurements of GitHub Pages or a
+promise of instantaneous image loading. The retained browser script accepts
+any baseline/candidate site directory; see `Project/README.md` commands.
+
+The navigation gate also passed with 240 ms server latency: rapid pointer
+sweeps request only the final article; obsolete active requests abort; a click
+during a fetch reuses its HTTP cache fill; history, anchors, theme, contextual
+ENG/RU switching and cross-language search stay correct. A failed prefetch does
+not block real navigation. Touch hover and Save-Data issue no speculative work.
+Strict MkDocs and the 24-page bilingual contract pass independently.
+
+Rejected: Material 9.7.7 built-in `navigation.instant.prefetch`. Its shipped
+source map shows a 25 ms debounce followed by `distinct` and `exhaustMap`.
+A new hover is discarded while the previous prefetch is active; this does not
+meet the latest-hover requirement. Reuse native navigation and HTTP caching,
+with only a small abortable fetch scheduler owned by this project.

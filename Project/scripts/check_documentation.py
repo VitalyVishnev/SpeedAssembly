@@ -9,6 +9,7 @@ from urllib.parse import urljoin, urlsplit
 class PageLinks(HTMLParser):
     def __init__(self, content: str) -> None:
         super().__init__()
+        self.locale = None
         self.languages: dict[str, dict[str, str]] = {}
         self.images: list[str] = []
         self.anchors: set[str] = set()
@@ -16,6 +17,8 @@ class PageLinks(HTMLParser):
 
     def handle_starttag(self, tag, attrs) -> None:
         attrs = dict(attrs)
+        if tag == "html":
+            self.locale = attrs.get("lang")
         if attrs.get("id"):
             self.anchors.add(attrs["id"])
         if tag == "a" and attrs.get("hreflang") in ("en", "ru"):
@@ -37,10 +40,12 @@ def main() -> None:
         url = base + relative
         content = page.read_text(encoding="utf-8")
         links = PageLinks(content)
+        assert links.locale == ("ru" if russian else "en"), page
         assert set(links.languages) == {"en", "ru"}, page
         for locale, attrs in links.languages.items():
             locale_path = ("ru/" if locale == "ru" else "") + article
             expected = base + locale_path
+            assert attrs.get("target") == "_self", "Locale changes must reload the translated shell."
             assert urljoin(url, attrs["href"]) == expected, (page, locale)
             assert (site / locale_path / "index.html").is_file(), (page, locale)
             assert (attrs.get("aria-current") == "true") == (locale == ("ru" if russian else "en")), page

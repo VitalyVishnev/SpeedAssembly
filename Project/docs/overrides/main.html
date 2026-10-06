@@ -1,5 +1,15 @@
 {% extends "base.html" %}
 
+{% block site_meta %}
+  {# Use i18n's resolved files, including English fallbacks, for both head and header. #}
+  {% if page and page.file.alternates %}
+    {% for alt in config.extra.alternate %}
+      {% set _ = alt.update({"link": page.file.alternates[alt.lang].url}) %}
+    {% endfor %}
+  {% endif %}
+  {{ super() }}
+{% endblock %}
+
 {% block content %}
   {% if i18n_page_locale == "ru" and i18n_file_locale != "ru" %}
     <aside class="admonition note" lang="ru">

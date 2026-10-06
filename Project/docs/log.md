@@ -531,3 +531,17 @@ under `docs/raw/`; Git retains per-change detail.
   articles are indexed and none use the untranslated-page fallback. Browser
   review checked home copy and the translated Proxy parameter table. English
   article sources are unchanged; public publication remains pending.
+
+## 2026-10-07 - Measure and optimize documentation navigation
+
+- Enabled Material instant navigation and added 100 ms cancellable hover/focus
+  preloading using the browser HTTP cache. The last hovered link wins; touch
+  and Save-Data skip speculative work. No new runtime dependencies.
+- Kept contextual ENG/RU links current after navigation; locale transitions
+  reload translated controls, including transitions from bilingual search.
+- Added an optional browser contract/benchmark and extended static locale checks.
+  Strict build and 24-page checks passed. Browser checks passed at 240 ms server
+  latency, including cancellation, in-flight click reuse and failed prefetch.
+- Seven-run medians with 120 ms server latency: baseline 200.7 ms, instant
+  navigation 153.1 ms, hover-preloaded 29.5 ms to article paint. Recorded limits
+  and upstream alternate-sitemap probes. Public deployment remains pending.

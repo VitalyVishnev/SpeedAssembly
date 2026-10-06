@@ -140,6 +140,25 @@ its text does not depend on hover to be rasterized clearly. Validate site-only
 style changes with `mkdocs build --strict` and browser checks, independently
 from Qt executable packaging.
 
+Article transitions use Material's `navigation.instant` and its delayed progress
+indicator. Keep navigation, history and scroll handling in the theme. The small
+`docs/user/assets/javascripts/navigation.js` preloads only article HTML through
+the browser HTTP cache after 100 ms of mouse hover or keyboard focus. It cancels
+obsolete speculative work, keeps at most one speculative request, and lets a
+fetch of the clicked article finish. Touch hover and Save-Data skip preloading.
+Do not add an application cache or eagerly fetch article images.
+
+Material 9.7.7's built-in prefetch uses `exhaustMap`, which drops new hover
+requests while the first one loads. It is deliberately disabled. The i18n
+plugin's automatic Material configuration assumes full page loads; disable that
+integration and explicitly configure theme language and ENG/RU entries instead.
+`overrides/main.html` resolves alternate destinations from i18n's file map,
+and `navigation.js` refreshes retained header links from the new page's head.
+Locale transitions, including search results, reload the shell so `html.lang`,
+search labels and theme translations remain correct. Static links work without
+JavaScript. Run the bilingual build check and optional browser navigation gate
+when changing this contract; see developer setup and Experiments for timings.
+
 Contextual application help will target explicit stable anchors such as
 `workflows/proxy-mesh/#density-resolution`; heading copy may change without
 removing an anchor already used by a released application.

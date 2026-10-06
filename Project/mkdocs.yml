@@ -27,6 +27,8 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
   features:
+    - navigation.instant
+    - navigation.instant.progress
     - navigation.sections
     - navigation.path
     - navigation.indexes
@@ -60,6 +62,8 @@ plugins:
   - i18n:
       docs_structure: suffix
       fallback_to_default: true
+      # Our contextual switcher is refreshed after Material's instant navigation.
+      reconfigure_material: false
       languages:
         - locale: en
           default: true
@@ -68,6 +72,8 @@ plugins:
         - locale: ru
           name: RU
           build: true
+          theme:
+            language: ru
           site_name: Документация SpeedAssembly
           site_description: Руководство пользователя SpeedAssembly для работы с растительностью.
           nav_translations:
@@ -100,6 +106,9 @@ markdown_extensions:
 extra_css:
   - assets/stylesheets/extra.css
 
+extra_javascript:
+  - assets/javascripts/navigation.js
+
 exclude_docs: |
   .obsidian/
   _drafts/
@@ -111,3 +120,10 @@ copyright: Copyright &copy; 2026 Vitaly Vishnev
 
 extra:
   generator: false
+  alternate:
+    - name: ENG
+      lang: en
+      link: /SpeedAssembly/
+    - name: RU
+      lang: ru
+      link: /SpeedAssembly/ru/
