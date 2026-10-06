@@ -271,6 +271,57 @@ Evidence labels:
   Alder skeleton contracts; execute three fresh 581 MB BigBranch reads with
   equal checksums.
 
+### CR-016 - Dense Unreal PCG without a Dynamic Wind Transform Provider
+
+- Reported: 2026-10-06; affected version UE 5.7, exact build/date unspecified.
+- Status/evidence: Operator-confirmed diagnosis/workaround; supplied assert
+  matches the source-verified allocation/check mechanism. Not rerun here.
+- Signature: assertion in Renderer/Private/Skinning/SkinningSceneExtension.h:
+  `HierarchyBufferOffset <= (1 << 22) && TransformBufferOffset <= (1 << 22) &&
+  (ObjectSpaceBufferOffset == INDEX_NONE || ObjectSpaceBufferOffset <= (1 << 22))
+  && MaxInfluenceCount <= (1 << 6)`.
+- Boundary: Unreal Editor during PCG generation, not a converter process.
+- Context/workaround: assigning Wind_TransformProvider before generating trees
+  resolved the operator's test. Configure it for the documented wind path.
+- Cause: missing provider disables skeleton batching in UE 5.7
+  Engine/Private/SkinningSceneExtensionProxy.cpp:136-156. Renderer/Private/
+  Skinning/SkinningSceneExtension.cpp:838-949 shares buffer offsets by Skeleton
+  GUID/provider only with batching; otherwise allocations are per component.
+  FHeaderData::Pack checks the 22-bit offsets. Dense per-component allocations
+  exhausted the range in the operator-confirmed case. The composite assert
+  does not identify which offset failed; that detail remains Unverified.
+- Geometric instancing remains enabled; this is loss of skeleton-buffer sharing,
+  not proof that geometry stops instancing or Skeleton Assets become unique.
+- Evidence: `evidence/ue57-skinning-offset-analysis.png` preserves the supplied
+  prior analysis. Its x16 transform estimate is not a general no-provider
+  formula: that UE 5.7 branch uses UniqueAnimationCount=1, so transform storage
+  is bones*2 per component; ObjectSpace storage separately uses 7/10 floats per
+  bone. Exact runtime offsets/counts cannot be recovered from this assert alone.
+- Regression gate: preserve the failing 5.7 PCG scene and validate the same
+  density with batching/provider enabled. Repeat in 5.8 before claiming its
+  crash behavior is fixed or unchanged. 5.8 runtime status remains Unverified.
+- UE 5.8 source audit: null provider still disables batching; AllocSpaceForPrimitive
+  still allocates per-component buffers outside the batch reuse branch. Offsets
+  remain 22-bit and Validate() still asserts their range. The maximum is corrected
+  to 2^22-1; batch keys now include bNanite and transform-slot bookkeeping changed.
+  These changes do not eliminate the source-level overflow risk. This is source
+  confirmation of risk, not a new runtime reproduction.
+
+### CR-017 - Streamed Global Foliage Actor in Unreal World Partition
+
+- Reported: 2026-10-06; occurrence date and engine build unspecified.
+- Status/evidence: Operator confirms separate prior testing; workaround known
+  from those tests. No stack or reproduction captured in this thread.
+- Signature: Unreal crash associated with streaming the global wind Blueprint;
+  no crash stack or precise stream-in/out event supplied.
+- Boundary: Unreal Editor/world streaming, outside SpeedAssembly.
+- Context/workaround: operator recommends disabling Is Spatially Loaded on
+  BP_GlobalFoliageActor_UE5. World Partition can still unload an actor through
+  disabled Data Layers, so spatial-loading alone is not an unconditional pin.
+- Cause: Unverified; no subsystem/provider lifetime fault established.
+- Regression gate: capture stack and reproduce stream-in/out with a provider-
+  backed plant, comparing spatial loading on/off and Data Layer state.
+
 ## System rules derived from the incidents
 
 1. Keep heavy/native geometry in crash-isolated workers; when a native backend

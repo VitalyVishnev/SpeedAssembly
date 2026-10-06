@@ -224,8 +224,12 @@ allocator holes affect offsets. UE 5.7's check also admits the unrepresentable
 
 This is separate from the wind dispatch limit
 `sum(ceil(BatchBones / 64) * 8)` in DynamicWindProvider.cpp. Do not present the
-dispatch-derived roughly 524k count as the complete scene budget. No runtime
-overflow reproduction or link to the author's earlier bug has been established.
+dispatch-derived roughly 524k count as the complete scene budget. On 2026-10-06,
+the operator supplied the UE 5.7 composite offset-limit assertion and confirmed
+that restoring batching with Wind_TransformProvider fixed the dense PCG crash.
+See CR-016. That supports the allocation-overflow mechanism but does not identify
+which offset failed or make x16 the no-provider formula: the null-provider
+branch sets one animation variant; object-space data is a separate allocation.
 
 SpeedTree preparation guidance uses author-recommended bone counts, not a
 guaranteed engine limit. The author also confirmed that Leaf Flip does not

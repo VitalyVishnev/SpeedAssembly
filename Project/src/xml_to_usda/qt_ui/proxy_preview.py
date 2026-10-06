@@ -46,6 +46,7 @@ from ..proxy_mesh_service import (
 )
 from .preview_shell import PreviewShellDialog, apply_compact_preview_panel_style
 from .material_controls import set_tooltip
+from .documentation import DocumentationButton
 from .viewport import ProxyViewport
 
 
@@ -101,7 +102,10 @@ class ProxyPreviewDialog(PreviewShellDialog):
 
         title = QLabel("Proxy Mesh", settings_panel)
         title.setProperty("typographyRole", "section")
-        settings_layout.addWidget(title)
+        title_row = QHBoxLayout()
+        title_row.addWidget(title, 1)
+        title_row.addWidget(DocumentationButton("proxy_mesh", settings_panel))
+        settings_layout.addLayout(title_row)
 
         _add_group_header(settings_layout, settings_panel, "Simplification")
         self.polycount_slider, self.polycount_spin = _build_int_slider_row(

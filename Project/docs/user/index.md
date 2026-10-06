@@ -4,7 +4,7 @@
 
 Convert SpeedTree Raw XML into Unreal-ready USDA while preserving the tree skeleton, unique base geometry, repeated parts, materials, and optional companion workflows.
 
-[Start with your first conversion](getting-started/quick-start.md){ .md-button .md-button--primary }
+[Follow the basic workflow](workflows/prepare-unreal.md){ .md-button .md-button--primary }
 
 </div>
 
@@ -32,4 +32,3 @@ SpeedAssembly is built specifically for the Unreal Engine 5.7–5.8 vegetation p
     Preview and export root-pivoted destructible tree pieces with optional collision geometry.
 
 </div>
-

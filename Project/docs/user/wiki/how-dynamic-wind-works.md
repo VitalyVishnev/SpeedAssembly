@@ -7,7 +7,7 @@ description: How Unreal's Dynamic Wind turns skeletons and wind groups into GPU 
 
 Dynamic Wind generates procedural bone motion for skeletal Nanite vegetation. The skeleton defines where the plant can bend, wind groups define its response, and the GPU calculates the transforms used to render it. Animation clips, an Animation Blueprint, and a Physics Asset are not required for this wind path.
 
-This overview follows the local Unreal Engine 5.8 source, whose build version is 5.8.2. Dynamic Wind is Experimental. Project setup is covered in [Prepare Unreal Engine](../workflows/prepare-unreal.md).
+Dynamic Wind is Experimental. Project setup is covered in [Prepare Unreal Engine](../workflows/prepare-unreal.md).
 
 ## From asset to moving plant {#pipeline}
 

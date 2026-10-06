@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import math
+import sys
 from typing import Callable
 
 import numpy as np
@@ -19,7 +20,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor, QMatrix4x4, QPainter, QPen, QSurfaceFormat, QVector3D, QVector4D
 from PySide6.QtOpenGL import QOpenGLBuffer, QOpenGLShader, QOpenGLShaderProgram, QOpenGLVertexArrayObject
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
-from PySide6.QtWidgets import QHBoxLayout, QLayout, QSizePolicy, QToolButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QLayout, QSizePolicy, QToolButton, QVBoxLayout, QWidget
 
 from .theme import BUTTON_OUTLINE_COLOR
 
@@ -225,6 +226,16 @@ class MatcapViewport(QOpenGLWidget):
         self.on_bone_clicked = lambda _joint_token, _modifiers: None
         self._bone_pick_requires_control = True
         self._shortcut_hints: tuple[str, ...] = ()
+        self.shortcut_hints_label = QLabel(self)
+        self.shortcut_hints_label.setProperty("typographyRole", "supporting")
+        self.shortcut_hints_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.shortcut_hints_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.shortcut_hints_label.setStyleSheet("color: rgba(200, 200, 200, 145); background: transparent;")
+        hints_layout = QVBoxLayout(self)
+        hints_layout.setContentsMargins(10, 10, 10, 10)
+        hints_layout.addWidget(self.shortcut_hints_label, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
+        hints_layout.addStretch(1)
+        self._update_shortcut_hints()
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
@@ -334,6 +345,7 @@ class MatcapViewport(QOpenGLWidget):
             show_bones=self._show_bones,
             bone_segment_count=len(self._bone_segments_for_overlay()),
         )
+        self._update_shortcut_hints()
         self.update()
 
     def set_selected_cut_tokens(self, joint_tokens: tuple[str, ...]) -> None:
@@ -344,13 +356,15 @@ class MatcapViewport(QOpenGLWidget):
 
     def set_bone_pick_requires_control(self, value: bool) -> None:
         self._bone_pick_requires_control = bool(value)
+        self._update_shortcut_hints()
         if self._bone_pick_requires_control and self._hover_cut_token is not None:
             self._hover_cut_token = None
             self.update()
 
     def set_shortcut_hints(self, hints: tuple[str, ...]) -> None:
+        """Set mode-specific hints alongside the shared camera controls."""
         self._shortcut_hints = tuple(str(hint).strip() for hint in hints if str(hint).strip())
-        self.update()
+        self._update_shortcut_hints()
 
     def set_bone_segments(self, bone_segments: tuple[ViewportBoneSegment, ...]) -> None:
         if self._scene is None:
@@ -606,7 +620,6 @@ class MatcapViewport(QOpenGLWidget):
             _finish_ghost_mesh_draw(functions)
         if self._show_bones:
             self._paint_bone_overlay()
-        self._paint_shortcut_hints()
 
     def _matcap_exploded_view_strength(self) -> float:
         return self._exploded_view_strength
@@ -697,7 +710,11 @@ class MatcapViewport(QOpenGLWidget):
         super().keyReleaseEvent(event)
 
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
-        if event.key() == Qt.Key.Key_F and not event.isAutoRepeat():
+        # Windows Scan 1 identifies physical F regardless of the active layout.
+        # https://learn.microsoft.com/en-us/windows/win32/inputdev/about-keyboard-input
+        scan_code = event.nativeScanCode() if sys.platform == "win32" else 0
+        frame_key = scan_code == 0x21 if scan_code else event.key() == Qt.Key.Key_F
+        if frame_key and not event.isAutoRepeat():
             self.frame_camera()
             event.accept()
             return
@@ -1167,26 +1184,16 @@ class MatcapViewport(QOpenGLWidget):
         finally:
             painter.end()
 
-    def _paint_shortcut_hints(self) -> None:
-        if not self._shortcut_hints:
-            return
-        painter = QPainter(self)
-        try:
-            painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
-            text = "   ".join(self._shortcut_hints)
-            font = self.font()
-            font.setPixelSize(max(1, round(self.fontInfo().pixelSize() * 12 / 13)))
-            painter.setFont(font)
-            metrics = painter.fontMetrics()
-            margin = 10
-            width = metrics.horizontalAdvance(text)
-            height = metrics.height()
-            x = max(margin, self.width() - width - margin)
-            y = max(margin + height, self.height() - margin)
-            painter.setPen(QPen(QColor(235, 240, 235, 145), 1.0))
-            painter.drawText(x, y, text)
-        finally:
-            painter.end()
+    def _update_shortcut_hints(self) -> None:
+        orbit = "Left drag on background: Orbit" if self._show_bones and not self._bone_pick_requires_control else "Left drag: Orbit"
+        self.shortcut_hints_label.setText("\n".join((
+            orbit,
+            "Middle drag: Pan",
+            "Mouse wheel: Zoom",
+            "Double left-click: Focus point",
+            "F: Frame all",
+            *self._shortcut_hints,
+        )))
 
     def _exploded_bone_segment_points(self, segment: ViewportBoneSegment) -> tuple[Vector3, Vector3]:
         offset = _scale_vector3(segment.explode_direction, self._exploded_view_strength)

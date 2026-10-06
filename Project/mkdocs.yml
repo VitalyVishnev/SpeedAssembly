@@ -38,22 +38,19 @@ nav:
   - Overview:
       - index.md
       - What is SpeedAssembly?: overview/what-is-speedassembly.md
+      - Pipeline overview: concepts/pipeline-overview.md
   - Basic workflow:
       - Prepare Unreal Engine: workflows/prepare-unreal.md
       - Prepare SpeedTree: workflows/prepare-speedtree.md
-  - Wiki:
-      - Choosing what to instance: wiki/choosing-assembly-parts.md
-      - How Dynamic Wind works: wiki/how-dynamic-wind-works.md
-  - Getting started:
-      - Quick start: getting-started/quick-start.md
-  - Concepts:
-      - Pipeline overview: concepts/pipeline-overview.md
+      - Convert in SpeedAssembly: workflows/basic-conversion.md
+      - Import into Unreal Engine: workflows/unreal-import.md
   - Workflows:
       - Proxy Mesh: workflows/proxy-mesh.md
-  - Parameter reference:
-      - Proxy Mesh: reference/proxy-mesh.md
-  - Troubleshooting:
-      - FAQ: troubleshooting/faq.md
+      - UDIM workflow: workflows/udim.md
+  - Wiki:
+      - XML, USD, USDA, and JSON: wiki/xml-usd-usda-json.md
+      - Choosing what to instance: wiki/choosing-assembly-parts.md
+      - How Dynamic Wind works: wiki/how-dynamic-wind-works.md
 
 plugins:
   - search
@@ -64,7 +61,7 @@ markdown_extensions:
   - attr_list
   - md_in_html
   - toc:
-      permalink: true
+      permalink: false
   - pymdownx.details
   - pymdownx.highlight
   - pymdownx.superfences
@@ -78,6 +75,7 @@ exclude_docs: |
   .obsidian/
   _drafts/
   _templates/
+  troubleshooting/faq.md
 
 copyright: Copyright &copy; 2026 Vitaly Vishnev
 

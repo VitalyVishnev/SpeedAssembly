@@ -21,11 +21,11 @@ Unreal Engine: import and validate the asset
 
 !!! note "Unreal setup is required"
 
-    Unreal does not recognize this workflow by itself. Before importing, enable the required plugins and configure the project importer path. The future Unreal prerequisites guide will list the verified setup.
+    Before importing, enable the required plugins and Nanite Foliage setting. Follow [Prepare Unreal Engine](../workflows/prepare-unreal.md).
 
 ## 1. Prepare and export the tree
 
-Create the tree in SpeedTree as usual, then prepare its skeleton, main trunk and branch mesh, reusable branches and leaves, materials, and UVs for export. Some tree setups need specific preparation; the future SpeedTree preparation guides will cover those requirements and export settings.
+Create the tree in SpeedTree as usual, then prepare its skeleton, main trunk and branch mesh, reusable branches and leaves, materials, and UVs for export. Follow [Prepare SpeedTree](../workflows/prepare-speedtree.md) for scene preparation and export settings.
 
 Export the tree as a SpeedTree Raw XML file. This is simply the export file you select in **Input XML**.
 
@@ -102,5 +102,7 @@ The exported pieces are static geometry; their runtime destruction behaviour sti
 
 ## See also
 
-- [Quick start](../getting-started/quick-start.md)
-- Planned guides: SpeedTree source requirements, Raw XML export, Unreal prerequisites, Unreal import, Dynamic Wind, Proxy Mesh, and Fracturing.
+- [Prepare Unreal Engine](../workflows/prepare-unreal.md)
+- [Prepare SpeedTree](../workflows/prepare-speedtree.md)
+- [Convert in SpeedAssembly](../workflows/basic-conversion.md)
+- [Import into Unreal Engine](../workflows/unreal-import.md)

@@ -96,7 +96,8 @@ from ..settings_service import (
 from .adjust_ui import AdjustUiDialog
 from .background_jobs import QtBackgroundJobsController
 from .dependencies import QtUiDependencies
-from .dialogs import HelpDeckDialog, SupportDialog, TextDialog
+from .dialogs import SupportDialog, TextDialog
+from .documentation import open_documentation
 from .operator_state import (
     SETTINGS_DIR,
     SETTINGS_PATH,
@@ -397,6 +398,7 @@ class TitleBar(QFrame):
 
         self.help_button = QPushButton("Documentation", self)
         self.help_button.setObjectName("HelpTitleButton")
+        self.help_button.setToolTip("Open SpeedAssembly documentation in your browser.")
         self.help_button.clicked.connect(window.open_help_dialog)
         self._layout.addWidget(self.help_button, 0, Qt.AlignmentFlag.AlignLeft)
 
@@ -414,6 +416,7 @@ class TitleBar(QFrame):
         self.adjust_button.setObjectName("AdjustUiButton")
         self.adjust_button.clicked.connect(window.open_adjust_ui_dialog)
         self._layout.addWidget(self.adjust_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.adjust_button.hide()
 
         self.preset_host = QWidget(self)
         self.preset_host.setObjectName("TitlePresetHost")
@@ -866,7 +869,6 @@ class MainWindow(QWidget):
         self._wind_json_running = False
         self._log_text = ""
         self._log_dialog: TextDialog | None = None
-        self._help_dialog: HelpDeckDialog | None = None
         self._support_dialog: SupportDialog | None = None
         self._adjust_ui_dialog: AdjustUiDialog | None = None
         self._global_settings_dialog: GlobalSettingsDialog | None = None
@@ -1020,7 +1022,7 @@ class MainWindow(QWidget):
         header.addWidget(self.help_callout_dismiss_button, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header)
 
-        self.help_callout_body = QLabel("Open How to use for the core conversion workflow.", self.help_callout)
+        self.help_callout_body = QLabel("Open Documentation for the core conversion workflow.", self.help_callout)
         self.help_callout_body.setObjectName("TutorialCalloutBody")
         self.help_callout_body.setWordWrap(True)
         layout.addWidget(self.help_callout_body)
@@ -1489,7 +1491,7 @@ class MainWindow(QWidget):
         self._apply_runtime_theme_to_widgets(runtime_theme)
         self.help_callout.adjustSize()
         self._position_help_callout()
-        for dialog in (self._log_dialog, self._help_dialog, self._adjust_ui_dialog, self._global_settings_dialog):
+        for dialog in (self._log_dialog, self._adjust_ui_dialog, self._global_settings_dialog):
             if dialog is not None:
                 dialog.setStyleSheet(build_stylesheet(runtime_theme))
 
@@ -1986,12 +1988,7 @@ class MainWindow(QWidget):
         self._log_dialog.activateWindow()
 
     def open_help_dialog(self) -> None:
-        if self._help_dialog is None:
-            self._help_dialog = HelpDeckDialog(parent=self)
-        self._help_dialog.setStyleSheet(build_stylesheet(self._theme))
-        self._help_dialog.show()
-        self._help_dialog.raise_()
-        self._help_dialog.activateWindow()
+        open_documentation(self)
 
     def open_support_dialog(self) -> None:
         if self._support_dialog is None:

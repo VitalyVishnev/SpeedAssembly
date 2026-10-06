@@ -1,5 +1,12 @@
 # Project log
 
+## 2026-10-06 - Remove heading permalink symbols
+
+- Disabled MkDocs heading permalink symbols globally. Heading IDs and
+  table-of-contents navigation remain available.
+- Validation: strict MkDocs build passed; all 15 generated HTML pages contain
+  no heading permalink links. Geometry heading ID and its TOC link are retained.
+
 Short history only. Current contracts, open risks, crash evidence, and rejected
 routes belong in [wiki/decisions.md](wiki/decisions.md),
 [wiki/known-bugs.md](wiki/known-bugs.md),
@@ -338,6 +345,31 @@ under `docs/raw/`; Git retains per-change detail.
   The operator reviews and publishes manually. This later evidence entry does
   not change the tagged build's source commit or its artifacts.
 
+## 2026-10-05 - Hide Adjust UI in the main title bar
+
+- Hid the development-only title-bar button with Qt visibility; retained the
+  existing dialog and theme tooling.
+- Validation: 12 existing Adjust UI/theme tests passed; `-Quick` completed and
+  produced `dist-preview/SpeedAssembly_preview.cmd`. No Package build.
+
+## 2026-10-05 - Basic conversion documentation draft
+
+- Added Convert in SpeedAssembly as Basic workflow step three and linked from
+  Prepare SpeedTree. Included eight supplied screenshots and a side-by-side
+  one-/two-weight fern comparison.
+- Separated JSON wind settings from USDA skin weights; described required
+  material assignments, geometry replacement, Scattered Rig controls, optional
+  Proxy/Fracturing, and all four export modes with current UI names.
+- Used corrected Copy Object Path and `/Game/` material screenshots. Kept
+  future guide links as editorial comments rather than broken public links.
+
+## 2026-10-05 - File format primer for artists
+
+- Added a short public Wiki article explaining XML, USD, USDA, and JSON,
+  their common uses, and their roles in the SpeedAssembly workflow.
+- Registered it in MkDocs navigation and linked the conversion and wind guides.
+- Validation: `mkdocs build --strict -f Project/mkdocs.yml` passed.
+
 ## 2026-10-05 - Generate Wind JSON tooltip
 
 - Replaced unrelated lower/higher wind advice with the button's action: create
@@ -361,3 +393,111 @@ under `docs/raw/`; Git retains per-change detail.
   maintained tooltip decision with material/collision constraints.
 - Validation: 42 existing Qt and conversion-service checks passed; `-Quick`
   completed. Source-backed preview only; no Package build.
+
+## 2026-10-06 - Unreal import workflow draft
+
+- Added Basic workflow step four with the agreed grouped Interchange settings,
+  expected assets, 5.7 fallback workaround, Wind JSON verification, and seven
+  screenshots. Linked from conversion and registered navigation immediately.
+- Added required Wind_TransformProvider setup for Blueprint/PCG and the sample
+  Global Foliage Actor, with a World Partition spatial-loading tip.
+- Recorded operator-reported engine crashes as CR-016/CR-017 with unverified
+  causes. Source inspection does not support saying provider-less components
+  disable geometric instancing entirely.
+- Validation: strict MkDocs build passed; generated page contains all seven
+  image references. No new Unreal runtime validation performed.
+
+## 2026-10-06 - UE 5.7 skinning assertion evidence and documentation voice
+
+- Removed third-person maintainer attribution from the import guide and recorded
+  neutral/first-person voice as the public authoring rule.
+- Updated CR-016 with the supplied 22-bit offset assertion, confirmed UE 5.7
+  diagnosis/workaround, and matching batching/allocation source paths. Preserved
+  the earlier analysis screenshot and distinguished its x16 wind estimate from
+  the null-provider branch's one animation variant and separate object-space data.
+- Public warning now explains the 5.7 overflow risk; 5.8 reproduction is unknown.
+  Global controller advice uses impersonal wording without dismissing prior tests.
+
+## 2026-10-06 - UE 5.8 skinning overflow risk comparison
+
+- Confirmed in source that provider-less components still disable skeleton
+  batching and allocate per-component buffers checked against 22-bit offsets.
+- Updated the import warning to distinguish a confirmed UE 5.7 crash from
+  source-confirmed UE 5.8 risk without claiming a 5.8 runtime reproduction.
+
+## 2026-10-06 - Public documentation navigation cleanup
+
+- Reordered navigation to Overview, Basic workflow, Workflows, Wiki, Parameter
+  reference, and FAQ. Moved Pipeline overview under Overview without changing
+  its file address; removed Getting Started and Concepts groups.
+- Deleted the Quick Start article on request and replaced its incoming links
+  with Basic workflow. Updated existing overview links to the completed guides.
+- Kept Parameter reference provisionally and FAQ last; aligned the editorial
+  plan and maintained navigation decision with the current structure.
+
+## 2026-10-06 - UDIM workflow draft
+
+- Added UDIM workflow under Workflows and linked from the conversion guide.
+  Included the supplied Unreal graph and concise converter/material formulas.
+- Verified tileOffset, UV1 center encoding, and UV1 overwrite behavior against
+  udim_resolver.py and existing tests. Preview/Edit uses the same material state.
+- Separated Shift UV/direct UV0 from Write UV1 Offset/Frac+Floor and avoided
+  unsupported one-fetch or guaranteed Nanite performance claims.
+- Validation: strict MkDocs build and diff whitespace check passed; all five
+  existing UDIM resolver tests passed. No new Unreal material runtime test.
+
+## 2026-10-06 - Shared viewport navigation hints
+
+- All shared viewports show Orbit, Pan, Zoom, point focus, and `F` frame-all
+  in the top-right corner as gray translucent text. Wind picking/history hints
+  append to the same list; Boolean viewers reuse the shared camera hints.
+- Replaced the direct-painted hint text, absent in source screenshots, with
+  one mouse-transparent Qt label. It stays visible in Proxy Shaded and
+  Silhouette Diff; the exact direct-paint failure mechanism is Unverified.
+- Validation: 28 existing viewport/dialog/theme checks passed; source images
+  checked shared navigation, editing hints, and both Proxy modes. `-Quick`
+  completed. Source-backed preview only; no Package build.
+
+## 2026-10-06 - Proxy workflow and inline parameter tables
+
+- Rewrote Proxy Mesh with the supplied screenshots, concise distance-field,
+  collision, and distant-shadow uses, generation steps, and silhouette comparison.
+- Corrected separate base/foliage simplification, base budget allocation, and
+  disconnected-component pruning descriptions against current code.
+- Moved all Proxy parameter details into a collapsible workflow table, preserved
+  anchor IDs at the new path, updated FAQ links, and deleted the old reference
+  article. Removed its now-empty navigation group and recorded the inline-table
+  convention for other preview guides.
+
+## 2026-10-06 - Layout-independent viewport frame-all
+
+- Windows frame-all follows physical F through its native scan code regardless
+  of the translated character. Events without native data retain logical F;
+  auto-repeat is still ignored.
+- Added the keyboard-layout UX rule to agent instructions and maintained
+  decisions. Extended the existing camera regression with native English,
+  Cyrillic, unknown-letter, wrong-physical-key, and auto-repeat events.
+- Validation: 17 existing viewport/dialog checks passed; `-Quick` completed.
+  Source-backed preview only; no Package build or hardware-layout matrix run.
+
+## 2026-10-06 - Contextual documentation buttons
+
+- Added shared circular 24 px question buttons with hover/focus highlighting
+  beside Proxy launch, in Proxy Preview, and across UDIM material controls.
+- Documentation in the title bar opens the public site through Qt desktop
+  services. Shared destinations and browser-opening errors live in
+  `qt_ui/documentation.py`.
+- Validation: 20 relevant Qt checks passed, including destination/navigation
+  coverage and fixed square button geometry. Source screenshots checked UDIM
+  rows and Proxy placement; `-Quick` completed. Source-backed preview only.
+- Live home and Proxy URLs returned 200; the locally authored UDIM guide still
+  returned 404. Recorded its pending publication in Known Bugs.
+
+## 2026-10-06 - Documentation publication preparation
+
+- Temporarily removed FAQ from navigation and excluded it from site/search
+  output without deleting its source.
+- Confirmed all other public articles are registered in navigation and that
+  the Pages workflow builds Project/docs/user after documentation pushes to
+  master. Prepared public documentation and screenshots for the next commit;
+  no commit, push, or deployment performed in this task.

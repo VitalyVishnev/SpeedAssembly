@@ -17,6 +17,7 @@ from xml_to_usda.qt_ui.dialogs import SupportDialog
 from xml_to_usda.version import application_title
 from xml_to_usda.qt_ui.widget_style import install_widget_style
 from xml_to_usda.qt_ui.theme import (
+    DOCUMENTATION_BUTTON_STYLE,
     ThemeOverrides,
     bake_theme_payload,
     build_ui_palette,
@@ -81,6 +82,7 @@ def test_theme_payload_bakes_and_stylesheet_uses_shared_control_colors(tmp_path)
     assert "QPushButton#FileButton" in stylesheet
     assert "#445566" in stylesheet
     assert "#778899" in stylesheet
+    assert DOCUMENTATION_BUTTON_STYLE in stylesheet
 
 
 def test_checkbox_click_paints_final_state_without_transition(qtbot) -> None:

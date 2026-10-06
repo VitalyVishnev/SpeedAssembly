@@ -15,6 +15,30 @@ from importlib.resources import files
 
 BUTTON_OUTLINE_COLOR = "#25000000"
 
+DOCUMENTATION_BUTTON_STYLE = f"""
+QPushButton#DocumentationButton {{
+    color: #73795e;
+    background: transparent;
+    border: 1px solid {BUTTON_OUTLINE_COLOR};
+    border-radius: 12px;
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 22px;
+    max-height: 22px;
+    padding: 0px;
+    font-size: 14px;
+    font-weight: 600;
+}}
+QPushButton#DocumentationButton:hover,
+QPushButton#DocumentationButton:focus {{
+    color: #829238;
+    background: rgba(148, 157, 77, 45);
+}}
+QPushButton#DocumentationButton:pressed {{
+    background: rgba(148, 157, 77, 85);
+}}
+"""
+
 _ThemeT = TypeVar("_ThemeT", bound="_ThemeBase")
 _THEME_SECTION_KEYS = (
     "colors",
@@ -332,7 +356,7 @@ def build_stylesheet(theme: ResolvedTheme) -> str:
     warning_fill = palette["warning_fill"]
     danger_fill_soft = palette["danger_fill_soft"]
 
-    return build_typography_stylesheet(theme) + f"""
+    return build_typography_stylesheet(theme) + DOCUMENTATION_BUTTON_STYLE + f"""
 QWidget {{
     color: {window_text};
 }}

@@ -141,21 +141,64 @@ style changes with `mkdocs build --strict` and browser checks, independently
 from Qt executable packaging.
 
 Contextual application help will target explicit stable anchors such as
-`reference/proxy-mesh/#density-resolution`; heading copy may change without
+`workflows/proxy-mesh/#density-resolution`; heading copy may change without
 removing an anchor already used by a released application.
+
+The current Qt help links are explicit entries in `qt_ui/documentation.py`.
+Documentation opens the public site home in the system browser. Circular 24 px
+question buttons open the Proxy Mesh and UDIM workflow pages, with hover/focus
+highlighting and action-specific tooltips. Add destinations only for existing
+articles registered in `mkdocs.yml`; do not infer URLs from control captions.
+UDIM help is shared by Materials, Prototype Preview/Edit, FBX slot rows, and
+Fracture Cap material controls. New public articles require site publication
+before their application links become usable.
+
+Heading permalink symbols are disabled through `toc.permalink: false`.
+Keep heading IDs and table-of-contents links for section navigation.
 
 Overview articles explain artist tasks and visible results in familiar terms.
 Keep workflow-specific technical limits in their dedicated guides. Use
 plain language and the Google Developer Documentation Style Guide for
 concrete procedures. The supported-workflows table lives inside
 `overview/what-is-speedassembly.md` rather than a separate overview page.
+Public guides use neutral wording or the maintainer's first person, never
+third-person phrases such as "the author" or "in the author's tests".
 Add every new user article to `mkdocs.yml` navigation as soon as its first
 draft exists so the author can review it through the local site preview.
-The editorial plan uses Overview, Basic workflow, and Advanced workflows.
+
+The short format primer is `docs/user/wiki/xml-usd-usda-json.md`. It explains
+SpeedTree Raw XML as source exchange, USD as scene description, USDA as its
+inspectable text encoding, and Dynamic Wind JSON as separate response metadata.
+
+The Unreal import guide is `docs/user/workflows/unreal-import.md`. Its grouped
+settings table is operator-approved, not a blanket diff from native defaults.
+Require Wind_TransformProvider on the Blueprint component and PCG template
+before vegetation generation in this workflow. The UE 5.7 provider-less PCG
+crash has operator-confirmed cause/workaround, supplied assertion evidence,
+and matching source allocation/check logic; see CR-016. Exact failing offset
+and UE 5.8 reproduction remain unverified. Keep that distinction out of the
+public instructions except for the version scope.
+
+The basic conversion guide is `docs/user/workflows/basic-conversion.md`.
+Keep Wind JSON settings distinct from geometry skinning: group controls,
+Ground Cover, and Gust Attenuation are JSON; Skinning Quality is authored in
+USDA and requires reconversion to change. Proxy is recommended when needed,
+not a required main-conversion step. Use the latest author-supplied Object Path
+and `/Game/` material screenshots, not the earlier Package Path/plugin examples.
+Public navigation order is Overview, Basic workflow, Workflows, Wiki.
+FAQ is temporarily hidden from navigation and excluded from the build/search;
+its source remains at troubleshooting/faq.md for later publication.
+Preview-window parameter documentation lives in a collapsible table
+inside each workflow article, not separate parameter-reference articles.
+Proxy parameters moved to workflows/proxy-mesh.md with their anchor IDs;
+incoming FAQ links were updated and the old reference page was deleted.
+No current application code targets that old page. Pipeline overview follows What is SpeedAssembly
+under Overview and retains its `concepts/pipeline-overview.md` address.
 Basic workflow covers Unreal preparation, SpeedTree preparation, conversion,
-and Unreal import, followed by Wind/Geometry/Materials articles. Quick Start
-and Getting Started are excluded from the planned structure; existing pages
-are migrated separately while preserving useful links and anchors.
+and Unreal import. Workflows hosts feature guides such as Proxy, UDIM, and
+preview windows. The empty Parameter reference navigation group was removed. Quick Start
+was deleted on operator request; Getting Started and Concepts navigation
+groups were removed, and incoming Quick Start links now use Basic workflow.
 
 The Unreal preparation guide uses the same UI setup for UE 5.7 and 5.8:
 Nanite Foliage plus Dynamic Wind, Procedural Vegetation Editor, and Interchange
@@ -462,6 +505,13 @@ Related files:
 The same numeric material id can appear in different authored pieces without conflict.
 
 Apply UDIM settings independently per authored piece.
+
+The public guide is `docs/user/workflows/udim.md`. Shift UV adds tileOffset to
+UV0 and needs direct UV0 sampling. Write UV1 Offset preserves UV0, overwrites
+UV1 with tileOffset + (0.5, 0.5), and uses frac(UV0) + floor(UV1) in the Unreal
+material. Do not describe that graph as compatible with Shift UV. For mixed
+bark/leaves using this one graph, select Write UV1 Offset for both. Material
+sharing is not a claim of one GPU fetch or universally faster Nanite rendering.
 
 Piece-local resolution matches operator expectations and avoids cross-piece overwrite.
 
@@ -1082,10 +1132,14 @@ public equivalent. Visual-only selection, highlight, or visibility changes
 should not rebuild or re-upload static mesh buffers; add a small public
 viewport update method instead. Scene replacement marks GPU buffers dirty and
 lets the next `paintGL` upload them with Qt's context current; result callbacks
-must not force eager uploads with `makeCurrent()`/`doneCurrent()`. Every viewport window should show active
-shortcuts briefly in the bottom-right corner as small translucent text, so
-mode-specific interactions remain discoverable without adding instructional UI
-blocks. Packaged smoke should cover any new high-risk viewport path.
+must not force eager uploads with `makeCurrent()`/`doneCurrent()`. Every viewport
+shows camera controls in the top-right corner as small gray translucent text.
+Use one mouse-transparent Qt label in `MatcapViewport`, including Proxy
+Silhouette Diff; `set_shortcut_hints` supplies additional mode-specific picking
+and history hints. Shared controls are left drag orbit, middle drag pan, wheel
+zoom, double-left-click point focus, and `F` frame-all. When unmodified bone
+picking is active, orbit drags start on the background. Packaged smoke should
+cover any new high-risk viewport path.
 
 Related files:
 - `src/xml_to_usda/qt_ui/viewport.py`
@@ -1526,6 +1580,9 @@ Related files:
 
 ## Decision: Main-shell chrome follows window state and readable content
 
+The main title bar hides the development-only `Adjust UI` button. Its dialog
+and theme tooling remain available internally.
+
 Window corners are square whenever Qt reports Maximized or FullScreen and
 rounded only in normal mode. Update chrome on `WindowStateChange`, including
 Windows shortcuts and restored startup state. `windowExpanded` is a separate
@@ -1550,3 +1607,19 @@ control may draw one perimeter on its shared owner instead of separate borders
 on its segments. The main caption controls and top settings gear are explicit
 operator-requested exceptions and remain borderless. Keep this rule in AGENTS.md
 and shared styles when adding controls.
+
+## Decision: Hotkeys are independent of keyboard layout
+
+Letter shortcuts use the physical key shown in the English keyboard layout,
+with the same modifiers and focus scope under any active input language.
+Text fields continue to use the selected layout for ordinary typing. Do not
+implement this by enumerating translated letters such as `F` and Cyrillic `А`.
+
+Shared viewport frame-all uses Windows `QKeyEvent.nativeScanCode()` and the
+Scan 1 code `0x21` for physical F. The native scan code takes precedence over
+the translated Qt key; logical `Key_F` remains the fallback when native data
+is absent or the platform is not Windows. Auto-repeat remains ignored.
+This validates the supported Windows path, not native mappings on other OSes.
+
+Sources: [Qt QKeyEvent](https://doc.qt.io/qt-6/qkeyevent.html#nativeScanCode)
+and [Microsoft keyboard input](https://learn.microsoft.com/en-us/windows/win32/inputdev/about-keyboard-input).

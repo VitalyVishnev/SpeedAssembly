@@ -1219,11 +1219,11 @@ class WindPreviewDialog(PreviewShellDialog):
         if self._redo_stack:
             history.append("Ctrl+Shift+Z redo")
         if active is None:
-            self.viewport.set_shortcut_hints(("LMB orbit", "Wheel zoom", *history))
+            self.viewport.set_shortcut_hints(tuple(history))
             return
         pick_label = "LMB add subtree" if active.edit_mode == EDIT_MODE_SUBTREE else "LMB add bone"
         remove_label = "Alt+LMB remove subtree" if active.edit_mode == EDIT_MODE_SUBTREE else "Alt+LMB remove bone"
-        self.viewport.set_shortcut_hints((pick_label, remove_label, "Wheel zoom", *history))
+        self.viewport.set_shortcut_hints((pick_label, remove_label, *history))
 
     def wind_session_snapshot(self) -> dict[str, object]:
         preview = self.current_preview

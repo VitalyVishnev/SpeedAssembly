@@ -26,12 +26,11 @@ Alongside the main tree export, SpeedAssembly provides tools for editing wind si
 
 ## Where to start
 
-Read the [pipeline overview](../concepts/pipeline-overview.md) for the full path from SpeedTree to Unreal, or follow the [quick start](../getting-started/quick-start.md) for your first conversion.
+Read the [pipeline overview](../concepts/pipeline-overview.md) for the full path from SpeedTree to Unreal. To begin the Basic workflow, [prepare your Unreal project](../workflows/prepare-unreal.md).
 
 For a simplified tree mesh, see the [Proxy Mesh workflow](../workflows/proxy-mesh.md).
 
 <!-- Add links to the dedicated guides when they exist:
-     ../getting-started/choose-export-mode.md
      ../wind/preview-workflow.md
      ../wind/unreal-setup.md
      ../fracturing/overview.md

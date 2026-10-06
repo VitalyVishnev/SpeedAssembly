@@ -60,6 +60,7 @@ from ..settings_service import (
     WindGroupSettingRecord,
 )
 from .scrollbars import keep_vertical_scrollbar_visible
+from .documentation import DocumentationButton
 from .material_controls import (
     MaterialUdimRow,
     MaterialUdimValue,
@@ -928,7 +929,11 @@ class GeometryTabPanel(QWidget):
             "Opens Fracturing settings and preview."
         )
         actions_layout.addWidget(actions_title, 0, 0)
-        actions_layout.addWidget(self.preview_proxy_button, 1, 0)
+        proxy_action = QHBoxLayout()
+        proxy_action.setSpacing(6)
+        proxy_action.addWidget(self.preview_proxy_button)
+        proxy_action.addWidget(DocumentationButton("proxy_mesh", actions_card))
+        actions_layout.addLayout(proxy_action, 1, 0)
         actions_layout.addWidget(self.preview_fracture_button, 1, 1)
         actions_layout.setColumnStretch(2, 1)
         outer.addWidget(actions_card)
@@ -1921,6 +1926,7 @@ class MaterialsTabPanel(QWidget):
         layout.addWidget(edit, 0, 1)
         layout.addWidget(udim_mode_combo, 0, 2)
         layout.addWidget(udim_id_spin, 0, 3)
+        layout.addWidget(DocumentationButton("udim", widget), 0, 4)
         row.slot_rows.append(
             SlotOverrideWidgets(
                 slot_name=slot_spec.slot_name,

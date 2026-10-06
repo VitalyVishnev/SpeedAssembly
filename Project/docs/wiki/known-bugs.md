@@ -4,6 +4,36 @@ Current defects, fail-loud limits, and validation gaps only. Resolved crash
 history lives in [Encountered Crashes](encountered-crashes.md); rejected fixes
 and benchmark detail live in [Experiments](experiments.md).
 
+## Pending publication: UDIM contextual help page
+
+On 2026-10-06, the public site home and `workflows/proxy-mesh/` returned HTTP
+200, while `workflows/udim/` returned 404. The UDIM article exists locally and
+is registered in `mkdocs.yml`; `qt_ui/documentation.py` targets that final route.
+Publishing the pending user-documentation changes is outside this UI change.
+Next step: publish the reviewed documentation and verify the UDIM URL returns
+200 before a release containing contextual help.
+
+## Unreal risks: provider-less dense PCG and streamed wind controller
+
+Status: UE 5.7 provider-less PCG cause/workaround confirmed by operator with
+assert evidence and matching source mechanism; UE 5.8 retains the allocation
+risk by source inspection, while its runtime reproduction remains Unverified.
+
+Dense UE 5.7 PCG without Wind_TransformProvider disables skeleton batching and
+can exceed the 22-bit skinning buffer offsets, triggering the supplied
+SkinningSceneExtension.h assertion. Assigning the provider resolved the
+confirmed case. Keep the global controller non-spatially-loaded and its Data
+Layer enabled: streaming BP_GlobalFoliageActor_UE5 caused crashes in separate
+operator tests. Its precise native cause is still Unverified. See CR-016/CR-017
+in encountered-crashes.md for evidence and regression gates.
+
+The source-backed requirement is that Dynamic Wind needs a Transform Provider.
+Absent provider does not disable geometric instancing outright: UE 5.8 retains
+bUseInstancing, uses reference pose, and disables skeleton batching. Diagnosis
+of the exact overflowing offset and 5.8 behavior is deferred until runtime
+values/reproduction are available; do not copy the earlier x16 estimate as a
+universal no-provider transform-storage formula.
+
 ## Limitation: Shared Skeleton Assets do not isolate Dynamic Wind metadata
 
 Status: Source-verified in UE 5.8.2; runtime A/B not reproduced

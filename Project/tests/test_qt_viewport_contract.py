@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from array import array
+import sys
 
 import pytest
 
@@ -8,6 +9,9 @@ import pytest
 pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 pytestmark = pytest.mark.qt
+
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QKeyEvent
 
 from xml_to_usda.geometry_buffers import geometry_buffer_from_mesh
 from xml_to_usda.models import Color4, GeometryBuffer, MeshData, Vector3
@@ -144,7 +148,7 @@ def test_fracture_viewport_smooths_shared_points_without_authored_normals() -> N
     assert first_normal[2] > 0.0
 
 
-def test_viewport_can_focus_on_mesh_and_zoom_to_cut_detail(qtbot) -> None:
+def test_viewport_can_focus_on_mesh_and_zoom_to_cut_detail(qtbot, qapp) -> None:
     class _Delta:
         def y(self) -> int:
             return 120 * 100
@@ -167,6 +171,7 @@ def test_viewport_can_focus_on_mesh_and_zoom_to_cut_detail(qtbot) -> None:
             face_vertex_indices=array("i", (0, 1, 2)),
         )
     )
+    frame_target = viewport.camera_target
     expected_focus = Vector3(0.2, 0.2, 0.0)
     screen = viewport._project_point_to_screen(expected_focus)
 
@@ -179,6 +184,24 @@ def test_viewport_can_focus_on_mesh_and_zoom_to_cut_detail(qtbot) -> None:
     viewport._distance = 300.0
     viewport.wheelEvent(_WheelEvent())
     assert viewport.camera_distance == pytest.approx(0.1)
+
+    # Frame-all follows physical F, even when a layout emits Cyrillic or no Qt letter.
+    keys = [(Qt.Key.Key_F, 0)]
+    if sys.platform == "win32":
+        keys.extend(((Qt.Key.Key_F, 0x21), (ord("А"), 0x21), (Qt.Key.Key_unknown, 0x21)))
+    for key, scan_code in keys:
+        viewport._target = expected_focus
+        viewport._distance = 0.1
+        qapp.sendEvent(viewport, QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier, scan_code, 0, 0))
+        assert viewport.camera_target == frame_target
+        assert viewport.camera_distance == pytest.approx(300.0)
+
+    if sys.platform == "win32":
+        # A different physical key producing F and held-key repeats must not frame.
+        for scan_code, repeat in ((0x16, False), (0x21, True)):
+            viewport._target = expected_focus
+            qapp.sendEvent(viewport, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_F, Qt.KeyboardModifier.NoModifier, scan_code, 0, 0, "f", repeat))
+            assert viewport.camera_target == expected_focus
 
 
 def test_viewport_keeps_offscreen_started_bone_visible_and_pickable(qtbot) -> None:

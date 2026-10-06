@@ -13,7 +13,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QFrame, QGridLayout, QSplitter, QVBoxLayout, QWidget
 
-from .theme import BUTTON_OUTLINE_COLOR
+from .theme import BUTTON_OUTLINE_COLOR, DOCUMENTATION_BUTTON_STYLE
 
 _DROPDOWN_ARROW_ICON = Path(__file__).with_name("themes") / "default" / "assets" / "dropdown_arrow.svg"
 
@@ -113,6 +113,7 @@ def apply_compact_preview_panel_style(panel: QWidget) -> None:
     arrow_url = _DROPDOWN_ARROW_ICON.as_posix()
     panel.setStyleSheet(
         f"""
+{DOCUMENTATION_BUTTON_STYLE}
 QPushButton {{
     background: rgba(148, 157, 77, 210);
     color: #111111;

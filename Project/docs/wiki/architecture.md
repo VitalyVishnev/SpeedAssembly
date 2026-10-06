@@ -29,6 +29,11 @@ Main systems:
 - parts-library requests reuse one bundle path in `conversion_orchestrator.py`;
   each resolved prototype is isolated into its own skeletal or static USDA.
 - `src/xml_to_usda/qt_ui/` - supported PySide6 shell and preview adapters.
+- `src/xml_to_usda/qt_ui/documentation.py` - explicit public help destinations
+  and shared circular question buttons; browser opening uses Qt desktop services.
+  The main Documentation action opens the site home. Proxy launch/preview and
+  every shared UDIM row link to their workflow articles. Main and compact-panel
+  styles reuse one question-button stylesheet in `qt_ui/theme.py`.
 - `src/xml_to_usda/fbx_adapter.py`, `src/xml_to_usda/_ufbx.c`, and `src/xml_to_usda/fbx_import_supervisor.py` - vendored ufbx integration and isolated helper-process control.
 - `src/xml_to_usda/discovery_service.py` and `src/xml_to_usda/source_discovery_worker_subprocess.py` - lightweight material/prototype row discovery; XML files at or above 5 MiB are inspected outside the GUI process.
 - `src/xml_to_usda/cache_maintenance.py` - bounded runtime cache maintenance for job leftovers, FBX payloads, source-model caches, Proxy Source Projection caches, legacy Fracture Preview cache files, and stale cache temp files.
@@ -225,10 +230,15 @@ the shared viewport instead of rebuilding and re-uploading static mesh buffers.
 Part Prototype Preview keeps the worker-loaded source mesh in the dialog;
 Default, Vertex Colors, and Material Colors are local projections and never
 restart XML/FBX loading, simplification, or the preview worker.
-Viewport-specific shortcuts should be shown as small contextual translucent text
-in the bottom-right corner of the viewport.
+Every viewport shows shared camera controls as small gray translucent text in
+the top-right corner. A mouse-transparent Qt label owns the overlay so it also
+stays visible in Proxy Silhouette Diff. Mode-specific picking and history hints
+append to that same list; camera instructions adapt when unmodified bone
+picking requires orbit drags to start on the background.
 Shared camera navigation includes left-button orbit, middle-button pan in the
 camera plane, wheel zoom, double-left-click mesh focus, and `F` frame-all.
+On Windows, frame-all follows physical F across keyboard layouts through the
+native scan code. See the [hotkey UX rule](decisions.md#decision-hotkeys-are-independent-of-keyboard-layout).
 Wheel zoom can approach to 0.1% of the framed scene radius, with a distance-
 adaptive near plane for close cut inspection. Scene setters only mark OpenGL
 buffers dirty; GPU uploads run in `paintGL` while Qt owns the current context.

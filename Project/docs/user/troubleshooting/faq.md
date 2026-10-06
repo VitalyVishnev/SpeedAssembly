@@ -6,7 +6,7 @@ No. Proxy Mesh is a companion Static Mesh. The Skeletal Assembly remains the pri
 
 ## Why did Final Polycount not produce the exact requested number?
 
-Final Polycount is a simplification target. The extracted surface may contain fewer triangles than requested, or its topology may have a minimum safely reachable count. See [Final Polycount](../reference/proxy-mesh.md#final-polycount).
+Final Polycount is a simplification target. The extracted surface may contain fewer triangles than requested, or its topology may have a minimum safely reachable count. See [Final Polycount](../workflows/proxy-mesh.md#final-polycount).
 
 ## Why is collision missing from the Proxy output?
 
@@ -19,7 +19,7 @@ Check the following:
 
 ## Why does increasing Final Polycount not restore small foliage detail?
 
-The detail may have been lost during density extraction. Increase [Density Resolution](../reference/proxy-mesh.md#density-resolution) before increasing the final triangle budget.
+The detail may have been lost during density extraction. Increase [Density Resolution](../workflows/proxy-mesh.md#density-resolution) before increasing the final triangle budget.
 
 ## Does successful Proxy import prove good distance fields or shadows?
 

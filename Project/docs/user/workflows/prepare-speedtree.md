@@ -101,6 +101,13 @@ In the **Export Mesh** window, match the settings in this screenshot exactly. Sa
 
 ![SpeedTree Export Mesh settings for the SpeedAssembly workflow](../assets/images/speedtree-xml-export.png)
 
+To save these settings as a preset:
+
+1. Next to **Presets**, open the menu with three dots.
+2. Select **Save new preset...** and name the preset.
+
+![Export Mesh preset menu with the three-dot button highlighted and Save new preset visible](../assets/images/speedtree-save-export-preset.png)
+
 The exported XML is the file you select in SpeedAssembly's **Input XML** field.
 
-<!-- Add the Convert in SpeedAssembly link when that article exists. -->
+Next, [convert the plant in SpeedAssembly](basic-conversion.md).

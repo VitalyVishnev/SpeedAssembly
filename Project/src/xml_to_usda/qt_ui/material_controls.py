@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..models import UdimMode
+from .documentation import DocumentationButton
 
 
 UDIM_MODE_COMBO_WIDTH = 180
@@ -122,6 +123,7 @@ def make_udim_id_cell(parent: QWidget, label: QLabel, spin: QSpinBox) -> QWidget
     label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     layout.addWidget(label, 0)
     layout.addWidget(spin, 0)
+    layout.addWidget(DocumentationButton("udim", cell), 0)
     return cell
 
 
@@ -175,10 +177,12 @@ class MaterialUdimRow(QWidget):
             layout.addWidget(self.path_edit, 0, 1, 1, 2)
             layout.addWidget(self.udim_mode_combo, 1, 1)
             layout.addWidget(self.udim_id_spin, 1, 2)
+            layout.addWidget(DocumentationButton("udim", self), 1, 3)
         else:
             layout.addWidget(self.path_edit, 0, 1)
             layout.addWidget(self.udim_mode_combo, 0, 2)
             layout.addWidget(self.udim_id_spin, 0, 3)
+            layout.addWidget(DocumentationButton("udim", self), 0, 4)
         layout.setColumnStretch(1, 1)
 
         self.path_edit.textChanged.connect(lambda _text: self.valueChanged.emit())

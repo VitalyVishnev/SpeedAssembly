@@ -202,9 +202,6 @@ class BooleanPrototypeWindow(QMainWindow):
         self.viewport = MatcapViewport()
         self.viewport.set_show_bones(True)
         self.viewport.set_bone_pick_requires_control(False)
-        self.viewport.set_shortcut_hints(
-            ("LMB: orbit", "MMB: pan", "Double LMB: focus", "F: frame all", "Wheel: zoom")
-        )
         splitter.addWidget(self.viewport)
         splitter.addWidget(self._build_panel(source_label))
         splitter.setStretchFactor(0, 1)
@@ -471,9 +468,6 @@ class BooleanMultiPrototypeWindow(QMainWindow):
         self.viewport = MatcapViewport()
         self.viewport.set_show_bones(True)
         self.viewport.set_bone_pick_requires_control(False)
-        self.viewport.set_shortcut_hints(
-            ("LMB: orbit", "MMB: pan", "Double LMB: focus", "F: frame all", "Wheel: zoom")
-        )
         splitter.addWidget(self.viewport)
         splitter.addWidget(self._build_panel(source_label))
         splitter.setStretchFactor(0, 1)
