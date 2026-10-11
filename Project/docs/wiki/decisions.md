@@ -1670,3 +1670,12 @@ This validates the supported Windows path, not native mappings on other OSes.
 
 Sources: [Qt QKeyEvent](https://doc.qt.io/qt-6/qkeyevent.html#nativeScanCode)
 and [Microsoft keyboard input](https://learn.microsoft.com/en-us/windows/win32/inputdev/about-keyboard-input).
+
+## Decision: Proxy preview reuse follows the source file revision
+
+An XML path alone is not a reusable Proxy Preview identity: artists may
+re-export to the same path while the application stays open. Render geometry,
+collision reuse, silhouette comparison, and export must validate resolved path,
+file size, and nanosecond modification time. A changed source requests render
+and comparison payloads from one load; results spanning a source change are
+rejected. Preserve geometry reuse for collision-only settings on unchanged XML.

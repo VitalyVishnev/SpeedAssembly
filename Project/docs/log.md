@@ -545,3 +545,30 @@ under `docs/raw/`; Git retains per-change detail.
 - Seven-run medians with 120 ms server latency: baseline 200.7 ms, instant
   navigation 153.1 ms, hover-preloaded 29.5 ms to article paint. Recorded limits
   and upstream alternate-sitemap probes. Public deployment remains pending.
+
+## 2026-10-11 - Investigate Black Alder Proxy scale
+
+- Reproduced oversized Proxy generation from the external Black Alder XML;
+  isolated it to Mesh_2 OriginalScale and recorded FBX node/unit evidence in
+  Known Bugs. In-memory /100 comparison restores tree-sized bounds; intended
+  source size and export cause remain unverified. Source assets and converter
+  code are unchanged.
+
+## 2026-10-11 - Keep Proxy silhouette and geometry on the same XML revision
+
+- Confirmed the operator's corrected Black Alder XML restores Mesh_2 size.
+  Fixed path-only in-memory Proxy/source-scene reuse after overwriting XML.
+- Added file revision checks to cache reuse, export, dialog callbacks, and
+  worker completion; extended the existing Qt lifecycle regression.
+- Validation: Core checks passed in the combined run; all 131 Integration
+  checks passed separately after one intermittent typography assertion,
+  recorded in Known Bugs. All 27 packaged contracts and both Package smoke
+  scenarios passed. Black Alder source/Proxy payloads now have tree-sized
+  bounds; release ZIP EXE hash matches the built EXE. Version unchanged.
+
+## 2026-10-11 - Part library illustration
+
+- Added the supplied CD PROJEKT RED branch-library screenshot to Choosing what
+  to instance, under Building a part library, with the presentation source link.
+- Updated the English original and Russian translation together; shared one
+  unchanged image asset between both language versions.

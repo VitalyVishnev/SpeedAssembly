@@ -73,6 +73,7 @@ from ..proxy_mesh_service import (
     ProxyMeshSourceRequest,
     derive_proxy_usda_output_path,
     prepare_proxy_mesh_source_request,
+    proxy_source_signature,
     update_proxy_collision,
 )
 from ..viewport_scene import ViewportScene
@@ -880,8 +881,10 @@ class MainWindow(QWidget):
         self._fracture_preview_settings = FracturePreviewSettings()
         self._proxy_mesh_preview_result: ProxyMeshResult | None = None
         self._proxy_mesh_preview_input_path = ""
+        self._proxy_mesh_preview_signature = None
         self._proxy_source_preview_scene: ViewportScene | None = None
         self._proxy_source_preview_input_path = ""
+        self._proxy_source_preview_signature = None
         self._shown_bone_gap_warning: tuple[str, tuple[str, ...]] | None = None
         self._scattered_parts_analysis = None
         self._fracture_preview_cache: OrderedDict[tuple[object, object], object] = OrderedDict()
@@ -2706,10 +2709,11 @@ class MainWindow(QWidget):
             return
 
         input_path = request.input_path
+        source_signature = proxy_source_signature(input_path)
         dialog = ProxyPreviewDialog(
             settings=self._proxy_mesh_settings,
             initial_proxy=self._proxy_preview_result_for_input(input_path),
-            source_scene=self._proxy_source_preview_scene if self._proxy_source_preview_input_path == input_path else None,
+            source_scene=self._proxy_source_scene_for_input(input_path),
             output_path=str(derive_proxy_usda_output_path(request.input_path, request.output_path)),
             on_generate_proxy=self.run_generate_proxy_mesh,
             on_settings_changed=lambda settings, current_input=input_path, current_request=request: self._handle_proxy_preview_settings_changed(
@@ -2720,11 +2724,13 @@ class MainWindow(QWidget):
             on_preview_ready=lambda proxy, current_input=input_path: self._cache_proxy_preview_result(
                 current_input,
                 proxy,
+                source_signature=source_signature,
             ),
             on_preview_closed=lambda settings, proxy, current_input=input_path: self._handle_proxy_preview_closed(
                 current_input,
                 settings,
                 proxy,
+                source_signature=source_signature,
             ),
             parent=None,
         )
@@ -3167,10 +3173,13 @@ class MainWindow(QWidget):
             self._background_jobs.start_proxy_mesh_preview(request, settings, collision_only=True)
             return
         dialog = self._proxy_preview_dialog
+        source_scene = self._proxy_source_scene_for_input(input_path)
+        if source_scene is None and dialog is not None:
+            dialog.set_source_scene(None)
         self._background_jobs.start_proxy_mesh_preview(
             request,
             settings,
-            include_source_scene=not (dialog is not None and dialog.viewport.has_source_scene),
+            include_source_scene=source_scene is None,
         )
 
     def _handle_proxy_collision_preview_result(self, settings: ProxyMeshSettings, collision_meshes) -> None:
@@ -3200,6 +3209,7 @@ class MainWindow(QWidget):
         if source_scene is not None:
             self._proxy_source_preview_scene = source_scene
             self._proxy_source_preview_input_path = input_path
+            self._proxy_source_preview_signature = proxy_source_signature(input_path)
         self._finish_status_activity("success", "Proxy Preview ready.")
         self._trace(
             "job.result",
@@ -3251,11 +3261,13 @@ class MainWindow(QWidget):
         input_path: str,
         settings: ProxyMeshSettings,
         proxy: ProxyMeshResult | None,
+        *,
+        source_signature: tuple[Path, int, int] | None = None,
     ) -> None:
         if self._background_jobs.proxy_preview_running:
             self._background_jobs.cancel_proxy_mesh_preview()
             self._finish_status_activity("cancelled", "Proxy Preview cancelled.")
-        self._apply_proxy_preview_state(input_path, settings, proxy)
+        self._apply_proxy_preview_state(input_path, settings, proxy, source_signature=source_signature)
 
     def run_generate_proxy_mesh(
         self,
@@ -3313,31 +3325,43 @@ class MainWindow(QWidget):
         )
 
     def _proxy_preview_result_for_input(self, input_path: str) -> ProxyMeshResult | None:
-        if self._proxy_mesh_preview_input_path != input_path:
+        signature = proxy_source_signature(input_path)
+        if (
+            self._proxy_mesh_preview_input_path != input_path
+            or signature is None
+            or self._proxy_mesh_preview_signature != signature
+        ):
             return None
         return self._proxy_mesh_preview_result
+
+    def _proxy_source_scene_for_input(self, input_path: str) -> ViewportScene | None:
+        signature = proxy_source_signature(input_path)
+        if (
+            self._proxy_source_preview_input_path != input_path
+            or signature is None
+            or self._proxy_source_preview_signature != signature
+        ):
+            return None
+        return self._proxy_source_preview_scene
 
     def _current_preview_proxy_for_export(
         self,
         input_path: str,
         settings: ProxyMeshSettings,
     ) -> ProxyMeshResult | None:
-        dialog = self._proxy_preview_dialog
-        if (
-            dialog is not None
-            and dialog.isVisible()
-            and dialog.current_proxy is not None
-            and self._proxy_mesh_preview_input_path == input_path
-            and dialog.current_proxy.settings == settings
-        ):
-            return dialog.current_proxy
         proxy = self._proxy_preview_result_for_input(input_path)
         if proxy is None or proxy.settings != settings:
             return None
         return proxy
 
-    def _cache_proxy_preview_result(self, input_path: str, proxy: ProxyMeshResult) -> None:
+    def _cache_proxy_preview_result(
+        self, input_path: str, proxy: ProxyMeshResult, *, source_signature: tuple[Path, int, int] | None = None,
+    ) -> None:
+        signature = proxy_source_signature(input_path)
+        if signature is None or (source_signature is not None and source_signature != signature):
+            return
         self._proxy_mesh_preview_input_path = input_path
+        self._proxy_mesh_preview_signature = signature
         self._proxy_mesh_preview_result = proxy
 
     def _apply_proxy_preview_state(
@@ -3345,11 +3369,13 @@ class MainWindow(QWidget):
         input_path: str,
         settings: ProxyMeshSettings,
         proxy: ProxyMeshResult | None,
+        *,
+        source_signature: tuple[Path, int, int] | None = None,
     ) -> None:
         self._proxy_mesh_settings = settings
         self.geometry_panel.apply_proxy_settings(settings)
         if proxy is not None and proxy.settings == settings:
-            self._cache_proxy_preview_result(input_path, proxy)
+            self._cache_proxy_preview_result(input_path, proxy, source_signature=source_signature)
         else:
             self._proxy_mesh_preview_result = None
             self._proxy_mesh_preview_input_path = ""

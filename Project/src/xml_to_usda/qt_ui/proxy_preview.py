@@ -386,7 +386,7 @@ class ProxyPreviewDialog(PreviewShellDialog):
         self._set_current_proxy(proxy)
         self.status_label.setText(_proxy_status_text(proxy))
 
-    def set_source_scene(self, scene: ViewportScene) -> None:
+    def set_source_scene(self, scene: ViewportScene | None) -> None:
         self.viewport.set_source_scene(scene)
 
     def browse_output_path(self) -> None:

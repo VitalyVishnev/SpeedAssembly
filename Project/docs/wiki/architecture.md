@@ -81,6 +81,11 @@ owns the `Shaded` / `Silhouette Diff` visual state and stencil comparison:
 original-only pixels are blue, Proxy-only pixels are red, overlap is neutral,
 and collision/grid rendering is omitted in Diff mode. This scene is not part of
 `ProxyMeshResult` and cannot affect Proxy USDA export.
+Render-mesh and comparison-scene caches both require the XML resolved path,
+file size, and nanosecond modification time to match. Overwriting the XML
+invalidates reuse, clears the old silhouette on regeneration, and requests
+both payloads from one source load. Worker completion rejects a source changed
+during the job; dialog close/ready callbacks preserve their original revision.
 Proxy export is initiated from the bottom of Proxy Preview. Its editable path
 defaults to the companion path derived from the main Output USDA; an override
 is carried as the exact Proxy USDA destination through the existing worker

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 from queue import Empty, Queue
 import threading
 import traceback
@@ -23,7 +24,7 @@ from ..gui_formatters import (
     format_telemetry_status,
 )
 from ..models import ConversionJobResult, ConversionRequest, ConversionTelemetry
-from ..proxy_mesh_service import ProxyMeshJobResult, ProxyMeshSettings
+from ..proxy_mesh_service import ProxyMeshJobResult, ProxyMeshSettings, proxy_source_signature
 from .preview_jobs import PreviewProcessJob
 
 
@@ -38,6 +39,7 @@ class _ProxyPreviewWork:
     settings: ProxyMeshSettings
     collision_only: bool = False
     include_source_scene: bool = False
+    source_signature: tuple[Path, int, int] | None = None
 
     @property
     def action(self) -> str:
@@ -465,6 +467,7 @@ class QtBackgroundJobsController:
                     settings=settings,
                     collision_only=collision_only,
                     include_source_scene=include_source_scene,
+                    source_signature=proxy_source_signature(request.input_path),
                 ),
             )
         except Exception as exc:
@@ -1222,6 +1225,9 @@ class QtBackgroundJobsController:
             if error_traceback:
                 message = f"{message}\n\n{error_traceback}"
             self._handle_proxy_preview_error(message)
+            return
+        if work.source_signature is None or work.source_signature != proxy_source_signature(request.input_path):
+            self._handle_proxy_preview_error("Source XML changed during Proxy Preview generation. Regenerate the preview.")
             return
         collision_meshes = getattr(job_result, "collision_meshes", None)
         if collision_meshes is not None:

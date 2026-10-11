@@ -284,6 +284,58 @@ Related:
 - `src/xml_to_usda/material_resolver.py`
 - `src/xml_to_usda/assembly_resolution.py`
 
+## Source investigation: Black Alder prototype scale mismatch
+
+Status: Source corrected by operator on 2026-10-11; no converter scale change.
+
+Observed 2026-10-11 in external `SK_Black_Alder_Field_Assembly_03.xml`.
+`Mesh_2` / `SK_BlackAlderBranch_02` has `OriginalScale=26.6136` and 980
+instances with scales 0.5–0.7243186. Its normalized prototype spans 26.025 m
+on its longest local axis; the base mesh height is 6.608 m. Default Proxy
+generation reproduces approximately 36 × 33 × 36 m bounds. The referenced
+FBX contains local node scaling 100/100/100 and centimeter unit metadata.
+The other XML prototypes span approximately 0.463 m and 0.231 m.
+
+Cause of the SpeedTree/XML disagreement is **Unverified**; node scale/unit
+handling during source preparation/export is a hypothesis. Proxy and inline
+normalization share `_mesh_with_original_scale`, so this is not evidence for
+a Proxy-only multiplier defect. A diagnostic in-memory division of only
+Mesh_2 coordinates by 100 reduces Proxy bounds to about 4.7 × 6.2 × 4.8 m,
+but does not establish the intended authored size. No source changes or
+magnitude-based scale heuristic. Source correction was the next validation
+step; see the operator confirmation below. Location: `normalizer.py`,
+`proxy_source_projection.py`.
+
+The operator re-exported the branch at the intended size and confirmed normal
+Proxy geometry. The refreshed XML produces a Mesh_2 longest-axis span of
+0.26025 m. The original source-export mechanism remains unverified.
+
+## Fixed: Proxy silhouette retained an overwritten XML revision
+
+Proxy Preview cached its original-tree comparison scene by XML path only.
+Regenerating render geometry after re-exporting at that same path could keep
+the previous blue silhouette. Disk Projection caching already uses file size
+and nanosecond modification time; clearing disk caches does not fix this
+in-memory mismatch.
+
+Render and source-scene reuse now require the same resolved-path/size/mtime
+signature. Regeneration after a file change clears the old comparison and
+requests both results from one source load. Stale dialog callbacks cannot
+re-cache an old mesh, stale previews cannot be exported, and worker results
+are rejected if the XML changed during generation. Regression gate:
+`test_proxy_cache_reuses_collision_but_reloads_overwritten_xml`.
+
+## Validation fragility: Qt typography scale assertion in the full suite
+
+On 2026-10-11, one full-suite run failed
+`test_typography_roles_scale_without_resizing_approved_caption_controls[1.75]`:
+the label font was 20 px instead of 35 px. The preceding full-suite attempt
+passed this test; a subsequent complete Integration run also passed. Cause
+is **Unverified**; investigate QApplication/QSS state across tests before
+changing production typography. Deferred from the Proxy cache fix because
+the failure was outside the changed workflow and did not reproduce in the
+Integration layer. Location: `tests/test_qt_ui_theme.py`.
+
 ## Validation gap: Proxy Mesh visual and lighting quality
 
 Status: Open

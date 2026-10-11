@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from array import array
 from dataclasses import replace
-from types import SimpleNamespace
+import os
+from types import MethodType, SimpleNamespace
 
 import pytest
 
@@ -18,9 +19,12 @@ from xml_to_usda.proxy_mesh_service import (
     ProxyMeshResult,
     ProxyMeshSettings,
     ProxyMeshSourceRequest,
+    ProxyMeshJobResult,
+    proxy_source_signature,
 )
 from xml_to_usda.proxy_viewport_scene import build_proxy_viewport_scene
 from xml_to_usda.qt_ui.proxy_preview import ProxyPreviewDialog
+from xml_to_usda.qt_ui.background_jobs import QtBackgroundJobsController, _ProxyPreviewWork
 from xml_to_usda.qt_ui.window import MainWindow
 
 
@@ -89,7 +93,7 @@ def test_proxy_preview_switches_viewport_silhouette_mode(qtbot) -> None:
     assert dialog.viewport.silhouette_diff is True
     dialog.viewport.shaded_button.click()
     assert dialog.viewport.silhouette_diff is False
-def test_collision_toggle_reuses_proxy_and_fit_changes_request_collision_only() -> None:
+def test_proxy_cache_reuses_collision_but_reloads_overwritten_xml(tmp_path) -> None:
     starts = []
     handled = []
     background = SimpleNamespace(
@@ -138,21 +142,38 @@ def test_collision_toggle_reuses_proxy_and_fit_changes_request_collision_only() 
     fake = SimpleNamespace(
         _proxy_mesh_settings=proxy.settings,
         geometry_panel=SimpleNamespace(apply_proxy_settings=lambda _settings: None),
-        _proxy_preview_result_for_input=lambda _input: fake.cached,
         _proxy_mesh_preview_result=None,
         _proxy_mesh_preview_input_path="",
+        _proxy_mesh_preview_signature=None,
+        _proxy_source_preview_scene=build_proxy_viewport_scene(proxy),
+        _proxy_source_preview_input_path="",
+        _proxy_source_preview_signature=None,
+        _proxy_preview_dialog=SimpleNamespace(
+            current_proxy=proxy,
+            isVisible=lambda: True,
+            set_source_scene=lambda scene: cleared_scenes.append(scene),
+        ),
         _schedule_operator_state_save=lambda: None,
         _trace=lambda *_args, **_kwargs: None,
         _background_jobs=background,
         _handle_proxy_preview_result=lambda result: handled.append(result),
-        cached=proxy,
     )
-    request = ProxyMeshSourceRequest(input_path="tree.xml")
+    for name in ("_proxy_preview_result_for_input", "_proxy_source_scene_for_input", "_cache_proxy_preview_result"):
+        setattr(fake, name, MethodType(getattr(MainWindow, name), fake))
+    cleared_scenes = []
+    xml_path = tmp_path / "tree.xml"
+    xml_path.write_text("old source", encoding="utf-8")
+    input_path = str(xml_path)
+    request = ProxyMeshSourceRequest(input_path=input_path)
+    old_signature = proxy_source_signature(input_path)
+    fake._cache_proxy_preview_result(input_path, proxy)
+    fake._proxy_source_preview_input_path = input_path
+    fake._proxy_source_preview_signature = old_signature
 
     disabled = replace(proxy.settings, collision=replace(proxy.settings.collision, enabled=False))
-    MainWindow._handle_proxy_preview_settings_changed(fake, "tree.xml", request, disabled)
-    fake.cached = handled[-1]
-    MainWindow._handle_proxy_preview_settings_changed(fake, "tree.xml", request, proxy.settings)
+    MainWindow._handle_proxy_preview_settings_changed(fake, input_path, request, disabled)
+    fake._cache_proxy_preview_result(input_path, handled[-1])
+    MainWindow._handle_proxy_preview_settings_changed(fake, input_path, request, proxy.settings)
 
     assert starts == []
     assert handled[-1].mesh is proxy.mesh
@@ -162,7 +183,34 @@ def test_collision_toggle_reuses_proxy_and_fit_changes_request_collision_only() 
         proxy.settings,
         collision=replace(proxy.settings.collision, mode=ProxyCollisionMode.CAPSULE),
     )
-    MainWindow._handle_proxy_preview_settings_changed(fake, "tree.xml", request, capsule)
+    MainWindow._handle_proxy_preview_settings_changed(fake, input_path, request, capsule)
     assert starts == []
     assert handled[-1].mesh is proxy.mesh
     assert [mesh.name for mesh in handled[-1].collision_meshes] == ["UCP_ProxyMesh_00"]
+
+    # Re-export at the same path must not compare fresh low-poly with old high-poly,
+    # reuse old collision, or export the stale mesh still visible in the dialog.
+    xml_path.write_text("new source", encoding="utf-8")
+    os.utime(xml_path, ns=(old_signature[2], old_signature[2] + 10_000_000))
+    assert proxy_source_signature(input_path)[1] == old_signature[1]
+    assert fake._proxy_preview_result_for_input(input_path) is None
+
+    errors = []
+    controller = SimpleNamespace(
+        _proxy_preview_job=SimpleNamespace(
+            error_traceback=None,
+            request=request,
+            settings=_ProxyPreviewWork(proxy.settings, source_signature=old_signature),
+        ),
+        _trace_worker=lambda *_args, **_kwargs: None,
+        _handle_proxy_preview_error=errors.append,
+    )
+    QtBackgroundJobsController._handle_proxy_preview_job_result(controller, ProxyMeshJobResult(proxy=proxy))
+    assert errors == ["Source XML changed during Proxy Preview generation. Regenerate the preview."]
+    assert fake._proxy_source_scene_for_input(input_path) is None
+    assert MainWindow._current_preview_proxy_for_export(fake, input_path, proxy.settings) is None
+    MainWindow._handle_proxy_preview_settings_changed(fake, input_path, request, proxy.settings)
+    assert starts == [(request, proxy.settings, {"include_source_scene": True})]
+    assert cleared_scenes == [None]
+    fake._cache_proxy_preview_result(input_path, proxy, source_signature=old_signature)
+    assert fake._proxy_preview_result_for_input(input_path) is None

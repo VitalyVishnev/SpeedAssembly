@@ -96,6 +96,10 @@ For trees, start with a small set of reusable shapes:
 - Larger branch sections.
 - Individual leaves for placements that need a specific shape or independent motion.
 
+![A library of reusable conifer branch meshes, including bare branches and branches with foliage](../assets/images/cdpr-part-library.png)
+
+[Example part library from a CD PROJEKT RED presentation](https://www.youtube.com/watch?v=EdNkm0ezP0o).
+
 These cluster sizes are examples, not requirements. Vary the meshes where needed for branch tips, dead branches, or other distinct areas of the crown.
 
 For grass, consider individual large blades where they define the silhouette, small clumps for visible variation, and larger clumps for dense filler. Grouping blades can reduce part count without reducing the number of visible blades.

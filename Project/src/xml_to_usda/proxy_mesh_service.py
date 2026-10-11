@@ -48,6 +48,16 @@ class ProxyMeshError(ValueError):
     """Raised when a proxy cannot be safely generated from source facts."""
 
 
+def proxy_source_signature(input_path: str) -> tuple[Path, int, int] | None:
+    """Identify the XML revision shared by render and silhouette preview caches."""
+    path = Path(input_path).resolve(strict=False)
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return path, stat.st_size, stat.st_mtime_ns
+
+
 @dataclass(frozen=True)
 class ProxyMeshSettings:
     method: str = PROXY_METHOD_DENSITY_FIELD
