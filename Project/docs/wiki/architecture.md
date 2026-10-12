@@ -158,6 +158,16 @@ deterministic wind-group stack: XML Generator Groups or Auto Hierarchy provide a
 base, manual override layers sit above it, and the flattened result writes the
 existing Dynamic Wind JSON schema. Auto Hierarchy derives groups from skeleton
 topology and SpeedTree/file joint ordering, not from XML wind generator labels.
+The explicitly selected `Auto Hierarchy (PVE)` alternative chooses continuation
+from segment direction plus normalized longest descendant path, then assigns
+side branches to the next hierarchy level. It reuses the same group stack,
+1-10 group cap, scene recoloring, and JSON export. Physical XML segments use
+bind endpoints; point-style external rigs use parent/current joint positions.
+`Auto Hierarchy (Tree)` uses the Qt-free `wind_tree_hierarchy.py` analyzer from
+bind poses and parent links only. It classifies basal stems, continuation and
+terminal chains, then reuses group caps/manual layers/JSON. GUI caches one
+loaded-rig analysis and uses its own-pivot display guides on the shared viewport;
+classification does not consume XML endpoints or generator metadata.
 Each final visible group can reveal its Dynamic Wind controls in the dialog;
 settings are keyed by the stable source layer and applied only after the stack
 is flattened. XML layers remain read-only for manual bone picking, while manual

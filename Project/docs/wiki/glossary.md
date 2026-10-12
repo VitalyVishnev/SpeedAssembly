@@ -63,6 +63,8 @@
 - `Primary Stem Axis` - a geometrically selected root-to-leaf skeleton path used to represent a physical stem for Fracturing or Proxy collision. It is not the SpeedTree Generator Continuation rule.
 - `Dynamic Wind` - the separate Unreal JSON wind output generated from the normalized skeleton.
 - `Wind Preview` - the Dynamic Wind inspection and authoring window. It supports Auto Hierarchy, manual override layers, external skeleton loading, display-only unit/up-axis conversion, and Dynamic Wind JSON export from the final group stack.
+- `Auto Hierarchy (PVE)` - optional Wind Preview grouping by geometric branch continuation. Direction plus normalized longest descendant path selects a continuation; other children increase hierarchy level. It does not extract or modify the skeleton and does not group by radius.
+- `Auto Hierarchy (Tree)` - calibrated Wind Preview proposal from bind-pose directions, attachment positions and downstream branch structure. It ignores source names/order/generator metadata/endpoints, preserves the rig, and exposes display-only guides plus ambiguous joints for manual review.
 - `External Skeleton` - an FBX rig or USD/UsdSkel skeleton loaded into Advanced Wind Settings for diagnostics, grouping, and JSON authoring. FBX includes a read-only rest-mesh/skin report; USD remains skeleton-only. Neither is an FBX/USD conversion input.
 - `Source Name` - any name observed in XML, FBX, or source filenames.
 - `Instance` - shorthand for a placed occurrence of a prototype when the stage is already obvious.

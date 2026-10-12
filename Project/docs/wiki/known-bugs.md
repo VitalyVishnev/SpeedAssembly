@@ -109,6 +109,83 @@ Related:
 - `src/xml_to_usda/wind_viewport_scene.py`
 - `scripts/ue57_fix_selected_foliage_bones.py`
 
+## Validation gap: Tree hierarchy calibration and Trunk fork runtime
+
+Tree mode agrees with 96.0% of 3336 labelled joints on the operator's ten
+independent reference rigs. This is calibration, not held-out generalization.
+Willow still differs on 31/115 joints; 03_28mil differs on 47/545 versus 28 for
+Order, and Alder 01 differs on 35/346. The operator may compare modes and retain
+manual corrections. Do not add asset-name/ordinal exceptions to hide errors.
+
+Tree's own-pivot guides avoid attachment-link overdraw, but USD terminal spans
+are direction markers, not recovered physical endpoints. Generic FBX axes,
+basal-root detection, and near-collinear generator boundaries need independent
+fixtures and visual validation. Tests protect rename/order/rotation/scale
+invariance and the aggregate/per-tree reference budget, not perfect recovery.
+
+The narrowed JSON guard allows same-group Trunk forks, supported by the local
+UE 5.8 shader path; non-Trunk forks still fail. Actual multi-stem runtime wind
+after this change has not been rerun. Next gate: operator comparison on the
+problem trees, then UE 5.7/5.8 imports with matching joint coverage and explicit
+Trunk flags. Keep export failures for merged branch levels visible.
+
+Location: `wind_tree_hierarchy.py`, `dynamic_wind.py`,
+`qt_ui/wind_preview.py`. Detailed evidence and benchmark:
+[Tree hierarchy calibration](wind-tree-hierarchy.md).
+
+## Bug: External USD loses physical bone endpoints and overlays attachment links
+
+Status: Source-reproduced on the operator's Norway Spruce; viewport observation
+reported by operator, overdraw mechanism verified from segment geometry.
+
+Tree mode now provides endpoint-independent grouping and explicitly inferred
+own-pivot guides. The original/PVE path still has the limitation below; no
+physical endpoint preservation contract was added to USD.
+
+`wind_external_skeleton.py::_unreal_usd_ref_skeleton` loads bind/rest transforms
+but has no physical endpoints. `wind_viewport_scene.py` consequently draws
+parent/child attachment connectors as bones and feeds those directions into
+the PVE scorer. A USD exported by SpeedAssembly is not necessarily a curve-point
+rig: branches can attach anywhere along a long physical parent bone.
+
+Observed on `SK_Norway_Spruce_Assembly_01_new.usda`: 249 joints, zero endpoints;
+PVE groups 0/1/2 contain 8/235/6 joints and choose side branch bone_018 after
+bone_005 instead of terminal stem bone_184. The sibling XML has all 249 endpoints;
+its joint set and parents match after the documented root alias, and maximum
+bind-matrix component difference is 4.9942e-7. Using its endpoint facts gives
+7/236/6 joints, with bone_184 in the trunk. All 103 trunk-to-side-branch
+connectors are within eight degrees of the physical trunk axis, so their
+child-group colors can cover the trunk overlay and explain the reported
+single-visible-trunk-bone appearance. The actual assignment contains eight
+group-0 joints, not one.
+
+Workaround: open the original XML as the main SpeedTree input and inspect PVE
+groups there; that route retains physical segment endpoints. Do not infer or
+silently replace the USD rig from names, shortest links, or arbitrary lengths.
+Systemic fix is deferred until the representation of physical segment facts on
+USD round-trip is defined, including old files without those facts and generic
+external rigs. Next gate: minimal attachment fixture, preserved endpoint/source
+contract, original-vs-round-trip grouping and segment agreement, then operator
+viewport and UE wind comparison. No engine or source-asset mutation performed.
+
+## Validation gap: PVE-style Wind hierarchy needs operator comparison
+
+`Auto Hierarchy (PVE)` is an explicitly selected grouping experiment. Local
+synthetic checks cover direction/length competition, more than three levels,
+reordered joints, and group caps. SimpleTree and Big Spruce produced complete
+assignments and a real SimpleTree JSON. Whether geometric continuation improves
+the operator's plants and their Unreal wind response remains Unverified.
+Equal scores use file order. Coincident single-child chains borrow a descendant
+direction; other missing incoming directions inherit the parent direction.
+Completely directionless candidates use length and deterministic tie order.
+The existing JSON gate still rejects non-Trunk same-group forks, including those caused
+by merging too many levels into the final group. Raise Groups or assign manual
+layers before export. Next step: compare both modes on the operator's problem
+asset, then validate exported JSON on the corresponding imported UE skeleton.
+
+Location: `src/xml_to_usda/wind_viewport_scene.py`,
+`src/xml_to_usda/qt_ui/wind_preview.py`.
+
 ## Validation gap: Source FBX diagnostics cannot certify Unreal's imported rig
 
 Status: Open
@@ -335,6 +412,20 @@ is **Unverified**; investigate QApplication/QSS state across tests before
 changing production typography. Deferred from the Proxy cache fix because
 the failure was outside the changed workflow and did not reproduce in the
 Integration layer. Location: `tests/test_qt_ui_theme.py`.
+
+## Open: Ground Cover export can disagree with the visible Trunk checkbox
+
+Observed 2026-10-11 in Black Alder Dynamic Wind JSON: `bIsGroundCover=true`
+and all three `bIsTrunkGroup=false`, while the operator reports group 0 Trunk
+checked in SpeedAssembly. `dynamic_wind.build_dynamic_wind_data` explicitly
+clears trunk groups for Ground Cover, including operator-supplied groups;
+`qt_ui/panels.py` restores the checkbox from persisted operator values.
+UE 5.7 `DynamicWindImportData.cpp` copies SimulationGroups from JSON unchanged.
+This is converter/UI policy disagreement, not evidence of UE dropping a flag.
+Workaround for trunk behavior: disable Ground Cover, regenerate JSON, and
+reimport it. Next step: resolve whether to preserve explicit Trunk with Ground
+Cover or visibly disable Trunk under the current policy; do not silently
+change the backend contract protected by `test_wind_pipeline.py`.
 
 ## Validation gap: Proxy Mesh visual and lighting quality
 

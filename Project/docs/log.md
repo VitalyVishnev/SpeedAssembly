@@ -566,9 +566,69 @@ under `docs/raw/`; Git retains per-change detail.
   scenarios passed. Black Alder source/Proxy payloads now have tree-sized
   bounds; release ZIP EXE hash matches the built EXE. Version unchanged.
 
+## 2026-10-11 - Diagnose Black Alder Dynamic Wind Trunk mismatch
+
+- Verified supplied JSON has Ground Cover enabled and every Trunk flag false.
+  Traced the converter's Ground Cover override and persisted checkbox display;
+  UE 5.7 imports the JSON groups unchanged. Recorded the unresolved UI/policy
+  mismatch and workaround; no runtime or source-asset changes.
+
 ## 2026-10-11 - Part library illustration
 
 - Added the supplied CD PROJEKT RED branch-library screenshot to Choosing what
   to instance, under Building a part library, with the presentation source link.
 - Updated the English original and Russian translation together; shared one
   unchanged image asset between both language versions.
+
+## 2026-10-12 - Trace UE 5.8 PVE mesh extraction and wind groups
+
+- Recorded the local UE 5.8.2 mesh-to-branch pipeline, continuation score,
+  hierarchy-depth contract, radius-based wind grouping, and export call sites.
+- Compared UE 5.7 grouping and current SpeedAssembly Auto Hierarchy; retained
+  source-order contracts and marked comparative asset quality Unverified.
+- Documentation only; engine and application code unchanged.
+
+## 2026-10-12 - Add PVE-style Auto Hierarchy comparison and Package build
+
+- Added `Auto Hierarchy (PVE)` beside the original mode in Advanced Wind
+  Settings. Direction and descendant length select continuation; side branches
+  increase hierarchy level. Reused Groups 1-10, manual layers, scene recoloring,
+  session persistence, and Dynamic Wind JSON. Source skeletons remain unchanged.
+- Recorded the physical-segment adaptation and provisional quality limits;
+  retained the source-order mode and its Continue line settings.
+- Validation: 41 focused grouping/stack/Qt/wind checks, source Wind smoke,
+  27 packaged contracts, Package stability/recovery smoke, and frozen Wind
+  smoke passed. Frozen PVE JSON covers all 105 SimpleTree joints; ZIP contains
+  the exact built EXE. No required smoke skipped; unrelated source suites not
+  rerun. Version remains 0.5.0-beta. Operator/UE quality comparison is pending.
+
+## 2026-10-12 - Diagnose Norway Spruce external USD grouping and bone overlay
+
+- Compared the supplied USDA and sibling XML: matching 249-joint hierarchy and
+  bind poses, but the USD load loses all physical endpoints. Reproduced the
+  PVE branch/stem continuation difference and verified 103 attachment links
+  overlap the physical trunk axis.
+- Recorded the source-XML workaround and the unresolved USD round-trip segment
+  contract. Existing EXE and source assets unchanged; no endpoint heuristic or
+  implicit sidecar loading introduced.
+
+## 2026-10-12 - Calibrate bare-rig Tree hierarchy and build the comparison EXE
+
+- Added `Auto Hierarchy (Tree)` alongside Order/PVE, using only bind poses and
+  parent links. Reference data is confined to the benchmark/regression corpus;
+  runtime has no source-file, name, ordinal, generator or endpoint lookup.
+- Added reproducible XML/USDA-JSON comparison and ten independent anonymous
+  skeleton fixtures. With matched group caps, 3336 labelled joints give Tree
+  133 mismatches versus Order 485 and PVE 808. Recorded per-tree counterexamples,
+  including the 03_28mil regression; 96% calibration is not generalization.
+- Cached one preview analysis, displayed own-pivot bone guides/terminal markers,
+  and retained source rigs/manual layers/settings. Geometry scale uses a
+  rotation-invariant centered sphere; ambiguous forks remain explicit.
+- Narrowed the same-group-fork guard for explicit Trunk groups only, based on
+  UE 5.8's separate trunk shader; branch forks still fail. New UE runtime
+  verification remains open.
+- Validation: 63 focused Wind checks, corpus rename/reorder/general-rotation/
+  translation/scale invariance, source Wind smoke and real Norway USD preview/
+  JSON passed. Final Package passed 27 packaged contracts and required
+  stability/recovery smoke; frozen Wind smoke wrote Tree JSON. ZIP embeds the
+  exact built EXE. No required smoke skipped; version remains 0.5.0-beta.

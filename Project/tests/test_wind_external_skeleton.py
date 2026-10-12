@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import types
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -181,6 +182,11 @@ def test_external_export_rejects_unmatched_or_forked_ref_skeleton_groups(monkeyp
 
     with pytest.raises(WindPreviewError, match="dynamic_wind_same_group_fork"):
         prepare_external_dynamic_wind_export(preview, forked)
+
+    # Independent stems may share trunk sway: the UE trunk shader does not
+    # consume branch chain length/influence. Branch forks still fail above.
+    trunk_fork = replace(forked, simulation_groups=(replace(group, is_trunk_group=True),))
+    assert prepare_external_dynamic_wind_export(preview, trunk_fork) == trunk_fork
 
     unmatched = DynamicWindData(
         joint_assignments=(DynamicWindJointAssignment(joint_name="Missing", simulation_group_index=0, branch_order=0),),

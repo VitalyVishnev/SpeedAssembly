@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import json
 
 import pytest
 
@@ -22,6 +23,7 @@ from xml_to_usda.models import (
     Vector3,
 )
 from xml_to_usda.wind_preview_service import generate_wind_preview_from_request
+from xml_to_usda.wind_tree_hierarchy import analyze_tree_hierarchy
 from xml_to_usda.wind_viewport_scene import (
     SELECTED_ALPHA,
     MUTED_ALPHA,
@@ -132,6 +134,112 @@ def test_auto_wind_viewport_groups_ignore_generator_levels() -> None:
 
     assert [assignment.simulation_group_index for assignment in auto_groups.joint_assignments] == [0, 0, 0]
     assert auto_groups.simulation_groups[0].is_trunk_group is True
+
+
+def test_tree_hierarchy_proposes_reference_groups_from_bare_format_independent_rigs() -> None:
+    cases = json.loads(Path("tests/fixtures/wind_hierarchy/curated_trees.json").read_text(encoding="utf-8"))
+    total = wrong = 0
+    for case in cases:
+        skeleton = tuple(
+            Joint(f"joint_{i}", parent=f"joint_{parent}" if parent >= 0 else None, bind_transform=Matrix4d(tuple(tuple(row) for row in matrix)))
+            for i, (parent, matrix, _group) in enumerate(case["joints"])
+        )
+        expected = {f"joint_{i}": group for i, (_parent, _matrix, group) in enumerate(case["joints"]) if group is not None}
+        count = max(expected.values()) + 1
+        analysis = analyze_tree_hierarchy(skeleton)
+        data = build_auto_wind_viewport_data(skeleton, count, method="tree", tree_analysis=analysis)
+        predicted = {assignment.joint_name: assignment.simulation_group_index for assignment in data.joint_assignments}
+        mismatch = sum(predicted[name] != group for name, group in expected.items())
+        # This is a calibrated proposal, not a claim to recover every generator
+        # boundary. Keep the whole curated corpus useful and prevent a bad tree
+        # family from disappearing inside a pooled accuracy number.
+        assert mismatch / len(expected) <= 0.30, case["reference"]
+        total += len(expected)
+        wrong += mismatch
+        if count == 1:
+            assert all(joint.branch_order == 0 for joint in analysis), case["reference"]
+
+        names = {joint.name: f"renamed_{len(skeleton) - i}" for i, joint in enumerate(skeleton)}
+        rotation = ((0.36, 0.48, -0.8), (-0.8, 0.6, 0.0), (0.48, 0.64, 0.6))
+        transformed = []
+        for joint in skeleton:
+            rows = []
+            for i, row in enumerate(joint.bind_transform.rows):
+                rotated = tuple(sum(row[k] * rotation[k][column] for k in range(3)) for column in range(3))
+                if i == 3:
+                    rotated = tuple(value * 1000 + shift for value, shift in zip(rotated, (42, -13, 5)))
+                rows.append((*rotated, row[3]))
+            transformed.append(replace(
+                joint, name=names[joint.name], parent=names.get(joint.parent), bind_transform=Matrix4d(tuple(rows)),
+                generator_level=99, generator_label="Ignored", source_id=99,
+                bind_end_transform=Matrix4d.from_translation(Vector3(9999, 9999, 9999)),
+            ))
+        rotated = analyze_tree_hierarchy(tuple(reversed(transformed)))
+        assert {j.name: j.branch_order for j in rotated} == {names[j.name]: j.branch_order for j in analysis}, case["reference"]
+    assert wrong / total <= 0.05
+
+    # A symmetric bare fork contains no evidence for selecting either child.
+    symmetric = (_joint("root", None, 0, 0, 0), _joint("left", "root", -1, 1, 0), _joint("right", "root", 1, 1, 0))
+    ambiguous = analyze_tree_hierarchy(symmetric)
+    assert ambiguous[0].ambiguous
+    assert [j.branch_order for j in ambiguous] == [0, 1, 1]
+
+
+@pytest.mark.parametrize("physical_segments", (False, True))
+def test_pve_hierarchy_groups_whole_branches_by_geometry_beyond_three_levels(physical_segments) -> None:
+    skeleton = [_joint("root", None, 0.0, 0.0, 0.0), _joint("fork_0", "root", 0.0, 1.0, 0.0)]
+    expected = {"root": 0, "fork_0": 0}
+    position = (0.0, 1.0, 0.0)
+    direction = (0.0, 1.0, 0.0)
+    for depth in range(6):
+        parent = f"fork_{depth}"
+        side_direction = (-direction[1], direction[0], 0.0)
+        side_position = tuple(a + b for a, b in zip(position, side_direction))
+        continuation = tuple(a + b for a, b in zip(position, direction))
+        tip = tuple(a + 100 * b for a, b in zip(continuation, direction))
+        if physical_segments:
+            skeleton[-1] = replace(skeleton[-1], bind_end_transform=Matrix4d.from_translation(Vector3(*continuation)))
+        # Both candidates exist independently of their generator labels or file order.
+        skeleton.extend((
+            _joint(f"fork_{depth + 1}", parent, *side_position),
+            _joint(f"continuation_{depth}", parent, *continuation, end=tip if physical_segments else None),
+            _joint(f"tip_{depth}", f"continuation_{depth}", *tip),
+        ))
+        expected.update({f"fork_{depth + 1}": depth + 1, f"continuation_{depth}": depth, f"tip_{depth}": depth})
+        position, direction = side_position, side_direction
+        # Move the next fork to the end to allow the next physical segment to be set.
+        skeleton.append(skeleton.pop(-3))
+
+    skeleton = tuple(skeleton)
+    # Length must also affect the decision: a much longer turned path wins
+    # over a short straight path, with the same PVE sum of both scores.
+    skeleton += (
+        _joint("other_root", None, 0.0, 0.0, 2.0),
+        _joint("other_fork", "other_root", 0.0, 1.0, 2.0, end=(0.0, 2.0, 2.0) if physical_segments else None),
+        _joint("short", "other_fork", 0.0, 2.0, 2.0, end=(0.0, 3.0, 2.0) if physical_segments else None),
+        _joint("short_tip", "short", 0.0, 3.0, 2.0),
+        _joint("long", "other_fork", 1.0, 1.0, 2.0, end=(11.0, 1.0, 2.0) if physical_segments else None),
+        _joint("long_tip", "long", 11.0, 1.0, 2.0),
+    )
+    expected.update(other_root=0, other_fork=0, short=1, short_tip=1, long=0, long_tip=0)
+    geometric = build_auto_wind_viewport_data(skeleton, 10, method="pve")
+    by_name = {item.joint_name: item.simulation_group_index for item in geometric.joint_assignments}
+    assert by_name == expected
+    assert len(geometric.simulation_groups) == 7
+    assert geometric == build_auto_wind_viewport_data(skeleton, 10, method="pve")
+    reordered = (skeleton[0], *reversed(skeleton[1:]))
+    assert {
+        item.joint_name: item.simulation_group_index
+        for item in build_auto_wind_viewport_data(reordered, 10, method="pve").joint_assignments
+    } == expected
+    merged = build_auto_wind_viewport_data(skeleton, 4, method="pve")
+    assert {item.joint_name: item.simulation_group_index for item in merged.joint_assignments} == {
+        name: min(level, 3) for name, level in expected.items()
+    }
+    assert {
+        item.joint_name: item.simulation_group_index
+        for item in build_auto_wind_viewport_data(reordered, 10).joint_assignments
+    } != expected
 
 
 @pytest.mark.parametrize(

@@ -164,6 +164,19 @@ def test_advanced_wind_group_controls_only_edit_manual_groups_and_persist_settin
     dialog = WindPreviewDialog(preview=preview)
     qtbot.addWidget(dialog)
 
+    batches = dialog._active_scene.mesh_batches
+    dialog.grouping_mode_combo.setCurrentIndex(dialog.grouping_mode_combo.findData("auto_pve"))
+    assert dialog._is_auto_mode()
+    assert dialog.group_count_slider.isEnabled()
+    qtbot.waitUntil(lambda: not any(box.text() == "Continue line" for box in dialog.findChildren(QCheckBox)))
+    assert dialog._active_scene.mesh_batches is batches
+    dialog.grouping_mode_combo.setCurrentIndex(dialog.grouping_mode_combo.findData("auto_tree"))
+    analysis = dialog._get_tree_analysis()
+    assert dialog._active_scene.mesh_batches is batches
+    assert "Tree bone guides" in dialog.summary_label.text()
+    dialog.group_count_slider.setValue(2)
+    assert dialog._get_tree_analysis() is analysis
+
     assert dialog.windowTitle() == "Advanced Wind Settings"
     assert not dialog._group_buttons
     assert any(label.text().startswith("G0 | Base group") for label in dialog.findChildren(QLabel))
@@ -202,5 +215,7 @@ def test_advanced_wind_group_controls_only_edit_manual_groups_and_persist_settin
 
     restored = WindPreviewDialog(preview=preview, wind_session_snapshot=snapshot)
     qtbot.addWidget(restored)
+    assert restored.grouping_mode_combo.currentData() == "auto_tree"
+    assert restored._current_dynamic_wind() == dialog._current_dynamic_wind()
     assert restored._group_settings_by_source_key[manual_group.source_key]["influence"] == pytest.approx(0.35)
     assert manual_group.source_key in restored._expanded_group_source_keys

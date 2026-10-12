@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from array import array
 from dataclasses import dataclass, replace
+from math import hypot, isfinite
 
 from .dynamic_wind import default_group_settings
+from .wind_tree_hierarchy import TreeHierarchyJoint, analyze_tree_hierarchy
 from .geometry_buffers import geometry_buffer_from_mesh
 from .models import (
     CanonicalTreeModel,
@@ -79,11 +81,23 @@ def build_auto_wind_viewport_data(
     group_count: int,
     *,
     continuous_branch_orders: frozenset[int] | set[int] | tuple[int, ...] = (),
+    method: str = "order",
+    tree_analysis: tuple[TreeHierarchyJoint, ...] | None = None,
 ) -> DynamicWindData:
+    if method not in {"order", "pve", "tree"}:
+        raise ValueError(f"wind_preview_auto_unknown_method: {method}")
     if not skeleton:
         return DynamicWindData(joint_assignments=(), simulation_groups=())
     clamped_group_count = max(AUTO_WIND_GROUP_MIN_COUNT, min(AUTO_WIND_GROUP_MAX_COUNT, int(group_count)))
-    branch_orders = _auto_branch_order_depths(skeleton, continuous_branch_orders=frozenset(continuous_branch_orders))
+    if method == "tree":
+        analysis = tree_analysis if tree_analysis is not None else analyze_tree_hierarchy(skeleton)
+        branch_orders = {joint.name: joint.branch_order for joint in analysis}
+        if set(branch_orders) != {joint.name for joint in skeleton}:
+            raise ValueError("wind_tree_invalid_analysis: analysis does not cover this skeleton.")
+    else:
+        branch_orders = _auto_branch_order_depths(
+            skeleton, continuous_branch_orders=frozenset(continuous_branch_orders), method=method,
+        )
     effective_group_count = min(clamped_group_count, max(branch_orders.values(), default=0) + 1)
     joint_assignments = tuple(
         DynamicWindJointAssignment(
@@ -221,12 +235,14 @@ def build_wind_viewport_bone_segments(
     dynamic_wind: DynamicWindData,
     *,
     selection: WindViewportSelection | None = None,
+    tree_analysis: tuple[TreeHierarchyJoint, ...] | None = None,
 ) -> tuple[ViewportBoneSegment, ...]:
     groups = build_wind_viewport_groups(dynamic_wind)
     group_by_joint = _group_by_joint(dynamic_wind)
     color_by_group = {group.group_index: group.color for group in groups}
     selected_joints = _selected_joint_tokens(model.skeleton, group_by_joint, selection)
-    return _bone_segments(model.skeleton, group_by_joint, color_by_group, selection, selected_joints)
+    display_ends = {joint.name: joint.display_end for joint in tree_analysis} if tree_analysis is not None else None
+    return _bone_segments(model.skeleton, group_by_joint, color_by_group, selection, selected_joints, display_ends=display_ends)
 
 
 def recolor_wind_viewport_scene(
@@ -339,8 +355,11 @@ def _auto_branch_order_depths(
     skeleton: tuple[Joint, ...],
     *,
     continuous_branch_orders: frozenset[int] = frozenset(),
+    method: str = "order",
 ) -> dict[str, int]:
     joints_by_name = {joint.name: joint for joint in skeleton}
+    if len(joints_by_name) != len(skeleton):
+        raise ValueError("wind_preview_auto_invalid_skeleton: duplicate joint names.")
     joint_names = set(joints_by_name)
     children_by_parent: dict[str | None, list[str]] = {}
     for joint in skeleton:
@@ -357,6 +376,9 @@ def _auto_branch_order_depths(
     if not root_tokens:
         raise ValueError("wind_preview_auto_no_trunk: automatic grouping needs at least one root or trunk joint.")
 
+    if method == "pve":
+        return _pve_branch_order_depths(root_tokens, children_by_parent, joints_by_name)
+
     depths: dict[str, int] = {}
     for root_token in root_tokens:
         _assign_branch_order(root_token, 0, children_by_parent, skeleton_order, joints_by_name, continuous_branch_orders, depths)
@@ -364,6 +386,75 @@ def _auto_branch_order_depths(
     missing = tuple(joint.name for joint in skeleton if joint.name not in depths)
     if missing:
         raise ValueError("wind_preview_auto_unreachable_joints: " + ", ".join(missing))
+    return depths
+
+
+def _pve_branch_order_depths(
+    roots: tuple[str, ...],
+    children_by_parent: dict[str | None, list[str]],
+    joints_by_name: dict[str, Joint],
+) -> dict[str, int]:
+    # UE 5.8 PVImportHelpers::FindBestParentPoint: direction + normalized subtree length.
+    # XML joints represent physical segments; FBX/USD joints represent curve points.
+    vectors: dict[str, tuple[float, float, float]] = {}
+    lengths: dict[str, float] = {}
+    traversal: list[str] = []
+    pending = list(reversed(roots))
+    while pending:
+        token = pending.pop()
+        joint = joints_by_name[token]
+        start = joint.bind_translate
+        end = joint.bind_end_translate
+        if end is None:
+            end = start
+            start = joints_by_name[joint.parent].bind_translate if joint.parent is not None else start
+        vector = (end.x - start.x, end.y - start.y, end.z - start.z)
+        if not all(isfinite(value) for value in vector):
+            raise ValueError(f"wind_preview_auto_invalid_geometry: non-finite segment at {token}.")
+        vectors[token] = vector
+        lengths[token] = hypot(*vector)
+        traversal.append(token)
+        pending.extend(reversed(children_by_parent.get(token, ())))
+    if len(traversal) != len(joints_by_name):
+        raise ValueError("wind_preview_auto_unreachable_joints: skeleton contains a disconnected cycle.")
+
+    remaining: dict[str, float] = {}
+    directions: dict[str, tuple[float, float, float]] = {}
+    for token in reversed(traversal):
+        children = children_by_parent.get(token, ())
+        remaining[token] = max((lengths[child] + remaining[child] for child in children), default=0.0)
+        size = lengths[token]
+        directions[token] = tuple(value / size for value in vectors[token]) if size > 0 else (
+            directions[children[0]] if len(children) == 1 else (0.0, 0.0, 0.0)
+        )
+
+    depths = {token: 0 for token in roots}
+    incoming: dict[str, tuple[float, float, float]] = {}
+    for token in traversal:
+        joint = joints_by_name[token]
+        direction = directions[token]
+        if direction == (0.0, 0.0, 0.0) and joint.parent is not None:
+            direction = incoming[joint.parent]
+        incoming[token] = direction
+        children = children_by_parent.get(token, ())
+        if not children:
+            continue
+        # PVE excludes the entering edge for curve points. A physical XML bone
+        # starts at its pivot, so its own segment belongs to the outgoing path.
+        path_lengths = {
+            child: remaining[child] + (lengths[child] if joints_by_name[child].bind_end_translate is not None else 0.0)
+            for child in children
+        }
+        total_length = sum(path_lengths.values())
+
+        def score(child: str) -> float:
+            dot = sum(a * b for a, b in zip(direction, directions[child]))
+            return (1.0 + dot) * 0.5 + (path_lengths[child] / total_length if total_length > 0 else 0.0)
+
+        # Equal or geometry-free candidates retain source order, deterministically.
+        continuation = max(children, key=score)
+        for child in children:
+            depths[child] = depths[token] + int(child != continuation)
     return depths
 
 
@@ -539,6 +630,8 @@ def _bone_segments(
     color_by_group: dict[int, Color4],
     selection: WindViewportSelection | None,
     selected_joints: set[str],
+    *,
+    display_ends: dict[str, Vector3] | None = None,
 ) -> tuple[ViewportBoneSegment, ...]:
     joints_by_name = {joint.name: joint for joint in skeleton}
     segments: list[ViewportBoneSegment] = []
@@ -546,7 +639,10 @@ def _bone_segments(
         parent = joints_by_name.get(joint.parent or "")
         if joint.parent is not None and parent is None:
             raise ValueError(f"wind_preview_invalid_skeleton: joint {joint.name} references missing parent {joint.parent}.")
-        start, end = _bone_segment_positions(joint, parent)
+        start, end = (
+            (joint.bind_translate, display_ends[joint.name])
+            if display_ends is not None else _bone_segment_positions(joint, parent)
+        )
         if start == end:
             continue
         group_index = _require_group(group_by_joint, joint.name)

@@ -3,6 +3,69 @@
 Rejected, superseded, and partially validated work. Current contracts live in
 [decisions.md](decisions.md); active gaps live in [known-bugs.md](known-bugs.md).
 
+## UE 5.8 PVE extraction and automatic wind groups
+
+Status: Source-verified in local UE 5.8.2; comparative runtime quality Unverified.
+
+Extract from Mesh reconstructs whole branch curves, choosing fork continuation
+by direction plus normalized remaining subtree length. Branch hierarchy depth
+increments only for side branches. Dynamic Wind assignment is separate: bone
+creation quantizes branch-base radii into indices 0/1/2, as in UE 5.7, with a
+branch-aware base-radius helper in 5.8. It does not use hierarchy depth.
+Geometry-based continuation is a candidate for external rigs, not a replacement
+for the established SpeedTree order contract. Details and source navigation:
+[UE 5.8 PVE Mesh Extraction](ue58-pve-mesh-extraction.md).
+
+## Tree hierarchy from operator-selected reference rigs
+
+Status: Implemented as a comparison candidate; independent/UE validation open.
+
+The operator selected seven prepared USDA/JSON pairs plus four XMLs; one Norway
+XML repeats its prepared rig. On ten independent inputs, Tree mismatches
+133/3336 labelled joints versus Order 485 and PVE 808 with matched group caps.
+Trunk and branch-chain geometry use a single analyzer, not file-specific rules.
+It runs on bare bind poses/parents and caches one loaded-rig result in the GUI.
+Tree guides start at each joint, removing child-color overdraw on the trunk;
+USD terminal guides are explicitly short direction markers. Source rigs and
+USDA authoring remain unchanged.
+
+Retained counterexamples: 03_28mil regresses versus Order, Willow and Alder 01
+still need manual review, and near-collinear source generator boundaries remain
+uncertain. A fitted edge classifier was rejected after whole-family exclusion
+showed poor generalization and root-error propagation. Full method, calibration
+constants, corpus policy and source-backed Trunk-fork exception:
+[Tree hierarchy calibration](wind-tree-hierarchy.md).
+
+## PVE-style Wind hierarchy comparison
+
+Status: Implemented as an explicit alternative; operator/UE quality Unverified.
+
+`Auto Hierarchy (PVE)` scores continuation with `(1 + dot) / 2` plus normalized
+longest descendant path. Other children increase branch level. XML physical
+segments use `bind -> bind_end`, including the candidate's own segment in its
+remaining path; external point rigs use parent/current displacement and exclude
+the candidate's entering edge, as in PVE. No radius grouping or new skeleton
+extraction. Zero lengths contribute no length score; ties retain file order.
+The existing 1-10 Groups slider caps levels into the last group, and manual
+overrides remain above either base method. Continue line belongs only to the
+original order-based method; switching back retains its settings.
+
+Synthetic comparison produced seven hierarchy groups and invariant geometric
+assignments after reordering. SimpleTree changed 45/105 assignments; Big Spruce
+changed 115/1108. Both real samples used three effective geometric groups even
+with cap 10. Those counts describe classification changes, not better quality.
+Combined old/new grouping ran in 0.0028 s and 0.0523 s respectively in one local
+run; these are observations, not benchmark medians.
+
+Norway Spruce follow-up: the operator's SpeedAssembly USDA loads the same
+249-joint rig as its sibling XML but lacks every physical endpoint. PVE selects
+a branch after bone_005 instead of stem bone_184. In-memory endpoint recovery
+after exact name/parent matching and a maximum bind component error of 4.9942e-7
+restores the physical-XML assignment. It is diagnostic evidence, not an automatic
+sidecar-loading contract. The 103 nearly collinear attachment connectors also
+overlay the trunk with child colors. See
+[the USD round-trip bug](known-bugs.md#bug-external-usd-loses-physical-bone-endpoints-and-overlays-attachment-links).
+
 ## Reparenting a populated viewport dialog into the main shell
 
 Status: Rejected; reproduced with Qt 6.11 on Windows.

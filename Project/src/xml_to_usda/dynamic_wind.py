@@ -206,7 +206,9 @@ def validate_dynamic_wind_data(
     if missing:
         raise ValueError("dynamic_wind_unassigned_joint: " + ", ".join(missing))
     if require_linear_groups:
-        _validate_linear_group_chains(skeleton, assignments_by_name)
+        _validate_linear_group_chains(
+            skeleton, assignments_by_name, {group.group_index for group in groups if group.is_trunk_group},
+        )
 
 
 def _validate_wind_group_values(group: DynamicWindSimulationGroup) -> None:
@@ -226,6 +228,7 @@ def _validate_wind_group_values(group: DynamicWindSimulationGroup) -> None:
 def _validate_linear_group_chains(
     skeleton: tuple[Joint, ...],
     assignments_by_name: dict[str, DynamicWindJointAssignment],
+    trunk_group_indices: set[int],
 ) -> None:
     children_by_parent: dict[str, list[str]] = {}
     for joint in skeleton:
@@ -234,6 +237,10 @@ def _validate_linear_group_chains(
     forks: list[str] = []
     for parent, children in children_by_parent.items():
         parent_group = assignments_by_name[parent].simulation_group_index
+        # UE DynamicWindEval's trunk path does not consume chain influence or
+        # length. Multiple stems may share a Trunk group; branch forks may not.
+        if parent_group in trunk_group_indices:
+            continue
         matching_children = [
             child for child in children
             if assignments_by_name[child].simulation_group_index == parent_group

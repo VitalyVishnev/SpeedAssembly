@@ -40,6 +40,7 @@ from ..wind_external_skeleton import (
 )
 from ..wind_service import derive_wind_json_output_path
 from ..wind_preview_service import WindPreviewResult
+from ..wind_tree_hierarchy import analyze_tree_hierarchy
 from ..wind_group_stack import (
     EDIT_MODE_BONES,
     EDIT_MODE_SUBTREE,
@@ -79,6 +80,8 @@ LAYERS_SCROLL_DEFAULT_HEIGHT = 210
 LAYERS_SCROLL_MAX_HEIGHT = 560
 GROUPING_MODE_XML = "xml"
 GROUPING_MODE_AUTO = "auto"
+GROUPING_MODE_PVE = "auto_pve"
+GROUPING_MODE_TREE = "auto_tree"
 SOURCE_MODE_XML = "source_xml"
 SOURCE_MODE_EXTERNAL = "source_external"
 DISPLAY_UNITS = (("Millimeters", "mm"), ("Centimeters", "cm"), ("Meters", "m"))
@@ -112,6 +115,7 @@ class WindPreviewDialog(PreviewShellDialog):
         self._group_settings_by_source_key: dict[str, dict[str, bool | float]] = {}
         self._auto_group_count = 1
         self._auto_continuous_levels: set[int] = set()
+        self._tree_analysis = None
         self._manual_groups: tuple[WindManualGroup, ...] = ()
         self._active_manual_layer_id: int | None = None
         self._undo_stack: list[tuple[tuple[WindManualGroup, ...], int | None]] = []
@@ -245,8 +249,10 @@ class WindPreviewDialog(PreviewShellDialog):
         self.grouping_mode_combo = QComboBox(settings_panel)
         self.grouping_mode_combo.addItem("XML Generator Groups", GROUPING_MODE_XML)
         self.grouping_mode_combo.addItem("Auto Hierarchy", GROUPING_MODE_AUTO)
+        self.grouping_mode_combo.addItem("Auto Hierarchy (PVE)", GROUPING_MODE_PVE)
+        self.grouping_mode_combo.addItem("Auto Hierarchy (Tree)", GROUPING_MODE_TREE)
         set_tooltip(
-            "Wind grouping source. Auto follows skeleton order; layer checkboxes allow endpoint-continuous chains.",
+            "XML uses generator groups. Auto follows skeleton order. PVE scores direction and subtree length. Tree analyses bind poses, attachment positions and complete branch chains; it does not read generator labels.",
             mode_label,
             self.grouping_mode_combo,
         )
@@ -411,6 +417,7 @@ class WindPreviewDialog(PreviewShellDialog):
 
     def set_preview(self, preview: WindPreviewResult) -> None:
         self.current_preview = preview
+        self._tree_analysis = None
         self._display_source_unit = preview.display_source_unit
         self._display_source_up_axis = preview.display_source_up_axis
         _set_combo_data(self.source_units_combo, self._display_source_unit)
@@ -438,6 +445,13 @@ class WindPreviewDialog(PreviewShellDialog):
             with QSignalBlocker(self.grouping_mode_combo):
                 self.grouping_mode_combo.setCurrentIndex(preferred_index)
         restore_notice = self._restore_wind_session_if_matching(preview)
+        if self._grouping_mode() == GROUPING_MODE_TREE:
+            try:
+                self._get_tree_analysis()
+            except ValueError as exc:
+                with QSignalBlocker(self.grouping_mode_combo):
+                    self.grouping_mode_combo.setCurrentIndex(self.grouping_mode_combo.findData(preview.preferred_grouping_mode))
+                restore_notice = f"Tree analysis unavailable: {exc}"
         with QSignalBlocker(self.group_count_slider):
             self.group_count_slider.setValue(self._auto_group_count)
         self._sync_source_controls()
@@ -685,6 +699,10 @@ class WindPreviewDialog(PreviewShellDialog):
                 dynamic_wind,
                 selection=self._selection,
             )
+        if self._grouping_mode() == GROUPING_MODE_TREE:
+            scene = replace(scene, bone_segments=build_wind_viewport_bone_segments(
+                preview.source_model, dynamic_wind, selection=self._selection, tree_analysis=self._get_tree_analysis(),
+            ))
         if _source_mode_for_preview(preview) == SOURCE_MODE_EXTERNAL:
             scene = transform_external_skeleton_scene(
                 scene,
@@ -711,6 +729,7 @@ class WindPreviewDialog(PreviewShellDialog):
             preview.source_model,
             dynamic_wind,
             selection=self._selection,
+            tree_analysis=self._get_tree_analysis() if self._grouping_mode() == GROUPING_MODE_TREE else None,
         )
         if _source_mode_for_preview(preview) == SOURCE_MODE_EXTERNAL:
             bone_segments = transform_external_skeleton_scene(
@@ -732,7 +751,12 @@ class WindPreviewDialog(PreviewShellDialog):
             selected = f"\nSelected group: {self._selection.group_index}"
         elif self._selection.subtree_root_token:
             selected = f"\nSelected subtree: {self._selection.subtree_root_token}"
-        mode_label = "Auto hierarchy" if self._grouping_mode() == GROUPING_MODE_AUTO else "XML generator"
+        mode_label = {
+            GROUPING_MODE_XML: "XML generator",
+            GROUPING_MODE_AUTO: "Auto hierarchy",
+            GROUPING_MODE_PVE: "Auto hierarchy (PVE)",
+            GROUPING_MODE_TREE: "Auto hierarchy (Tree)",
+        }[self._grouping_mode()]
         self.summary_label.setText(
             (
                 f"{len(groups)} groups ({mode_label})\n"
@@ -740,6 +764,12 @@ class WindPreviewDialog(PreviewShellDialog):
                 f"{selected}"
             )
         )
+        if self._grouping_mode() == GROUPING_MODE_TREE:
+            count = sum(joint.ambiguous for joint in self._get_tree_analysis())
+            guide_notice = "\nTree bone guides; terminal joints use short direction markers."
+            if count:
+                guide_notice += f"\n{count} ambiguous joint(s): review manual groups."
+            self.summary_label.setText(self.summary_label.text() + guide_notice)
 
     def _rebuild_group_list(self) -> None:
         while self.group_layout.count():
@@ -786,7 +816,7 @@ class WindPreviewDialog(PreviewShellDialog):
             group_control.setObjectName("LayerLabel")
             group_control.setMinimumHeight(22)
             group_control.setStyleSheet(_layer_label_stylesheet())
-            group_control.setToolTip(f"{group.name}. XML group; assignments are read-only here.")
+            group_control.setToolTip(f"{group.name}. Base group; assignments are read-only here.")
         else:
             group_control = QPushButton(label, card)
             group_control.setObjectName("LayerButton")
@@ -810,7 +840,7 @@ class WindPreviewDialog(PreviewShellDialog):
         card_layout.addWidget(row)
         if group.source_key in self._expanded_group_source_keys:
             card_layout.addWidget(self._make_group_settings_editor(group, card))
-        if self._is_auto_mode() and group.source_group_index is not None:
+        if self._grouping_mode() == GROUPING_MODE_AUTO and group.source_group_index is not None:
             options_row = QWidget(card)
             options_layout = QHBoxLayout(options_row)
             options_layout.setContentsMargins(17, 0, 0, 0)
@@ -880,7 +910,7 @@ class WindPreviewDialog(PreviewShellDialog):
         return str(self.grouping_mode_combo.currentData() or GROUPING_MODE_XML)
 
     def _is_auto_mode(self) -> bool:
-        return self._grouping_mode() == GROUPING_MODE_AUTO
+        return self._grouping_mode() in {GROUPING_MODE_AUTO, GROUPING_MODE_PVE, GROUPING_MODE_TREE}
 
     def _current_dynamic_wind(self) -> DynamicWindData:
         flattened = self._flattened()
@@ -998,6 +1028,11 @@ class WindPreviewDialog(PreviewShellDialog):
         self._group_settings_by_source_key.setdefault(source_key, {})[field] = normalized
         self._save_wind_session()
 
+    def _get_tree_analysis(self):
+        if self._tree_analysis is None:
+            self._tree_analysis = analyze_tree_hierarchy(self.current_preview.source_model.skeleton)
+        return self._tree_analysis
+
     def _base_dynamic_wind(self) -> DynamicWindData:
         preview = self.current_preview
         if preview is None:
@@ -1007,6 +1042,8 @@ class WindPreviewDialog(PreviewShellDialog):
                 preview.source_model.skeleton,
                 self._auto_group_count,
                 continuous_branch_orders=frozenset(self._auto_continuous_levels),
+                method={GROUPING_MODE_AUTO: "order", GROUPING_MODE_PVE: "pve", GROUPING_MODE_TREE: "tree"}[self._grouping_mode()],
+                tree_analysis=self._get_tree_analysis() if self._grouping_mode() == GROUPING_MODE_TREE else None,
             )
         return preview.dynamic_wind
 
@@ -1026,6 +1063,18 @@ class WindPreviewDialog(PreviewShellDialog):
         return build_wind_viewport_groups(self._current_dynamic_wind(), label_kind="Final layer")
 
     def _on_grouping_mode_changed(self) -> None:
+        if self.current_preview is not None and self._grouping_mode() == GROUPING_MODE_TREE:
+            try:
+                self._get_tree_analysis()
+            except ValueError as exc:
+                with QSignalBlocker(self.grouping_mode_combo):
+                    self.grouping_mode_combo.setCurrentIndex(self.grouping_mode_combo.findData(self.current_preview.preferred_grouping_mode))
+                self._sync_grouping_controls()
+                self._rebuild_group_list()
+                self._apply_scene(frame_camera=False)
+                self.set_error(f"Tree analysis unavailable: {exc}")
+                self._save_wind_session()
+                return
         if self.current_preview is not None and not self.current_preview.xml_groups_available and self._grouping_mode() == GROUPING_MODE_XML:
             auto_index = self.grouping_mode_combo.findData(GROUPING_MODE_AUTO)
             if auto_index >= 0:

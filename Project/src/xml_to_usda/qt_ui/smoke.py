@@ -235,6 +235,27 @@ def _run_wind_preview_smoke(context: SmokeContext) -> dict[str, Any]:
         _pump_events(25)
         _assert(dialog.viewport.has_mesh(), "wind auto hierarchy keeps viewport mesh")
         _assert(len(dialog._base_dynamic_wind().simulation_groups) == 2, "wind auto hierarchy uses integer group count")
+        pve_index = dialog.grouping_mode_combo.findData("auto_pve")
+        _assert(pve_index >= 0, "PVE hierarchy mode is available")
+        dialog.grouping_mode_combo.setCurrentIndex(pve_index)
+        dialog.group_count_slider.setValue(10)
+        from ..dynamic_wind import write_dynamic_wind_json
+        from ..wind_external_skeleton import prepare_external_dynamic_wind_export
+        pve_data = prepare_external_dynamic_wind_export(dialog.current_preview, dialog._current_dynamic_wind())
+        pve_json = write_dynamic_wind_json(pve_data, context.report_path.with_name("PVE_DynamicWind.json"))
+        pve_payload = json.loads(pve_json.read_text(encoding="utf-8"))
+        _assert(len(pve_payload["Joints"]) == len(dialog.current_preview.source_model.skeleton), "PVE JSON covers the loaded skeleton")
+        _pump_events(25)
+        _assert(dialog.viewport.has_mesh(), "PVE switch retains rendered mesh")
+        tree_index = dialog.grouping_mode_combo.findData("auto_tree")
+        _assert(tree_index >= 0, "Tree hierarchy mode is available")
+        dialog.grouping_mode_combo.setCurrentIndex(tree_index)
+        tree_data = prepare_external_dynamic_wind_export(dialog.current_preview, dialog._current_dynamic_wind())
+        tree_json = write_dynamic_wind_json(tree_data, context.report_path.with_name("Tree_DynamicWind.json"))
+        tree_payload = json.loads(tree_json.read_text(encoding="utf-8"))
+        _assert(len(tree_payload["Joints"]) == len(dialog.current_preview.source_model.skeleton), "Tree JSON covers the loaded skeleton")
+        _pump_events(25)
+        _assert(dialog.viewport.has_mesh(), "Tree switch retains rendered mesh")
         trace_text = _trace_text(context)
         for milestone in (
             '"job":"wind_preview"',
@@ -254,11 +275,17 @@ def _run_wind_preview_smoke(context: SmokeContext) -> dict[str, Any]:
                 "viewport.precomputed",
                 "selection.clear",
                 "auto.grouping",
+                "pve.grouping.json",
+                "tree.grouping.json",
                 "trace.milestones",
             ),
             data={
                 "group_count": len(dialog.current_preview.groups),
-                "auto_group_count": len(dialog._base_dynamic_wind().simulation_groups),
+                "auto_group_count": 2,
+                "pve_group_count": len(pve_data.simulation_groups),
+                "pve_json": str(pve_json),
+                "tree_group_count": len(tree_data.simulation_groups),
+                "tree_json": str(tree_json),
                 "bone_vertices": dialog.viewport.bone_vertex_count,
                 "vertex_count": dialog.viewport.vertex_count,
             },

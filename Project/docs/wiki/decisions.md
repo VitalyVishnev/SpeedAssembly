@@ -1054,9 +1054,10 @@ up axis; it must not apply the main SpeedTree one-degree tilt. This mirrors
 local +X; Pivot Painter is not evidence for this rule.
 External JSON is validated against the same RefSkeleton-shaped model before
 serialization: every joint must occur exactly once, no unknown name may occur,
-and two direct children of one parent cannot remain in the same group. The
-last rule is an intentional export gate because Dynamic Wind represents groups
-as chains and cannot encode that fork deterministically. XML and external USD
+and two direct children of one parent cannot remain in the same non-Trunk group.
+The branch-chain guard prevents aggregated fork influence/length data. Explicit
+Trunk groups permit multiple stems because the trunk shader does not consume
+those chain fields. XML and external USD
 exports remain byte-semantically unchanged by FBX sanitation.
 External Skeleton is a diagnostic/grouping/JSON input, not an FBX-to-USD
 conversion path. The FBX adapter may inspect and display mesh skinning, local
@@ -1081,6 +1082,40 @@ Related files:
 - `src/xml_to_usda/wind_viewport_scene.py`
 - `src/xml_to_usda/qt_ui/wind_preview.py`
 - `tests/test_wind_viewport_scene.py`
+
+## Decision: Tree grouping is calibrated from bare rigs and explicit references
+
+The operator selected `for_assembly` USDA/JSON pairs and four named XMLs on
+2026-10-12 as the reference corpus. `Auto Hierarchy (Tree)` is a separate
+comparison mode; its classifier sees only bind poses and parent links, never
+generator labels, source IDs, names as features, array order, endpoints, source
+files, or reference data. Skeleton/binding/USDA contracts remain unchanged.
+Keep the benchmark's per-tree errors and per-joint differences visible. Current
+96% calibration agreement is not independent generalization or UE validation.
+See [Tree hierarchy calibration](wind-tree-hierarchy.md).
+
+Tree guides are display-only estimates rooted at each joint. Terminal markers
+are labelled as direction markers; inferred spans never enter the source model
+or export. Existing manual layers remain the correction mechanism.
+
+The same-group-fork export guard permits explicitly marked Trunk groups, because
+the local UE 5.8 trunk shader path does not consume chain influence/length.
+Non-trunk forks still fail; Ground Cover alone does not grant an exception.
+This is a source-backed narrowing of the earlier blanket chain guard and needs
+operator runtime validation. Do not silently set Trunk/Ground Cover flags to
+bypass the guard.
+
+## Decision: PVE-style Wind grouping is an explicit comparison mode
+
+Status: Active; operator-authorized alternative, UE quality Unverified.
+
+The operator explicitly authorized an alternative Wind Preview analysis mode
+on 2026-10-12. `Auto Hierarchy (PVE)` applies geometric continuation only to
+group assignments, selected beside the existing Auto method. It does not
+redefine source generator identity, bone orientation, skeleton topology,
+skinning, or Fracturing. The selection persists through the existing session's
+`grouping_mode = auto_pve`; old sessions keep their original mode.
+See [PVE grouping experiment](experiments.md#pve-style-wind-hierarchy-comparison).
 
 ## Decision: SpeedTree bone order identifies generator continuation
 
