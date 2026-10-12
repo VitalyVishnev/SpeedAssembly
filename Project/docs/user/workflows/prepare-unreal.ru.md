@@ -29,7 +29,7 @@ SpeedAssembly поддерживает Unreal Engine 5.7 и 5.8. Описанн�
 
     ![Procedural Vegetation Editor включён в окне Plugins](../assets/images/unreal-procedural-vegetation-editor-plugin.png)
 
-4. Найдите `usd` и включите **Interchange OpenUSD**. Этот плагин используется для импорта файлов из SpeedAssembly.
+4. Найдите `usd` и включите **Interchange OpenUSD**. Этот плагин используется для импорта [USD-файлов](../wiki/xml-usd-usda-json.md#usd-describes-a-3d-scene) из SpeedAssembly.
 
     ![Interchange OpenUSD включён в окне Plugins](../assets/images/unreal-interchange-openusd-plugin.png)
 
@@ -41,8 +41,6 @@ SpeedAssembly поддерживает Unreal Engine 5.7 и 5.8. Описанн�
 2. Снова откройте **Project Settings** и проверьте, что **Nanite Foliage (Experimental)** включён.
 3. Снова откройте **Plugins** и проверьте, что **Dynamic Wind**, **Procedural Vegetation Editor** и **Interchange OpenUSD** включены.
 
-Проект готов для SpeedAssembly workflow. Настройки импорта и подключение данных ветра описаны в отдельном руководстве по импорту в Unreal.
+Проект готов для SpeedAssembly workflow. Настройки импорта и подключение данных ветра описаны в [Импорте в Unreal Engine](unreal-import.md).
 
 Далее [подготовьте растение в SpeedTree](prepare-speedtree.md).
-
-<!-- Add the Import into Unreal Engine link when that article exists. -->

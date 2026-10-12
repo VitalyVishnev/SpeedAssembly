@@ -5,7 +5,7 @@ description: Место SpeedAssembly в pipeline от исходного рас
 
 # Обзор pipeline {#pipeline-overview}
 
-SpeedAssembly связывает SpeedTree с новым Nanite workflow для растительности в Unreal Engine. Повторяющиеся листья и ветки остаются настоящими инстансами Nanite Assembly, скелет сохраняется для анимации ветра, а результат записывается в USDA для импорта в Unreal.
+SpeedAssembly связывает SpeedTree с новым Nanite workflow для растительности в Unreal Engine. Повторяющиеся листья и ветки остаются настоящими [инстансами Nanite Assembly](../wiki/choosing-assembly-parts.md), скелет сохраняется для анимации ветра, а результат записывается в [USDA](../wiki/xml-usd-usda-json.md#usda-is-usd-you-can-read) для импорта в Unreal.
 
 ```text
 SpeedTree
@@ -27,7 +27,7 @@ Unreal Engine: импорт и проверка ассета
 
 Создайте дерево в SpeedTree как обычно, затем подготовьте к экспорту скелет, основную геометрию ствола и веток, ветки и листья для инстансинга, материалы и UV. Подготовка сцены и настройки экспорта описаны в [Подготовке SpeedTree](../workflows/prepare-speedtree.md).
 
-Экспортируйте дерево в SpeedTree Raw XML. Именно этот файл нужно выбрать в **Input XML**.
+Экспортируйте дерево в SpeedTree [Raw XML](../wiki/xml-usd-usda-json.md#xml-carries-the-speedtree-source). Именно этот файл нужно выбрать в **Input XML**.
 
 ## 2. Настройте дерево в SpeedAssembly {#2-configure-the-tree-in-speedassembly}
 
@@ -70,7 +70,7 @@ Vertex Color Split полезен, когда одному Leaf-генерато
 
 ## 3. Конвертируйте и импортируйте {#3-convert-and-import}
 
-После настройки нажмите **Convert to USDA**. SpeedAssembly запишет основной USDA для настроенного USD/Interchange workflow в Unreal.
+После настройки нажмите **Convert to USDA**. SpeedAssembly запишет основной USDA для настроенного [USD](../wiki/xml-usd-usda-json.md#usd-describes-a-3d-scene)/Interchange workflow в Unreal.
 
 Импортируйте файл в Unreal с настройками проекта и импорта, описанными для этого pipeline. Затем проверьте геометрию дерева, инстансы веток и листьев, материалы и скелет, если он предусмотрен режимом экспорта. Успешный импорт подтверждает структуру файла. Качество ветра, освещения, коллизий и разрушения нужно проверить отдельно.
 
@@ -80,7 +80,7 @@ Vertex Color Split полезен, когда одному Leaf-генерато
 
 ### Wind Preview {#wind-preview}
 
-**Wind Preview** открывает отдельный viewport для проверки и редактирования групп ветра. Можно использовать XML-группы, автоматически создать группы по иерархии, добавить ручные переопределения и создать Dynamic Wind JSON из итогового набора видимых групп.
+**Wind Preview** открывает отдельный viewport для проверки и редактирования групп ветра. Можно использовать XML-группы, автоматически создать группы по иерархии, добавить ручные переопределения и создать [Dynamic Wind JSON](../wiki/xml-usd-usda-json.md#json-carries-the-wind-settings) из итогового набора видимых групп.
 
 Можно также загрузить внешний FBX- или USD-скелет и создать Dynamic Wind JSON для растения, сделанного вне SpeedTree.
 

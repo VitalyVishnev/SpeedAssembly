@@ -5,7 +5,7 @@ description: Импортируйте ассеты SpeedAssembly через Inte
 
 # Импорт в Unreal Engine {#import-into-unreal-engine}
 
-Перед импортом выполните [Подготовку Unreal Engine](prepare-unreal.md). Нужные плагины и Nanite Foliage должны быть включены. Подготовьте экспортированный USDA и, для растения со скелетом, соответствующий Wind JSON.
+Перед импортом выполните [Подготовку Unreal Engine](prepare-unreal.md). Нужные плагины и Nanite Foliage должны быть включены. Подготовьте экспортированный [USDA](../wiki/xml-usd-usda-json.md#usda-is-usd-you-can-read) и, для растения со скелетом, соответствующий [Wind JSON](../wiki/xml-usd-usda-json.md#json-carries-the-wind-settings).
 
 ## 1. Импортируйте USDA {#1-import-the-usda}
 

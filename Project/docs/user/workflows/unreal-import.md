@@ -5,7 +5,7 @@ description: Import SpeedAssembly assets with Interchange, apply Wind JSON, and 
 
 # Import into Unreal Engine
 
-Before importing, complete [Prepare Unreal Engine](prepare-unreal.md). The required plugins and Nanite Foliage setting must be enabled. Have your exported USDA and, for a skeletal plant, its matching Wind JSON ready.
+Before importing, complete [Prepare Unreal Engine](prepare-unreal.md). The required plugins and Nanite Foliage setting must be enabled. Have your exported [USDA](../wiki/xml-usd-usda-json.md#usda-is-usd-you-can-read) and, for a skeletal plant, its matching [Wind JSON](../wiki/xml-usd-usda-json.md#json-carries-the-wind-settings) ready.
 
 ## 1. Import the USDA
 

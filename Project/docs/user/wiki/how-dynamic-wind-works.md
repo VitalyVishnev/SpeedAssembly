@@ -15,7 +15,7 @@ The input is a Skeletal Mesh with a Skeleton Asset, reference pose, and skin wei
 
 A component using the Dynamic Wind transform provider registers the skeleton with the world's wind system. Each frame, a GPU compute shader calculates bone motion from the reference pose, time, and wind parameters. Nanite uses the resulting transforms to move the geometry.
 
-SpeedAssembly supplies the mesh and skeleton through USDA and wind metadata through a separate `*_DynamicWind.json`. The JSON contains bone-to-group assignments and response settings. It contains no animation keyframes and does not replace the skeleton or skin weights.
+SpeedAssembly supplies the mesh and skeleton through [USDA](xml-usd-usda-json.md#usda-is-usd-you-can-read) and wind metadata through a separate [`*_DynamicWind.json`](xml-usd-usda-json.md#json-carries-the-wind-settings). The JSON contains bone-to-group assignments and response settings. It contains no animation keyframes and does not replace the skeleton or skin weights.
 
 ## How it reads the skeleton {#skeleton}
 

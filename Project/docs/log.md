@@ -632,3 +632,40 @@ under `docs/raw/`; Git retains per-change detail.
   JSON passed. Final Package passed 27 packaged contracts and required
   stability/recovery smoke; frozen Wind smoke wrote Tree JSON. ZIP embeds the
   exact built EXE. No required smoke skipped; version remains 0.5.0-beta.
+
+## 2026-10-13 - Scattered Rig and material assignment drafts
+
+- Added English-only Workflows guides, navigation, five supplied screenshots,
+  and links from Basic conversion. Translations are deferred until review.
+- Documented synthetic rigs, baking/instancing, counts, orientation, clustering
+  requirements, and unavailable Unreal Reference/Proxy/Fracturing paths.
+- Documented material modes, SpeedTree Compute and color viewing, exact XML
+  versus FBX face classification, Preview/Edit labels, and the existing UDIM guide.
+- Validation: strict bilingual site build and all 45 existing Scattered Parts/
+  material resolver tests passed. Initial sandbox run blocked ten FBX checks
+  at atomic temporary-file replacement; the unsandboxed rerun passed them.
+
+## 2026-10-13 - Public links audit and remaining Russian translations
+
+- Added Russian Scattered Rig and Assigning materials guides with matching
+  procedures, UI labels, tables, screenshots, and English anchor IDs. All 14
+  published English articles now have Russian siblings; FAQ remains hidden.
+- Linked Basic workflow to all four Workflows articles, replaced stale future
+  import-guide text, and linked format introductions and repeated-part authoring
+  to the relevant public Wiki in both languages.
+- Extended the existing site checker to reject missing internal destinations
+  and HTML fragments. No new dependency or application behavior change.
+- Validation: strict MkDocs build, the 28-page bilingual/link/image check,
+  and headless Edge navigation check at 240 ms server latency passed. Six Epic
+  article/API URLs opened; YouTube oEmbed confirmed the cited presentation.
+  Edge's sandboxed temporary-profile launch failed; the unsandboxed check passed.
+
+## 2026-10-13 - Documentation publication approval and README link
+
+- Marked Scattered Rig and Assigning materials, their Russian translations,
+  and screenshots ready for publication. Both guides are already in the site
+  navigation and build; FAQ remains excluded.
+- Added a prominent Documentation heading/link directly below Download
+  SpeedAssembly in the root README, using the configured public site URL.
+- Prepared public documentation sources and assets for the next commit.
+  No commit or push; Pages deployment remains tied to a push to `master`.

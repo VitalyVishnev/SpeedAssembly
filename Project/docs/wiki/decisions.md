@@ -261,6 +261,15 @@ Validate changes with strict MkDocs build,
 `scripts/check_documentation.py`, and browser review. The Pages workflow tracks
 theme overrides and runs the same generated-site check before upload.
 
+The generated-site check validates every internal link and HTML fragment as
+well as locale routing, images, and translation anchor parity. Basic workflow
+links to relevant Workflows articles; first file-format mentions link to the
+format Wiki and repeated-part authoring links to Choosing what to instance.
+All 14 published English articles have Russian translations as of 2026-10-13.
+The operator approved Scattered Rig and Assigning materials for publication,
+including their Russian translations and supplied images. Both are in site
+navigation; the existing Pages workflow deploys after a push to `master`.
+
 ## Decision: Tests are organized by system contract and execution boundary
 
 Core tests protect fast deterministic invariants with synthetic fixtures.
@@ -583,6 +592,14 @@ Related files:
 - `docs/raw/workflow_status.md`
 
 ## Decision: Conversion preflight requires every discovered Unreal material assignment
+
+Public guide: `docs/user/workflows/materials-tab.md`, with its `.ru.md` translation.
+The explicit XML split requires uniform exact-black or exact-white RGB on each
+face and both buckets. Explicit FBX split sends all-black faces to Black and
+all other faces to White, also requiring both buckets. Alpha is ignored. This
+distinction is implemented by material_resolver.py and payload_partition.py;
+do not conflate it with legacy source-role policies. Preview labels Vertex Color
+and FBX Materials correspond to main-tab Vertex Color Split and Material Slots.
 
 The USDA conversion worker must not start while a discovered Base Mesh material
 row or a required inline Part material row is blank. `single_material` requires
@@ -1522,6 +1539,10 @@ Related files:
 - `src/xml_to_usda/qt_ui/panels.py`
 
 ## Decision: Leaf-only sources use Scattered Parts resolution
+
+Public guide: `docs/user/workflows/scattered-rig.md`, with its `.ru.md` translation.
+It explains graph structure, all four modes, geometry baking versus instancing,
+bone counts/pivots, orientation, and XML/FBX-only skeletal source requirements.
 
 Status: Active; tested grass output imports and animates normally in Unreal
 

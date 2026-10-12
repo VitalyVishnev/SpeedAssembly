@@ -29,7 +29,7 @@ Complete these steps once for each Unreal project, before importing plants from 
 
     ![Procedural Vegetation Editor enabled in the Plugins window](../assets/images/unreal-procedural-vegetation-editor-plugin.png)
 
-4. Search for `usd` and enable **Interchange OpenUSD**. This is the plugin used to import SpeedAssembly exports.
+4. Search for `usd` and enable **Interchange OpenUSD**. This is the plugin used to import SpeedAssembly's [USD exports](../wiki/xml-usd-usda-json.md#usd-describes-a-3d-scene).
 
     ![Interchange OpenUSD enabled in the Plugins window](../assets/images/unreal-interchange-openusd-plugin.png)
 
@@ -41,8 +41,6 @@ If Unreal asks to enable plugin dependencies, accept. These plugins are marked E
 2. Reopen **Project Settings** and check that **Nanite Foliage (Experimental)** remains enabled.
 3. Reopen **Plugins** and check that **Dynamic Wind**, **Procedural Vegetation Editor**, and **Interchange OpenUSD** are enabled.
 
-Your project is ready for the SpeedAssembly workflow. Import settings and connecting wind data are covered in the separate Unreal import guide.
+Your project is ready for the SpeedAssembly workflow. [Import into Unreal Engine](unreal-import.md) covers import settings and connecting wind data.
 
 Next, [prepare your plant in SpeedTree](prepare-speedtree.md).
-
-<!-- Add the Import into Unreal Engine link when that article exists. -->

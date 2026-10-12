@@ -5,12 +5,12 @@ description: Load your SpeedTree export, configure wind and geometry, assign Unr
 
 # Convert in SpeedAssembly
 
-Start with the XML exported using the settings in [Prepare SpeedTree](prepare-speedtree.md). Your Unreal project should also be [prepared for import](prepare-unreal.md), with the materials you want to use already available in its Content Browser.
+Start with the [XML](../wiki/xml-usd-usda-json.md#xml-carries-the-speedtree-source) exported using the settings in [Prepare SpeedTree](prepare-speedtree.md). Your Unreal project should also be [prepared for import](prepare-unreal.md), with the materials you want to use already available in its Content Browser.
 
 ## 1. Select the input and output
 
 1. In SpeedAssembly, click **Input XML** and select your SpeedTree XML file.
-2. Check **Output USDA**. By default, it uses the XML's folder and filename with a `.usda` extension.
+2. Check **Output USDA**. By default, it uses the XML's folder and filename with a [.usda extension](../wiki/xml-usd-usda-json.md#usda-is-usd-you-can-read).
 3. Optional: Click **Output USDA** to choose a different destination or filename.
 
 ![Input XML and Output USDA fields highlighted in SpeedAssembly](../assets/images/conversion-input-output.png)
@@ -54,7 +54,7 @@ Set **Skinning Quality** before conversion:
 </figure>
 </div>
 
-Skinning Quality determines the weights written into the USDA geometry. It is not part of Wind JSON. To change it later, convert the plant again with the new setting and reimport it.
+Skinning Quality determines the weights written into the USDA geometry. It is not part of [Wind JSON](../wiki/xml-usd-usda-json.md#json-carries-the-wind-settings). To change it later, convert the plant again with the new setting and reimport it.
 
 ### Set group behavior
 
@@ -80,11 +80,11 @@ The available rig types are **Whole Mesh (Skinned)**, **Per Cluster (Rigid)**, *
 
 ![Wind tab with Scattered Rig Mode and Average Instance Orientation highlighted for leaf-only input](../assets/images/conversion-scattered-rig.png)
 
-<!-- Add the dedicated Scattered Rig workflow link when that guide exists. -->
+See [Scattered Rig](scattered-rig.md) for SpeedTree graph setup, rig modes, and export behavior.
 
 ## 3. Review Geometry
 
-Open **Geometry** to review the repeated branches and leaves. Each row shows a mesh and how many times the plant uses it.
+Open **Geometry** to review the [repeated branches and leaves](../wiki/choosing-assembly-parts.md). Each row shows a mesh and how many times the plant uses it.
 
 ![Geometry tab with a repeated branch set to Use FBX File](../assets/images/conversion-geometry.png)
 
@@ -143,6 +143,8 @@ Choose a UDIM mode and tile **ID** for the relevant material:
 - **Write UV1 Offset** leaves the primary UVs unchanged and writes tile-offset data into the second UV channel for your Unreal material to use.
 
 See [UDIM workflow](udim.md) for tile selection and the Unreal material graph for tiling bark with UV1 offset data.
+
+See [Assigning materials](materials-tab.md) for Single Material, FBX slots, and preparing a Vertex Color Split in SpeedTree.
 
 ## 5. Convert geometry and generate wind data
 

@@ -5,12 +5,12 @@ description: Загрузите экспорт SpeedTree, настройте в�
 
 # Конвертация в SpeedAssembly {#convert-in-speedassembly}
 
-Начните с XML, экспортированного по инструкции [Подготовка SpeedTree](prepare-speedtree.md). Проект Unreal должен быть [подготовлен к импорту](prepare-unreal.md), а нужные материалы уже должны находиться в его Content Browser.
+Начните с [XML](../wiki/xml-usd-usda-json.md#xml-carries-the-speedtree-source), экспортированного по инструкции [Подготовка SpeedTree](prepare-speedtree.md). Проект Unreal должен быть [подготовлен к импорту](prepare-unreal.md), а нужные материалы уже должны находиться в его Content Browser.
 
 ## 1. Выберите исходный файл и путь экспорта {#1-select-the-input-and-output}
 
 1. В SpeedAssembly нажмите **Input XML** и выберите XML из SpeedTree.
-2. Проверьте **Output USDA**. По умолчанию используются папка и имя XML с расширением `.usda`.
+2. Проверьте **Output USDA**. По умолчанию используются папка и имя XML с [расширением .usda](../wiki/xml-usd-usda-json.md#usda-is-usd-you-can-read).
 3. При необходимости нажмите **Output USDA**, чтобы выбрать другую папку или имя файла.
 
 ![Поля Input XML и Output USDA в SpeedAssembly](../assets/images/conversion-input-output.png)
@@ -54,7 +54,7 @@ SpeedAssembly автоматически анализирует файл. Во �
 </figure>
 </div>
 
-Skinning Quality определяет веса, записываемые в геометрию USDA. Эта настройка не входит в Wind JSON. Чтобы изменить её позже, заново конвертируйте растение с новым значением и повторите импорт.
+Skinning Quality определяет веса, записываемые в геометрию USDA. Эта настройка не входит в [Wind JSON](../wiki/xml-usd-usda-json.md#json-carries-the-wind-settings). Чтобы изменить её позже, заново конвертируйте растение с новым значением и повторите импорт.
 
 ### Настройте поведение групп {#set-group-behavior}
 
@@ -80,11 +80,11 @@ Skinning Quality определяет веса, записываемые в ге
 
 ![Scattered Rig Mode и Average Instance Orientation во вкладке Wind для растения только из инстансов листвы](../assets/images/conversion-scattered-rig.png)
 
-<!-- Add the dedicated Scattered Rig workflow link when that guide exists. -->
+Граф SpeedTree, режимы скелета и особенности экспорта описаны в [Scattered Rig](scattered-rig.md).
 
 ## 3. Проверьте Geometry {#3-review-geometry}
 
-Откройте **Geometry**, чтобы проверить ветки и листья для инстансинга. В каждой строке показаны mesh и количество его инстансов в растении.
+Откройте **Geometry**, чтобы проверить [ветки и листья для инстансинга](../wiki/choosing-assembly-parts.md). В каждой строке показаны mesh и количество его инстансов в растении.
 
 ![Вкладка Geometry с веткой в режиме Use FBX File](../assets/images/conversion-geometry.png)
 
@@ -143,6 +143,8 @@ Proxy рекомендуется при обычной подготовке де
 - **Write UV1 Offset** оставляет основной UV-канал без изменений и записывает смещение тайла во второй UV-канал для материала Unreal.
 
 Выбор тайлов и граф материала Unreal для тайловой коры с данными смещения в UV1 описаны в [UDIM workflow](udim.md).
+
+Single Material, FBX slots и подготовка Vertex Color Split в SpeedTree описаны в [Назначении материалов](materials-tab.md).
 
 ## 5. Конвертируйте геометрию и создайте данные ветра {#5-convert-geometry-and-generate-wind-data}
 

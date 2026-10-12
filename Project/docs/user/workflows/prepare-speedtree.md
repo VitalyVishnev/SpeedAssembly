@@ -21,7 +21,7 @@ To use meters for future work, open **Edit > Preferences > Tree Window** and set
 
 ## Prepare repeated branches and leaves
 
-Use **Leaf** generators for the branches or leaf clusters you want Unreal to repeat throughout the plant. In this workflow, Frond and other generators contribute to the main geometry, not to repeated parts.
+Use **Leaf** generators for the [branches or leaf clusters you want Unreal to repeat](../wiki/choosing-assembly-parts.md) throughout the plant. In this workflow, Frond and other generators contribute to the main geometry, not to repeated parts.
 
 Create each branch mesh separately in Blender, Maya, Houdini, or another SpeedTree scene, then import it into SpeedTree. You can also use cutout geometry, but fully modeled branches and leaves are recommended.
 
@@ -108,6 +108,6 @@ To save these settings as a preset:
 
 ![Export Mesh preset menu with the three-dot button highlighted and Save new preset visible](../assets/images/speedtree-save-export-preset.png)
 
-The exported XML is the file you select in SpeedAssembly's **Input XML** field.
+The exported [XML](../wiki/xml-usd-usda-json.md#xml-carries-the-speedtree-source) is the file you select in SpeedAssembly's **Input XML** field.
 
 Next, [convert the plant in SpeedAssembly](basic-conversion.md).

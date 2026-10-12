@@ -52,6 +52,8 @@ nav:
   - Workflows:
       - Proxy Mesh: workflows/proxy-mesh.md
       - UDIM workflow: workflows/udim.md
+      - Scattered Rig: workflows/scattered-rig.md
+      - Assigning materials: workflows/materials-tab.md
   - Wiki:
       - XML, USD, USDA, and JSON: wiki/xml-usd-usda-json.md
       - Choosing what to instance: wiki/choosing-assembly-parts.md
@@ -85,6 +87,9 @@ plugins:
             Prepare SpeedTree: Подготовка SpeedTree
             Convert in SpeedAssembly: Конвертация в SpeedAssembly
             Import into Unreal Engine: Импорт в Unreal Engine
+            Workflows: Дополнительные workflows
+            Scattered Rig: Scattered Rig
+            Assigning materials: Назначение материалов
             Wiki: Вики
             XML, USD, USDA, and JSON: XML, USD, USDA и JSON
             Choosing what to instance: Выбор геометрии для инстансинга

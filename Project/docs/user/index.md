@@ -2,7 +2,7 @@
 
 # SpeedAssembly
 
-Convert SpeedTree Raw XML into Unreal-ready USDA while preserving the tree skeleton, unique base geometry, repeated parts, materials, and optional companion workflows.
+Convert SpeedTree [Raw XML](wiki/xml-usd-usda-json.md#xml-carries-the-speedtree-source) into Unreal-ready [USDA](wiki/xml-usd-usda-json.md#usda-is-usd-you-can-read) while preserving the tree skeleton, unique base geometry, repeated parts, materials, and optional companion workflows.
 
 [Follow the basic workflow](workflows/prepare-unreal.md){ .md-button .md-button--primary }
 
@@ -21,7 +21,7 @@ SpeedAssembly is built specifically for the Unreal Engine 5.7–5.8 vegetation p
 
 -   **Dynamic Wind**
 
-    Inspect wind groups and generate the separate Dynamic Wind JSON used by the Unreal workflow.
+    Inspect wind groups and generate the separate Dynamic Wind [JSON](wiki/xml-usd-usda-json.md#json-carries-the-wind-settings) used by the Unreal workflow.
 
 -   **Proxy Mesh**
 

@@ -17,7 +17,7 @@ The proxy is a companion to the visible plant. Keep it out of the main camera vi
 
 ## Generate a proxy
 
-1. In SpeedAssembly, select the plant's **Input XML** and check **Output USDA**.
+1. In SpeedAssembly, select the plant's [XML file](../wiki/xml-usd-usda-json.md#xml-carries-the-speedtree-source) with **Input XML** and check **Output USDA**, the destination for the [USDA export](../wiki/xml-usd-usda-json.md#usda-is-usd-you-can-read).
 2. Open **Geometry** and click **Preview Proxy Mesh**.
 
 ![Preview Proxy Mesh highlighted in the Geometry tab](../assets/images/proxy-open-preview.png)
@@ -31,7 +31,7 @@ The proxy is a companion to the visible plant. Keep it out of the main camera vi
 
 The default output is `<OutputStem>_proxy.usda`, beside the main plant's Output USDA. You can choose another destination with **Browse** or edit the path directly. When the preview already matches the current settings, export reuses it.
 
-Proxy generation is unavailable for leaf-only Scattered Rig input.
+Proxy generation is unavailable for leaf-only [Scattered Rig](scattered-rig.md) input.
 
 ## Adjust the shape and polygon budget
 

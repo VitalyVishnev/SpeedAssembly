@@ -21,7 +21,7 @@ description: Подготовьте растение, ветки для инст
 
 ## Подготовьте ветки и листья для инстансинга {#prepare-repeated-branches-and-leaves}
 
-Используйте генераторы **Leaf** для веток и кластеров листвы, которые Unreal будет повторять по всему растению. В этом workflow Frond и другие генераторы входят в основную геометрию, а не в инстансы элементов.
+Используйте генераторы **Leaf** для [веток и кластеров листвы, которые Unreal будет повторять](../wiki/choosing-assembly-parts.md) по всему растению. В этом workflow Frond и другие генераторы входят в основную геометрию, а не в инстансы элементов.
 
 Создайте каждый mesh ветки отдельно в Blender, Maya, Houdini или другой сцене SpeedTree, затем импортируйте его в SpeedTree. Можно использовать и cutout-геометрию, но рекомендуется полностью моделировать ветки и листья.
 
@@ -108,6 +108,6 @@ SpeedAssembly читает эти группы из экспорта. Лучше
 
 ![Меню Export Mesh с кнопкой из трёх точек и пунктом Save new preset](../assets/images/speedtree-save-export-preset.png)
 
-Экспортированный XML нужно выбрать в поле **Input XML** в SpeedAssembly.
+Экспортированный [XML](../wiki/xml-usd-usda-json.md#xml-carries-the-speedtree-source) нужно выбрать в поле **Input XML** в SpeedAssembly.
 
 Далее [конвертируйте растение в SpeedAssembly](basic-conversion.md).

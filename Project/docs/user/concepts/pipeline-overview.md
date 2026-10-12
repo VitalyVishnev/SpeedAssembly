@@ -5,7 +5,7 @@ description: See where SpeedAssembly fits between a SpeedTree source and an Unre
 
 # Pipeline overview
 
-SpeedAssembly acts as a bridge between SpeedTree and the new Nanite vegetation workflow in Unreal Engine. It keeps repeated leaves and branches as real nanite assembly instances, preserves the skeleton for wind animation, then writes a USDA file ready to import into Unreal.
+SpeedAssembly acts as a bridge between SpeedTree and the new Nanite vegetation workflow in Unreal Engine. It keeps repeated leaves and branches as real [Nanite Assembly instances](../wiki/choosing-assembly-parts.md), preserves the skeleton for wind animation, then writes a [USDA file](../wiki/xml-usd-usda-json.md#usda-is-usd-you-can-read) ready to import into Unreal.
 
 ```text
 SpeedTree
@@ -27,7 +27,7 @@ Unreal Engine: import and validate the asset
 
 Create the tree in SpeedTree as usual, then prepare its skeleton, main trunk and branch mesh, reusable branches and leaves, materials, and UVs for export. Follow [Prepare SpeedTree](../workflows/prepare-speedtree.md) for scene preparation and export settings.
 
-Export the tree as a SpeedTree Raw XML file. This is simply the export file you select in **Input XML**.
+Export the tree as a SpeedTree [Raw XML file](../wiki/xml-usd-usda-json.md#xml-carries-the-speedtree-source). This is simply the export file you select in **Input XML**.
 
 ## 2. Configure the tree in SpeedAssembly
 
@@ -70,7 +70,7 @@ Each applicable material can also use a UDIM policy: keep its original UVs, shif
 
 ## 3. Convert and import
 
-Select **Convert to USDA** after the configuration is complete. SpeedAssembly writes the main USDA output ready for the configured Unreal USD/Interchange workflow.
+Select **Convert to USDA** after the configuration is complete. SpeedAssembly writes the main USDA output ready for the configured Unreal [USD](../wiki/xml-usd-usda-json.md#usd-describes-a-3d-scene)/Interchange workflow.
 
 Import the file in Unreal using the project setup and import options documented for this pipeline. Then check that the expected tree geometry, repeated branches and leaves, materials, and—when applicable—the skeleton are present. A successful import confirms the file shape, not final wind, lighting, collision, or destruction quality.
 
@@ -80,7 +80,7 @@ Use the following tools after the main tree is configured.
 
 ### Wind Preview
 
-**Wind Preview** is a separate viewport for reviewing and editing wind groups. You can use XML groups, create automatic hierarchy-based groups, add manual overrides, and generate Dynamic Wind JSON from the final visible group setup.
+**Wind Preview** is a separate viewport for reviewing and editing wind groups. You can use XML groups, create automatic hierarchy-based groups, add manual overrides, and generate [Dynamic Wind JSON](../wiki/xml-usd-usda-json.md#json-carries-the-wind-settings) from the final visible group setup.
 
 It can also load an external FBX or USD skeleton, so you can generate Dynamic Wind JSON for a skeletal plant created outside SpeedTree.
 

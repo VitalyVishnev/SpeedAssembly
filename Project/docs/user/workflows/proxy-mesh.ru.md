@@ -17,7 +17,7 @@ Proxy дополняет видимое растение. Скройте его 
 
 ## Создайте proxy {#generate-a-proxy}
 
-1. В SpeedAssembly выберите **Input XML** растения и проверьте **Output USDA**.
+1. В SpeedAssembly выберите [XML растения](../wiki/xml-usd-usda-json.md#xml-carries-the-speedtree-source) через **Input XML** и проверьте **Output USDA**, путь для [экспорта USDA](../wiki/xml-usd-usda-json.md#usda-is-usd-you-can-read).
 2. Откройте **Geometry** и нажмите **Preview Proxy Mesh**.
 
 ![Preview Proxy Mesh во вкладке Geometry](../assets/images/proxy-open-preview.png)
@@ -31,7 +31,7 @@ Proxy дополняет видимое растение. Скройте его 
 
 По умолчанию `<OutputStem>_proxy.usda` сохраняется рядом с основным Output USDA растения. Другой путь можно выбрать через **Browse** или ввести вручную. Если preview уже соответствует текущим настройкам, экспорт использует его без повторной генерации.
 
-Для растений только из инстансов листвы со Scattered Rig генерация proxy недоступна.
+Для растений только из инстансов листвы со [Scattered Rig](scattered-rig.md) генерация proxy недоступна.
 
 ## Настройте форму и polycount {#adjust-the-shape-and-polygon-budget}
 

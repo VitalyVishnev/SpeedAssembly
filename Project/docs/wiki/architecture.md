@@ -58,7 +58,8 @@ Main systems:
   `mkdocs-static-i18n` builds English originals at the existing URLs and Russian
   `.ru.md` translations at `/ru/`. `docs/overrides/` owns the shared ENG/RU links
   and untranslated-page notice; `scripts/check_documentation.py` checks the
-  generated routing, fallback, image, search, and publication-isolation contract.
+  generated routing, internal links/fragments, fallback, images, translation
+  anchor parity, search, and publication-isolation contract.
   Material owns instant article navigation. `docs/user/assets/javascripts/navigation.js`
   adds cancellable hover/focus HTTP-cache warming and keeps the retained language
   switcher current; language changes reload the translated shell. The optional

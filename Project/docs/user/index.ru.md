@@ -6,7 +6,7 @@ title: Главная
 
 # SpeedAssembly {#speedassembly}
 
-Подготовьте растения из SpeedTree к импорту в Unreal Engine. SpeedAssembly экспортирует USDA, сохраняя скелет, базовую геометрию, инстансы веток и листвы и материалы.
+Подготовьте растения из SpeedTree к импорту в Unreal Engine. SpeedAssembly читает [Raw XML](wiki/xml-usd-usda-json.md#xml-carries-the-speedtree-source) и экспортирует [USDA](wiki/xml-usd-usda-json.md#usda-is-usd-you-can-read), сохраняя скелет, базовую геометрию, инстансы веток и листвы и материалы.
 
 [Начать основной workflow](workflows/prepare-unreal.md){ .md-button .md-button--primary }
 
@@ -24,7 +24,7 @@ SpeedAssembly создан специально для работы с раст�
 
 -   **Dynamic Wind**
 
-    Настройте группы костей и экспортируйте Dynamic Wind JSON для анимации ветра в Unreal.
+    Настройте группы костей и экспортируйте Dynamic Wind [JSON](wiki/xml-usd-usda-json.md#json-carries-the-wind-settings) для анимации ветра в Unreal.
 
 -   **Proxy Mesh**
 

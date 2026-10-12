@@ -15,7 +15,7 @@ Dynamic Wind имеет статус Experimental. Настройка проек
 
 Компонент с transform provider Dynamic Wind регистрирует скелет в системе ветра мира. Каждый кадр GPU compute shader рассчитывает движение костей по reference pose, времени и параметрам ветра. Nanite использует полученные transforms для движения геометрии.
 
-SpeedAssembly передаёт mesh и скелет через USDA, а метаданные ветра через отдельный `*_DynamicWind.json`. JSON содержит назначение костей в группы и настройки реакции. В нём нет animation keyframes, и он не заменяет скелет или skin weights.
+SpeedAssembly передаёт mesh и скелет через [USDA](xml-usd-usda-json.md#usda-is-usd-you-can-read), а метаданные ветра через отдельный [`*_DynamicWind.json`](xml-usd-usda-json.md#json-carries-the-wind-settings). JSON содержит назначение костей в группы и настройки реакции. В нём нет animation keyframes, и он не заменяет скелет или skin weights.
 
 ## Как читается скелет {#skeleton}
 
