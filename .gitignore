@@ -1,6 +1,7 @@
 # Local Python environments
 .venv/
 .venv*/
+node_modules/
 .vs/
 
 # Test and runtime caches

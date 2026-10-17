@@ -1,31 +1,37 @@
-// Optional browser gate/benchmark: node scripts/check_documentation_navigation.cjs site check
+// Browser gate/benchmark: node scripts/check_documentation_navigation.cjs site check 240
 // Requires Playwright and an installed browser; DOCS_BROWSER_CHANNEL can select msedge.
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const fs = require('node:fs/promises');
+const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(process.argv[2] || 'site');
+// Use the built site's canonical URL, including its deployment prefix.
+const canonical = fs.readFileSync(path.join(root, 'index.html'), 'utf8').match(/<link rel="canonical" href="([^"]+)"/);
+assert(canonical, 'Build documentation before checking navigation: home canonical URL missing.');
+const published = new URL(canonical[1]);
+const mount = published.pathname;
 const mode = process.argv[3] || 'check';
 const delay = Number(process.argv[4] || 120);
 const requests = [];
 let failOnce;
 const server = http.createServer(async (req, res) => {
   const pathname = new URL(req.url, 'http://localhost').pathname;
-  const relative = pathname.replace(/^\/SpeedAssembly\//, '');
+  if (!pathname.startsWith(mount)) { res.writeHead(404); res.end(); return; }
+  const relative = pathname.slice(mount.length);
   const file = path.join(root, !relative || relative.endsWith('/') ? relative + 'index.html' : relative);
   requests.push({ path: pathname, time: Date.now() });
   if (pathname === failOnce) { failOnce = undefined; res.writeHead(503); res.end(); return; }
   try {
-    let body = await fs.readFile(file);
-    if (file.endsWith('.xml')) body = Buffer.from(body.toString().replaceAll('https://vitalyvishnev.github.io', `http://127.0.0.1:${server.address().port}`));
+    let body = await fs.promises.readFile(file);
+    if (file.endsWith('.xml')) body = Buffer.from(body.toString().replaceAll(published.origin, `http://127.0.0.1:${server.address().port}`));
     const type = {'.html':'text/html', '.xml':'application/xml', '.css':'text/css', '.js':'application/javascript', '.json':'application/json', '.png':'image/png'}[path.extname(file)] || 'application/octet-stream';
     setTimeout(() => { res.writeHead(200, {'Content-Type':type, 'Cache-Control':'public, max-age=600'}); res.end(body); }, delay);
   } catch { res.writeHead(404); res.end(); }
 });
 (async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const base = `http://127.0.0.1:${server.address().port}/SpeedAssembly/`;
+  const base = `http://127.0.0.1:${server.address().port}${mount}`;
   const browser = await chromium.launch({headless:true, channel:process.env.DOCS_BROWSER_CHANNEL});
   const results = [];
   try {
@@ -52,11 +58,11 @@ const server = http.createServer(async (req, res) => {
         await nav(route).hover();
       }
       await page.waitForTimeout(delay + 200);
-      assert.deepEqual(requests.slice(start).filter(r=>r.path.endsWith('/')).map(r=>r.path), ['/SpeedAssembly/wiki/xml-usd-usda-json/']);
+      assert.deepEqual(requests.slice(start).filter(r=>r.path.endsWith('/')).map(r=>r.path), [`${mount}wiki/xml-usd-usda-json/`]);
       start = requests.length;
       await visit('wiki/xml-usd-usda-json/');
       assert.equal(await page.evaluate(() => performance.timeOrigin), origin);
-      assert(!requests.slice(start).some(r=>r.path === '/SpeedAssembly/wiki/xml-usd-usda-json/'), 'Warm article fetched again');
+      assert(!requests.slice(start).some(r=>r.path === `${mount}wiki/xml-usd-usda-json/`), 'Warm article fetched again');
       const articleHeading = await heading();
       assert.equal(await page.locator('.sa-language [hreflang="ru"]').getAttribute('href'), base + 'ru/wiki/xml-usd-usda-json/');
       await page.goBack();
@@ -68,10 +74,10 @@ const server = http.createServer(async (req, res) => {
       await page.waitForTimeout(110);
       await nav('workflows/proxy-mesh/').hover();
       await page.waitForTimeout(delay + 200);
-      assert(aborted.includes('/SpeedAssembly/workflows/udim/'), 'Old hover request was not aborted');
+      assert(aborted.includes(`${mount}workflows/udim/`), 'Old hover request was not aborted');
       start = requests.length;
       await visit('workflows/proxy-mesh/');
-      assert(!requests.slice(start).some(r=>r.path === '/SpeedAssembly/workflows/proxy-mesh/'), 'Last hovered article was not cached');
+      assert(!requests.slice(start).some(r=>r.path === `${mount}workflows/proxy-mesh/`), 'Last hovered article was not cached');
       // Same-page anchors and theme state survive article navigation.
       const anchor = page.locator('.md-nav--secondary a[href*="#"]').first();
       const hash = await anchor.evaluate(link => new URL(link.href).hash);
@@ -87,7 +93,7 @@ const server = http.createServer(async (req, res) => {
       await nav('workflows/prepare-unreal/').hover();
       await page.waitForTimeout(110);
       await visit('workflows/prepare-unreal/');
-      assert.equal(requests.slice(start).filter(r=>r.path === '/SpeedAssembly/workflows/prepare-unreal/').length, 1);
+      assert.equal(requests.slice(start).filter(r=>r.path === `${mount}workflows/prepare-unreal/`).length, 1);
       // Switching languages preserves the article and reloads translated UI.
       await page.locator('.sa-language [hreflang="ru"]').click();
       await page.waitForFunction(() => document.documentElement.lang === 'ru');
@@ -102,7 +108,7 @@ const server = http.createServer(async (req, res) => {
       await page.waitForFunction(() => document.documentElement.lang === 'en');
       assert(new URL(page.url()).pathname.endsWith('/workflows/udim/'));
       // A failed prefetch must not prevent the subsequent real navigation.
-      failOnce = '/SpeedAssembly/wiki/how-dynamic-wind-works/';
+      failOnce = `${mount}wiki/how-dynamic-wind-works/`;
       await nav('wiki/how-dynamic-wind-works/').hover();
       await page.waitForTimeout(delay + 200);
       await visit('wiki/how-dynamic-wind-works/');
@@ -112,7 +118,7 @@ const server = http.createServer(async (req, res) => {
       await page.waitForTimeout(delay + 200);
       start = requests.length;
       await visit('wiki/choosing-assembly-parts/');
-      assert(!requests.slice(start).some(r=>r.path === '/SpeedAssembly/wiki/choosing-assembly-parts/'));
+      assert(!requests.slice(start).some(r=>r.path === `${mount}wiki/choosing-assembly-parts/`));
       assert.deepEqual(errors, []);
       await context.close();
       // Touch and data-saving users must not trigger speculative traffic.

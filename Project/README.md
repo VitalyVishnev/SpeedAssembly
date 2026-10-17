@@ -60,9 +60,17 @@ python scripts/check_documentation.py
 .\scripts\preview_documentation.cmd
 ```
 
-After navigation changes, run the optional browser contract with Playwright
-available to Node.js and a browser installed. Set `DOCS_BROWSER_CHANNEL=msedge`
-to use an existing Microsoft Edge installation on Windows.
+The Pages workflow runs the browser contract before uploading the site. For
+local checks, use Node.js 24 and install the locked browser dependencies once:
+
+```powershell
+npm ci --prefix scripts
+npx --prefix scripts playwright install chromium
+```
+
+After navigation changes, run the same check locally. Set
+`$env:DOCS_BROWSER_CHANNEL = "msedge"` to use an existing Microsoft Edge
+installation on Windows instead of downloading Chromium.
 
 ```powershell
 node scripts/check_documentation_navigation.cjs site check 240

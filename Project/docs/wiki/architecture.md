@@ -60,11 +60,16 @@ Main systems:
   and untranslated-page notice; `scripts/check_documentation.py` checks the
   generated routing, internal links/fragments, fallback, images, translation
   anchor parity, search, and publication-isolation contract.
+  The checker loads paths and the public URL from `mkdocs.yml` and validates
+  matching contextual ENG/RU destinations in the header and head alternates.
   Material owns instant article navigation. `docs/user/assets/javascripts/navigation.js`
   adds cancellable hover/focus HTTP-cache warming and keeps the retained language
-  switcher current; language changes reload the translated shell. The optional
+  switcher current; language changes reload the translated shell. The
   `scripts/check_documentation_navigation.cjs` browser gate exercises navigation
-  and measures click-to-article paint under controlled server latency.
+  before the Pages artifact upload, using locked Playwright dependencies in
+  `scripts/package.json` and `scripts/package-lock.json`. It derives the local
+  server prefix from the built home canonical URL. Separate `click`/`hover`
+  modes measure click-to-article paint under controlled server latency.
 
 Proxy Preview prepares a compact `ProxyCollisionSource` with only primary-stem
 joints and their owned base-mesh points during render-mesh generation. The

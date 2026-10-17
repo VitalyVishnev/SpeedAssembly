@@ -1,0 +1,7 @@
+{
+  "name": "speedassembly-docs-checks",
+  "private": true,
+  "devDependencies": {
+    "playwright": "1.64.0"
+  }
+}

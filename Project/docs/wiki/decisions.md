@@ -156,8 +156,13 @@ integration and explicitly configure theme language and ENG/RU entries instead.
 and `navigation.js` refreshes retained header links from the new page's head.
 Locale transitions, including search results, reload the shell so `html.lang`,
 search labels and theme translations remain correct. Static links work without
-JavaScript. Run the bilingual build check and optional browser navigation gate
-when changing this contract; see developer setup and Experiments for timings.
+JavaScript. Run the bilingual build check and browser navigation gate when
+changing this contract; see developer setup and Experiments for timings.
+The static checker reads MkDocs paths/site URL and checks both header links and
+head alternates. Pages runs the existing navigation gate with 240 ms server
+latency before artifact upload. Playwright is pinned and locked under
+`scripts/`, outside application dependencies; CI installs its Chromium build.
+Performance measurements remain separate from the publication gate.
 
 Contextual application help will target explicit stable anchors such as
 `workflows/proxy-mesh/#density-resolution`; heading copy may change without

@@ -669,3 +669,18 @@ under `docs/raw/`; Git retains per-change detail.
   SpeedAssembly in the root README, using the configured public site URL.
 - Prepared public documentation sources and assets for the next commit.
   No commit or push; Pages deployment remains tied to a push to `master`.
+
+## 2026-10-13 - Documentation publication checks
+
+- The existing static checker now loads paths and site URL from MkDocs and
+  verifies contextual ENG/RU head alternates against header destinations.
+- Pinned Playwright 1.64.0 with an npm lockfile under `scripts/`. Pages installs
+  Chromium and runs the existing navigation contract before artifact upload;
+  benchmark modes remain separate. Updated local setup instructions.
+- The browser gate derives its server prefix and sitemap origin rewrite from
+  the built home canonical URL instead of duplicating the publication address.
+- Validation: strict build and all 28 generated pages passed. Chromium passed
+  the 240 ms navigation contract for the normal build and an isolated build
+  using another origin, URL prefix, and site directory. Negative probes rejected
+  a wrong head alternate and removed hover preloading. Workflow ordering passed.
+  GitHub Actions itself has not run; no commit, push, or deployment.
