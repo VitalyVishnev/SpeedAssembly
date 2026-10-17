@@ -14,7 +14,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from dataclasses import replace
 
-from .models import BaseMaterialOverride, CanonicalTreeModel, ObservedXmlSchemaReport, PrototypeDiscoveryEntry
+from .models import BaseMaterialOverride, CanonicalTreeModel, ObservedXmlSchemaReport, PrototypeDiscoveryEntry, SourceXmlDocument
 from .normalizer import normalize_to_canonical
 from .skeleton_rules import parse_generator_label
 from .xml_reader import analyze_xml, iterparse_source_xml, read_source_xml
@@ -42,7 +42,9 @@ def inspect_source(input_path: str) -> ObservedXmlSchemaReport:
     )
 
 
-def discover_part_prototypes(input_path: str) -> tuple[PrototypeDiscoveryEntry, ...]:
+def discover_part_prototypes(
+    input_path: str, *, document: SourceXmlDocument | None = None,
+) -> tuple[PrototypeDiscoveryEntry, ...]:
     """Discover repeated-part prototype identities from streamed `LeafReferences`."""
     mesh_names_by_id: dict[int, str] = {}
     mesh_instance_counts_by_id: dict[int, int] = {}
@@ -51,13 +53,14 @@ def discover_part_prototypes(input_path: str) -> tuple[PrototypeDiscoveryEntry, 
     saw_leaf_references = False
     leaf_without_mesh_id_instance_count = 0
 
-    for _event, elem in iterparse_source_xml(input_path, events=("end",)):
+    for _event, elem in _discovery_events(input_path, document, events=("end",)):
         if elem.tag == "Mesh":
             raw_mesh_id = elem.attrib.get("ID")
             if raw_mesh_id is not None and raw_mesh_id.isdigit():
                 mesh_id = int(raw_mesh_id)
                 mesh_names_by_id[mesh_id] = elem.attrib.get("Name", f"Mesh_{mesh_id}")
-            elem.clear()
+            if document is None:
+                elem.clear()
             continue
         if elem.tag != "LeafReferences":
             continue
@@ -77,7 +80,8 @@ def discover_part_prototypes(input_path: str) -> tuple[PrototypeDiscoveryEntry, 
                 mesh_instance_counts_by_id[mesh_id] = mesh_instance_counts_by_id.get(mesh_id, 0) + count_delta
         elif _leaf_reference_has_instances(elem):
             leaf_without_mesh_id_instance_count += max(instance_count, 1)
-        elem.clear()
+        if document is None:
+            elem.clear()
 
     prototypes = tuple(
         PrototypeDiscoveryEntry(
@@ -100,14 +104,16 @@ def discover_part_prototypes(input_path: str) -> tuple[PrototypeDiscoveryEntry, 
     )
 
 
-def discover_source_materials(input_path: str) -> tuple[BaseMaterialOverride, ...]:
+def discover_source_materials(
+    input_path: str, *, document: SourceXmlDocument | None = None,
+) -> tuple[BaseMaterialOverride, ...]:
     """Discover base-tree XML material slots while ignoring prototype-only materials."""
     material_names_by_id: dict[int, str] = {}
     material_id_order: list[int] = []
     used_base_material_ids: set[int] = set()
     element_stack: list[str] = []
 
-    for event, elem in iterparse_source_xml(input_path, events=("start", "end")):
+    for event, elem in _discovery_events(input_path, document, events=("start", "end")):
         if event == "start":
             element_stack.append(elem.tag)
             continue
@@ -131,7 +137,8 @@ def discover_source_materials(input_path: str) -> tuple[BaseMaterialOverride, ..
 
         if element_stack:
             element_stack.pop()
-        elem.clear()
+        if document is None:
+            elem.clear()
 
     return tuple(
         BaseMaterialOverride(
@@ -143,21 +150,39 @@ def discover_source_materials(input_path: str) -> tuple[BaseMaterialOverride, ..
     )
 
 
-def discover_missing_bone_generator_groups(input_path: str) -> tuple[str, ...]:
+def discover_missing_bone_generator_groups(
+    input_path: str, *, document: SourceXmlDocument | None = None,
+) -> tuple[str, ...]:
     """Return numeric Generator groups skipped between authored bone levels."""
     levels: set[int] = set()
-    for _event, elem in iterparse_source_xml(input_path, events=("end",)):
+    for _event, elem in _discovery_events(input_path, document, events=("end",)):
         if elem.tag == "Bone":
             raw_bone_id = elem.attrib.get("ID", "")
             bone_id = int(raw_bone_id) if raw_bone_id.lstrip("-").isdigit() else -1
             _label, level = parse_generator_label(elem.attrib.get("Generator"), bone_id)
             if level is not None:
                 levels.add(level)
-        elem.clear()
+        if document is None:
+            elem.clear()
 
     if len(levels) < 2:
         return ()
     return tuple(f"Group_{level}" for level in range(min(levels), max(levels)) if level not in levels)
+
+
+def _discovery_events(input_path, document, *, events):
+    """Reuse a safety-checked document without clearing its canonical payloads."""
+    if document is None:
+        yield from iterparse_source_xml(input_path, events=events)
+        return
+    stack = [("start", document.tree.getroot())]
+    while stack:
+        event, elem = stack.pop()
+        if event == "start":
+            stack.append(("end", elem))
+            stack.extend(("start", child) for child in reversed(elem))
+        if event in events:
+            yield event, elem
 
 
 def _base_geometry_mode(model: CanonicalTreeModel) -> str:

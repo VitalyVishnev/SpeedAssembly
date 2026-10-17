@@ -1,5 +1,41 @@
 # Experiments
 
+## Initial XML opening projection, 2026-10-17
+
+The original discovery service normalized/cached a full canonical model, then
+parsed XML three more times for material rows, prototypes and Generator gaps.
+The historical Phase 5 architecture plan explicitly avoided this heavy path;
+subsequent Scattered Parts detection and vertical-joint warnings explain why
+canonical structure was added, but authored skeletons do not need mesh payloads.
+
+Discovery now reuses one hardened document, canonical skeleton normalization and
+LeafReferences count/position-space checks. No geometry construction or source
+JSON cache is needed for authored skeletons. Skeletonless sources retain full
+canonical classification on that document. Worker isolation is unchanged.
+
+52 accepted fresh-process/Qt opening runs, six real-source parity comparisons.
+Real Qt paste through automatic Wind completion: Big Spruce 4.017 -> 2.662 s
+with cache off, or 5.514 s cold/4.498 s warm JSON before the change. WorldTree
+32.503 -> 13.829 s without application caching. Service-only discovery improves
+1.745 -> 0.570 s and 25.775 -> 7.591 s; parent peaks fall 128 -> 73 MiB and
+1536 -> 532 MiB. Packaged XML adapter checks independently improve complete
+discovery + Wind by about 2.4x. These source timings exclude EXE extraction;
+CPU affinity differs from the earlier Rust experiment.
+
+Real clustered/unclustered grass keeps its classification and canonical path;
+unchanged leaf-only Wind limits the clustered case to a small total improvement.
+Rust XML parsing, a selective streaming reader and combined discovery/Wind IPC
+remain Unverified. Parallel duplicate reads were not introduced. Conversion
+cache creation can move to the later Convert action. Full results, methodology,
+input hashes and reproduction: `experiments/xml_opening/RESULTS.md`.
+
+Validation: 632 default tests, 59 final focused checks, 27 Package contracts,
+repeated Detailed Cuts real-result smoke and injected-failure recovery passed.
+Real frozen discovery/source results match on Big Spruce, WorldTree and both
+grass inputs without creating a JSON source cache. No unexpected crash, new
+dependency, version bump or publication. Actual frozen acceptance timings are
+recorded separately from source before/after ratios.
+
 ## Bone overlay rendering experiments, 2026-10-13
 
 Superseded: QPainter strokes and CPU clipping of projected ribbons. Grid-based

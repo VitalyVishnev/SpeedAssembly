@@ -317,6 +317,7 @@ def test_leaf_reference_orientation_preserves_rotation_sense_after_axis_remap() 
 
 
 def test_non_mesh_leaf_reference_host_with_nonzero_abs_transform_fails_loudly() -> None:
+    from xml_to_usda.normalizer import count_source_part_instances
     root = ET.fromstring(
         """
         <SpeedTreeRaw>
@@ -338,6 +339,8 @@ def test_non_mesh_leaf_reference_host_with_nonzero_abs_transform_fails_loudly() 
 
     with pytest.raises(ValueError, match="position space cannot be determined safely"):
         _extract_assembly_parts_from_leaf_references(tuple(root.findall(".//Object")), [], transform, {2})
+    with pytest.raises(ValueError, match="position space cannot be determined safely"):
+        count_source_part_instances(tuple(root.findall(".//Object")), transform)
 
 
 def test_normalize_to_canonical_keeps_leaf_reference_scale_as_instance_multiplier() -> None:

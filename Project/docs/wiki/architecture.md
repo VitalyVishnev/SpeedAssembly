@@ -46,7 +46,7 @@ Main systems:
   every shared UDIM row link to their workflow articles. Main and compact-panel
   styles reuse one question-button stylesheet in `qt_ui/theme.py`.
 - `src/xml_to_usda/fbx_adapter.py`, `src/xml_to_usda/_ufbx.c`, and `src/xml_to_usda/fbx_import_supervisor.py` - vendored ufbx integration and isolated helper-process control.
-- `src/xml_to_usda/discovery_service.py` and `src/xml_to_usda/source_discovery_worker_subprocess.py` - lightweight material/prototype row discovery; XML files at or above 5 MiB are inspected outside the GUI process.
+- `src/xml_to_usda/discovery_service.py` and `src/xml_to_usda/source_discovery_worker_subprocess.py` - initial rows reuse one safety-checked XML document without the full-model JSON cache. Authored skeletons use the same normalization and orientation as conversion, without constructing geometry. Sources without a normalized skeleton retain canonical Scattered Parts analysis. XML files at or above 5 MiB stay outside the GUI process; Wind inspection remains sequential in its own worker.
 - `src/xml_to_usda/cache_maintenance.py` - bounded runtime cache maintenance for job leftovers, FBX payloads, source-model caches, Proxy Source Projection caches, legacy Fracture Preview cache files, and stale cache temp files.
 - `src/xml_to_usda/proxy_mesh_service.py`, `src/xml_to_usda/fracture_service.py`, and related workers - companion workflows.
 - `src/xml_to_usda/qem_simplification.py` - shared topology-preserving `fast-simplification` QEM backend used by Proxy Mesh and Fracture Preview diagnostic geometry.

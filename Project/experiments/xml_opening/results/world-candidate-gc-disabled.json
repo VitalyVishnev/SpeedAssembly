@@ -1,0 +1,14 @@
+{
+  "input": "D:\\3D Personal\\XMLtoUSD_miscFiles\\WorldTree.xml",
+  "bytes": 148545230,
+  "variant": "candidate",
+  "cache": "off",
+  "discovery": 7.032667100007529,
+  "wind": 3.6466102999984287,
+  "total": 10.679277400005958,
+  "peak_mib": 532.77734375,
+  "stages": {},
+  "signature": "3103994c84c0d5ce5aaa9e0284d003d213a3fdbbb5aae8ea2cbb69ae046f9fb6",
+  "skeleton": 4249,
+  "instances": 43263
+}

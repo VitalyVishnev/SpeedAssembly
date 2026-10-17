@@ -1,0 +1,38 @@
+{
+  "passed": true,
+  "exe_sha256": "bec0a4cb16a9e94d9d3c56e947f176c584c31ac29eaa613da03b9b9fed30ae12",
+  "cases": [
+    {
+      "input": "Project\\samples\\speedtree\\BigSpruce\\SkeletalAssemblyTest_Spruce_Big_low.xml",
+      "seconds": 2.5033241999917664,
+      "joints": 1108,
+      "instances": 3613,
+      "eligible": false,
+      "clusters": 0
+    },
+    {
+      "input": "D:\\3D Personal\\XMLtoUSD_miscFiles\\WorldTree.xml",
+      "seconds": 9.67216789998929,
+      "joints": 4249,
+      "instances": 43263,
+      "eligible": false,
+      "clusters": 0
+    },
+    {
+      "input": "D:\\3D Personal\\XMLtoUSD_miscFiles\\GrassOnlyLeaves_clusters_on_zones.xml",
+      "seconds": 2.055989900007262,
+      "joints": 0,
+      "instances": 572,
+      "eligible": true,
+      "clusters": 52
+    },
+    {
+      "input": "D:\\3D Personal\\XMLtoUSD_miscFiles\\GrassOnlyLeaves_one_clump_no_zones.xml",
+      "seconds": 2.1146681000100216,
+      "joints": 0,
+      "instances": 41,
+      "eligible": true,
+      "clusters": 0
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "rows": 2.5898470999964047,
+  "joints": 1108,
+  "ready": 3.845067199988989,
+  "variant": "baseline",
+  "cache": "off",
+  "input": "Project\\samples\\speedtree\\BigSpruce\\SkeletalAssemblyTest_Spruce_Big_low.xml",
+  "warnings": [],
+  "wind_groups": 3
+}

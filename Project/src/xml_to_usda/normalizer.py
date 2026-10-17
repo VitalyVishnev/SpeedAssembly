@@ -103,7 +103,7 @@ def _normalize_to_canonical(
     materials = tuple(_extract_materials(source_nodes.materials))
     material_ids = {material.source_id for material in materials}
 
-    skeleton = orient_skeleton_x(tuple(_extract_skeleton(source_nodes.bones, data_messages, source_transform)))
+    skeleton = normalize_source_skeleton(source_nodes.bones, source_transform, data_messages)
     joint_index_by_source_id = {
         joint.source_id: index for index, joint in enumerate(skeleton) if joint.source_id is not None
     }
@@ -149,6 +149,35 @@ def _normalize_to_canonical(
         skeletal_support_primvars=skeletal_support_primvars,
         spines=spines,
     )
+
+
+def normalize_source_skeleton(
+    bone_nodes: tuple[ET.Element, ...], source_transform: SourceTransform,
+    messages: list[str] | None = None,
+) -> tuple[Joint, ...]:
+    """Normalize the authored skeleton without constructing mesh payloads."""
+    return orient_skeleton_x(tuple(_extract_skeleton(
+        bone_nodes, messages if messages is not None else [], source_transform)))
+
+
+def count_source_part_instances(
+    object_nodes: tuple[ET.Element, ...], source_transform: SourceTransform,
+) -> int:
+    """Count instances with canonical array semantics, without building transforms."""
+    count = 0
+    for obj in object_nodes:
+        leaf_refs = tuple(child for child in obj if child.tag == "LeafReferences")
+        if not leaf_refs:
+            continue
+        # Full normalization rejects ambiguous placement before building parts;
+        # opening must retain that structural guard even without geometry.
+        _leaf_reference_position_offset(
+            obj, source_transform,
+            has_mesh_payload=obj.find("Points") is not None and obj.find("Triangles") is not None,
+        )
+        count += sum(_read_leaf_reference_payload(
+            obj, child, [], set(), source_transform).count for child in leaf_refs)
+    return count
 
 
 def _metadata_warnings(report: ObservedXmlSchemaReport) -> list[str]:

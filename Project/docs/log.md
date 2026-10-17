@@ -754,3 +754,24 @@ under `docs/raw/`; Git retains per-change detail.
   changing its behavior. Relevant Wind, preview-shell and Fracture UI checks:
   10 passed. Quick preview built successfully at dist-preview/SpeedAssembly_preview.cmd;
   no Package or release validation.
+
+## 2026-10-17 - Faster initial XML discovery without full-model caching
+
+- Traced the old streamed-discovery decision and later Scattered Parts/vertical
+  warning requirements before changing the Python source-opening boundary.
+  Reuse one hardened XML document; normalize authored bones and count parts
+  without constructing geometry. Skeletonless input retains canonical analysis.
+- Retained 52 accepted opening runs and six real-source parity comparisons.
+  Real Qt readiness: Big Spruce 4.017 -> 2.662 s without source caching, or
+  5.514 s cold/4.498 s warm JSON before; WorldTree 32.503 -> 13.829 s uncached.
+  Recorded exact inputs, caveats, service/packaged-adapter timings and memory.
+- Preserved XML safety budgets, ambiguous placement rejection, normalized bone
+  warnings and the >=5 MiB fresh-worker boundary. Conversion and FBX caches
+  remain unchanged; generic JSON-cache risk and remaining reads stay tracked.
+- Passed 632 default tests, 59 final focused checks, 27 packaged contracts and
+  both required real-result/recovery smokes with no skips. The actual frozen EXE
+  matches source discovery on Big Spruce, WorldTree and both grass inputs without
+  creating a source cache. No unexpected crash or new Unreal import.
+- Built `dist-next/SpeedAssembly.exe` and its ZIP at the existing version.
+  Rust remains experimental; no dependency, backend switch, release bump or
+  GitHub publication. Evidence: `experiments/xml_opening/RESULTS.md`.

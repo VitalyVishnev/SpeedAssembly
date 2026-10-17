@@ -2,6 +2,31 @@
 
 This page stores active project contracts. Rejected or superseded approaches live in [experiments.md](experiments.md). Current limitations and bugs live in [known-bugs.md](known-bugs.md).
 
+## Initial XML discovery projects facts without a geometry cache, 2026-10-17
+
+Opening an XML file reads one document through the existing hardened reader.
+Reuse it for material/prototype rows and missing Generator groups. Normalize the
+authored skeleton through the conversion helper, preserving source-axis mapping,
+missing-end inference and +X orientation for vertical-joint warnings. A nonempty
+normalized skeleton excludes Scattered Parts; count its instances through the
+canonical LeafReferences payload reader without constructing geometry or instance
+transforms, retaining ambiguous position-space rejection. Geometry normalization
+and validation remain mandatory at conversion. Its internal exclusion reason is now `skeleton is present`, even
+when a base mesh would also exclude it. That reason is not displayed by the UI.
+
+Without a normalized skeleton, perform full canonical normalization on the same
+document before Scattered Parts classification. Tag presence is not proof of a
+valid mesh, hierarchy or cluster. Initial discovery never reads or creates the
+generic full-model JSON cache. Conversion and FBX cache policies are unchanged;
+leaf-only Wind inspection can still use its existing canonical fallback.
+
+This restores the intent of raw `ARCHITECTURE_IMPROVEMENT_PLAN.md`, Phase 5,
+which explicitly rejected heavy normalization on every UI discovery. Later
+Scattered Parts and strict-vertical warnings require canonical structural facts,
+but do not justify building all geometry for an authored skeleton. Keep XML
+budgets, DTD/entity rejection and the CR-013 fresh-worker boundary at 5 MiB.
+See `experiments/xml_opening/RESULTS.md` for measured costs and remaining reads.
+
 ## Interactive Tree thresholds and equivalent forks, 2026-10-13
 
 Follow-up operator polish: Tree is the primary automatic selection; retain XML

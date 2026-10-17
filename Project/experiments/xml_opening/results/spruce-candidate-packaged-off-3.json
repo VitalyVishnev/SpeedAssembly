@@ -1,0 +1,18 @@
+{
+  "input": "Project\\samples\\speedtree\\BigSpruce\\SkeletalAssemblyTest_Spruce_Big_low.xml",
+  "bytes": 9741453,
+  "variant": "candidate",
+  "cache": "off",
+  "parser": "packaged",
+  "discovery": 0.5120014999993145,
+  "wind": 0.22662850000779144,
+  "total": 0.738630000007106,
+  "peak_mib": 78.8984375,
+  "stages": {
+    "read_source_xml": 0.21873379999306053,
+    "analyze_xml": 0.049786400006269105
+  },
+  "signature": "da5ede8539935378a46f7e4bd0375479ec53c7812ee956c6ced35b1470c72162",
+  "skeleton": 1108,
+  "instances": 3613
+}

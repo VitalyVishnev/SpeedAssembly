@@ -253,6 +253,16 @@ Do not restore this cache for Proxy or Fracture, or add another persistent cache
 without registering it in `cache_maintenance.py`. Replace the generic format
 only when a real conversion workflow justifies and stress-validates it.
 
+Initial opening still builds the safety-checked XML element tree, traverses it
+for separate row projections, then rereads XML for Wind groups. Leaf-only
+discovery still needs canonical geometry and leaf-only Wind retains its existing
+full-model fallback. Locations: `discovery_service.py`, `source_analysis.py`,
+`wind_pipeline.py`. Deferred to preserve one boundary per change. Next step:
+profile a bounded selective reader or reuse typed skeleton facts across the
+existing worker boundary, with row/warning/Scattered Parts parity. XML parsing
+Rust gains and a combined discovery/Wind protocol remain Unverified. Evidence:
+`experiments/xml_opening/RESULTS.md`.
+
 Related:
 - `src/xml_to_usda/canonical_loader.py`
 - `src/xml_to_usda/worker_file_protocol.py`

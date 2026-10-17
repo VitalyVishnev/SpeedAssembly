@@ -1,0 +1,18 @@
+{
+  "input": "Project\\samples\\speedtree\\simple_tree\\variants\\SimpleTree_01.xml",
+  "bytes": 746696,
+  "variant": "baseline",
+  "cache": "off",
+  "discovery": 0.0892217999935383,
+  "wind": 0.011896299998625182,
+  "total": 0.10111809999216348,
+  "peak_mib": 43.6640625,
+  "stages": {
+    "read_source_xml": 0.010793099994771183,
+    "analyze_xml": 0.0012560999894049019,
+    "normalize_to_canonical": 0.03649450000375509
+  },
+  "signature": "7276c76819fa9221205a9cc1235a2b0aec1498563cb94f637fed2edb3ebd4b30",
+  "skeleton": 105,
+  "instances": 39
+}

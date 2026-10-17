@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from .models import CpuProfile, FbxMaterialMode, PrototypeSourceMode, UdimMode
+from .models import CpuProfile, FbxMaterialMode, PrototypeSourceMode, SourceXmlDocument, UdimMode
 from .settings_service import (
     BaseMaterialSettingRecord,
     FbxMaterialSlotSettingRecord,
@@ -27,6 +27,9 @@ from .source_analysis import (
 from .canonical_loader import load_source_tree_model
 from .scattered_parts import ScatteredPartsAnalysis, analyze_scattered_parts
 from .skeleton_processing import strictly_vertical_joint_names
+from .normalizer import count_source_part_instances, normalize_source_skeleton, normalize_to_canonical
+from .source_transform import build_source_transform
+from .xml_reader import analyze_xml, read_source_xml
 
 
 @dataclass(frozen=True)
@@ -101,21 +104,43 @@ class SourceDiscoveryResult:
 
 
 def discover_source_rows(request: SourceDiscoveryRequest) -> SourceDiscoveryResult:
-    _report, source_model, _diagnostics = load_source_tree_model(request.input_path)
+    # Opening the UI needs source facts, not a serialized geometry model. Keep
+    # the canonical reader's safety checks and reuse its document for every row.
+    document = read_source_xml(request.input_path)
+    analysis = analyze_xml(document)
+    source_transform = build_source_transform(
+        document.tree.getroot(), analysis.report.units_hint,
+        analysis.report.up_axis_hint, analysis.source_nodes.meshes,
+    )
+    skeleton = normalize_source_skeleton(analysis.source_nodes.bones, source_transform)
+    if skeleton:
+        scattered_parts = ScatteredPartsAnalysis(
+            False, False, count_source_part_instances(analysis.source_nodes.objects, source_transform),
+            reason="skeleton is present",
+        )
+    else:
+        # Leaf-only sources need canonical Object/mesh facts to distinguish real
+        # Scattered Parts and cluster ownership. Do not guess from XML tags.
+        source_model = normalize_to_canonical(
+            document, analysis.report, source_nodes=analysis.source_nodes,
+        )
+        scattered_parts = analyze_scattered_parts(source_model)
     return SourceDiscoveryResult(
         input_path=request.input_path,
         base=discover_base_material_rows(
             request.input_path,
             persisted_records=request.base_persisted_records,
+            document=document,
         ),
         prototypes=discover_part_prototype_rows(
             request.input_path,
             persisted_records=request.part_persisted_records,
+            document=document,
         ),
-        missing_bone_generator_groups=discover_missing_bone_generator_groups(request.input_path),
-        scattered_parts=analyze_scattered_parts(source_model),
-        strictly_vertical_joints=strictly_vertical_joint_names(source_model.skeleton),
-        skeleton_joint_count=len(source_model.skeleton),
+        missing_bone_generator_groups=discover_missing_bone_generator_groups(request.input_path, document=document),
+        scattered_parts=scattered_parts,
+        strictly_vertical_joints=strictly_vertical_joint_names(skeleton),
+        skeleton_joint_count=len(skeleton),
     )
 
 
@@ -132,9 +157,10 @@ def discover_strictly_vertical_joints(input_path: str) -> tuple[str, ...]:
 def discover_base_material_rows(
     input_path: str,
     persisted_records: tuple[BaseMaterialSettingRecord, ...] = (),
+    *, document: SourceXmlDocument | None = None,
 ) -> BaseMaterialDiscovery:
     """Discover base XML material rows and merge persisted UI assignments."""
-    materials = discover_source_materials(input_path)
+    materials = discover_source_materials(input_path, document=document)
     if not materials:
         return BaseMaterialDiscovery(
             summary="No XML material slots were found in this file.",
@@ -164,9 +190,10 @@ def _base_material_row_spec(material, persisted: BaseMaterialSettingRecord | Non
 def discover_part_prototype_rows(
     input_path: str,
     persisted_records: tuple[PartSourceSettingRecord, ...] = (),
+    *, document: SourceXmlDocument | None = None,
 ) -> PrototypeDiscovery:
     """Discover repeated-part prototype rows and merge persisted source settings."""
-    prototypes = discover_part_prototypes(input_path)
+    prototypes = discover_part_prototypes(input_path, document=document)
     if not prototypes:
         return PrototypeDiscovery(
             summary="No repeated branch instances were found in this XML.",
