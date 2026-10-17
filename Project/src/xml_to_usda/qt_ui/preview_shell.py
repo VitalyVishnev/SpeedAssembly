@@ -11,11 +11,43 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QFrame, QGridLayout, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QFrame, QGridLayout, QSplitter, QToolButton, QVBoxLayout, QWidget
 
 from .theme import BUTTON_OUTLINE_COLOR, DOCUMENTATION_BUTTON_STYLE
 
 _DROPDOWN_ARROW_ICON = Path(__file__).with_name("themes") / "default" / "assets" / "dropdown_arrow.svg"
+
+
+class CollapsibleSettingsSection(QFrame):
+    """Compact settings group with a stable header and hideable contents."""
+
+    def __init__(self, title: str, *, expanded: bool, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setObjectName("FractureSettingsSection")
+        section_layout = QVBoxLayout(self)
+        section_layout.setContentsMargins(0, 0, 0, 0)
+        section_layout.setSpacing(5)
+
+        self.toggle = QToolButton(self)
+        self.toggle.setObjectName("SettingsSectionToggle")
+        self.toggle.setText(title)
+        self.toggle.setCheckable(True)
+        self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        self.toggle.setChecked(expanded)
+        section_layout.addWidget(self.toggle)
+
+        self.content = QWidget(self)
+        self.content_layout = QVBoxLayout(self.content)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(5)
+        section_layout.addWidget(self.content)
+        self.toggle.toggled.connect(self._set_expanded)
+        self._set_expanded(expanded)
+
+    def _set_expanded(self, expanded: bool) -> None:
+        self.content.setVisible(expanded)
+        self.toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
 
 
 class PreviewShellDialog(QDialog):

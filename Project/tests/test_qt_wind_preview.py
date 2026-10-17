@@ -94,6 +94,9 @@ def test_external_display_transform_persists_and_warns_without_mutating_skeleton
     dialog = WindPreviewDialog(preview=preview)
     qtbot.addWidget(dialog)
 
+    assert dialog.grouping_mode_combo.currentData() == "auto_tree"
+    # Also protect unit/up-axis transport in the earlier connector display.
+    dialog.grouping_mode_combo.setCurrentIndex(dialog.grouping_mode_combo.findData("auto"))
     dialog.source_units_combo.setCurrentIndex(dialog.source_units_combo.findData("cm"))
     dialog.preview_units_combo.setCurrentIndex(dialog.preview_units_combo.findData("m"))
     dialog.source_up_axis_combo.setCurrentIndex(dialog.source_up_axis_combo.findData("Y"))
@@ -164,6 +167,34 @@ def test_advanced_wind_group_controls_only_edit_manual_groups_and_persist_settin
     dialog = WindPreviewDialog(preview=preview)
     qtbot.addWidget(dialog)
 
+    assert dialog.bone_overlap_checkbox.isChecked()
+    assert dialog.bone_overlap_strength_editor.value() == 50
+    assert dialog.bone_overlap_radius_editor.value() == 1.2
+    assert dialog.viewport._bone_overlap_strength == pytest.approx(.5)
+    assert dialog.viewport._bone_overlap_radius == pytest.approx(1.2)
+    assert dialog.bones_shading_section.toggle.text() == "Bones Shading"
+    dialog.bones_shading_section.toggle.click()
+    assert dialog.bones_shading_section.content.isHidden()
+    assert dialog.bone_overlap_checkbox.isChecked()
+    dialog.bones_shading_section.toggle.click()
+    assert not dialog.bones_shading_section.content.isHidden()
+
+    assert [dialog.grouping_mode_combo.itemData(i) for i in range(dialog.grouping_mode_combo.count())] == ["xml", "auto_tree", "auto_pve", "auto"]
+    assert dialog.grouping_mode_combo.currentData() == "auto_tree"
+    assert dialog.tree_threshold_editors["fork_angle"].spin.suffix() == " °"
+    assert dialog.tree_threshold_editors["equivalent_size"].spin.suffix() == " %"
+    assert len({dialog.tree_equivalent_combo.itemData(i, Qt.ItemDataRole.ToolTipRole) for i in range(3)}) == 3
+    ends = tuple(s.end for s in dialog._active_scene.bone_segments)
+    dialog.tree_direction_combo.setCurrentIndex(dialog.tree_direction_combo.findData("bind"))
+    qtbot.waitUntil(lambda: not dialog._tree_update_timer.isActive())
+    assert tuple(s.end for s in dialog._active_scene.bone_segments) == ends
+    assert "Identical orientations" in dialog.tree_direction_combo.toolTip()
+    assert not dialog.tree_direction_notice.isHidden()
+    dialog.tree_direction_combo.setCurrentIndex(dialog.tree_direction_combo.findData("auto"))
+    qtbot.waitUntil(lambda: not dialog._tree_update_timer.isActive())
+    dialog.bone_overlap_checkbox.setChecked(False)
+    dialog.bone_overlap_strength_editor.slider.setValue(1700)
+    dialog.bone_overlap_radius_editor.slider.setValue(90)
     batches = dialog._active_scene.mesh_batches
     dialog.grouping_mode_combo.setCurrentIndex(dialog.grouping_mode_combo.findData("auto_pve"))
     assert dialog._is_auto_mode()
@@ -176,6 +207,21 @@ def test_advanced_wind_group_controls_only_edit_manual_groups_and_persist_settin
     assert "Tree bone guides" in dialog.summary_label.text()
     dialog.group_count_slider.setValue(2)
     assert dialog._get_tree_analysis() is analysis
+    qtbot.waitUntil(lambda: not dialog._tree_update_timer.isActive())
+    prepared = dialog._prepared_tree
+    camera = (dialog.viewport.camera_target, dialog.viewport.camera_distance)
+    geometry = dialog.viewport._precomputed_matcap_vertices
+    monkeypatch.setattr(wind_preview_module, "prepare_tree_hierarchy", lambda _: pytest.fail("slider re-prepared the rig"))
+    monkeypatch.setattr(dialog.viewport, "set_precomputed_instanced_matcap_scene", lambda *args, **kwargs: pytest.fail("slider rebuilt mesh geometry"))
+    dialog.tree_threshold_editors["fork_angle"].slider.setValue(5500)
+    dialog.tree_threshold_editors["chain_angle"].setValue(40)
+    dialog.tree_threshold_editors["chain_angle"].valueChanged.emit(40)
+    qtbot.waitUntil(lambda: not dialog._tree_update_timer.isActive())
+    assert dialog._tree_settings.fork_angle == 55
+    assert dialog._prepared_tree is prepared
+    assert dialog.viewport._precomputed_matcap_vertices is geometry
+    assert (dialog.viewport.camera_target, dialog.viewport.camera_distance) == camera
+    monkeypatch.undo()
 
     assert dialog.windowTitle() == "Advanced Wind Settings"
     assert not dialog._group_buttons
@@ -213,9 +259,52 @@ def test_advanced_wind_group_controls_only_edit_manual_groups_and_persist_settin
     assert snapshot["group_settings"][manual_group.source_key]["influence"] == pytest.approx(0.35)
     assert manual_group.source_key in snapshot["expanded_group_source_keys"]
 
+    dialog.tree_threshold_editors["equivalent_size"].slider.setValue(6500)
+    qtbot.waitUntil(lambda: not dialog._tree_update_timer.isActive())
+    assert dialog._manual_groups[0].joint_tokens == frozenset({"branch"})
+    assert dialog._active_manual_layer_id == layer_id
+    assert dialog._current_dynamic_wind().simulation_groups[manual_group.final_group_index].influence == pytest.approx(0.35)
+    snapshot = dialog.wind_session_snapshot()
+
     restored = WindPreviewDialog(preview=preview, wind_session_snapshot=snapshot)
     qtbot.addWidget(restored)
     assert restored.grouping_mode_combo.currentData() == "auto_tree"
+    assert restored._tree_settings == dialog._tree_settings
+    assert restored.bone_overlap_checkbox.isChecked() is False
+    assert restored.viewport._bone_overlap_shading is False
+    assert restored.bone_overlap_strength_editor.value() == 17
+    assert restored.bone_overlap_radius_editor.value() == .9
+    assert restored.viewport._bone_overlap_strength == pytest.approx(.17)
+    assert restored.bone_overlap_strength_editor.spin.maximum() == 100
+    assert restored.bone_overlap_radius_editor.spin.maximum() == 3
+    assert restored.bone_overlap_radius_editor.spin.minimum() == 0
+    assert restored.bone_overlap_radius_editor.spin.suffix() == ""
+    legacy = dict(snapshot)
+    legacy.pop("bone_overlap_radius_scale")
+    legacy["bone_overlap_radius"] = 12
+    legacy_restored = WindPreviewDialog(preview=preview, wind_session_snapshot=legacy)
+    qtbot.addWidget(legacy_restored)
+    assert legacy_restored.bone_overlap_radius_editor.value() == 1
     assert restored._current_dynamic_wind() == dialog._current_dynamic_wind()
     assert restored._group_settings_by_source_key[manual_group.source_key]["influence"] == pytest.approx(0.35)
     assert manual_group.source_key in restored._expanded_group_source_keys
+
+
+def test_wind_error_dialog_explains_missing_skeleton_and_keeps_trace_in_log(qtbot, monkeypatch) -> None:
+    from PySide6.QtWidgets import QWidget, QMessageBox
+    from xml_to_usda.qt_ui.window import MainWindow
+    window = QWidget()
+    qtbot.addWidget(window)
+    window._wind_preview_dialog = None
+    logged = []
+    window._append_log = logged.append
+    window._finish_status_activity = lambda *args: None
+    shown = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda box: shown.append((box.text(), box.informativeText())))
+    message = "external_skeleton_not_found: D:/Trees/Alder_proxy.usda\n\nTraceback (most recent call last):\nprivate worker details"
+    MainWindow._report_error(window, "Wind Preview failed", message)
+    assert "No skeleton in this file." in shown[0][0]
+    assert "font-size:18px" in shown[0][0]
+    assert shown[0][1] == "File: D:/Trees/Alder_proxy.usda"
+    assert "Traceback" not in " ".join(shown[0])
+    assert logged == [message]

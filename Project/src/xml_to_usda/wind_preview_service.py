@@ -80,7 +80,7 @@ def generate_wind_preview_from_request(request: WindPreviewRequest) -> WindPrevi
         dynamic_wind = build_auto_wind_viewport_data(source_model.skeleton, group_count=3)
         groups = build_wind_viewport_groups(dynamic_wind, label_kind="Hierarchy level")
         diagnostics = diagnostics + (warning,)
-        preferred_grouping_mode = "auto"
+        preferred_grouping_mode = "auto_tree"
     viewport_scene = build_wind_viewport_scene(source_model, dynamic_wind)
     preview_source_model = CanonicalTreeModel(
         metadata=source_model.metadata,
@@ -104,7 +104,7 @@ def generate_wind_preview_from_request(request: WindPreviewRequest) -> WindPrevi
 
 def _validate_wind_preview_skeleton(model: CanonicalTreeModel) -> None:
     if not model.skeleton:
-        raise WindPreviewError("wind_preview_missing_skeleton: Wind Preview requires XML skeleton data.")
+        raise WindPreviewError(f"wind_preview_missing_skeleton: {model.metadata.source_path}")
 
 
 def _xml_wind_groups_available(model: CanonicalTreeModel) -> tuple[bool, ValidationIssue]:

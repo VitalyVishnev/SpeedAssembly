@@ -633,6 +633,21 @@ under `docs/raw/`; Git retains per-change detail.
   stability/recovery smoke; frozen Wind smoke wrote Tree JSON. ZIP embeds the
   exact built EXE. No required smoke skipped; version remains 0.5.0-beta.
 
+
+## 2026-10-13 - Live Tree hierarchy tuning
+
+- Exposed semantic thresholds and default Keep parent level for equivalent forks.
+  Preserved the previous continuation option and explicit export guard.
+- Prepared both geometry models once, cached grouping/layers, and reused mesh
+  vertices while updating instance tints and bone overlays. Settings persist;
+  camera, manual assignments and group wind settings survive tuning.
+- Recorded local CPU measurements and the 137/3336 default calibration result.
+  Raw docs, source rigs, JSON schema and visible version remain unchanged.
+- Validation: 71 focused Wind/viewport checks and 27 packaged contracts passed.
+  Source and frozen Wind smoke exercised live controls and wrote complete JSON.
+  Package stability/recovery smoke passed without skipped gates; ZIP contains
+  the exact built EXE. Version remains 0.5.0-beta.
+
 ## 2026-10-13 - Scattered Rig and material assignment drafts
 
 - Added English-only Workflows guides, navigation, five supplied screenshots,
@@ -644,6 +659,31 @@ under `docs/raw/`; Git retains per-change detail.
 - Validation: strict bilingual site build and all 45 existing Scattered Parts/
   material resolver tests passed. Initial sandbox run blocked ten FBX checks
   at atomic temporary-file replacement; the unsandboxed rerun passed them.
+
+
+## 2026-10-13 - Wind readability and primary Tree mode
+
+- Made Tree the primary automatic selection and renamed/reordered Skeleton Order.
+  Preserved XML generator labels and saved operator choices.
+- Decoupled displayed guides from grouping direction overrides; explained uniform
+  bind axes, added choice tooltips, and moved degree/percent units beside values.
+- Replaced Wind error dumps with short prominent explanations and file paths;
+  retained raw worker diagnostics in logs.
+- Added local-depth bone visibility and matching picking, cached independently
+  from colors, plus optional rear-only overlap shading with session persistence.
+- Validation: 73 relevant source checks and actual Alder/overlap/error rendering
+  passed. No rig, JSON schema or release version change.
+- Operator shadow feedback: removed excess black gaps by clipping only the
+  front colored stroke and softening crossing outlines. Added live AO strength
+  and radius controls with persisted defaults 14% / 7 px, after rejecting 28%
+  as too aggressive and 6% as invisible. Fourteen focused Qt/viewport checks
+  and actual pixels passed; near rear changes from 230 to 210 at the sampled
+  point, front remains 230, distant difference is one raster quantization level.
+- Final validation: Package passed all 27 packaged contracts and mandatory
+  stability/recovery smoke. Final frozen Wind smoke exercised live Tree and
+  shadow controls, reused visibility plans and wrote complete JSON. ZIP embeds
+  the exact built EXE. No gates skipped; version remains 0.5.0-beta. AO slider
+  persistence uses the existing 200 ms debounce and close flush.
 
 ## 2026-10-13 - Public links audit and remaining Russian translations
 
@@ -684,3 +724,33 @@ under `docs/raw/`; Git retains per-change detail.
   using another origin, URL prefix, and site directory. Negative probes rejected
   a wrong head alternate and removed hover preloading. Workflow ordering passed.
   GitHub Actions itself has not run; no commit, push, or deployment.
+
+
+## 2026-10-13 - Opaque realtime bone renderer
+
+- Replaced QPainter bone strokes and CPU visibility clipping with one opaque
+  unlit GPU batch using hardware depth. Vectorized endpoint projection and
+  strict-crossing shadow events; excluded adjacent/endpoint/parallel contacts.
+- Expanded strength to 0-100%, default 35%; normalized radius to 0-3, default 1
+  = 12 pixels at 1440p with monitor height/DPI scaling. Migrated old pixel values
+  and retained live uniform updates and debounced persistence.
+- Rotating complete frames with GPU completion: 347 joints median 2.16 ms /
+  p95 2.48 ms; 1108 joints median 6.22 ms / p95 6.90 ms. Real pixels verify
+  opaque colors, correct depth, local AO and no serial-joint shading.
+- Relevant source checks: 47 passed. Source Wind smoke wrote complete JSON.
+  No source rig, export schema or release version change.
+- Final Package: 27 packaged contracts plus mandatory stability/recovery
+  passed. Frozen Wind smoke drew the opaque GPU batch, exercised relative AO
+  controls and wrote complete JSON. ZIP contains the exact built EXE. No
+  skipped gates; version remains 0.5.0-beta.
+
+
+## 2026-10-17 - Bone shading defaults and section
+
+- Wind now defaults to shading enabled, 50% strength and 1.20 relative radius;
+  existing saved values retain precedence. All three controls share the
+  collapsible Bones Shading section, expanded initially.
+- Reused the Fracture section widget through the shared preview shell without
+  changing its behavior. Relevant Wind, preview-shell and Fracture UI checks:
+  10 passed. Quick preview built successfully at dist-preview/SpeedAssembly_preview.cmd;
+  no Package or release validation.

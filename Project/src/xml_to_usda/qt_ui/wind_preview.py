@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import os
-from dataclasses import replace
+from math import isfinite
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import Qt, QSignalBlocker
+from PySide6.QtCore import Qt, QSignalBlocker, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -40,7 +41,7 @@ from ..wind_external_skeleton import (
 )
 from ..wind_service import derive_wind_json_output_path
 from ..wind_preview_service import WindPreviewResult
-from ..wind_tree_hierarchy import analyze_tree_hierarchy
+from ..wind_tree_hierarchy import TreeHierarchySettings, prepare_tree_hierarchy, classify_tree_hierarchy
 from ..wind_group_stack import (
     EDIT_MODE_BONES,
     EDIT_MODE_SUBTREE,
@@ -66,11 +67,13 @@ from ..wind_viewport_scene import (
 )
 from .material_controls import set_tooltip
 from .panels import SliderSpinEditor
-from .preview_shell import PreviewShellDialog, apply_compact_preview_panel_style
-from .viewport import MatcapViewport
+from .preview_shell import CollapsibleSettingsSection, PreviewShellDialog, apply_compact_preview_panel_style
+from .viewport import MatcapViewport, _build_instanced_scene_payload
 
 
 WIND_MATCAP_TINT_STRENGTH = 0.82
+WIND_BONE_SHADOW_STRENGTH = 0.50
+WIND_BONE_SHADOW_RADIUS = 1.20
 WIND_PREVIEW_DEFAULT_WIDTH = 1160
 WIND_PREVIEW_DEFAULT_HEIGHT = 936
 WIND_SETTINGS_PANEL_MIN_WIDTH = 320
@@ -88,6 +91,62 @@ DISPLAY_UNITS = (("Millimeters", "mm"), ("Centimeters", "cm"), ("Meters", "m"))
 DISPLAY_UP_AXES = (("Y-up", "Y"), ("Z-up", "Z"))
 _WIND_GROUP_BOOLEAN_FIELDS = frozenset({"is_trunk_group", "use_dual_influence"})
 _WIND_GROUP_NUMERIC_FIELDS = frozenset({"influence", "min_influence", "max_influence", "shift_top"})
+
+# Ratios are displayed as percentages; numerical degeneracy tolerances stay internal.
+_TREE_THRESHOLDS = (
+    ("fork_angle", "Continuation angle (°)", 180, 1, 1, "Maximum angle from the parent direction for a fork continuation. Higher accepts wider turns."),
+    ("chain_angle", "Chain split angle (°)", 180, 1, 1, "A larger bend starts a new level on an unbranched chain. Higher keeps more bends in the same level."),
+    ("distal_fraction", "Distal attachment (%)", 100, 1, 100, "Minimum projected attachment position relative to the furthest child. Higher requires attachment nearer the tip."),
+    ("equivalent_angle", "Equivalent angle difference (°)", 180, 1, 1, "Maximum difference between daughter angles to the parent. Higher accepts less symmetric forks."),
+    ("equivalent_size", "Equivalent subtree size (%)", 100, 1, 100, "Minimum smallest/largest daughter subtree joint count. Higher requires more similar branch structure."),
+    ("equivalent_length", "Equivalent path length (%)", 100, 1, 100, "Minimum shortest/longest daughter path length, including its entry link. Higher requires more similar branch reach."),
+    ("basal_distance", "Basal distance (%)", 100, 1, 100, "Maximum basal attachment or root-to-stem-plane distance relative to tree diameter. Higher accepts more spread-out stem bases."),
+    ("basal_balance", "Basal subtree balance (%)", 100, 1, 100, "Minimum smallest/largest compact basal subtree size. Higher requires more balanced independent stems."),
+    ("basal_planarity", "Stem plane spread (%)", 100, 1, 100, "Minimum second/first principal spread of basal attachments. Higher requires a broader stem-base plane."),
+    ("frame_variation", "Bind direction variation (%)", 100, 0.1, 100, "Minimum normalized +X variation for Auto to use bind directions. Higher switches more rigs to attachment directions."),
+)
+
+_EQUIVALENT_FORK_TOOLTIPS = {
+    "keep_parent": "Both equivalent daughter branches keep their parent's level. The fork alone does not create a new group.",
+    "advance": "Both equivalent daughter branches start the same next level. The parent stays at its current level.",
+    "continuation": "Apply the previous rule: the best aligned eligible daughter keeps the parent level; other daughters start the next level. An exact tie advances both, without choosing by joint order.",
+}
+_DIRECTION_TOOLTIPS = {
+    "auto": "Choose branch directions for grouping automatically. Use bone orientations when they vary, otherwise infer directions from child attachments. This does not change the displayed skeleton.",
+    "bind": "Analyze groups using each bone's local +X orientation in the bind pose. Useful when the rig has meaningful bone orientations. Identical orientations cannot describe branch directions. This does not change the displayed skeleton.",
+    "attachments": "Analyze groups using directions inferred from child-joint attachment positions. Useful for skeletons whose bone orientations are identical or unreliable. This does not change the displayed skeleton.",
+}
+
+
+def wind_preview_error_text(message: str) -> tuple[str, str]:
+    """Operator explanation only; raw worker message/traceback stays in the log."""
+    first = message.split("\n\n", 1)[0].strip()
+    code, _, detail = first.partition(":")
+    summaries = {
+        "external_skeleton_not_found": "No skeleton in this file.",
+        "external_skeleton_usd_open_failed": "Could not open this USD file.",
+        "external_skeleton_unsupported_format": "This file format is not supported.",
+        "external_skeleton_missing_path": "Select a skeleton file first.",
+        "external_skeleton_multiple_skeletons": "Choose which skeleton to load.",
+        "external_skeleton_selected_not_found": "The selected skeleton is no longer in this file.",
+        "external_skeleton_missing_joint_transforms": "The skeleton has no usable bone transforms.",
+        "external_skeleton_invalid_joint_transform": "The skeleton contains an invalid bone transform.",
+        "external_skeleton_backend_unavailable": "The skeleton reader is unavailable.",
+        "external_skeleton_duplicate_joint_name": "The skeleton contains duplicate bone names.",
+        "external_skeleton_noninvertible_bind_transform": "The skeleton contains a bone transform that cannot be inverted.",
+        "external_usd_duplicate_joint_path": "The USD skeleton contains duplicate joints.",
+        "external_usd_unreal_joint_name_collision": "Some bone names become identical in Unreal.",
+        "external_fbx_unreal_joint_name_collision": "Some bone names become identical in Unreal.",
+        "external_usd_joint_order": "The skeleton has a child listed before its parent.",
+        "external_usd_invalid_joint_path": "The skeleton contains an invalid joint path.",
+        "wind_preview_missing_skeleton": "No skeleton in this file.",
+        "dynamic_wind_same_group_fork": "Cannot export a branch fork in one wind group.",
+    }
+    summary = summaries.get(code, "Could not prepare Wind Preview.")
+    context = f"File: {detail.strip()}" if code in {"external_skeleton_not_found", "external_skeleton_usd_open_failed", "wind_preview_missing_skeleton"} else ""
+    if code == "dynamic_wind_same_group_fork":
+        context = "Use Advance together, more Groups or manual corrections. Trunk is valid only for stems."
+    return summary, context
 
 
 class WindPreviewDialog(PreviewShellDialog):
@@ -116,6 +175,21 @@ class WindPreviewDialog(PreviewShellDialog):
         self._auto_group_count = 1
         self._auto_continuous_levels: set[int] = set()
         self._tree_analysis = None
+        self._prepared_tree = None
+        self._tree_settings = TreeHierarchySettings()
+        self._base_data_cache = None
+        self._flatten_cache = None
+        self._preview_fingerprint = None
+        self._group_list_signature = None
+        self._live_group_labels = {}
+        self._wind_draw_templates = None
+        self._tree_update_timer = QTimer(self)
+        self._tree_update_timer.setSingleShot(True)
+        self._tree_update_timer.timeout.connect(self._apply_live_tree_settings)
+        self._tree_save_timer = QTimer(self)
+        self._tree_save_timer.setSingleShot(True)
+        self._tree_save_timer.setInterval(200)
+        self._tree_save_timer.timeout.connect(self._save_wind_session)
         self._manual_groups: tuple[WindManualGroup, ...] = ()
         self._active_manual_layer_id: int | None = None
         self._undo_stack: list[tuple[tuple[WindManualGroup, ...], int | None]] = []
@@ -131,6 +205,7 @@ class WindPreviewDialog(PreviewShellDialog):
         self.viewport = MatcapViewport(self)
         self.viewport.set_matcap_tint_strength(WIND_MATCAP_TINT_STRENGTH)
         self.viewport.set_show_bones(True)
+        self.viewport.set_bone_overlap_shading(True, strength=WIND_BONE_SHADOW_STRENGTH, radius=WIND_BONE_SHADOW_RADIUS)
         self.viewport.set_bone_pick_requires_control(False)
         self.viewport.on_bone_clicked = self._edit_group_from_pick_token
         self._update_shortcut_hints()
@@ -243,16 +318,40 @@ class WindPreviewDialog(PreviewShellDialog):
         self.total_bones_label = QLabel("Total bones: —", settings_panel)
         self.total_bones_label.setObjectName("MutedText")
         settings_layout.addWidget(self.total_bones_label)
+        self.bones_shading_section = CollapsibleSettingsSection("Bones Shading", expanded=True, parent=settings_panel)
+        set_tooltip("Expand or collapse bone shading controls.", self.bones_shading_section.toggle)
+        settings_layout.addWidget(self.bones_shading_section)
+        self.bone_overlap_checkbox = QCheckBox("Bone overlap shading", self.bones_shading_section.content)
+        self.bone_overlap_checkbox.setChecked(True)
+        set_tooltip("On subtly darkens the rear bone near screen-space overlaps. Off keeps depth ordering with plain group colors. This is a display effect and does not change groups or exported data.", self.bone_overlap_checkbox)
+        self.bone_overlap_checkbox.toggled.connect(self._on_bone_overlap_shading_changed)
+        self.bones_shading_section.content_layout.addWidget(self.bone_overlap_checkbox)
+        self.bone_overlap_settings_frame = QFrame(self.bones_shading_section.content)
+        overlap_form = QFormLayout(self.bone_overlap_settings_frame)
+        overlap_form.setContentsMargins(0, 0, 0, 0)
+        overlap_form.setSpacing(4)
+        self.bone_overlap_strength_editor = SliderSpinEditor(minimum=0, maximum=100, step=1, value=WIND_BONE_SHADOW_STRENGTH * 100, parent=self.bone_overlap_settings_frame)
+        self.bone_overlap_radius_editor = SliderSpinEditor(minimum=0, maximum=3, step=.05, value=WIND_BONE_SHADOW_RADIUS, parent=self.bone_overlap_settings_frame)
+        self.bone_overlap_strength_editor.spin.setSuffix(" %")
+        for label, editor, tooltip in (
+            ("Overlap shadow", self.bone_overlap_strength_editor, "Maximum darkening of the rear bone near an overlap. Lower is more subtle; higher makes the layers more distinct. Group colors and export stay unchanged."),
+            ("Shadow radius", self.bone_overlap_radius_editor, "Relative screen radius. 1 is 12 pixels on a 1440p monitor, scaled with monitor height and DPI. 0 removes the shadow; higher spreads it farther. The same value keeps the same proportion of the screen on other monitors."),
+        ):
+            text = QLabel(label, self.bone_overlap_settings_frame)
+            set_tooltip(tooltip, text, editor, editor.slider, editor.spin)
+            overlap_form.addRow(text, editor)
+            editor.valueChanged.connect(lambda _: self._on_bone_overlap_shading_changed(self.bone_overlap_checkbox.isChecked()))
+        self.bones_shading_section.content_layout.addWidget(self.bone_overlap_settings_frame)
 
         _add_group_header(settings_layout, settings_panel, "Grouping")
         mode_label = QLabel("Mode", settings_panel)
         self.grouping_mode_combo = QComboBox(settings_panel)
-        self.grouping_mode_combo.addItem("XML Generator Groups", GROUPING_MODE_XML)
-        self.grouping_mode_combo.addItem("Auto Hierarchy", GROUPING_MODE_AUTO)
-        self.grouping_mode_combo.addItem("Auto Hierarchy (PVE)", GROUPING_MODE_PVE)
+        self.grouping_mode_combo.addItem("Generator XML Groups", GROUPING_MODE_XML)
         self.grouping_mode_combo.addItem("Auto Hierarchy (Tree)", GROUPING_MODE_TREE)
+        self.grouping_mode_combo.addItem("Auto Hierarchy (PVE)", GROUPING_MODE_PVE)
+        self.grouping_mode_combo.addItem("Auto Hierarchy (Skeleton Order)", GROUPING_MODE_AUTO)
         set_tooltip(
-            "XML uses generator groups. Auto follows skeleton order. PVE scores direction and subtree length. Tree analyses bind poses, attachment positions and complete branch chains; it does not read generator labels.",
+            "Generator XML uses source group labels. Tree is the primary automatic mode and analyzes branch directions and structure. PVE compares direction and subtree length. Skeleton Order follows the original file joint order.",
             mode_label,
             self.grouping_mode_combo,
         )
@@ -274,6 +373,65 @@ class WindPreviewDialog(PreviewShellDialog):
         )
         settings_layout.addWidget(self.group_count_label)
         settings_layout.addWidget(self.group_count_slider)
+
+        self.tree_settings_frame = QFrame(self.global_host)
+        tree_layout = QVBoxLayout(self.tree_settings_frame)
+        tree_layout.setContentsMargins(0, 2, 0, 2)
+        tree_layout.setSpacing(4)
+        tree_title = QLabel("Tree hierarchy settings", self.tree_settings_frame)
+        tree_title.setProperty("typographyRole", "group")
+        tree_layout.addWidget(tree_title)
+        self.tree_equivalent_combo = QComboBox(self.tree_settings_frame)
+        for label, key in (("Keep parent level", "keep_parent"), ("Advance together", "advance"), ("Choose continuation (previous)", "continuation")):
+            self.tree_equivalent_combo.addItem(label, key)
+            self.tree_equivalent_combo.setItemData(self.tree_equivalent_combo.count() - 1, _EQUIVALENT_FORK_TOOLTIPS[key], Qt.ItemDataRole.ToolTipRole)
+        self.tree_direction_combo = QComboBox(self.tree_settings_frame)
+        for label, key in (("Auto", "auto"), ("Bind-pose +X", "bind"), ("Attachment geometry", "attachments")):
+            self.tree_direction_combo.addItem(label, key)
+            self.tree_direction_combo.setItemData(self.tree_direction_combo.count() - 1, _DIRECTION_TOOLTIPS[key], Qt.ItemDataRole.ToolTipRole)
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(4)
+        form.addRow("Equivalent forks", self.tree_equivalent_combo)
+        form.addRow("Grouping directions", self.tree_direction_combo)
+        self.tree_direction_notice = QLabel(self.tree_settings_frame)
+        self.tree_direction_notice.setWordWrap(True)
+        self.tree_direction_notice.setObjectName("MutedText")
+        form.addRow(self.tree_direction_notice)
+        self.tree_threshold_editors = {}
+        for name, label, maximum, step, scale, tooltip in _TREE_THRESHOLDS:
+            editor = SliderSpinEditor(minimum=0, maximum=maximum, step=step,
+                                      value=getattr(self._tree_settings, name) * scale, parent=self.tree_settings_frame)
+            label, unit = label.rsplit(" (", 1)
+            editor.spin.setSuffix(" " + unit.rstrip(")"))
+            text = QLabel(label, self.tree_settings_frame)
+            set_tooltip(tooltip, text, editor, editor.slider, editor.spin)
+            form.addRow(text, editor)
+            self.tree_threshold_editors[name] = editor
+            editor.valueChanged.connect(lambda value, key=name, divisor=scale: self._set_tree_setting(key, value / divisor))
+        tree_layout.addLayout(form)
+        self.tree_option_checkboxes = {}
+        for name, label, tooltip in (
+            ("independent_stems", "Detect independent basal stems", "On keeps detected independent basal stems at level 0. Off analyses the root as an ordinary fork."),
+            ("prefer_branched", "Prefer a branched continuation", "On prefers eligible continuations with downstream forks. Off selects by direction and attachment."),
+            ("preserve_terminal", "Keep terminal chain bends together", "On keeps bends after a terminal branch starts at the same level. Off lets chain angles split them."),
+        ):
+            checkbox = QCheckBox(label, self.tree_settings_frame)
+            checkbox.setChecked(getattr(self._tree_settings, name))
+            set_tooltip(tooltip, checkbox)
+            checkbox.toggled.connect(lambda value, key=name: self._set_tree_setting(key, value))
+            tree_layout.addWidget(checkbox)
+            self.tree_option_checkboxes[name] = checkbox
+        self.tree_reset_button = QPushButton("Reset tree settings", self.tree_settings_frame)
+        set_tooltip("Restores all Tree hierarchy thresholds and fork behavior to their defaults and recolors the skeleton.", self.tree_reset_button)
+        self.tree_reset_button.clicked.connect(self._reset_tree_settings)
+        tree_layout.addWidget(self.tree_reset_button)
+        self.tree_equivalent_combo.currentIndexChanged.connect(lambda _: self._set_tree_setting("equivalent_forks", self.tree_equivalent_combo.currentData()))
+        self.tree_direction_combo.currentIndexChanged.connect(lambda _: self._set_tree_setting("direction_mode", self.tree_direction_combo.currentData()))
+        self.tree_equivalent_combo.currentIndexChanged.connect(lambda _: self._sync_tree_choice_help())
+        self.tree_direction_combo.currentIndexChanged.connect(lambda _: self._sync_tree_choice_help())
+        self._sync_tree_choice_help()
+        settings_layout.addWidget(self.tree_settings_frame)
 
         _add_group_header(settings_layout, settings_panel, "Edit")
         edit_mode_label = QLabel("Pick mode", settings_panel)
@@ -398,7 +556,8 @@ class WindPreviewDialog(PreviewShellDialog):
         self.summary_label.setText(message)
 
     def set_error(self, message: str) -> None:
-        self.summary_label.setText(message)
+        summary, context = wind_preview_error_text(message)
+        self.summary_label.setText("\n".join(part for part in (summary, context) if part))
 
     def _resize_layers_scroll(self, delta_y: int) -> None:
         current_height = self.scroll.minimumHeight() or self.scroll.height()
@@ -416,8 +575,22 @@ class WindPreviewDialog(PreviewShellDialog):
         super().keyPressEvent(event)
 
     def set_preview(self, preview: WindPreviewResult) -> None:
+        self._tree_update_timer.stop()
+        self._tree_save_timer.stop()
         self.current_preview = preview
         self._tree_analysis = None
+        self._prepared_tree = None
+        self._base_data_cache = self._flatten_cache = None
+        self._wind_draw_templates = None
+        self._preview_fingerprint = _json_fingerprint(preview)
+        self._tree_settings = TreeHierarchySettings()
+        with QSignalBlocker(self.bone_overlap_checkbox):
+            self.bone_overlap_checkbox.setChecked(True)
+        self.bone_overlap_strength_editor.setValue(WIND_BONE_SHADOW_STRENGTH * 100)
+        self.bone_overlap_radius_editor.setValue(WIND_BONE_SHADOW_RADIUS)
+        self.bone_overlap_settings_frame.setEnabled(True)
+        self.viewport.set_bone_overlap_shading(True, strength=WIND_BONE_SHADOW_STRENGTH, radius=WIND_BONE_SHADOW_RADIUS)
+        self._sync_tree_settings()
         self._display_source_unit = preview.display_source_unit
         self._display_source_up_axis = preview.display_source_up_axis
         _set_combo_data(self.source_units_combo, self._display_source_unit)
@@ -450,7 +623,7 @@ class WindPreviewDialog(PreviewShellDialog):
                 self._get_tree_analysis()
             except ValueError as exc:
                 with QSignalBlocker(self.grouping_mode_combo):
-                    self.grouping_mode_combo.setCurrentIndex(self.grouping_mode_combo.findData(preview.preferred_grouping_mode))
+                    self.grouping_mode_combo.setCurrentIndex(self.grouping_mode_combo.findData(GROUPING_MODE_XML if preview.xml_groups_available else GROUPING_MODE_AUTO))
                 restore_notice = f"Tree analysis unavailable: {exc}"
         with QSignalBlocker(self.group_count_slider):
             self.group_count_slider.setValue(self._auto_group_count)
@@ -610,6 +783,11 @@ class WindPreviewDialog(PreviewShellDialog):
         if preview is None:
             self.summary_label.setText("Load a Wind Preview source before generating JSON.")
             return
+        try:
+            dynamic_wind = prepare_external_dynamic_wind_export(preview, self._current_dynamic_wind())
+        except ValueError as exc:
+            self.set_error(str(exc))
+            return
         output_path = Path(self.output_path_edit.text().strip() or derive_wind_json_output_path(preview.input_path, ""))
         if output_path.exists():
             answer = QMessageBox.question(
@@ -621,7 +799,6 @@ class WindPreviewDialog(PreviewShellDialog):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
-        dynamic_wind = prepare_external_dynamic_wind_export(preview, self._current_dynamic_wind())
         written = write_dynamic_wind_json(dynamic_wind, output_path)
         self.output_path_edit.setText(str(written))
         self.summary_label.setText(f"Wrote Dynamic Wind JSON\n{written}")
@@ -689,7 +866,7 @@ class WindPreviewDialog(PreviewShellDialog):
         if preview is None:
             return
         dynamic_wind = self._current_dynamic_wind()
-        groups = self._current_groups()
+        groups = build_wind_viewport_groups(dynamic_wind, label_kind="Final layer")
         if dynamic_wind == preview.dynamic_wind and self._selection == WindViewportSelection():
             scene = preview.viewport_scene
         else:
@@ -698,8 +875,9 @@ class WindPreviewDialog(PreviewShellDialog):
                 preview.source_model,
                 dynamic_wind,
                 selection=self._selection,
+                tree_analysis=self._get_tree_analysis() if self._grouping_mode() == GROUPING_MODE_TREE else None,
             )
-        if self._grouping_mode() == GROUPING_MODE_TREE:
+        if self._grouping_mode() == GROUPING_MODE_TREE and scene is preview.viewport_scene:
             scene = replace(scene, bone_segments=build_wind_viewport_bone_segments(
                 preview.source_model, dynamic_wind, selection=self._selection, tree_analysis=self._get_tree_analysis(),
             ))
@@ -712,9 +890,22 @@ class WindPreviewDialog(PreviewShellDialog):
                 preview_up_axis=self._display_preview_up_axis,
             )
         self._active_scene = scene
-        self.viewport.set_scene(scene, frame_camera=frame_camera, precompute_static=True)
+        if self._wind_draw_templates is None or frame_camera:
+            vertices, draws = _build_instanced_scene_payload(scene, use_draw_tints=True)
+            ranges = {draw.batch_id for draw in scene.draw_calls if draw.visibility_group != "collision"}
+            valid_batches = {batch.batch_id for batch in scene.mesh_batches if batch.mesh.face_count > 0}
+            self._wind_draw_templates = tuple(zip(
+                (draw.draw_id for draw in scene.draw_calls if draw.batch_id in ranges & valid_batches and draw.visibility_group != "collision"), draws,
+            ))
+            self.viewport.set_precomputed_instanced_matcap_scene(scene, vertices=vertices, draws=draws,
+                min_point=scene.bounds.min_point, max_point=scene.bounds.max_point, frame_camera=frame_camera)
+        else:
+            by_id = {draw.draw_id: draw for draw in scene.draw_calls}
+            draws = tuple(replace(template, translate=by_id[key].translate, orientation=by_id[key].orientation,
+                                  scale=by_id[key].scale, tint=by_id[key].tint) for key, template in self._wind_draw_templates)
+            self.viewport.update_instanced_scene(scene, draws)
         self.viewport.set_show_bones(True)
-        self._update_summary(scene, groups)
+        self._update_summary(scene, groups, dynamic_wind)
 
     def _apply_selection(self) -> None:
         preview = self.current_preview
@@ -742,7 +933,7 @@ class WindPreviewDialog(PreviewShellDialog):
         self.viewport.set_bone_segments(bone_segments)
         self._update_summary(self._active_scene, groups)
 
-    def _update_summary(self, scene, groups: tuple[WindViewportGroup, ...]) -> None:
+    def _update_summary(self, scene, groups: tuple[WindViewportGroup, ...], dynamic_wind: DynamicWindData | None = None) -> None:
         self._sync_group_buttons()
         selected = ""
         if self._active_manual_layer_id is not None:
@@ -753,7 +944,7 @@ class WindPreviewDialog(PreviewShellDialog):
             selected = f"\nSelected subtree: {self._selection.subtree_root_token}"
         mode_label = {
             GROUPING_MODE_XML: "XML generator",
-            GROUPING_MODE_AUTO: "Auto hierarchy",
+            GROUPING_MODE_AUTO: "Skeleton order",
             GROUPING_MODE_PVE: "Auto hierarchy (PVE)",
             GROUPING_MODE_TREE: "Auto hierarchy (Tree)",
         }[self._grouping_mode()]
@@ -769,9 +960,33 @@ class WindPreviewDialog(PreviewShellDialog):
             guide_notice = "\nTree bone guides; terminal joints use short direction markers."
             if count:
                 guide_notice += f"\n{count} ambiguous joint(s): review manual groups."
+            equivalent_count = sum(joint.equivalent for joint in self._get_tree_analysis())
+            if equivalent_count:
+                guide_notice += f"\n{equivalent_count} equivalent fork(s)."
+            data = dynamic_wind if dynamic_wind is not None else self._current_dynamic_wind()
+            assignments = {a.joint_name: a.simulation_group_index for a in data.joint_assignments}
+            trunk_groups = {g.group_index for g in data.simulation_groups if g.is_trunk_group}
+            prepared = self._prepared_tree
+            blocked = sum(
+                assignments[prepared.names[i]] not in trunk_groups
+                and sum(assignments[prepared.names[c]] == assignments[prepared.names[i]] for c in kids) > 1
+                for i, kids in enumerate(prepared.children) if len(kids) > 1
+            )
+            if blocked:
+                guide_notice += f"\nJSON export blocked: {blocked} same-group branch fork(s). Use Advance together, more Groups or manual corrections. Trunk is valid only for stems."
             self.summary_label.setText(self.summary_label.text() + guide_notice)
 
-    def _rebuild_group_list(self) -> None:
+    def _rebuild_group_list(self, *, reuse_rows: bool = False) -> None:
+        flattened = self._flattened() if self.current_preview is not None else None
+        signature = None if flattened is None else (
+            tuple((g.source_key, g.final_group_index, g.name) for g in flattened.groups), self._manual_groups,
+        )
+        if reuse_rows and signature == self._group_list_signature:
+            for group in flattened.groups:
+                self._live_group_labels[group.source_key].setText(_flattened_group_button_text(group.name, group.final_group_index, len(group.joint_tokens)))
+            return
+        self._group_list_signature = signature
+        self._live_group_labels = {}
         while self.group_layout.count():
             item = self.group_layout.takeAt(0)
             widget = item.widget()
@@ -836,6 +1051,7 @@ class WindPreviewDialog(PreviewShellDialog):
         disclosure.clicked.connect(lambda _checked=False, source_key=group.source_key: self._toggle_group_settings(source_key))
         row_layout.addWidget(chip, 0)
         row_layout.addWidget(group_control, 1)
+        self._live_group_labels[group.source_key] = group_control
         row_layout.addWidget(disclosure, 0)
         card_layout.addWidget(row)
         if group.source_key in self._expanded_group_source_keys:
@@ -1026,36 +1242,107 @@ class WindPreviewDialog(PreviewShellDialog):
         else:
             return
         self._group_settings_by_source_key.setdefault(source_key, {})[field] = normalized
+        if self._grouping_mode() == GROUPING_MODE_TREE and self._active_scene is not None:
+            self._update_summary(self._active_scene, self._current_groups())
         self._save_wind_session()
 
     def _get_tree_analysis(self):
         if self._tree_analysis is None:
-            self._tree_analysis = analyze_tree_hierarchy(self.current_preview.source_model.skeleton)
+            if self._prepared_tree is None:
+                self._prepared_tree = prepare_tree_hierarchy(self.current_preview.source_model.skeleton)
+            self._tree_analysis = classify_tree_hierarchy(self._prepared_tree, self._tree_settings)
+            self._sync_tree_choice_help()
         return self._tree_analysis
+
+    def _sync_tree_choice_help(self) -> None:
+        for combo in (self.tree_equivalent_combo, self.tree_direction_combo):
+            combo.setToolTip(str(combo.itemData(combo.currentIndex(), Qt.ItemDataRole.ToolTipRole) or ""))
+        uniform_bind = self._prepared_tree is not None and self._prepared_tree.frame_variation <= 0.01 and self.tree_direction_combo.currentData() == "bind"
+        self.tree_direction_notice.setVisible(uniform_bind)
+        self.tree_direction_notice.setText("This rig has identical bone orientations. Use Auto or Attachment geometry to follow its branches." if uniform_bind else "")
+
+    def _on_bone_overlap_shading_changed(self, enabled: bool) -> None:
+        self.bone_overlap_settings_frame.setEnabled(enabled)
+        self.viewport.set_bone_overlap_shading(enabled, strength=self.bone_overlap_strength_editor.value()/100,
+                                               radius=self.bone_overlap_radius_editor.value())
+        if self.current_preview is not None:
+            self._tree_save_timer.start()
+
+    def _set_tree_setting(self, name: str, value) -> None:
+        settings = replace(self._tree_settings, **{name: value})
+        if settings == self._tree_settings:
+            return
+        self._tree_settings = settings
+        self._tree_analysis = None
+        if self.current_preview is not None and self._grouping_mode() == GROUPING_MODE_TREE:
+            if not self._tree_update_timer.isActive():
+                self._tree_update_timer.start(0)
+
+    def _sync_tree_settings(self) -> None:
+        for name, _label, _maximum, _step, scale, _tooltip in _TREE_THRESHOLDS:
+            self.tree_threshold_editors[name].setValue(getattr(self._tree_settings, name) * scale)
+        for name, checkbox in self.tree_option_checkboxes.items():
+            with QSignalBlocker(checkbox):
+                checkbox.setChecked(getattr(self._tree_settings, name))
+        with QSignalBlocker(self.tree_equivalent_combo), QSignalBlocker(self.tree_direction_combo):
+            _set_combo_data(self.tree_equivalent_combo, self._tree_settings.equivalent_forks)
+            _set_combo_data(self.tree_direction_combo, self._tree_settings.direction_mode)
+        self._sync_tree_choice_help()
+
+    def _reset_tree_settings(self) -> None:
+        self._tree_settings = TreeHierarchySettings()
+        self._tree_analysis = None
+        self._sync_tree_settings()
+        self._tree_update_timer.start(0)
+
+    def _apply_live_tree_settings(self) -> None:
+        if self.current_preview is None or self._grouping_mode() != GROUPING_MODE_TREE:
+            return
+        self._rebuild_group_list(reuse_rows=True)
+        self._apply_scene(frame_camera=False)
+        self.group_count_label.setText(f"Groups: {len(self._current_groups())}")
+        self._tree_save_timer.start()
+
+    def closeEvent(self, event) -> None:
+        self._tree_update_timer.stop()
+        self._tree_save_timer.stop()
+        self._save_wind_session()
+        super().closeEvent(event)
 
     def _base_dynamic_wind(self) -> DynamicWindData:
         preview = self.current_preview
         if preview is None:
             raise RuntimeError("wind preview is not loaded")
         if self._is_auto_mode():
-            return build_auto_wind_viewport_data(
+            analysis = self._get_tree_analysis() if self._grouping_mode() == GROUPING_MODE_TREE else None
+            key = (id(preview), self._grouping_mode(), self._auto_group_count, frozenset(self._auto_continuous_levels), self._tree_settings if analysis is not None else None)
+            if self._base_data_cache is not None and self._base_data_cache[0] == key:
+                return self._base_data_cache[1]
+            data = build_auto_wind_viewport_data(
                 preview.source_model.skeleton,
                 self._auto_group_count,
                 continuous_branch_orders=frozenset(self._auto_continuous_levels),
                 method={GROUPING_MODE_AUTO: "order", GROUPING_MODE_PVE: "pve", GROUPING_MODE_TREE: "tree"}[self._grouping_mode()],
-                tree_analysis=self._get_tree_analysis() if self._grouping_mode() == GROUPING_MODE_TREE else None,
+                tree_analysis=analysis,
             )
+            self._base_data_cache = (key, data)
+            return data
         return preview.dynamic_wind
 
     def _flattened(self) -> WindFlattenResult:
         preview = self.current_preview
         if preview is None:
             return flatten_wind_group_stack(DynamicWindData(joint_assignments=(), simulation_groups=()), ())
-        return flatten_wind_group_stack(
-            self._base_dynamic_wind(),
+        base = self._base_dynamic_wind()
+        if self._flatten_cache is not None and self._flatten_cache[0] is base and self._flatten_cache[1] == self._manual_groups:
+            return self._flatten_cache[2]
+        flattened = flatten_wind_group_stack(
+            base,
             self._manual_groups,
             all_joint_tokens=tuple(joint.name for joint in preview.source_model.skeleton),
         )
+        self._flatten_cache = (base, self._manual_groups, flattened)
+        return flattened
 
     def _current_groups(self) -> tuple[WindViewportGroup, ...]:
         if self.current_preview is None:
@@ -1068,7 +1355,7 @@ class WindPreviewDialog(PreviewShellDialog):
                 self._get_tree_analysis()
             except ValueError as exc:
                 with QSignalBlocker(self.grouping_mode_combo):
-                    self.grouping_mode_combo.setCurrentIndex(self.grouping_mode_combo.findData(self.current_preview.preferred_grouping_mode))
+                    self.grouping_mode_combo.setCurrentIndex(self.grouping_mode_combo.findData(GROUPING_MODE_XML if self.current_preview.xml_groups_available else GROUPING_MODE_AUTO))
                 self._sync_grouping_controls()
                 self._rebuild_group_list()
                 self._apply_scene(frame_camera=False)
@@ -1088,6 +1375,10 @@ class WindPreviewDialog(PreviewShellDialog):
 
     def _on_auto_group_count_changed(self, value: int) -> None:
         self._auto_group_count = int(value)
+        if self._grouping_mode() == GROUPING_MODE_TREE and self.current_preview is not None:
+            if not self._tree_update_timer.isActive():
+                self._tree_update_timer.start(0)
+            return
         self._sync_grouping_controls()
         if not self._is_auto_mode():
             self._save_wind_session()
@@ -1125,6 +1416,7 @@ class WindPreviewDialog(PreviewShellDialog):
         auto_enabled = self._is_auto_mode()
         self.group_count_slider.setEnabled(auto_enabled)
         self.group_count_label.setEnabled(auto_enabled)
+        self.tree_settings_frame.setVisible(self._grouping_mode() == GROUPING_MODE_TREE)
         display_count = len(self._current_groups()) if auto_enabled and self.current_preview is not None else self._auto_group_count
         self.group_count_label.setText(f"Groups: {display_count}")
         self._sync_group_buttons()
@@ -1280,7 +1572,7 @@ class WindPreviewDialog(PreviewShellDialog):
             return {}
         return {
             "schema_version": 4,
-            "fingerprint": _json_fingerprint(preview),
+            "fingerprint": self._preview_fingerprint,
             "input_path": str(preview.input_path),
             "source_mode": self.source_mode_combo.currentData() or SOURCE_MODE_XML,
             "external_path": self.external_path_edit.text().strip(),
@@ -1291,6 +1583,10 @@ class WindPreviewDialog(PreviewShellDialog):
             "output_path": self.output_path_edit.text().strip(),
             "grouping_mode": self._grouping_mode(),
             "auto_group_count": int(self._auto_group_count),
+            "bone_overlap_shading": self.bone_overlap_checkbox.isChecked(),
+            "bone_overlap_strength": self.bone_overlap_strength_editor.value()/100,
+            "bone_overlap_radius_scale": self.bone_overlap_radius_editor.value(),
+            "tree_hierarchy_settings": asdict(self._tree_settings),
             "auto_continuous_levels": sorted(int(level) for level in self._auto_continuous_levels),
             "expanded_group_source_keys": sorted(self._expanded_group_source_keys),
             "group_settings": {
@@ -1324,7 +1620,7 @@ class WindPreviewDialog(PreviewShellDialog):
         session_version = session.get("schema_version")
         if session_version not in {1, 2, 3, 4}:
             return "Previous Wind Preview session reset: unsupported session version."
-        if session.get("fingerprint") != _json_fingerprint(preview):
+        if session.get("fingerprint") != self._preview_fingerprint:
             return "Previous Wind Preview session reset: skeleton changed."
 
         valid_tokens = {joint.name for joint in preview.source_model.skeleton}
@@ -1376,6 +1672,32 @@ class WindPreviewDialog(PreviewShellDialog):
                     self.grouping_mode_combo.setCurrentIndex(grouping_index)
 
             self._auto_group_count = _coerce_group_count(session.get("auto_group_count"), self._auto_group_count)
+            overlap_shading = session.get("bone_overlap_shading", True)
+            overlap_shading = overlap_shading if isinstance(overlap_shading, bool) else True
+            with QSignalBlocker(self.bone_overlap_checkbox):
+                self.bone_overlap_checkbox.setChecked(overlap_shading)
+            for editor, name, default, scale in (
+                (self.bone_overlap_strength_editor, "bone_overlap_strength", WIND_BONE_SHADOW_STRENGTH, 100),
+                (self.bone_overlap_radius_editor, "bone_overlap_radius_scale", WIND_BONE_SHADOW_RADIUS, 1),
+            ):
+                try:
+                    if name == "bone_overlap_radius_scale" and name not in session and "bone_overlap_radius" in session:
+                        value = float(session["bone_overlap_radius"]) / 12.0
+                    else:
+                        value = float(session.get(name, default))
+                except (TypeError, ValueError):
+                    value = default
+                editor.setValue((value if isfinite(value) else default) * scale)
+            self.bone_overlap_settings_frame.setEnabled(overlap_shading)
+            self.viewport.set_bone_overlap_shading(overlap_shading, strength=self.bone_overlap_strength_editor.value()/100,
+                                                   radius=self.bone_overlap_radius_editor.value())
+            raw_settings = session.get("tree_hierarchy_settings")
+            if isinstance(raw_settings, dict):
+                try:
+                    self._tree_settings = TreeHierarchySettings(**raw_settings)
+                except (TypeError, ValueError):
+                    self._tree_settings = TreeHierarchySettings()
+            self._sync_tree_settings()
             self._auto_continuous_levels = _restore_continuous_levels(session.get("auto_continuous_levels"))
             self._expanded_group_source_keys = _restore_expanded_group_source_keys(
                 session.get("expanded_group_source_keys") if session_version >= 3 else None

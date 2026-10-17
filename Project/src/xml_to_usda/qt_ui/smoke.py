@@ -250,6 +250,38 @@ def _run_wind_preview_smoke(context: SmokeContext) -> dict[str, Any]:
         tree_index = dialog.grouping_mode_combo.findData("auto_tree")
         _assert(tree_index >= 0, "Tree hierarchy mode is available")
         dialog.grouping_mode_combo.setCurrentIndex(tree_index)
+        _pump_events(25)
+        prepared = dialog._prepared_tree
+        vertices = dialog.viewport._precomputed_matcap_vertices
+        camera = (dialog.viewport.camera_target, dialog.viewport.camera_distance)
+        _assert(dialog.tree_equivalent_combo.currentData() == "keep_parent", "Tree defaults to parent-level equivalent forks")
+        for angle in (50, 65, 40, 55):
+            dialog.tree_threshold_editors["fork_angle"].slider.setValue(angle * 100)
+            _pump_events(25)
+        _assert(dialog._tree_settings.fork_angle == 55, "Tree sliders update live")
+        _assert(dialog._prepared_tree is prepared, "live Tree changes retain prepared geometry features")
+        _assert(dialog.viewport._precomputed_matcap_vertices is vertices, "live Tree changes retain mesh vertices")
+        _assert((dialog.viewport.camera_target, dialog.viewport.camera_distance) == camera, "live Tree changes retain camera")
+        dialog._reset_tree_settings()
+        _pump_events(25)
+        _assert(dialog.tree_threshold_editors["fork_angle"].spin.suffix() == " °", "Tree angles show units beside values")
+        _assert(dialog.tree_threshold_editors["equivalent_size"].spin.suffix() == " %", "Tree ratios show units beside values")
+        _assert(dialog.bone_overlap_checkbox.isChecked(), "Wind enables overlap shading by default")
+        projected = dialog.viewport._projected_bone_overlay()
+        dialog.bone_overlap_checkbox.setChecked(False)
+        _pump_events(25)
+        _assert(not dialog.viewport._bone_overlap_shading, "overlap shading can be disabled")
+        _assert(dialog.viewport._projected_bone_overlay() is projected, "display toggle retains projection")
+        dialog.bone_overlap_checkbox.setChecked(True)
+        dialog.bone_overlap_strength_editor.slider.setValue(1800)
+        dialog.bone_overlap_radius_editor.slider.setValue(150)
+        _pump_events(25)
+        _assert(dialog.viewport._bone_overlap_strength == .18, "overlap strength updates live")
+        _assert(dialog.viewport._bone_overlap_radius == 1.5, "relative overlap radius updates live")
+        _assert(dialog.viewport._projected_bone_overlay() is projected, "shadow sliders retain projection")
+        _assert(dialog.viewport._bone_renderer is not None and dialog.viewport._bone_renderer.count > 0, "opaque GPU bone batch was drawn")
+        dialog.bone_overlap_strength_editor.slider.setValue(3500)
+        dialog.bone_overlap_radius_editor.slider.setValue(100)
         tree_data = prepare_external_dynamic_wind_export(dialog.current_preview, dialog._current_dynamic_wind())
         tree_json = write_dynamic_wind_json(tree_data, context.report_path.with_name("Tree_DynamicWind.json"))
         tree_payload = json.loads(tree_json.read_text(encoding="utf-8"))
@@ -277,6 +309,8 @@ def _run_wind_preview_smoke(context: SmokeContext) -> dict[str, Any]:
                 "auto.grouping",
                 "pve.grouping.json",
                 "tree.grouping.json",
+                "tree.live.thresholds",
+                "bones.depth.overlap.shading",
                 "trace.milestones",
             ),
             data={

@@ -12,6 +12,7 @@ import os
 import time
 import contextlib
 import traceback
+from html import escape
 from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import dataclass, replace
@@ -2139,6 +2140,20 @@ class MainWindow(QWidget):
     ) -> None:
         self._finish_status_activity("error", status or title)
         self._append_log(details or message)
+        if title == "Wind Preview failed":
+            from .wind_preview import wind_preview_error_text
+            summary, context = wind_preview_error_text(message)
+            parent = self._wind_preview_dialog if self._wind_preview_dialog is not None and self._wind_preview_dialog.isVisible() else self
+            box = QMessageBox(parent)
+            box.setWindowTitle(title)
+            box.setIcon(QMessageBox.Icon.Critical)
+            box.setTextFormat(Qt.TextFormat.RichText)
+            box.setText(f'<span style="font-size:18px; font-weight:600;">{escape(summary)}</span>')
+            if context:
+                box.setInformativeText(escape(context))
+            box.setStandardButtons(QMessageBox.StandardButton.Ok)
+            box.exec()
+            return
         QMessageBox.critical(self, title, message)
 
     def _handle_source_text_changed(self, text: str) -> None:

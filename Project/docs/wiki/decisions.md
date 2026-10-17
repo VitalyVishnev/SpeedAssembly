@@ -2,6 +2,37 @@
 
 This page stores active project contracts. Rejected or superseded approaches live in [experiments.md](experiments.md). Current limitations and bugs live in [known-bugs.md](known-bugs.md).
 
+## Interactive Tree thresholds and equivalent forks, 2026-10-13
+
+Follow-up operator polish: Tree is the primary automatic selection; retain XML
+labels and saved choices. Stable keys remain xml / auto_tree / auto_pve / auto,
+with Skeleton Order last. Classification direction overrides do not change
+display guide directions. Numeric units belong to values; fork policies have
+separate tooltips. Wind error popups explain known failures, retain the filename
+and omit traceback; raw diagnostic evidence stays in logs.
+
+Shared bone strokes render as one opaque unlit GPU batch with hardware depth,
+above meshes. CPU projection is vectorized; picking compares local depth. Wind
+AO only marks strict interior crossings of unrelated bones, never serial joint
+contacts or parallel proximity. Shader work is capped at eight crossing centers
+per bone. Wind shading defaults on with strength 50% (range 0-100%) and radius 1.20
+(range 0-3); one radius unit = screen-height/120
+(12 physical pixels at 1440p, independent of DPI). Settings persist separately
+from groups/exports. Cache geometry, projection, shadows and GPU payloads apart;
+keep sparse annotations separate. Profile rotating complete frames, including
+GPU completion, against the 16.7 ms realtime budget before delivering renderer
+changes. Source preprocessing timings alone are not a viewport performance gate.
+
+Tree defaults to Keep parent level for comparable daughter subtrees. All
+semantic thresholds are editable; Advance together and previous continuation
+remain explicit choices. Prepare both direction models and subtree/root metrics
+once, then classify in one forward pass. Retain uploaded mesh vertices and
+update instance tints/bone overlays. Preserve manual layers/camera; debounce
+persistence. Settings use the existing Wind session, with no rig or JSON schema
+change. Non-Trunk same-group fork export remains rejected and is reported in
+preview. The grouping policy does not authorize invented independent-chain
+metadata or automatic Trunk flags. See [Tree hierarchy](wind-tree-hierarchy.md).
+
 ## Decision: Application files live in `Project/`
 
 The repository root contains only `Project/`, `.github/`, `.gitignore`,

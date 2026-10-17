@@ -2,6 +2,17 @@
 
 The codebase is organized around one deterministic conversion system with different execution strategies around the edges.
 
+Wind Tree hierarchy separates per-rig geometric preparation from forward
+classification. Live tuning caches base/flattened wind data, reuses layer rows
+and instanced Matcap mesh vertices, and updates tints/bone overlays. See
+[Tree hierarchy](wind-tree-hierarchy.md) for settings and measurements.
+
+`qt_ui/bone_overlay.py` vectorizes projection and strict-crossing shadow events.
+`qt_ui/bone_renderer.py` owns one opaque unlit OpenGL batch and hardware depth;
+MatcapViewport keeps source/projection/shadow/vertex caches and context lifetime.
+Picking uses projected depth; optional shading affects display only.
+Wind error formatting separates operator explanations from raw logged evidence.
+
 For current contracts and problem tracking, see:
 
 - [Decisions](decisions.md)

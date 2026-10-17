@@ -272,7 +272,7 @@ def load_external_skeleton_preview(request: ExternalSkeletonPreviewRequest) -> W
         diagnostics=diagnostics,
         viewport_scene=viewport_scene,
         xml_groups_available=False,
-        preferred_grouping_mode="auto",
+        preferred_grouping_mode="auto_tree",
         display_source_unit=display_source_unit,
         display_source_up_axis=display_source_up_axis,
     )
@@ -325,7 +325,7 @@ def _load_usd_skeleton_for_preview(path: Path, *, skeleton_index: int | None):
     for candidate in candidates:
         if candidate.choice.index == skeleton_index:
             return candidate.joints
-    raise WindPreviewError(f"external_skeleton_not_found: Skeleton index {skeleton_index} was not found in {path}.")
+    raise WindPreviewError(f"external_skeleton_selected_not_found: Skeleton index {skeleton_index} was not found in {path}.")
 
 
 def _load_usd_skeleton_candidates(path: Path) -> tuple[_UsdSkeletonCandidate, ...]:
