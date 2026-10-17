@@ -770,7 +770,15 @@ def _run_conversion_worker_smoke(context: SmokeContext) -> dict[str, Any]:
             label="conversion worker completion",
         )
         _assert(output_path.exists(), "conversion output exists")
-        return _passed(name=SMOKE_SCENARIO_CONVERSION_WORKER, checks=("worker.result", "output.exists"))
+        with output_path.open("rb") as handle:
+            _assert(handle.read(6) == b"#usda ", "conversion produced USDA text")
+        _assert(not output_path.with_name(output_path.name + ".partial").exists(), "conversion published its completed file")
+        if bool(getattr(sys, "frozen", False)):
+            from ..usda_numbers import _native_module
+            _assert(_native_module() is not None, "packaged numerical formatter loads")
+        return _passed(name=SMOKE_SCENARIO_CONVERSION_WORKER,
+                       checks=("worker.result", "output.usda", "output.published"),
+                       data={"output_bytes": output_path.stat().st_size})
     finally:
         _close_window(window)
 

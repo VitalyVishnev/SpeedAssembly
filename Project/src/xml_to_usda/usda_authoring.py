@@ -12,7 +12,6 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass
-from itertools import islice
 from pathlib import Path
 
 from .asset_paths import is_valid_unreal_asset_path
@@ -42,13 +41,17 @@ from .models import (
     ValidationIssue,
     Vector3,
 )
+from .usda_numbers import (
+    integer_values as _iter_int_strings,
+    normal_values as _iter_payload_normal_strings,
+    point_values as _iter_payload_point_strings,
+    uv_values as _iter_payload_uv_strings,
+    write_values as _write_formatted_values,
+)
 from .naming import make_stable_prim_name
 from .ue_schema import DEFAULT_UE_SCHEMA_CONTRACT, UeSchemaContract
 
 
-_FORMAT_CACHE_MIN_VALUES = 1024
-_FORMAT_CACHE_SAMPLE_VALUES = 2048
-_FORMAT_CACHE_MAX_UNIQUE_RATIO = 0.75
 _PARTS_CONVERSION_MODES = {ConversionMode.SKELETAL_PARTS, ConversionMode.STATIC_PARTS}
 
 
@@ -84,10 +87,12 @@ class TextSink:
 
 
 class HandleSink:
-    def __init__(self, handle) -> None:
+    def __init__(self, handle, cancel_event=None) -> None:
         self._handle = handle
+        self._cancel_event = cancel_event
 
     def write(self, text: str) -> None:
+        throw_if_cancelled(self._cancel_event)
         self._handle.write(text)
 
 
@@ -212,7 +217,7 @@ def author_usda_stream(
     started_at: float | None = None,
 ) -> None:
     author_usda(
-        HandleSink(handle),
+        HandleSink(handle, cancel_event),
         context,
         telemetry_callback=telemetry_callback,
         cancel_event=cancel_event,
@@ -1348,20 +1353,6 @@ def _finish_array_attribute(sink, prefix: str, metadata_lines: tuple[str, ...]) 
     sink.write("\n")
 
 
-def _write_formatted_values(sink, values: Iterable[str], *, chunk_size: int) -> None:
-    iterator = iter(values)
-    pending = list(islice(iterator, chunk_size))
-    if not pending:
-        return
-    sink.write(", ".join(pending))
-    while True:
-        pending = list(islice(iterator, chunk_size))
-        if not pending:
-            return
-        sink.write(", ")
-        sink.write(", ".join(pending))
-
-
 def _render_materials_scope(materials: tuple[MaterialSpec, ...], root_prim_name: str | None) -> str:
     if not materials:
         return ""
@@ -1771,134 +1762,12 @@ def _prototype_inline_mesh(prototype: Prototype) -> MeshData | GeometryBuffer | 
     return None
 
 
-def _iter_payload_point_strings(mesh: MeshData | GeometryBuffer):
-    if isinstance(mesh, GeometryBuffer):
-        for index in range(0, len(mesh.point_components), 3):
-            yield "(%g, %g, %g)" % (
-                mesh.point_components[index],
-                mesh.point_components[index + 1],
-                mesh.point_components[index + 2],
-            )
-        return
-    for point in mesh.points:
-        yield "(%g, %g, %g)" % (point.x, point.y, point.z)
-
-
-def _iter_payload_normal_strings(mesh: MeshData | GeometryBuffer):
-    if isinstance(mesh, GeometryBuffer):
-        return (
-            "(%g, %g, %g)"
-            % (
-                mesh.normal_components[index],
-                mesh.normal_components[index + 1],
-                mesh.normal_components[index + 2],
-            )
-            for index in range(0, len(mesh.normal_components), 3)
-        )
-    if _vector_coords_reuse_objects(mesh.normals):
-        cache: dict[int, str] = {}
-        values: list[str] = []
-        append = values.append
-        for normal in mesh.normals:
-            key = id(normal)
-            value = cache.get(key)
-            if value is None:
-                value = "(%g, %g, %g)" % (normal.x, normal.y, normal.z)
-                cache[key] = value
-            append(value)
-        return values
-    return ("(%g, %g, %g)" % (normal.x, normal.y, normal.z) for normal in mesh.normals)
-
-
 def _iter_payload_face_count_strings(mesh: MeshData | GeometryBuffer):
     return _iter_int_strings(mesh.face_vertex_counts)
 
 
 def _iter_payload_face_index_strings(mesh: MeshData | GeometryBuffer):
     return _iter_int_strings(mesh.face_vertex_indices)
-
-
-def _iter_int_strings(values):
-    count = len(values)
-    if count >= _FORMAT_CACHE_MIN_VALUES:
-        sample_count = min(count, _FORMAT_CACHE_SAMPLE_VALUES)
-        if len(set(values[:sample_count])) / sample_count <= _FORMAT_CACHE_MAX_UNIQUE_RATIO:
-            cache = {value: str(value) for value in set(values)}
-            return map(cache.__getitem__, values)
-    return map(str, values)
-
-
-def _iter_payload_uv_strings(mesh: MeshData | GeometryBuffer, *, uv_set: str = "primary"):
-    if isinstance(mesh, GeometryBuffer):
-        uv_components = mesh.secondary_uv_components if uv_set == "secondary" else mesh.uv_components
-        if _uv_components_should_cache_format(uv_components):
-            return _iter_cached_uv_component_strings(uv_components)
-        return _iter_uv_component_strings(uv_components)
-    uv_coords = mesh.secondary_uv_coords if uv_set == "secondary" else mesh.uv_coords
-    if _uv_coords_should_cache_format(uv_coords):
-        return _iter_cached_uv_coord_strings(uv_coords)
-    return _iter_uv_coord_strings(uv_coords)
-
-
-def _iter_uv_component_strings(uv_components):
-    for index in range(0, len(uv_components), 2):
-        yield "(%g, %g)" % (uv_components[index], uv_components[index + 1])
-
-
-def _iter_cached_uv_component_strings(uv_components):
-    cache: dict[tuple[float, float], str] = {}
-    for index in range(0, len(uv_components), 2):
-        key = (uv_components[index], uv_components[index + 1])
-        value = cache.get(key)
-        if value is None:
-            value = "(%g, %g)" % key
-            cache[key] = value
-        yield value
-
-
-def _iter_uv_coord_strings(uv_coords):
-    for uv in uv_coords:
-        yield "(%g, %g)" % (uv.x, uv.y)
-
-
-def _iter_cached_uv_coord_strings(uv_coords):
-    cache: dict[int, str] = {}
-    values: list[str] = []
-    append = values.append
-    for uv in uv_coords:
-        key = id(uv)
-        value = cache.get(key)
-        if value is None:
-            value = "(%g, %g)" % (uv.x, uv.y)
-            cache[key] = value
-        append(value)
-    return values
-
-
-def _uv_components_should_cache_format(uv_components) -> bool:
-    pair_count = len(uv_components) // 2
-    if pair_count < _FORMAT_CACHE_MIN_VALUES:
-        return False
-    sample_pair_count = min(pair_count, _FORMAT_CACHE_SAMPLE_VALUES)
-    sample_end = sample_pair_count * 2
-    unique_pairs = {
-        (uv_components[index], uv_components[index + 1])
-        for index in range(0, sample_end, 2)
-    }
-    return len(unique_pairs) / sample_pair_count <= _FORMAT_CACHE_MAX_UNIQUE_RATIO
-
-
-def _uv_coords_should_cache_format(uv_coords) -> bool:
-    return _vector_coords_reuse_objects(uv_coords)
-
-
-def _vector_coords_reuse_objects(coords) -> bool:
-    value_count = len(coords)
-    if value_count < _FORMAT_CACHE_MIN_VALUES:
-        return False
-    sample_value_count = min(value_count, _FORMAT_CACHE_SAMPLE_VALUES)
-    unique_objects = {id(coords[index]) for index in range(sample_value_count)}
-    return len(unique_objects) / sample_value_count <= _FORMAT_CACHE_MAX_UNIQUE_RATIO
 
 
 def _payload_has_uvs(mesh: MeshData | GeometryBuffer) -> bool:

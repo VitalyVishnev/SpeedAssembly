@@ -172,8 +172,8 @@ try {
     }
 
     if ($Package) {
-        Write-Host 'Building Rust XML reader ...'
-        & (Join-Path $PSScriptRoot 'build_xml_reader.ps1')
+        Write-Host 'Building Rust extensions ...'
+        & (Join-Path $PSScriptRoot 'build_rust_extensions.ps1')
         Write-Host 'Building bundled ufbx extension ...'
         & $pythonExe -s setup.py build_ext --inplace
         if ($LASTEXITCODE -ne 0) {
@@ -211,6 +211,7 @@ try {
             '--additional-hooks-dir', $hooksPath,
             '--hidden-import', 'xml_to_usda._ufbx',
             '--hidden-import', 'xml_to_usda._xml_reader',
+            '--hidden-import', 'xml_to_usda._usda_numbers',
             '--paths', (Join-Path $repoRoot 'src'),
             '--add-data', "$qtUiStagingRoot;xml_to_usda/qt_ui",
             '--add-data', "$(Join-Path $buildPath 'build_identity.json');xml_to_usda",
@@ -415,6 +416,27 @@ a.binaries = [
                 throw "Packaged Fracture worker recovery smoke report failed: $recoveryReportPath"
             }
             Write-Host "Packaged Fracture worker recovery smoke passed: $recoveryReportPath"
+
+            $conversionReportPath = Join-Path $smokeDir 'smoke_conversion_report.json'
+            $recoveryStartInfo.Arguments = Join-ProcessArguments @(
+                'smoke', '--scenario', 'conversion-worker', '--input', $smokeInputPath,
+                '--output', (Join-Path $smokeDir 'conversion.usda'),
+                '--report', $conversionReportPath, '--timeout-ms', '180000'
+            )
+            $conversionProcess = New-Object System.Diagnostics.Process
+            $conversionProcess.StartInfo = $recoveryStartInfo
+            if (-not $conversionProcess.Start()) {
+                throw 'Packaged conversion worker smoke did not start.'
+            }
+            $conversionProcess.WaitForExit()
+            if ($conversionProcess.ExitCode -ne 0 -or -not (Test-Path $conversionReportPath)) {
+                throw "Packaged conversion worker smoke failed. Report: $conversionReportPath"
+            }
+            $conversionReport = Get-Content -LiteralPath $conversionReportPath -Raw | ConvertFrom-Json
+            if (-not $conversionReport.passed) {
+                throw "Packaged conversion worker smoke report failed: $conversionReportPath"
+            }
+            Write-Host "Packaged conversion worker smoke passed: $conversionReportPath"
         }
         else {
             Write-Host "Skipping packaged smoke because -SkipSmoke was supplied."

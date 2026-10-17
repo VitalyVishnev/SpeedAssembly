@@ -23,13 +23,14 @@ python -m xml_to_usda gui
 After relocating an existing checkout, rerun the editable install so it points
 to `Project/src`.
 
-The XML opening reader uses Rust 1.85.1 and MSVC. Install that toolchain
-through rustup, then run `scripts/build_xml_reader.ps1` from PowerShell for
-source runs. `-Package` builds and bundles the reader automatically. Python-only
-source setups retain the canonical reader when the extension is absent;
-packaged builds require the native reader. Legacy XML encodings and namespaces
-use the existing reader. Malformed XML and broken native imports report errors.
-The Rust parser validates the complete source before projecting opening facts.
+The XML opening reader and USDA numerical formatter use Rust 1.85.1 and MSVC.
+Install that toolchain through rustup, then run `scripts/build_rust_extensions.ps1` from PowerShell
+to enable both in source runs. `-Package` builds and bundles them automatically
+in the EXE. Python-only source setups retain canonical Python paths when an
+extension is absent. A packaged build requires both extensions. There is no
+backend selector in the operator UI. Legacy XML encodings and namespaces use the existing reader; malformed XML and broken
+native imports report errors. The Rust parser validates the complete source,
+including discarded geometry budgets, before returning its opening projection.
 
 ## Tests and builds
 

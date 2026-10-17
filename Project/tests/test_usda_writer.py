@@ -214,3 +214,52 @@ def test_streaming_writer_cleans_partial_file_on_cancel(tmp_path: Path) -> None:
 
     assert not output_path.exists()
     assert not output_path.with_name("cancelled_stream.usda.partial").exists()
+
+
+@pytest.mark.parametrize("mode", ["skeletal_assembly", "static_assembly", "skeletal_parts", "static_parts"])
+def test_numerical_adapters_preserve_complete_authoring_contract(tmp_path, mode):
+    from unittest.mock import patch
+    from xml_to_usda import usda_numbers
+    from pxr import Usd
+    pytest.importorskip("xml_to_usda._usda_numbers")
+    payload = _write_fbx_json_payload(tmp_path)
+    _, model, diagnostics = load_canonical_model(str(SIMPLE_TREE_01), prototype_source_configs=(
+        PrototypeSourceConfig(source_key="Mesh_1", mode=PrototypeSourceMode.FBX_FILE, fbx_path=str(payload)),
+    ))
+    context = build_authoring_context(model, diagnostics, conversion_mode=mode)
+    with patch.object(usda_numbers, "_native_module", return_value=None):
+        expected = author_usda_text(context)
+    assert author_usda_text(context) == expected
+    path = tmp_path / "parity.usda"
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        author_usda_stream(handle, context)
+    assert path.read_text(encoding="utf-8") == expected
+    assert Usd.Stage.Open(str(path))
+
+
+def test_streaming_cancel_during_numeric_array_preserves_destination_and_releases_buffer(tmp_path):
+    from array import array
+    from unittest.mock import patch
+    from xml_to_usda import usda_authoring
+    from xml_to_usda.models import GeometryBuffer
+    pytest.importorskip("xml_to_usda._usda_numbers")
+    _, model, diagnostics = load_canonical_model(str(SIMPLE_TREE_01))
+    payload = GeometryBuffer("cancel", array("f", [0, 1, 2] * 9000), array("i", [3] * 3000), array("i", range(9000)))
+    model = replace(model, prototypes=(replace(model.prototypes[0], mesh=None, geometry_payload=payload),) + model.prototypes[1:])
+    output = tmp_path / "cancel.usda"
+    output.write_text("previous completed export", encoding="utf-8")
+    event = threading.Event()
+    original = usda_authoring.HandleSink.write
+    chunks = []
+    def write(sink, text):
+        original(sink, text)
+        if len(text) > 10000:
+            chunks.append(len(text))
+            event.set()
+    with patch.object(usda_authoring.HandleSink, "write", write):
+        with pytest.raises(ConversionCancelledError):
+            write_usda_document(model, diagnostics, output_path=output, cancel_event=event)
+    assert chunks
+    assert output.read_text(encoding="utf-8") == "previous completed export"
+    assert not output.with_suffix(".usda.partial").exists()
+    payload.point_components.append(0)

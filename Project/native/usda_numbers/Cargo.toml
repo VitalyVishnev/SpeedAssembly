@@ -1,0 +1,17 @@
+[package]
+name = "speedassembly-usda-numbers"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85.1"
+publish = false
+
+[lib]
+name = "_usda_numbers"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "=0.23.5", features = ["extension-module"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
