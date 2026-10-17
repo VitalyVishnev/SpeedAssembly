@@ -16,7 +16,7 @@ from xml_to_usda.models import (
     PrototypeSourceMode,
     Vector3,
 )
-from xml_to_usda.normalizer import _mesh_with_original_scale
+from xml_to_usda.source_extraction import mesh_with_original_scale as _mesh_with_original_scale
 from xml_to_usda.usda_authoring import author_usda_stream, author_usda_text, build_authoring_context
 from xml_to_usda.usda_writer import render_usda, write_usda_document
 

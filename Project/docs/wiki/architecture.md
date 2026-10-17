@@ -2,6 +2,48 @@
 
 The codebase is organized around one deterministic conversion system with different execution strategies around the edges.
 
+The isolated Rust conversion experiment lives in
+`experiments/rust_conversion/`, outside the application package. Its PyO3
+kernels retain canonical Python objects and the shared authoring structure;
+packed FBX geometry uses borrowed buffer views. Production imports none of it.
+See its `RESULTS.md` and [Experiments](experiments.md) before proposing native
+integration or extrapolating a kernel speedup to complete conversion latency.
+
+The production XML opening reader is a separate Rust/PyO3 module in
+`native/xml_reader/`, loaded lazily by `opening_xml.py`. It validates the whole
+source and projects material/prototype/count/bone facts. Canonical bone
+normalization and placement checks remain Python; skeletonless inputs retain
+full canonical geometry analysis. Discovery returns authored Wind data in the
+same fresh-worker result, avoiding a second read/process when Ground Cover still
+matches. This does not integrate the experimental conversion kernels.
+
+`opening_xml.py` now owns the complete Source Opening Facts query and the narrow
+authored-Wind-joint query. Native projection details and full-document recovery
+are private there. Discovery only merges facts with persisted operator settings;
+the Wind pipeline retains JSON output and synthetic-rig resolution. Both queries
+use the same reader owner without forcing Wind refresh to build discovery rows.
+
+`usda_numbers.py` owns numerical array serialization, with Python and Rust
+adapters behind the same value/chunk interface. `native/usda_numbers/` borrows
+packed float32/int32 arrays, preserves CPython `%g` formatting and returns at
+most 4096 values per call. Authoring still owns every USDA declaration,
+relationship and schema field; `usda_writer.py` retains publication. Streamed
+writes check cancellation between chunks and release native buffer leases on
+failure. No backend choice enters settings, UI or canonical/resolved models.
+Both production extensions use `scripts/build_rust_extensions.ps1`.
+On the retained heavy-FBX case, numerical writing improves 2.76x wall
+and 2.85x CPU; full conversion improves 1.53x locally, not several-fold.
+See `experiments/rust_usda/RESULTS.md` for ranges, cache policy and acceptance.
+
+`source_extraction.py` owns shared SpeedTree interpretation for canonical and
+Proxy projections: geometry, skinning, skeleton, Object-local Repeated Part
+placement and OriginalScale application. `normalizer.py` retains canonical
+Object metadata, diagnostic order, material policy and prototype identity.
+`proxy_source_projection.py` retains its geometry-only composition and typed
+cache. Its queries skip surface attributes before decoding them. Opening facts
+reuse the same skeleton and placement rules. This is a concrete Python owner;
+no native extraction adapter or intermediate representation is introduced.
+
 Wind Tree hierarchy separates per-rig geometric preparation from forward
 classification. Live tuning caches base/flattened wind data, reuses layer rows
 and instanced Matcap mesh vertices, and updates tints/bone overlays. See
@@ -46,7 +88,7 @@ Main systems:
   every shared UDIM row link to their workflow articles. Main and compact-panel
   styles reuse one question-button stylesheet in `qt_ui/theme.py`.
 - `src/xml_to_usda/fbx_adapter.py`, `src/xml_to_usda/_ufbx.c`, and `src/xml_to_usda/fbx_import_supervisor.py` - vendored ufbx integration and isolated helper-process control.
-- `src/xml_to_usda/discovery_service.py` and `src/xml_to_usda/source_discovery_worker_subprocess.py` - initial rows reuse one safety-checked XML document without the full-model JSON cache. Authored skeletons use the same normalization and orientation as conversion, without constructing geometry. Sources without a normalized skeleton retain canonical Scattered Parts analysis. XML files at or above 5 MiB stay outside the GUI process; Wind inspection remains sequential in its own worker.
+- `src/xml_to_usda/discovery_service.py` and `src/xml_to_usda/source_discovery_worker_subprocess.py` - initial rows use the native opening projection without a full-model JSON cache. Authored skeletons use canonical normalization/orientation without geometry construction. Sources without a usable skeleton retain full canonical Scattered Parts analysis. XML at or above 5 MiB stays in a fresh worker, now carrying compatible authored Wind data with discovery. Leaf-only or invalid-Wind sources retain the existing separate Wind path.
 - `src/xml_to_usda/cache_maintenance.py` - bounded runtime cache maintenance for job leftovers, FBX payloads, source-model caches, Proxy Source Projection caches, legacy Fracture Preview cache files, and stale cache temp files.
 - `src/xml_to_usda/proxy_mesh_service.py`, `src/xml_to_usda/fracture_service.py`, and related workers - companion workflows.
 - `src/xml_to_usda/qem_simplification.py` - shared topology-preserving `fast-simplification` QEM backend used by Proxy Mesh and Fracture Preview diagnostic geometry.
@@ -149,7 +191,8 @@ module reduced authoring-only wall median from 0.525 s to 0.338 s (35.7%),
 full text generation plus an OS temporary-file write from 0.490 s to 0.329 s
 (32.8%), and the `GeometryBuffer` streaming path from 0.480 s to 0.307 s
 (36.1%). Baseline and optimized outputs matched byte-for-byte. Keep these
-paths stdlib-only and benchmark-backed.
+Python reference paths in `usda_numbers.py`; the native adapter is benchmarked
+separately and must preserve their exact text.
 
 Dense numerical work stays behind the existing domain seams rather than
 changing the canonical model. `skeleton_processing.py` precomputes bone geometry
@@ -340,8 +383,9 @@ packaged smoke/build gate for completed UI changes.
 The main shell never imports the ufbx C extension solely to build its XML discovery
 panels. FBX loading is lazy at the actual FBX action boundary. Restored large
 XML inputs are shown immediately, discovered in a fresh file-backed worker,
-then inspected for Wind groups in the existing isolated Wind worker; the
-source reads do not overlap.
+with authored Wind data carried in the same result when available. The existing
+isolated Wind worker handles synthetic rigs and other fallback cases; source
+reads do not overlap.
 
 Testing has four separate execution boundaries: Core (synthetic deterministic
 contracts), Integration (source/worker/Qt workflows), Packaged (frozen EXE and

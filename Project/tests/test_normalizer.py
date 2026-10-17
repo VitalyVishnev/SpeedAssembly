@@ -11,11 +11,11 @@ from xml_to_usda.normalizer import (
     _build_base_mesh,
     _extract_assembly_parts_from_leaf_references,
     _extract_bounds,
-    _extract_face_varying_uvs,
-    _read_float_list,
-    _read_int_list,
-    _read_positive_float,
     normalize_to_canonical,
+)
+from xml_to_usda.source_extraction import (
+    _extract_face_varying_uvs, read_float_list as _read_float_list,
+    read_int_list as _read_int_list, read_positive_float as _read_positive_float,
 )
 from xml_to_usda.pipeline import inspect_source, load_canonical_model
 from xml_to_usda.skeleton_processing import apply_skinning_quality, validate_skinning
@@ -317,7 +317,7 @@ def test_leaf_reference_orientation_preserves_rotation_sense_after_axis_remap() 
 
 
 def test_non_mesh_leaf_reference_host_with_nonzero_abs_transform_fails_loudly() -> None:
-    from xml_to_usda.normalizer import count_source_part_instances
+    from xml_to_usda.source_extraction import count_source_part_instances
     root = ET.fromstring(
         """
         <SpeedTreeRaw>

@@ -37,6 +37,8 @@
 - `Unreal Asset Path` - a UE package/object path such as `/Game/Trees/SK_Branch.SK_Branch`.
 - `PointInstancer` - the USD mechanism that places repeated parts.
 - `CanonicalTreeModel` - the normalized source-facts model used by conversion and validation.
+- `Source Opening Facts` - source-derived material/prototype listings, skeleton warnings, Repeated Part classification and authored Dynamic Wind information needed when opening XML, before conversion. Excludes persisted operator settings and full geometry.
+- `Source extraction` - shared interpretation of SpeedTree geometry, skinning, skeleton and Repeated Part placement. Canonical and Proxy projections compose these facts under their own identity, diagnostics and cache policies.
 - `ResolvedAssemblyModel` - the authoring-stage model that combines source facts with operator intent.
 - `Operator State` - the current UI-selected values for a conversion workflow.
 - `Persisted Operator Settings` - saved global operator values and presets.
@@ -70,3 +72,9 @@
 - `Bone Overlap Shading` - optional unlit GPU color modulation at true projected crossings with nearer unrelated bones; serial/endpoint contacts do not cast AO. Strength 0-100%; relative radius 0-3, with 1 = 1/120 of monitor height. Hardware bone depth and picking remain active when shading is off; rig/groups are unaffected.
 - `Source Name` - any name observed in XML, FBX, or source filenames.
 - `Instance` - shorthand for a placed occurrence of a prototype when the stage is already obvious.
+
+## USDA numerical serialization
+
+Formatting canonical mesh vectors, UVs and integer arrays into bounded USDA
+text chunks. Owned by `usda_numbers.py`, with interchangeable Python and Rust
+adapters. It does not choose scene structure, schema fields or output paths.

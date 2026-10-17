@@ -1,5 +1,121 @@
 # Experiments
 
+Detailed artifacts in `experiments/rust_conversion`, `experiments/rust_xml`,
+`experiments/rust_usda` and `experiments/source_extraction` are local, untracked
+research material. Their conclusions below remain maintained project memory;
+those directories are not production, test or packaging dependencies.
+
+## Shared source extraction, 2026-10-18
+
+Architecture candidate 3 introduces `source_extraction.py` as the shared owner
+for geometry, skinning, skeleton and Repeated Part interpretation. Canonical and
+Proxy composition, prototype identity, diagnostics and cache policies remain
+separate. No native extraction adapter, cache schema change or performance
+claim. The existing Rust experiment now patches parser/skinning functions in
+their actual extraction owner and passes its parity runner.
+
+Retained pre-refactor modules match complete canonical models, warning order
+and Proxy fields on ten inputs, including WorldTree with 657,878 base points
+and 43,263 instances. Simple Tree matches USDA text in all four modes. The
+default suite passes 680 tests. Old/new frozen conversion workers also match
+USDA bytes and diagnostics for Simple Tree and BigSpruce. Evidence:
+`experiments/source_extraction/RESULTS.md` and its result records. Existing
+non-finite OriginalScale validation differs between projections; tracked in
+known bugs and intentionally preserved in this refactor.
+
+Full Package passes 27 contracts and all three required smokes; frozen Proxy
+Preview also returns and uploads geometry. UE 5.7.4 imports the exact new-worker
+USDA with three correct mesh/Skeleton associations, no error-level log entries
+and clean shutdown. Existing MaterialBindingAPI warnings remain. Animated Wind
+and material appearance were not rerun. Version and publication state unchanged.
+
+## Production USDA numerical adapter, 2026-10-18
+
+Implemented architecture candidate 2. `usda_numbers.py` owns Python/native
+numeric arrays and bounded chunk consumption; `native/usda_numbers` uses
+borrowed buffers and exact CPython `%g`. Scene declarations, canonical models,
+FBX, validation and publication remain in their existing owners. Source-only
+Python recovery is retained; packaged builds require native API 1. Streamed
+cancellation releases leases and preserves completed destinations.
+
+Three fresh processes per adapter/input, source cache off, one-core affinity,
+interleaved order: WorldTree full wall median 31.310 -> 27.453 s, writing
+7.287 -> 3.854 s. Heavy FBX full wall 87.115 -> 56.827 s;
+writing 45.680 -> 16.560 s and writer CPU 27.000 -> 9.469 s.
+Heavy parent peak falls 3331 -> 2103 MiB. Wall time varies;
+small-tree total CPU improvement is not established. Unchanged FBX helper/cache
+cost remains. Do not extrapolate writer gain to the whole program.
+
+24 byte-identical old-author/new-author pairs cover three sources, all modes
+and packed prototypes; OpenUSD opens each. Source suite 679, Package contracts
+27, all three required real-result smokes, old/new frozen worker parity and
+ZIP/native/license checks pass. UE 5.7.4 imported the byte-identical Simple Tree
+baseline with three mesh-to-skeleton bindings and no Nanite assembly failure.
+The scratch importer needs a startup Nanite CVar and returns a Python Array.
+Import-only scope, stock pipeline extras and existing MaterialBindingAPI warnings
+are recorded in the report; animated runtime was not rerun.
+
+The original experimental UV cache mishandled NaN combined with signed zero;
+production skips those cache keys and has a regression check. No unexpected
+native crash, version bump or publication. Evidence:
+`experiments/rust_usda/RESULTS.md` and `results/acceptance.json`.
+
+
+## Source Opening Facts ownership, 2026-10-18
+
+Implemented architecture candidate 1 without changing Rust exchange or domain
+semantics. `opening_xml.py` owns complete opening facts and authored Wind joint
+reading; native projection recovery is private. Discovery only merges settings,
+and the Wind pipeline retains synthetic-rig resolution and JSON output.
+
+Six-source signatures match retained discovery/Wind results. New source equals
+the saved working EXE on four ordinary/grass inputs; the new EXE equals source
+on the same four without a full-model source cache. Interleaved frozen runs,
+four openings per version: Big Spruce 1.356 -> 1.379 s median, WorldTree
+4.189 -> 4.057 s. No new speedup or stable regression is established. Earlier
+unpaired WorldTree source-Qt timing rose 3.986 -> 4.367 s; retain that observation
+and the stronger paired check rather than treating either as a universal ratio.
+
+670 default tests, 27 packaged contracts, both mandatory real-result smokes and
+ZIP/hash/license checks pass. One documented Qt typography flake recurred;
+targeted and complete reruns passed without typography edits. No unexpected
+native crash or new UE import. Evidence: `experiments/rust_xml/OPENING_OWNERSHIP.md`
+and `experiments/rust_xml/results/ownership/acceptance.json`.
+
+## Native XML opening and shared Wind snapshot, 2026-10-18
+
+Control: accepted Python-only commit `2621bd2`; source-model cache disabled in
+both variants, OS file cache retained. The first Rust DOM projection preserved
+too many LeafReferences nodes and only reduced Big Spruce Qt readiness from
+2.999 to 2.808 s in its pilot. Python traversals still dominated. Moving scalar
+material/prototype/count facts to Rust and returning shared authored Wind data
+eliminated both those traversals and a second XML read/worker launch.
+
+43 accepted runs, six real-source exact row/Wind comparisons. Source Qt paste
+through Wind readiness: Simple Tree 0.463 -> 0.187 s, Big Spruce 3.454 -> 1.565 s,
+WorldTree 15.701 -> 4.085 s. Retaining a second Wind request with the final Rust
+reader costs 2.910 s on Big Spruce. Service readiness including reused Wind:
+0.907 -> 0.205 s and 12.270 -> 2.411 s for Big Spruce/WorldTree. WorldTree memory
+only falls about 533 -> 494 MiB because Rust still builds its native DOM.
+Clustered grass has no established total improvement; canonical synthetic-rig
+work remains. Single extra-source runs establish parity, not stable speedups.
+
+Native parsing uses roxmltree with explicit full-source budgets and no unsafe
+code in the module. Cow text views avoid copying ordinary packed fields;
+unusual numeric forms keep the authoritative Python interpretation. All UI
+assignment, canonical bone, placement and Scattered Parts owners are reused.
+Rust-skills guided memory/error handling and strict Clippy/format checks.
+Full report and raw evidence: `experiments/rust_xml/RESULTS.md`.
+
+Final EXE UI acceptance, two runs per input: Simple Tree 0.113–0.161 s,
+Big Spruce 1.071–1.303 s, WorldTree 3.440–3.892 s, from path insertion to
+rows and Wind. Complete source/frozen worker results match on Big Spruce,
+WorldTree and both grass inputs without source-model cache creation. Passed
+664 default tests, 81 focused checks, 27 packaged contracts, both required
+real-result smokes, strict native lint/format and ZIP/hash/license validation.
+No new UE import or unexpected native crash. Artifact hashes and timing scope
+are retained in `experiments/rust_xml/results/acceptance.json`.
+
 ## Initial XML opening projection, 2026-10-17
 
 The original discovery service normalized/cached a full canonical model, then
@@ -35,6 +151,55 @@ Real frozen discovery/source results match on Big Spruce, WorldTree and both
 grass inputs without creating a JSON source cache. No unexpected crash, new
 dependency, version bump or publication. Actual frozen acceptance timings are
 recorded separately from source before/after ratios.
+
+## Rust conversion kernels, 2026-10-17
+
+Status: Source experiment validated; production integration and UE acceptance open.
+
+The operator requested full XML-to-published-USDA profiling, followed by Rust
+replacement of measured hot loops while retaining UI and FBX loading. The
+isolated PyO3 candidate lives in `experiments/rust_conversion/`. It moves packed
+number parsing, vertex binding, batched point/normal transforms and numerical
+USDA arrays. Canonical Python models and the authoring/validation engine remain.
+Packed FBX arrays use borrowed buffer views and a UV-value cache preserving
+signed-zero first-spelling behavior across output chunks. Float formatting
+reuses CPython's proven native `%g` conversion for exact output.
+
+Fresh processes on i9-14900K, one logical CPU, alternating variant order, OS file
+cache retained, source-model cache disabled:
+
+| Case | Python | Rust hybrid | Runs per variant |
+| --- | ---: | ---: | ---: |
+| Simple Tree, quality 1 | 0.244 s | 0.223 s | 6 |
+| Big Spruce, quality 1 | 1.358 s | 1.144 s | 6 |
+| Big Spruce, quality 4 | 1.488 s | 1.269 s | 6 |
+| WorldTree, 148.5 MB XML | 18.972 s | 15.633 s | 6 |
+| Big Spruce + 14.16M-triangle FBX | 50.086 s | 32.754 s | 3 |
+
+On the heavy FBX path, writing alone falls from 26.760 s to 9.556 s, 2.80x;
+full conversion improves 1.53x. The unchanged helper/cache/IPC boundary remains
+21.2-21.4 s. Parent peak working set falls from 3330 to 2105 MiB, but WorldTree
+adds about 40 MiB. Normalization is a smaller gain, 1.32x on Big Spruce. Do not
+extrapolate these loop replacements into a full-normalizer or multi-threaded
+backend claim.
+
+All 126 accepted conversions retained exact output hashes, sizes and diagnostics.
+Nine XML canonical models and packed writer payloads match; numeric, invalid
+binding and UV-cache boundary checks pass. Existing backend contracts: 71 passed.
+OpenUSD opened both large outputs and verified mesh/skeleton/instance counts.
+No native crash occurred. Sandbox temp permission failures and cancelled pilot
+iterations were excluded and resolved with workspace-local tool/helper temp
+roots, without product patches. cProfile's asymmetric overhead is excluded
+from speed comparisons; retained function/module tables cover the conversion
+parent, not helper internals.
+
+The current JSON source cache separately regresses Big Spruce to 3.073 s cold
+or 2.554 s warm versus 1.358 s without it. Conversion cache policy is unchanged;
+the subsequent initial-opening change bypasses this cache for row discovery.
+Next useful native trial is the numerical writer behind the current authoring
+seam. Package, native worker lifecycle and UE 5.7.x gates remain mandatory before
+integration. Full report, exact inputs, code and raw evidence:
+`experiments/rust_conversion/RESULTS.md` and `results/` beside it.
 
 ## Bone overlay rendering experiments, 2026-10-13
 

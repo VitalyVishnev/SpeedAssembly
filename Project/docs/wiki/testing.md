@@ -20,6 +20,12 @@ and then owns the frozen-runtime smoke. Markers are assigned centrally in
 `tests/conftest.py`; a test has one primary execution layer, while `stress` is
 an additional opt-in marker.
 
+A byte-identical final USD and unchanged referenced payloads may reuse an
+existing successful Unreal import under the same import settings. Retain the
+baseline and output SHA-256 comparison. Repeat source and Package checks for
+the changed runtime; repeat Unreal import when output or importer behavior
+changes. This avoids repeating an import solely for an internal refactor.
+
 Quick writes `dist-preview/SpeedAssembly_preview.cmd`, which launches the
 current source tree through `.venv310` after an import check. It is a manual
 preview artifact, not a standalone build or validation layer. Use it after

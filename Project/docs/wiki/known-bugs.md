@@ -4,6 +4,31 @@ Current defects, fail-loud limits, and validation gaps only. Resolved crash
 history lives in [Encountered Crashes](encountered-crashes.md); rejected fixes
 and benchmark detail live in [Experiments](experiments.md).
 
+## OriginalScale validation differs between projections
+
+Code inspection during the 2026-10-18 extraction refactor found that Proxy's
+local positive-float parser accepts positive infinity; canonical extraction
+requires a finite positive OriginalScale. A malformed source could therefore
+scale the projections differently. No real asset failure reproduced.
+Locations: `proxy_source_projection.py::_read_positive_float` and
+`source_extraction.py::read_positive_float`. Preserved to keep this refactor
+behavior-identical. Review non-finite source validation as a separate change,
+with one shared contract and a malformed-input regression check.
+
+## Baseline inline-part material API warning
+
+UE 5.7.4 Interchange import on 2026-10-18 warns that the Twig_01/Twig_02 Mesh
+prims have material bindings without applied `MaterialBindingAPI`. The same
+USDA bytes come from accepted Python author `2621bd2` and the native numerical
+adapter. Import/build and all three mesh-to-skeleton bindings succeed; material
+appearance was not checked in this headless run. Evidence:
+`experiments/rust_usda/results/ue57/import.log` and the input SHA in its
+acceptance record. Location: `usda_authoring.py::_emit_inline_part_payload`
+declares only SkelBindingAPI while `_emit_material_binding` writes the relation.
+Deferred to keep the numerical migration byte-identical. Next step: review the
+mesh API declaration as a separate importer-contract fix and rerun UE material
+assignment/appearance checks. Do not change numerical serialization for this.
+
 ## Tree Keep parent level can require export correction
 
 The default equivalent-fork policy may keep parent and both daughters in one
@@ -243,6 +268,22 @@ Related:
 
 Status: Open; avoided by typed projection and fresh-worker paths
 
+2026-10-17 conversion measurements on the 9.74 MB Big Spruce confirm this
+cost independently: no source cache 1.358 s, cold JSON cache 3.073 s, warm JSON
+cache 2.554 s median. Cold cache writing alone took 1.707 s; warm reconstruction
+1.694 s. Three fresh-process cache repetitions, one-core affinity; filesystem
+cache was not flushed. Parent peak working set rose from about 156 MiB without
+the cache to 307-324 MiB with it. Keep this separate from Rust gains. Initial
+row discovery now bypasses this cache and avoids geometry normalization for
+authored skeletons. Conversion cache policy is unchanged; compare a typed
+replacement in a dedicated worker/stress-validated change. Evidence:
+`experiments/rust_conversion/results/measurements.json` and `RESULTS.md`.
+Direct inspection also confirms lost UV/normal sharing: each 174,975-entry
+array grows from 39,714 distinct canonical objects to 174,975 after JSON decode,
+despite value equality. That defeats identity-based authoring format reuse;
+warm Python writing rises from 0.255 s to 0.382 s. Preserve sharing or typed
+buffers when replacing this cache, not only its JSON encoder.
+
 Big Spruce triggered `0xC0000005` during generic JSON serialization and once
 reconstructed a `Vector3` where a face-owner tuple was expected. Even successful
 large-model serialization can cost more than XML parsing and normalization.
@@ -253,21 +294,42 @@ Do not restore this cache for Proxy or Fracture, or add another persistent cache
 without registering it in `cache_maintenance.py`. Replace the generic format
 only when a real conversion workflow justifies and stress-validates it.
 
-Initial opening still builds the safety-checked XML element tree, traverses it
-for separate row projections, then rereads XML for Wind groups. Leaf-only
-discovery still needs canonical geometry and leaf-only Wind retains its existing
-full-model fallback. Locations: `discovery_service.py`, `source_analysis.py`,
-`wind_pipeline.py`. Deferred to preserve one boundary per change. Next step:
-profile a bounded selective reader or reuse typed skeleton facts across the
-existing worker boundary, with row/warning/Scattered Parts parity. XML parsing
-Rust gains and a combined discovery/Wind protocol remain Unverified. Evidence:
-`experiments/xml_opening/RESULTS.md`.
+Ordinary native opening now validates in Rust, returns compact facts and reuses
+authored Wind data from the same discovery worker. The native DOM still holds
+the XML input and a complete native tree: WorldTree peaks near 494 MiB in the
+service measurement. Worker/import/IPC and UI application time remain visible
+on medium trees. Leaf-only discovery still needs canonical geometry and Wind
+retains synthetic-rig preparation; clustered grass has no measured total gain.
+Legacy encodings/namespaces, nested Bones and structural tags inside
+LeafReferences use Python; unusual numeric forms retain full LeafReferences.
+Locations: `opening_xml.py`, `native/xml_reader`,
+`discovery_service.py`, `wind_pipeline.py`. Deferred to preserve the validated
+opening boundary. Next step: profile native DOM/traversal and worker startup
+before proposing streaming or concurrency. Evidence:
+`experiments/rust_xml/RESULTS.md`; the earlier Python-only boundary is recorded
+in `experiments/xml_opening/RESULTS.md`.
 
 Related:
 - `src/xml_to_usda/canonical_loader.py`
 - `src/xml_to_usda/worker_file_protocol.py`
 - `src/xml_to_usda/proxy_source_projection.py`
 - `tests/test_canonical_loader_cache.py`
+
+## Validation gap: Experimental Rust kernels are not a packaged backend
+
+This concerns the original normalization/transform prototype in
+`experiments/rust_conversion/`. The separate production XML opening reader and
+numerical writer adapter now pass Package and real-result worker gates; the
+writer also passed byte-identical baseline UE 5.7.4 import/build. See
+`experiments/rust_usda/RESULTS.md`.
+
+`experiments/rust_conversion/` is a source-only PyO3 prototype. Sample/model,
+diagnostic and byte parity do not establish frozen DLL loading, cancellation,
+native failure containment, concurrency safety or UE importer acceptance.
+Normalization/transform integration remains deferred deliberately. Before
+integrating those kernels, retain the FBX helper boundary and test their chosen
+module in Package, real-result worker smoke and UE 5.7.x. A full Rust canonical
+representation and a multi-threaded writer remain Unverified; measured loop replacements cannot establish their speed.
 
 ## Risk: Fracture native and viewport stability lacks broad operator confirmation
 
@@ -434,6 +496,13 @@ is **Unverified**; investigate QApplication/QSS state across tests before
 changing production typography. Deferred from the Proxy cache fix because
 the failure was outside the changed workflow and did not reproduce in the
 Integration layer. Location: `tests/test_qt_ui_theme.py`.
+
+The identical 20-versus-35 px assertion recurred on 2026-10-18 during Source
+Opening Facts consolidation: 669 tests passed and this one failed. A separate
+theme/opening/Wind/Qt run passed all 76 checks without typography changes.
+One subsequent complete rerun passed all 670 default tests.
+The cause remains Unverified; retain this as test-state fragility, not evidence
+of an XML-reader failure.
 
 ## Open: Ground Cover export can disagree with the visible Trunk checkbox
 

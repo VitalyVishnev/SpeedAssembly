@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 from .dynamic_wind import build_dynamic_wind_data
 from .models import BaseMaterialOverride, DynamicWindData, Joint, PrototypeDiscoveryEntry, SourceXmlDocument
 from .normalizer import normalize_to_canonical
-from .normalizer import count_source_part_instances, normalize_source_skeleton, validate_source_part_hosts
+from .source_extraction import count_source_part_instances, normalize_source_skeleton, validate_source_part_hosts
 from .scattered_parts import ScatteredPartsAnalysis, analyze_scattered_parts
 from .skeleton_processing import strictly_vertical_joint_names
 from .skeleton_rules import joint_name_from_bone_id, parse_generator_label

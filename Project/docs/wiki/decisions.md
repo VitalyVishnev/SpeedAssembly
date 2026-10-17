@@ -1,6 +1,105 @@
 # Decisions
 
+## Reuse Unreal acceptance for identical output, 2026-10-18
+
+Operator instruction: do not repeat Unreal import when the final USD is
+byte-identical to an accepted baseline. Compare hashes and keep referenced
+payloads and import settings unchanged. Source/native/Package gates still
+validate the changed execution path. Changed output or importer behavior needs
+Unreal validation. This supersedes unconditional reimport for internal changes.
+
+## Source extraction is shared by two projections, 2026-10-18
+
+Architecture candidate 3 moves common source interpretation from private
+normalizer helpers into `source_extraction.py`. Canonical and Proxy callers
+request Object meshes, selected-LOD prototype meshes and host Repeated Parts.
+Skeleton and narrow opening placement/count queries share the same owner.
+Projection composition, prototype identity, missing-data diagnostics and
+material fallback stay with their callers. Proxy skips UV/normal/color reads;
+canonical diagnostics retain mesh, spine, then part order per Object.
+
+Preserve Python float precision, root BoneID=-1 mapping, sibling-block/global
+instance order and the fail-loud non-mesh host placement rule. Proxy keeps
+schema-4 float64 NPZ storage with pickle disabled. Its cache intentionally omits
+material sections and does not promise complete dataclass round-trip equality.
+No cache invalidation, UI setting, generic backend framework or Rust extraction
+port belongs to this refactor. A native adapter needs profiling and a concrete
+implementation first. This change makes no performance claim.
+
 This page stores active project contracts. Rejected or superseded approaches live in [experiments.md](experiments.md). Current limitations and bugs live in [known-bugs.md](known-bugs.md).
+
+## USDA numerical serialization has one owner, 2026-10-18
+
+Architecture candidate 2 moves numeric payload iteration and chunk joining from
+`usda_authoring.py` into `usda_numbers.py`. Keep scene authoring, scalar/matrix
+fields, validation, canonical models, FBX loading and publication unchanged.
+Rust accelerates object-vector and packed float32/int32 arrays; source-only
+setups retain the previous Python implementation, including float64 packed data.
+Frozen builds require the native module and API version 1. A broken extension
+or native formatting error must propagate, never silently retry in Python.
+
+Retain CPython `PyOS_double_to_string` with `g`, precision 6, flags 0 for exact
+`%g` text. Keep the GIL during these calls and borrowed-buffer access. Do not
+claim this implementation runs concurrently without the GIL. Bound FFI results
+to 4096 values; acquire buffer leases only during consumption and release the
+iterator in `finally`. UV value caching spans the entire packed array and keeps
+the first signed-zero spelling; NaNs bypass the cache to match Python equality.
+Primary/secondary UVs have separate caches. Streamed sinks check cancellation
+between bounded writes and retain existing partial-file cleanup/publication.
+
+The original `experiments/rust_conversion/` remains isolated, including its
+normalization/transform kernels. Its Python control explicitly disables the
+production adapter so comparisons remain valid. Build both production crates
+through `build_rust_extensions.ps1`; the XML-only command remains compatible.
+No user backend selector, version bump or release publication is introduced.
+
+## Source Opening Facts own reader coordination, 2026-10-18
+
+`opening_xml.py` owns native/Python selection, native projection recovery,
+canonical opening classification and authored Wind identity reading. Its two
+views return complete `SourceOpeningFacts` or authored Wind joints. Partial XML,
+projection flags and optional native scalar collections stay private.
+`discovery_service.py` merges those facts with persisted settings and preserves
+the existing source worker result. `wind_pipeline.py` owns Dynamic Wind JSON
+output and the existing synthetic-rig resolution when authored joints are absent.
+
+Keep native safety checks, import/version errors, source-only Python fallback,
+canonical normalization/placement rules, invalid-Generator error ownership,
+manual rereads and fresh-worker lifecycle unchanged. Rust exchange format is
+unchanged; this consolidation does not establish another performance gain.
+Numerical serialization has its own owner and native adapter in `usda_numbers.py`.
+
+## Rust XML opening and one-result Wind reuse, 2026-10-18
+
+The operator requested Rust reading after accepting Python baseline `2621bd2`.
+`native/xml_reader` is the default packaged opening backend, separate from the
+unintegrated normalization/writer experiment. Pin Rust 1.85.1, PyO3 0.23.5 and
+roxmltree 0.21.1; build through `scripts/build_xml_reader.ps1` and the ordinary
+Package gate. The user does not install Rust to run the EXE or select a backend.
+Source setups without the extension retain Python. Frozen builds require a
+present extension with `API_VERSION = 1`; failed native imports/API mismatches
+must report errors, not silently degrade.
+
+Rust validates XML, DTD/entity rejection, byte/depth/packed-value/instance/face
+budgets before discarding geometry. It returns compact structure/bones plus
+material/prototype/count facts. Keep source-axis mapping, skeleton orientation,
+ambiguous placement rejection and persisted row merging in the existing Python
+owners. Missing usable rest poses reload full XML before Scattered Parts
+classification. Skeletonless sources receive full canonical data directly.
+Legacy encodings, namespaces, nested Bone elements and structural tags inside
+LeafReferences use the canonical reader;
+unusual numeric spellings retain full LeafReferences for Python interpretation.
+
+The discovery worker also receives authored Wind data from that same snapshot,
+using the opening module's shared bone extraction and `build_dynamic_wind_data`. Request
+Ground Cover explicitly. Consume the returned data only for the current input
+and matching Ground Cover, through the existing UI completion callback. Invalid
+Generator metadata does not erase valid source rows: defer its error to the
+existing Wind refresh. Leaf-only synthetic rigs and incompatible results retain
+their separate Wind path. Manual refresh still rereads the current source.
+Preserve the CR-013 fresh-worker threshold and cancellation; do not keep a
+persistent native worker or add another model cache. Full conversion loading,
+FBX and USDA authoring are unchanged. Evidence: `experiments/rust_xml/RESULTS.md`.
 
 ## Initial XML discovery projects facts without a geometry cache, 2026-10-17
 
@@ -26,6 +125,20 @@ Scattered Parts and strict-vertical warnings require canonical structural facts,
 but do not justify building all geometry for an authored skeleton. Keep XML
 budgets, DTD/entity rejection and the CR-013 fresh-worker boundary at 5 MiB.
 See `experiments/xml_opening/RESULTS.md` for measured costs and remaining reads.
+
+## Rust conversion evaluation stays outside production, 2026-10-17
+
+The operator requested a performance experiment, not a runtime migration.
+Keep its Rust/PyO3 build and process-local adapters in
+`experiments/rust_conversion/`; do not add application dependencies or persisted
+backend choices. Retain XML safety checks, canonical/resolved models, staged
+validation, scene authoring, FBX loading and worker boundaries. Compare complete
+real conversions, including FFI, final file publication and cache costs, with
+byte-identical output and diagnostics. Profile timings locate work but must not
+serve as Python/Rust speed comparisons because cProfile overhead is asymmetric.
+
+An integrated alternate build still needs the Package/native-worker gates and
+UE 5.7.x validation. Source benchmark parity alone does not approve it.
 
 ## Interactive Tree thresholds and equivalent forks, 2026-10-13
 

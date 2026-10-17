@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import copy
 import pickle
 import sys
+import xml.etree.ElementTree as ET
 from array import array
 from dataclasses import replace
 from pathlib import Path
@@ -9,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from xml_to_usda.canonical_loader import load_canonical_model
+from xml_to_usda.canonical_loader import load_canonical_model, load_source_tree_model
 from xml_to_usda.models import (
     ConversionRequest,
     ExportMetadata,
@@ -646,13 +648,35 @@ def test_proxy_request_export_uses_proxy_source_projection(monkeypatch, tmp_path
     assert calls["input_path"] == "tree.xml"
 
 
+def _assert_shared_source_facts(projection, source):
+    assert projection.skeleton == source.skeleton
+    assert projection.repeated_parts == source.repeated_parts
+    assert projection.base_mesh is not None and source.base_mesh is not None
+    for field in ("points", "face_vertex_counts", "face_vertex_indices", "sections",
+                  "skel_joint_indices", "skel_joint_weights", "skel_element_size"):
+        assert getattr(projection.base_mesh, field) == getattr(source.base_mesh, field)
+    source_prototypes = {prototype.source_key: prototype for prototype in source.prototypes}
+    assert [p.source_key for p in projection.prototypes] == list(source_prototypes)
+    for prototype in projection.prototypes:
+        expected = source_prototypes[prototype.source_key]
+        assert prototype.source_mesh_id == expected.source_mesh_id
+        assert prototype.mesh is not None and expected.mesh is not None
+        for field in ("points", "face_vertex_counts", "face_vertex_indices"):
+            assert getattr(prototype.mesh, field) == getattr(expected.mesh, field)
+        assert not prototype.mesh.uv_coords and not prototype.mesh.normals and not prototype.mesh.vertex_colors
+    assert not projection.base_mesh.uv_coords and not projection.base_mesh.normals
+
+
 @pytest.mark.parametrize("source_path", (SIMPLE_TREE_01, BIG_SPRUCE, LEAFREFS_ON_BRANCH_LEVELS))
-def test_proxy_source_projection_matches_canonical_proxy_inputs(source_path: Path) -> None:
+def test_proxy_source_projection_matches_canonical_proxy_inputs(source_path: Path, monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("xml_to_usda.proxy_source_projection._proxy_projection_cache_root", lambda: tmp_path / "cache")
     settings = ProxyMeshSettings(final_polycount=5000, density_resolution=64, branch_prune_aggression=0.98)
     _report, canonical_model, diagnostics = load_canonical_model(str(source_path), source_cache_enabled=False)
     assert not [issue for issue in diagnostics if issue.severity == "error"]
 
     projection = load_proxy_source_projection(str(source_path))
+    _, source_model, _ = load_source_tree_model(str(source_path), source_cache_enabled=False)
+    _assert_shared_source_facts(projection, source_model)
     projection_model = tilt_tree_for_dynamic_wind(projection_to_tree_asset(projection))
 
     assert projection.skeleton
@@ -665,6 +689,50 @@ def test_proxy_source_projection_matches_canonical_proxy_inputs(source_path: Pat
 
     assert _mesh_signature(projected.mesh) == _mesh_signature(canonical.mesh)
     assert projected.source_instance_count == canonical.source_instance_count
+
+
+def test_shared_extraction_keeps_object_local_precision_order_and_root_binding(monkeypatch, tmp_path):
+    from xml_to_usda import proxy_source_projection
+    monkeypatch.setattr(proxy_source_projection, "_proxy_projection_cache_root", lambda: tmp_path / "cache")
+    root = ET.parse(LEAFREFS_ON_BRANCH_LEVELS).getroot()
+    obj = root.find(".//Object")
+    obj.set("AbsX", "0.123456789012345")
+    obj.find("Points/X").text = "0.0000000123456789 0.123456789012345 0"
+    obj.find("Vertices/BoneID").text = "-1 -1 -1"
+    leaf = obj.find("LeafReferences")
+    leaf.find("X").text = "0.123456789012345"
+    leaf.find("RotAngle").text = "37"
+    leaf.find("BoneID").text = "-1"
+    obj.append(copy.deepcopy(leaf))
+    path = tmp_path / "object_local.xml"
+    ET.ElementTree(root).write(path, encoding="utf-8")
+    _, source, _ = load_source_tree_model(str(path), source_cache_enabled=False)
+    projection = load_proxy_source_projection(str(path))
+    _assert_shared_source_facts(projection, source)
+    assert [part.name for part in projection.repeated_parts] == [
+        f"AssemblyPart_{i:04d}" for i in range(len(projection.repeated_parts))]
+    assert projection.repeated_parts[0].binding.joint_tokens == ("root",)
+    # Source facts must not silently narrow XML coordinates to packed float32.
+    x = projection.base_mesh.points[0].x
+    assert x != array("f", [x])[0]
+    warm = load_proxy_source_projection(str(path))
+    assert warm.skeleton == projection.skeleton
+    assert warm.repeated_parts == projection.repeated_parts
+    # The typed cache omits material sections; compare its retained source facts.
+    for cached, cold in [(warm.base_mesh, projection.base_mesh)] + [
+        (cached.mesh, cold.mesh) for cached, cold in zip(warm.prototypes, projection.prototypes)
+    ]:
+        assert cached == replace(cold, sections=())
+    ambiguous = copy.deepcopy(root)
+    for tag in ("Points", "Triangles"):
+        for node in list(ambiguous.find(".//Object").findall(tag)):
+            ambiguous.find(".//Object").remove(node)
+    bad = tmp_path / "ambiguous.xml"
+    ET.ElementTree(ambiguous).write(bad, encoding="utf-8")
+    for load in (lambda: load_source_tree_model(str(bad), source_cache_enabled=False),
+                 lambda: load_proxy_source_projection(str(bad))):
+        with pytest.raises(ValueError, match="position space cannot be determined safely"):
+            load()
 
 
 def test_proxy_source_projection_reuses_typed_cache(monkeypatch, tmp_path: Path) -> None:

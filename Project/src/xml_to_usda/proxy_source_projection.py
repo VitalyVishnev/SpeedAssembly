@@ -32,22 +32,7 @@ from .models import (
     TreeAsset,
     Vector3,
 )
-from .normalizer import (
-    _binding_from_bone_id,
-    _build_leaf_reference_instance,
-    _extract_lod_faces,
-    _extract_packed_points,
-    _extract_packed_triangle_blocks,
-    _extract_skeleton,
-    _extract_vertex_skinning,
-    _leaf_reference_position_offset,
-    _mesh_with_original_scale,
-    _object_abs_translate,
-    _parse_float_value,
-    _read_leaf_reference_payload,
-    _select_primary_lod,
-)
-from .skeleton_processing import orient_skeleton_x
+from . import source_extraction
 from .source_transform import build_source_transform
 from .xml_reader import packaged_xml_parser_adapter_enabled, read_source_xml
 
@@ -88,7 +73,7 @@ def load_proxy_source_projection(input_path: str) -> ProxySourceProjection:
     )
     messages: list[str] = []
     material_ids: set[int] = set()
-    skeleton = orient_skeleton_x(tuple(_extract_skeleton(bone_nodes, messages, source_transform)))
+    skeleton = source_extraction.normalize_source_skeleton(bone_nodes, source_transform, messages)
     joint_index_by_source_id = {
         joint.source_id: index for index, joint in enumerate(skeleton) if joint.source_id is not None
     }
@@ -155,60 +140,34 @@ def _extract_proxy_objects(
             elif child.tag == "LeafReferences":
                 leaf_ref_nodes.append(child)
         if object_id is not None and points_node is not None and triangles_nodes:
-            points = _extract_packed_points(points_node, f"{obj.attrib.get('Name', obj.tag)}.points", messages, source_transform)
-            face_counts, face_indices, vertex_indices, sections = _extract_packed_triangle_blocks(
-                tuple(triangles_nodes),
-                f"{obj.attrib.get('Name', obj.tag)}.triangles",
-                messages,
-                material_ids,
+            mesh = source_extraction.extract_object_mesh(
+                obj.attrib.get("Name", obj.tag), points_node, tuple(triangles_nodes), vertices_node,
+                joint_index_by_source_id, messages, source_transform, material_ids,
+                include_surface_attributes=False,
             )
-            if points and face_counts and face_indices:
-                joint_indices, joint_weights = _extract_vertex_skinning(
-                    vertices_node,
-                    face_indices,
-                    vertex_indices,
-                    len(points),
-                    joint_index_by_source_id,
-                    f"{obj.attrib.get('Name', obj.tag)}.vertices",
-                    messages,
-                )
+            if mesh is not None:
                 point_offset = len(merged_points)
                 face_offset = len(merged_face_counts)
-                translate = _object_abs_translate(obj, source_transform)
+                translate = source_extraction.object_abs_translate(obj, source_transform)
                 merged_points.extend(
                     Vector3(point.x + translate.x, point.y + translate.y, point.z + translate.z)
-                    for point in points
+                    for point in mesh.points
                 )
-                merged_face_counts.extend(face_counts)
-                merged_face_indices.extend(index + point_offset for index in face_indices)
-                merged_joint_indices.extend(joint_indices)
-                merged_joint_weights.extend(joint_weights)
-                for section in sections:
+                merged_face_counts.extend(mesh.face_vertex_counts)
+                merged_face_indices.extend(index + point_offset for index in mesh.face_vertex_indices)
+                merged_joint_indices.extend(mesh.skel_joint_indices)
+                merged_joint_weights.extend(mesh.skel_joint_weights)
+                for section in mesh.sections:
                     merged_sections[section.material_id].extend(
                         face_offset + face_index for face_index in section.face_indices
                     )
         if not leaf_ref_nodes:
             continue
-        position_offset = _leaf_reference_position_offset(
-            obj,
-            source_transform,
+        repeated_parts.extend(source_extraction.extract_repeated_parts(
+            obj, tuple(leaf_ref_nodes), messages, source_transform, material_ids,
+            first_instance_index=len(repeated_parts),
             has_mesh_payload=points_node is not None and bool(triangles_nodes),
-        )
-        for leaf_ref_node in leaf_ref_nodes:
-            payload = _read_leaf_reference_payload(obj, leaf_ref_node, messages, material_ids, source_transform)
-            if payload.count == 0:
-                continue
-            for index in range(payload.count):
-                repeated_parts.append(
-                    _build_leaf_reference_instance(
-                        payload,
-                        index,
-                        name=f"AssemblyPart_{len(repeated_parts):04d}",
-                        source_object_id=object_id,
-                        source_transform=source_transform,
-                        position_offset=position_offset,
-                    )
-                )
+        ))
 
     base_mesh = (
         MeshData(
@@ -238,27 +197,23 @@ def _extract_proxy_mesh_library(
         mesh_id = mesh.attrib.get("ID")
         if mesh_id is None or not mesh_id.isdigit():
             continue
-        lod = _select_primary_lod(mesh)
+        lod = source_extraction.select_primary_lod(mesh)
         if lod is None:
             continue
         vertices = lod.find("Vertices")
         if vertices is None:
             continue
-        points = _extract_packed_points(vertices, f"{mesh.attrib.get('Name', f'Mesh_{mesh_id}')}.points", messages, source_transform)
-        face_counts, face_indices, sections = _extract_lod_faces(lod, mesh.attrib.get("Name", f"Mesh_{mesh_id}"), messages, material_ids)
-        if not points or not face_counts or not face_indices:
+        mesh_data = source_extraction.extract_prototype_mesh(
+            mesh.attrib.get("Name", f"Mesh_{mesh_id}"), vertices, lod, messages,
+            source_transform, material_ids, include_surface_attributes=False,
+        )
+        if mesh_data is None:
             continue
         entries.append(
             MeshLibraryEntry(
                 mesh_id=int(mesh_id),
                 name=mesh.attrib.get("Name", f"Mesh_{mesh_id}"),
-                mesh=MeshData(
-                    name=mesh.attrib.get("Name", f"Mesh_{mesh_id}"),
-                    points=tuple(points),
-                    face_vertex_counts=tuple(face_counts),
-                    face_vertex_indices=tuple(face_indices),
-                    sections=sections,
-                ),
+                mesh=mesh_data,
                 original_scale=_read_positive_float(lod.attrib.get("OriginalScale")),
             )
         )
@@ -279,7 +234,7 @@ def _build_proxy_prototypes(
         prototypes.append(
             Prototype(
                 identity=PrototypeIdentity(source_key=source_key, prim_name=source_key),
-                mesh=_mesh_with_original_scale(entry) if entry is not None else None,
+                mesh=source_extraction.mesh_with_original_scale(entry) if entry is not None else None,
                 source_key=source_key,
                 source_mesh_id=entry.mesh_id if entry is not None else None,
                 source_name=entry.name if entry is not None else source_key,
@@ -296,7 +251,7 @@ def _find_first_attr(root: ET.Element, attr_name: str) -> str | None:
 
 
 def _read_positive_float(raw: str | None) -> float | None:
-    value = _parse_float_value(raw)
+    value = source_extraction.parse_float_value(raw)
     return value if value is not None and value > 0.0 else None
 
 
@@ -604,4 +559,4 @@ def _quaternion_from_row(row) -> Quaternion:
 def _binding_from_cache_bone_id(source_bone_id: int) -> InstanceBinding:
     if source_bone_id < 0:
         return InstanceBinding(joint_tokens=(), weights=())
-    return _binding_from_bone_id(source_bone_id)
+    return source_extraction.binding_from_bone_id(source_bone_id)

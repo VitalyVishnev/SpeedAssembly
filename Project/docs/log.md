@@ -755,6 +755,20 @@ under `docs/raw/`; Git retains per-change detail.
   10 passed. Quick preview built successfully at dist-preview/SpeedAssembly_preview.cmd;
   no Package or release validation.
 
+## 2026-10-17 - Isolated Rust conversion performance experiment
+
+- Added a reproducible PyO3 experiment outside the application package, with
+  source profiling, fresh-process stage/wall/CPU/parent-memory measurements,
+  private cache controls, Rust normalization kernels and numerical USDA writing.
+- Retained 126 accepted conversions. Big Spruce: 1.358 -> 1.144 s; WorldTree:
+  18.972 -> 15.633 s; unchanged 14.16M-triangle FBX path: 50.086 -> 32.754 s.
+  Heavy USDA writing alone: 26.760 -> 9.556 s, 2.80x. Exact hashes match.
+- Validated nine canonical XML models, packed-buffer and numeric edge parity,
+  71 existing backend contracts, and OpenUSD counts on both large outputs.
+  Recorded the source JSON cache slowdown and source-only integration gap.
+- Production code, UI, FBX loading, application dependencies and release version
+  are unchanged. No Rust-enabled EXE, Package build, UE import or GitHub upload.
+
 ## 2026-10-17 - Faster initial XML discovery without full-model caching
 
 - Traced the old streamed-discovery decision and later Scattered Parts/vertical
@@ -775,3 +789,96 @@ under `docs/raw/`; Git retains per-change detail.
 - Built `dist-next/SpeedAssembly.exe` and its ZIP at the existing version.
   Rust remains experimental; no dependency, backend switch, release bump or
   GitHub publication. Evidence: `experiments/xml_opening/RESULTS.md`.
+
+## 2026-10-18 - Native XML opening with shared Wind data
+
+- Added the default packaged Rust/PyO3 opening reader. Validate complete XML and
+  existing source budgets, then return compact opening facts; retain Python
+  canonical transforms, skeleton normalization and Scattered Parts semantics.
+  Legacy encodings and unusual structure use the existing reader.
+- Discovery returns authored Wind from the same source snapshot, avoiding the
+  second read and worker startup. Preserve manual refresh, Ground Cover,
+  large-source isolation, cancellation and leaf-only synthetic-rig behavior.
+- Retained 43 accepted measurements and six-source exact parity. Paired source
+  Qt readiness: Big Spruce 3.454 -> 1.565 s, WorldTree 15.701 -> 4.085 s.
+  Clustered grass shows no established total gain; native DOM memory and worker
+  startup remain measured limits. Evidence: `experiments/rust_xml/RESULTS.md`.
+- Passed 664 default tests, 81 focused checks, 27 packaged contracts and both
+  required real-result/recovery smokes without skips. No unexpected native
+  crash or new UE import. Package bundles the extension and upstream notices;
+  user machines do not need Rust. No version change or GitHub publication.
+- Final EXE readiness: Big Spruce 1.071–1.303 s, WorldTree 3.440–3.892 s, two
+  openings each including automatic Wind. Complete source/frozen worker equality
+  holds on four inputs; ZIP/EXE hashes, integrity and bundled licenses verified.
+
+## 2026-10-18 - One owner for Source Opening Facts
+
+- Consolidated reader selection, native projection recovery and authored Wind
+  identity reading in `opening_xml.py`. Discovery merges complete source facts
+  with persisted settings; Wind retains JSON output and synthetic-rig resolution.
+  Partial XML/native availability no longer reaches those callers.
+- Kept Rust exchange, canonical interpretation, UI/worker payloads and cache
+  policy unchanged. Added the domain term and recorded module ownership.
+- Passed the 670-test default suite after one documented Qt typography flake;
+  a separate theme/opening/Wind/Qt check passed all 76 tests. Added intent-level
+  checks that both opening views propagate broken-native and rejected-input
+  errors without silently selecting Python.
+- Retained exact discovery/Wind signatures on six sources and full equality
+  with the pre-refactor EXE on Big Spruce, WorldTree and both grass sources.
+  No new native kernel, release version, commit or GitHub publication.
+- Package passed 27 contracts and both mandatory real-result smokes without
+  skips. The new EXE equals source on four inputs; ZIP/embedded EXE, input hashes
+  and upstream notices verify. Four interleaved openings per version give
+  1.356 -> 1.379 s for Big Spruce and 4.189 -> 4.057 s for WorldTree. No new
+  speedup or stable regression is established. Evidence:
+  `experiments/rust_xml/OPENING_OWNERSHIP.md` and its acceptance records.
+
+## 2026-10-18 - Production Rust USDA numerical serialization
+
+- Moved numerical payload iteration/chunking behind `usda_numbers.py`; added
+  pinned `native/usda_numbers` with borrowed buffers and exact `%g` text. Kept
+  scene authoring/publication, canonical models, FBX and UI choices unchanged.
+- Added shared Rust build ownership, frozen-module inclusion, upstream notices
+  and a mandatory real-result conversion-worker smoke. Kept source Python
+  recovery and explicit packaged import/API failures. Mid-array cancellation
+  preserves old outputs and releases buffer leases.
+- Passed 679 default tests, 27 Package contracts and all required smokes without
+  skips; strict native lint/format, 24 old/new author pairs and actual frozen
+  heavy-FBX parity pass. Retained UE 5.7.4 import/build evidence with matching
+  skeleton bindings; recorded pre-existing material API warnings separately.
+- Twenty-four source timing runs: heavy writing 45.680 -> 16.560 s
+  wall and 27.000 -> 9.469 s CPU; full 87.115 -> 56.827 s.
+  Parent peak 3331 -> 2103 MiB. WorldTree full median
+  31.310 -> 27.453 s. Small-input CPU gain is not established; keep measured
+  scope and wall variation. No version bump, commit or publication.
+- Evidence and exact candidate hashes: `experiments/rust_usda/RESULTS.md` and
+  `results/acceptance.json`. Runtime Wind/viewport validation was not rerun.
+
+## 2026-10-18 - Shared source extraction for canonical and Proxy projections
+
+- Implemented architecture candidate 3 in `source_extraction.py`. Shared
+  geometry, skinning, skeleton and Repeated Part interpretation now have one
+  owner; canonical and Proxy composition, diagnostics, identity and cache
+  policies stay separate. Updated opening queries and isolated Rust experiment
+  hooks. No new native extraction adapter or cache schema change.
+- Exact old/new source facts match on ten inputs through WorldTree; all four
+  Simple Tree export modes match. Passed 680 source tests, 27 Package contracts,
+  all required smokes, frozen Proxy Preview and old/new frozen worker parity on
+  Simple Tree and BigSpruce. ZIP/native/notices checks pass.
+- UE 5.7.4 imports the exact new EXE output with three correct mesh/Skeleton
+  associations and no error-level log entries. Existing material API warnings
+  remain; animated Wind/material appearance were not rerun. Recorded the
+  pre-existing non-finite OriginalScale discrepancy for a separate change.
+- Evidence: `experiments/source_extraction/RESULTS.md` and `results/acceptance.json`.
+  No measured speedup, version change, commit or publication claimed.
+
+## 2026-10-18 - Commit production Rust work and retain local experiments
+
+- Split production XML opening, USDA numerical serialization and shared source
+  extraction into three logical commits. Retained native sources, lockfiles,
+  build integration, licenses and contract tests; excluded local experiment
+  directories and their binaries/results.
+- Recorded the operator's validation rule: byte-identical USD with unchanged
+  payloads/settings reuses accepted UE import evidence. Source/Package gates
+  still apply to runtime changes. No new build is required for commit grouping
+  and documentation alone; the preceding 680-test/full-Package result applies.
