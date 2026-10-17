@@ -20,6 +20,9 @@ def test_release_bundle_packages_exe_examples_and_help_assets(tmp_path: Path) ->
     ufbx_license = repo_root / "src" / "xml_to_usda" / "vendor" / "ufbx" / "LICENSE"
     ufbx_license.parent.mkdir(parents=True)
     ufbx_license.write_text("ufbx license", encoding="utf-8")
+    native_license = repo_root / "native/xml_reader/licenses/roxmltree.txt"
+    native_license.parent.mkdir(parents=True)
+    native_license.write_text("MIT notice", encoding="utf-8")
     sample_xml.with_name(".gitkeep").write_text("", encoding="utf-8")
     dist_path.mkdir(parents=True)
     exe_path.write_bytes(b"exe")
@@ -39,6 +42,7 @@ def test_release_bundle_packages_exe_examples_and_help_assets(tmp_path: Path) ->
             "LICENSE",
             "THIRD_PARTY_NOTICES.md",
             "licenses/ufbx-LICENSE",
+            "licenses/rust-xml/roxmltree.txt",
             "examples/SimpleTree_01.xml",
         }
 

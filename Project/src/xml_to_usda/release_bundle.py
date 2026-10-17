@@ -35,6 +35,8 @@ def build_release_bundle(*, repo_root: str | Path, dist_path: str | Path, zip_pa
         if not ufbx_license.exists():
             raise FileNotFoundError(f"Vendored ufbx license is missing: {ufbx_license}")
         archive.write(ufbx_license, "licenses/ufbx-LICENSE")
+        for native_license in sorted((resolved_repo_root / "native/xml_reader/licenses").glob("*.txt")):
+            archive.write(native_license, f"licenses/rust-xml/{native_license.name}")
         sample_path = resolved_repo_root / "samples" / "speedtree" / "simple_tree" / "variants" / "SimpleTree_01.xml"
         if not sample_path.exists():
             raise FileNotFoundError(f"Packaged example is missing: {sample_path}")

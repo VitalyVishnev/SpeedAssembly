@@ -13,23 +13,20 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from .models import CpuProfile, FbxMaterialMode, PrototypeSourceMode, SourceXmlDocument, UdimMode
+from .models import CpuProfile, DynamicWindData, FbxMaterialMode, PrototypeSourceMode, SourceXmlDocument, UdimMode
 from .settings_service import (
     BaseMaterialSettingRecord,
     FbxMaterialSlotSettingRecord,
     PartSourceSettingRecord,
 )
 from .source_analysis import (
-    discover_missing_bone_generator_groups,
     discover_part_prototypes,
     discover_source_materials,
 )
 from .canonical_loader import load_source_tree_model
 from .scattered_parts import ScatteredPartsAnalysis, analyze_scattered_parts
 from .skeleton_processing import strictly_vertical_joint_names
-from .normalizer import count_source_part_instances, normalize_source_skeleton, normalize_to_canonical
-from .source_transform import build_source_transform
-from .xml_reader import analyze_xml, read_source_xml
+from .opening_xml import inspect_source_opening
 
 
 @dataclass(frozen=True)
@@ -90,6 +87,7 @@ class SourceDiscoveryRequest:
     input_path: str
     base_persisted_records: tuple[BaseMaterialSettingRecord, ...] = ()
     part_persisted_records: tuple[PartSourceSettingRecord, ...] = ()
+    is_ground_cover: bool = False
 
 
 @dataclass(frozen=True)
@@ -101,46 +99,20 @@ class SourceDiscoveryResult:
     scattered_parts: ScatteredPartsAnalysis = ScatteredPartsAnalysis(False, False, 0)
     strictly_vertical_joints: tuple[str, ...] = ()
     skeleton_joint_count: int = 0
+    wind_data: DynamicWindData | None = None
 
 
 def discover_source_rows(request: SourceDiscoveryRequest) -> SourceDiscoveryResult:
-    # Opening the UI needs source facts, not a serialized geometry model. Keep
-    # the canonical reader's safety checks and reuse its document for every row.
-    document = read_source_xml(request.input_path)
-    analysis = analyze_xml(document)
-    source_transform = build_source_transform(
-        document.tree.getroot(), analysis.report.units_hint,
-        analysis.report.up_axis_hint, analysis.source_nodes.meshes,
-    )
-    skeleton = normalize_source_skeleton(analysis.source_nodes.bones, source_transform)
-    if skeleton:
-        scattered_parts = ScatteredPartsAnalysis(
-            False, False, count_source_part_instances(analysis.source_nodes.objects, source_transform),
-            reason="skeleton is present",
-        )
-    else:
-        # Leaf-only sources need canonical Object/mesh facts to distinguish real
-        # Scattered Parts and cluster ownership. Do not guess from XML tags.
-        source_model = normalize_to_canonical(
-            document, analysis.report, source_nodes=analysis.source_nodes,
-        )
-        scattered_parts = analyze_scattered_parts(source_model)
+    facts = inspect_source_opening(request.input_path, is_ground_cover=request.is_ground_cover)
     return SourceDiscoveryResult(
         input_path=request.input_path,
-        base=discover_base_material_rows(
-            request.input_path,
-            persisted_records=request.base_persisted_records,
-            document=document,
-        ),
-        prototypes=discover_part_prototype_rows(
-            request.input_path,
-            persisted_records=request.part_persisted_records,
-            document=document,
-        ),
-        missing_bone_generator_groups=discover_missing_bone_generator_groups(request.input_path, document=document),
-        scattered_parts=scattered_parts,
-        strictly_vertical_joints=strictly_vertical_joint_names(skeleton),
-        skeleton_joint_count=len(skeleton),
+        base=_base_material_discovery(facts.materials, request.base_persisted_records),
+        prototypes=_prototype_discovery(facts.prototypes, request.part_persisted_records),
+        missing_bone_generator_groups=facts.missing_bone_generator_groups,
+        scattered_parts=facts.scattered_parts,
+        strictly_vertical_joints=facts.strictly_vertical_joints,
+        skeleton_joint_count=facts.skeleton_joint_count,
+        wind_data=facts.wind_data,
     )
 
 
@@ -161,6 +133,10 @@ def discover_base_material_rows(
 ) -> BaseMaterialDiscovery:
     """Discover base XML material rows and merge persisted UI assignments."""
     materials = discover_source_materials(input_path, document=document)
+    return _base_material_discovery(materials, persisted_records)
+
+
+def _base_material_discovery(materials, persisted_records) -> BaseMaterialDiscovery:
     if not materials:
         return BaseMaterialDiscovery(
             summary="No XML material slots were found in this file.",
@@ -194,6 +170,10 @@ def discover_part_prototype_rows(
 ) -> PrototypeDiscovery:
     """Discover repeated-part prototype rows and merge persisted source settings."""
     prototypes = discover_part_prototypes(input_path, document=document)
+    return _prototype_discovery(prototypes, persisted_records)
+
+
+def _prototype_discovery(prototypes, persisted_records) -> PrototypeDiscovery:
     if not prototypes:
         return PrototypeDiscovery(
             summary="No repeated branch instances were found in this XML.",

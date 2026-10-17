@@ -26,7 +26,7 @@ SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "samples" / "speedtree" /
 def test_opening_projects_canonical_facts_with_one_safe_read_and_no_model_cache(
     source, monkeypatch, tmp_path,
 ) -> None:
-    from xml_to_usda import discovery_service as service, source_analysis
+    from xml_to_usda import discovery_service as service, opening_xml, source_analysis
     from xml_to_usda.normalizer import normalize_to_canonical
     from xml_to_usda.scattered_parts import analyze_scattered_parts
     from xml_to_usda.skeleton_processing import strictly_vertical_joint_names
@@ -74,11 +74,12 @@ def test_opening_projects_canonical_facts_with_one_safe_read_and_no_model_cache(
         return read_source_xml(input_path)
     def forbidden(*args, **kwargs):
         raise AssertionError("opening repeated XML parsing, cache IO, or unnecessary normalization")
-    monkeypatch.setattr(service, "read_source_xml", tracked_read)
+    monkeypatch.setattr(opening_xml, "read_source_xml", tracked_read)
+    monkeypatch.setattr(opening_xml, "_read_native_opening", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(service, "load_source_tree_model", forbidden)
     monkeypatch.setattr(source_analysis, "iterparse_source_xml", forbidden)
     if model.skeleton:
-        monkeypatch.setattr(service, "normalize_to_canonical", forbidden)
+        monkeypatch.setattr(opening_xml, "normalize_to_canonical", forbidden)
     result = service.discover_source_rows(service.SourceDiscoveryRequest(str(path)))
     assert reads == [str(path)]
     assert result.base == expected_base

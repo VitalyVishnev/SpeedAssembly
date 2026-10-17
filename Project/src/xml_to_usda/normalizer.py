@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import gc
 import math
@@ -178,6 +178,16 @@ def count_source_part_instances(
         count += sum(_read_leaf_reference_payload(
             obj, child, [], set(), source_transform).count for child in leaf_refs)
     return count
+
+
+def validate_source_part_hosts(object_nodes, source_transform: SourceTransform) -> None:
+    """Validate placement space without expanding the native instance-count projection."""
+    for obj in object_nodes:
+        if obj.find("LeafReferences") is not None:
+            _leaf_reference_position_offset(
+                obj, source_transform,
+                has_mesh_payload=obj.find("Points") is not None and obj.find("Triangles") is not None,
+            )
 
 
 def _metadata_warnings(report: ObservedXmlSchemaReport) -> list[str]:

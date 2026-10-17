@@ -14,6 +14,7 @@ the MIT license of SpeedAssembly's original source code.
 | fast-simplification | MIT | Permissive; copyright PyVista Developers; [license](https://github.com/pyvista/fast-simplification/blob/main/LICENSE) |
 | Manifold | Apache-2.0 | Permissive; copyright Manifold contributors; [license](https://github.com/elalish/manifold/blob/master/LICENSE) |
 | defusedxml | PSF License 2.0 | Permissive; [license](https://github.com/tiran/defusedxml/blob/main/LICENSE) |
+| Rust XML reader dependencies: PyO3 0.23.5, roxmltree 0.21.1, memchr and support crates | MIT option of the upstream licenses | Exact versions in `native/xml_reader/Cargo.lock`; MIT notices included under `licenses/rust-xml/` in the release ZIP. [PyO3](https://github.com/PyO3/pyo3), [roxmltree](https://github.com/RazrFalcon/roxmltree), [memchr](https://github.com/BurntSushi/memchr) |
 | OpenUSD (`usd-core`) | Tomorrow Open Source Technology License 1.0 | Apache-2.0-derived permissive license; [license](https://github.com/PixarAnimationStudios/OpenUSD/blob/release/LICENSE.txt) |
 | ufbx 0.21.3 | MIT or public domain | Permissive; vendored source and license are retained in `src/xml_to_usda/vendor/ufbx`; [license](https://github.com/ufbx/ufbx/blob/master/LICENSE) |
 | PyInstaller | GPL-2.0-or-later with Bootloader Exception | The exception permits distribution of programs built with PyInstaller; [license](https://pyinstaller.org/en/stable/license.html) |

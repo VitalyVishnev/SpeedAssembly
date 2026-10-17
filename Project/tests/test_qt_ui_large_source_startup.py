@@ -107,3 +107,30 @@ def test_missing_bone_group_warning_requires_acknowledgement_but_does_not_change
     assert calls[0][1] == "Missing skeleton bones"
     assert "Group_2" in calls[0][2]
     assert calls[0][3] == QMessageBox.StandardButton.Ok
+
+
+@pytest.mark.parametrize('ground_cover', (False, True))
+def test_source_result_reuses_wind_and_does_not_launch_another_worker(qtbot, tmp_path, ground_cover):
+    from xml_to_usda.discovery_service import SourceDiscoveryResult, BaseMaterialDiscovery, PrototypeDiscovery
+    from xml_to_usda.dynamic_wind import build_dynamic_wind_data
+    from xml_to_usda.models import Joint
+
+    xml_path = tmp_path / 'tree.xml'
+    xml_path.write_text('<Tree/>', encoding='utf-8')
+    wind = build_dynamic_wind_data((Joint('bone_0', generator_level=0),), is_ground_cover=ground_cover)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('source result caused a duplicate Wind read/worker')
+    deps = replace(build_default_dependencies(),
+        discover_source_rows=lambda request: SourceDiscoveryResult(
+            request.input_path, BaseMaterialDiscovery('', ()), PrototypeDiscovery('', ()), wind_data=wind),
+        inspect_wind_groups=forbidden, start_wind_preview_process=forbidden)
+    window = MainWindow(load_theme(), UiShellState(help_prompt_dismissed=True), dependencies=deps,
+                        state_path=tmp_path / 'state.json', operator_settings_path=tmp_path / 'settings.json')
+    qtbot.addWidget(window)
+    window.wind_panel.ground_cover_checkbox.setChecked(ground_cover)
+    window.source_input.setText(str(xml_path))
+    qtbot.wait(350)
+    assert window._current_dynamic_wind == wind
+    assert not window._source_refresh_timer.isActive()
+    assert not window._background_jobs.wind_refresh_running
+    window.close()

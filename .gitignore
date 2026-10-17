@@ -10,6 +10,7 @@ node_modules/
 __pycache__/
 *.pyc
 Project/src/xml_to_usda/_ufbx*.pyd
+Project/src/xml_to_usda/_xml_reader*.pyd
 
 # Build outputs
 build/

@@ -866,6 +866,7 @@ class MainWindow(QWidget):
         self._pending_generate_after_refresh = False
         self._pending_wind_preview_after_refresh = False
         self._current_dynamic_wind = None
+        self._source_wind_ready_key = None
         self._conversion_running = False
         self._wind_refresh_running = False
         self._wind_json_running = False
@@ -2240,6 +2241,8 @@ class MainWindow(QWidget):
         if not input_path or not Path(input_path).exists():
             self._source_refresh_timer.stop()
             return
+        if self._source_wind_ready_key == (input_path, self.wind_panel.is_ground_cover_enabled()):
+            return
         if self._background_jobs.source_discovery_running:
             return
         if self._conversion_running or self._wind_refresh_running or self._wind_json_running:
@@ -2332,6 +2335,7 @@ class MainWindow(QWidget):
                     input_path=input_path,
                     base_persisted_records=base_records,
                     part_persisted_records=part_records,
+                    is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
                 )
             )
             return
@@ -2343,6 +2347,7 @@ class MainWindow(QWidget):
                     input_path=input_path,
                     base_persisted_records=base_records,
                     part_persisted_records=part_records,
+                    is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
                 )
             )
         except Exception as exc:
@@ -2370,6 +2375,7 @@ class MainWindow(QWidget):
             skeleton_joint_count=result.skeleton_joint_count,
         )
         self._finish_status_activity("success", "Source rows loaded.")
+        self._reuse_source_wind(result)
 
     def _should_discover_source_async(self, input_path: str) -> bool:
         try:
@@ -2404,7 +2410,16 @@ class MainWindow(QWidget):
             skeleton_joint_count=result.skeleton_joint_count,
         )
         self._finish_status_activity("success", "Source rows loaded.")
+        self._reuse_source_wind(result)
         self._maybe_auto_refresh_wind_groups()
+
+    def _reuse_source_wind(self, result: SourceDiscoveryResult) -> None:
+        self._source_wind_ready_key = None
+        wind = result.wind_data
+        if wind is not None and wind.is_ground_cover == self.wind_panel.is_ground_cover_enabled():
+            self._source_refresh_timer.stop()
+            self._source_wind_ready_key = (result.input_path, wind.is_ground_cover)
+            self._handle_wind_data_loaded(wind, used_retry=False)
 
     def _handle_source_discovery_error(self, message: str) -> None:
         self._clear_input_dependent_tabs()
@@ -2497,6 +2512,7 @@ class MainWindow(QWidget):
         )
 
     def _clear_input_dependent_tabs(self) -> None:
+        self._source_wind_ready_key = None
         self._scattered_parts_analysis = None
         self.program_status_card.set_vertical_skeleton_warning(())
         self.wind_panel.set_scattered_parts_mode(active=False)

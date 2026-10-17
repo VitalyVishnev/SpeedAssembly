@@ -20,6 +20,7 @@ from typing import Callable, Any
 
 SMOKE_COMMAND = "smoke"
 SMOKE_SCENARIO_STARTUP = "startup"
+SMOKE_SCENARIO_SOURCE_OPENING = "source-opening"
 SMOKE_SCENARIO_WIND_PREVIEW = "wind-preview"
 SMOKE_SCENARIO_FRACTURE_PREVIEW = "fracture-preview"
 SMOKE_SCENARIO_FRACTURE_PREVIEW_INTERACTIVE = "fracture-preview-interactive"
@@ -48,6 +49,7 @@ PACKAGED_STABILITY_SCENARIOS: tuple[str, ...] = (
 )
 
 SMOKE_SCENARIOS: tuple[str, ...] = HIGH_RISK_SCENARIOS + (
+    SMOKE_SCENARIO_SOURCE_OPENING,
     SMOKE_SCENARIO_FRACTURE_PREVIEW_RECOVERY,
     SMOKE_SCENARIO_HIGH_RISK,
     SMOKE_SCENARIO_PACKAGED_STABILITY,
@@ -142,6 +144,8 @@ def run_smoke_cli(argv: list[str] | None = None, *, scenario_runner: ScenarioRun
 
 
 def run_real_smoke_scenario(name: str, context: SmokeContext) -> dict[str, Any]:
+    if name == SMOKE_SCENARIO_SOURCE_OPENING:
+        return _run_source_opening_smoke(context)
     if name == SMOKE_SCENARIO_STARTUP:
         return _run_startup_smoke(context)
     if name == SMOKE_SCENARIO_WIND_PREVIEW:
@@ -173,6 +177,35 @@ def _scenario_names(name: str) -> tuple[str, ...]:
 
 def _default_report_path() -> Path:
     return Path.cwd() / "dist-next" / "smoke" / "smoke_report.json"
+
+
+def _run_source_opening_smoke(context: SmokeContext) -> dict[str, Any]:
+    window = _create_smoke_window(context)
+    try:
+        input_path, _output_path = _resolve_input_output(context, suffix=".usda")
+        data = {}
+        apply_rows = window._apply_source_discovery
+        def measured_rows(**kwargs):
+            apply_rows(**kwargs)
+            data.update(rows_seconds=time.perf_counter() - started,
+                        joints=kwargs["skeleton_joint_count"],
+                        prototypes=len(kwargs["prototype_discovery"].rows),
+                        instances=sum(row.instance_count for row in kwargs["prototype_discovery"].rows))
+        window._apply_source_discovery = measured_rows
+        started = time.perf_counter()
+        window.source_input.setText(str(input_path))
+        _wait_until(lambda: window._current_dynamic_wind is not None and "rows_seconds" in data,
+                    timeout_ms=context.timeout_ms, label="source rows and automatic Wind")
+        data.update(ready_seconds=time.perf_counter() - started,
+                    wind_groups=len(window._current_dynamic_wind.simulation_groups),
+                    reused_wind=window._source_wind_ready_key is not None)
+        if bool(getattr(sys, 'frozen', False)):
+            from importlib.util import find_spec
+            _assert(find_spec('xml_to_usda._xml_reader') is not None, "packaged native XML reader available")
+        return _passed(name=SMOKE_SCENARIO_SOURCE_OPENING,
+                       checks=("source.rows", "wind.result", "window.visible"), data=data)
+    finally:
+        _close_window(window)
 
 
 def _run_startup_smoke(context: SmokeContext) -> dict[str, Any]:

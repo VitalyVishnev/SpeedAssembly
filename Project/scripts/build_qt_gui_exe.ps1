@@ -172,6 +172,8 @@ try {
     }
 
     if ($Package) {
+        Write-Host 'Building Rust XML reader ...'
+        & (Join-Path $PSScriptRoot 'build_xml_reader.ps1')
         Write-Host 'Building bundled ufbx extension ...'
         & $pythonExe -s setup.py build_ext --inplace
         if ($LASTEXITCODE -ne 0) {
@@ -208,6 +210,7 @@ try {
             '--version-file', (Join-Path $buildPath 'windows_version.txt'),
             '--additional-hooks-dir', $hooksPath,
             '--hidden-import', 'xml_to_usda._ufbx',
+            '--hidden-import', 'xml_to_usda._xml_reader',
             '--paths', (Join-Path $repoRoot 'src'),
             '--add-data', "$qtUiStagingRoot;xml_to_usda/qt_ui",
             '--add-data', "$(Join-Path $buildPath 'build_identity.json');xml_to_usda",
