@@ -37,6 +37,8 @@ AGENTS.override.md
 CLAUDE.md
 
 # Temporary diagnostics and generated scratch data
+# Research source/evidence belongs outside Git; see Project/docs/wiki/experiments.md.
+/Project/experiments/
 /tmp/
 /Project/tmp/
 .pytest_tmp*/

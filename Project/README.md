@@ -34,6 +34,11 @@ including discarded geometry budgets, before returning its opening projection.
 
 ## Tests and builds
 
+Research scripts and durable evidence belong in the external experiment archive,
+not `Project/experiments/`. See [experiment storage](docs/wiki/experiments.md#storage-policy)
+for its location and retention rules. Keep generated exports, caches and build
+products in disposable scratch space outside that archive.
+
 From `Project/`:
 
 ```powershell

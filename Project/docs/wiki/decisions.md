@@ -1,5 +1,17 @@
 # Decisions
 
+## Durable experiments live outside the repository, 2026-10-18
+
+Store research code, documents and useful evidence in
+`D:/3D Personal/XMLtoUSD_miscFiles/SpeedAssembly_Experiments`, abbreviated
+`<archive>/` in evidence references. Run generated geometry, caches, build
+products and temporary process files in disposable scratch space outside that
+archive. Retain compact measurements, environment details and hashes instead
+of full generated outputs. Keep maintained conclusions in the wiki and working
+production crates/tests in the repository. Source, Package and tests must not
+depend on the external archive. `Project/experiments/` is retired. See
+[Experiments](experiments.md) for retention and reproduction rules.
+
 ## Reuse Unreal acceptance for identical output, 2026-10-18
 
 Operator instruction: do not repeat Unreal import when the final USD is
@@ -47,7 +59,7 @@ the first signed-zero spelling; NaNs bypass the cache to match Python equality.
 Primary/secondary UVs have separate caches. Streamed sinks check cancellation
 between bounded writes and retain existing partial-file cleanup/publication.
 
-The original `experiments/rust_conversion/` remains isolated, including its
+The original `<archive>/rust_conversion/` remains isolated, including its
 normalization/transform kernels. Its Python control explicitly disables the
 production adapter so comparisons remain valid. Build both production crates
 through `build_rust_extensions.ps1`; the XML-only command remains compatible.
@@ -99,7 +111,7 @@ existing Wind refresh. Leaf-only synthetic rigs and incompatible results retain
 their separate Wind path. Manual refresh still rereads the current source.
 Preserve the CR-013 fresh-worker threshold and cancellation; do not keep a
 persistent native worker or add another model cache. Full conversion loading,
-FBX and USDA authoring are unchanged. Evidence: `experiments/rust_xml/RESULTS.md`.
+FBX and USDA authoring are unchanged. Evidence: `<archive>/rust_xml/RESULTS.md`.
 
 ## Initial XML discovery projects facts without a geometry cache, 2026-10-17
 
@@ -124,13 +136,13 @@ which explicitly rejected heavy normalization on every UI discovery. Later
 Scattered Parts and strict-vertical warnings require canonical structural facts,
 but do not justify building all geometry for an authored skeleton. Keep XML
 budgets, DTD/entity rejection and the CR-013 fresh-worker boundary at 5 MiB.
-See `experiments/xml_opening/RESULTS.md` for measured costs and remaining reads.
+See `<archive>/xml_opening/RESULTS.md` for measured costs and remaining reads.
 
 ## Rust conversion evaluation stays outside production, 2026-10-17
 
 The operator requested a performance experiment, not a runtime migration.
 Keep its Rust/PyO3 build and process-local adapters in
-`experiments/rust_conversion/`; do not add application dependencies or persisted
+`<archive>/rust_conversion/`; do not add application dependencies or persisted
 backend choices. Retain XML safety checks, canonical/resolved models, staged
 validation, scene authoring, FBX loading and worker boundaries. Compare complete
 real conversions, including FFI, final file publication and cache costs, with

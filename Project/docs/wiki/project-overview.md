@@ -4,6 +4,9 @@ The application lives in `Project/`. Paths in this wiki are relative to that
 directory unless stated otherwise. The repository root holds the public README,
 license, ignore rules, and `.github/` automation. See [development setup](../../README.md).
 
+Research code and durable reports live in the external archive beside test
+assets, not in the repository. See [experiment storage](experiments.md#storage-policy).
+
 SpeedAssembly is a deterministic converter from SpeedTree Raw XML to USDA for the UE 5.7–5.8 vegetation pipeline. It is not a generic XML-to-USD tool.
 
 The current goal is to preserve the importer contract while keeping the pipeline inspectable and deterministic. The validated primary path is `skeletal_assembly` (Skeletal Assembly, or `Skeletal Mesh Nanite Assembly`). `static_assembly` is supported as a secondary export shape (`Static Mesh Nanite Assembly`), but it must not redefine the skeletal contract.

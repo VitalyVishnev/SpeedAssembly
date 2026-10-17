@@ -10,7 +10,7 @@ This is the maintained entry point for project memory.
 - [Decisions](decisions.md) - stable choices that should not be re-litigated casually.
 - [Known Bugs](known-bugs.md) - current fragilities, workarounds, and open validation gaps.
 - [Encountered Crashes](encountered-crashes.md) - resolved/open native failures grouped by systemic cause and regression gate.
-- [Experiments](experiments.md) - rejected or uncertain technical experiments worth preserving.
+- [Experiments](experiments.md) - research conclusions, external archive location and retention rules.
 - [Glossary](glossary.md) - project terms, workflows, and abbreviations.
 - [Test Policy](testing.md) - execution layers, fixture limits, and system-contract map.
 - [Typography](typography.md) - current Qt font audit and proposed text roles, pending visual approval.

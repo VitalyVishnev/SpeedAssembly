@@ -882,3 +882,21 @@ under `docs/raw/`; Git retains per-change detail.
   payloads/settings reuses accepted UE import evidence. Source/Package gates
   still apply to runtime changes. No new build is required for commit grouping
   and documentation alone; the preceding 680-test/full-Package result applies.
+
+## 2026-10-18 - Move durable experiments outside the repository
+
+- Archived all five experiments in
+  `D:/3D Personal/XMLtoUSD_miscFiles/SpeedAssembly_Experiments`. Retained 242
+  original source, document, configuration and evidence files, verified with
+  SHA-256. The external README and manifest describe reproduction limits,
+  retained files and intentional omissions; the complete archive is 1.11 MiB.
+- Removed `Project/experiments/`, including the previously tracked Python-only
+  opening study. Discarded 409 generated/runtime/build files, about 13.50 GiB,
+  after verifying the retained archive. Test-tree assets were not modified.
+- Recorded the external storage contract in the wiki and local agent rules;
+  updated current evidence references and retired the in-repository directory.
+  Future archives keep useful code and compact results; disposable outputs,
+  caches and temporary files stay outside them. Production Rust crates stay in
+  `Project/native/` and builds/tests do not depend on the archive.
+- Rechecked all retained hashes and current evidence paths. Production, native,
+  test and build sources are unchanged; no new Package or Unreal import needed.

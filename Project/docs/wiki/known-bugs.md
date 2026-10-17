@@ -4,6 +4,9 @@ Current defects, fail-loud limits, and validation gaps only. Resolved crash
 history lives in [Encountered Crashes](encountered-crashes.md); rejected fixes
 and benchmark detail live in [Experiments](experiments.md).
 
+Evidence paths starting with `<archive>/` use the external experiment archive
+defined on that page; they are not repository-relative paths.
+
 ## OriginalScale validation differs between projections
 
 Code inspection during the 2026-10-18 extraction refactor found that Proxy's
@@ -22,7 +25,7 @@ prims have material bindings without applied `MaterialBindingAPI`. The same
 USDA bytes come from accepted Python author `2621bd2` and the native numerical
 adapter. Import/build and all three mesh-to-skeleton bindings succeed; material
 appearance was not checked in this headless run. Evidence:
-`experiments/rust_usda/results/ue57/import.log` and the input SHA in its
+`<archive>/rust_usda/results/ue57/import.log` and the input SHA in its
 acceptance record. Location: `usda_authoring.py::_emit_inline_part_payload`
 declares only SkelBindingAPI while `_emit_material_binding` writes the relation.
 Deferred to keep the numerical migration byte-identical. Next step: review the
@@ -277,7 +280,7 @@ the cache to 307-324 MiB with it. Keep this separate from Rust gains. Initial
 row discovery now bypasses this cache and avoids geometry normalization for
 authored skeletons. Conversion cache policy is unchanged; compare a typed
 replacement in a dedicated worker/stress-validated change. Evidence:
-`experiments/rust_conversion/results/measurements.json` and `RESULTS.md`.
+`<archive>/rust_conversion/results/measurements.json` and `RESULTS.md`.
 Direct inspection also confirms lost UV/normal sharing: each 174,975-entry
 array grows from 39,714 distinct canonical objects to 174,975 after JSON decode,
 despite value equality. That defeats identity-based authoring format reuse;
@@ -306,8 +309,8 @@ Locations: `opening_xml.py`, `native/xml_reader`,
 `discovery_service.py`, `wind_pipeline.py`. Deferred to preserve the validated
 opening boundary. Next step: profile native DOM/traversal and worker startup
 before proposing streaming or concurrency. Evidence:
-`experiments/rust_xml/RESULTS.md`; the earlier Python-only boundary is recorded
-in `experiments/xml_opening/RESULTS.md`.
+`<archive>/rust_xml/RESULTS.md`; the earlier Python-only boundary is recorded
+in `<archive>/xml_opening/RESULTS.md`.
 
 Related:
 - `src/xml_to_usda/canonical_loader.py`
@@ -318,12 +321,12 @@ Related:
 ## Validation gap: Experimental Rust kernels are not a packaged backend
 
 This concerns the original normalization/transform prototype in
-`experiments/rust_conversion/`. The separate production XML opening reader and
+`<archive>/rust_conversion/`. The separate production XML opening reader and
 numerical writer adapter now pass Package and real-result worker gates; the
 writer also passed byte-identical baseline UE 5.7.4 import/build. See
-`experiments/rust_usda/RESULTS.md`.
+`<archive>/rust_usda/RESULTS.md`.
 
-`experiments/rust_conversion/` is a source-only PyO3 prototype. Sample/model,
+`<archive>/rust_conversion/` is a source-only PyO3 prototype. Sample/model,
 diagnostic and byte parity do not establish frozen DLL loading, cancellation,
 native failure containment, concurrency safety or UE importer acceptance.
 Normalization/transform integration remains deferred deliberately. Before

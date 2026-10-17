@@ -2,12 +2,12 @@
 
 The codebase is organized around one deterministic conversion system with different execution strategies around the edges.
 
-The isolated Rust conversion experiment lives in
-`experiments/rust_conversion/`, outside the application package. Its PyO3
-kernels retain canonical Python objects and the shared authoring structure;
-packed FBX geometry uses borrowed buffer views. Production imports none of it.
-See its `RESULTS.md` and [Experiments](experiments.md) before proposing native
-integration or extrapolating a kernel speedup to complete conversion latency.
+Research code and evidence live in the external experiment archive documented
+in [Experiments](experiments.md). Paths starting with `<archive>/` refer to that
+root. The isolated `rust_conversion` PyO3 kernels retain canonical Python
+objects and the shared authoring structure; packed FBX geometry uses borrowed
+buffer views. Production imports none of that prototype. Read its `RESULTS.md`
+before proposing integration or extrapolating a kernel speedup to full latency.
 
 The production XML opening reader is a separate Rust/PyO3 module in
 `native/xml_reader/`, loaded lazily by `opening_xml.py`. It validates the whole
@@ -33,7 +33,7 @@ failure. No backend choice enters settings, UI or canonical/resolved models.
 Both production extensions use `scripts/build_rust_extensions.ps1`.
 On the retained heavy-FBX case, numerical writing improves 2.76x wall
 and 2.85x CPU; full conversion improves 1.53x locally, not several-fold.
-See `experiments/rust_usda/RESULTS.md` for ranges, cache policy and acceptance.
+See `<archive>/rust_usda/RESULTS.md` for ranges, cache policy and acceptance.
 
 `source_extraction.py` owns shared SpeedTree interpretation for canonical and
 Proxy projections: geometry, skinning, skeleton, Object-local Repeated Part

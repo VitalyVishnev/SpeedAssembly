@@ -1,9 +1,38 @@
 # Experiments
 
-Detailed artifacts in `experiments/rust_conversion`, `experiments/rust_xml`,
-`experiments/rust_usda` and `experiments/source_extraction` are local, untracked
-research material. Their conclusions below remain maintained project memory;
-those directories are not production, test or packaging dependencies.
+## Storage policy
+
+Keep experiment source code and durable evidence outside the repository at:
+
+`D:/3D Personal/XMLtoUSD_miscFiles/SpeedAssembly_Experiments`
+
+This is the external experiment archive, beside the test trees under the
+historical XMLtoUSD asset-folder name. Use one directory per experiment. Keep
+code, configuration, documents, useful measurements, compact profiles, summaries,
+environment details and hashes. Preserve failed approaches when they explain a
+decision. Keep current conclusions and contracts in this wiki and production
+Rust modules in `Project/native/`.
+
+Do not store generated USD/FBX, imported asset caches, serialized full models,
+native build products, executables, runtime IPC, UI state or temporary files in
+the archive. Run those in disposable scratch space outside the archive, such
+as OS temp or the ignored `Project/tmp/`, and clean them after extracting useful
+results. New experiment scripts must accept explicit repository and scratch
+paths instead of deriving them from the archive location. Disable Python
+bytecode writes when running archived code, or direct them to scratch; set
+`CARGO_TARGET_DIR` outside the archive for Rust builds. Do not recreate
+`Project/experiments/` or make builds/tests depend on the external archive.
+
+On 2026-10-18 all five existing experiments were archived: `xml_opening`,
+`rust_conversion`, `rust_xml`, `rust_usda` and `source_extraction`. The archive
+contains 242 original files verified with SHA-256, plus its README and manifest.
+409 generated or temporary files were discarded. Historical scripts retain
+their original path assumptions; consult the archive README before rerunning
+them. The external archive is not backed up by this repository's Git history.
+
+References starting with `<archive>/` below use this external root. Older
+`experiments/<name>/...` references in the project log now map to
+`<archive>/<name>/...`. The archive manifest records retained files and omissions.
 
 ## Shared source extraction, 2026-10-18
 
@@ -19,7 +48,7 @@ and Proxy fields on ten inputs, including WorldTree with 657,878 base points
 and 43,263 instances. Simple Tree matches USDA text in all four modes. The
 default suite passes 680 tests. Old/new frozen conversion workers also match
 USDA bytes and diagnostics for Simple Tree and BigSpruce. Evidence:
-`experiments/source_extraction/RESULTS.md` and its result records. Existing
+`<archive>/source_extraction/RESULTS.md` and its result records. Existing
 non-finite OriginalScale validation differs between projections; tracked in
 known bugs and intentionally preserved in this refactor.
 
@@ -58,7 +87,7 @@ are recorded in the report; animated runtime was not rerun.
 The original experimental UV cache mishandled NaN combined with signed zero;
 production skips those cache keys and has a regression check. No unexpected
 native crash, version bump or publication. Evidence:
-`experiments/rust_usda/RESULTS.md` and `results/acceptance.json`.
+`<archive>/rust_usda/RESULTS.md` and `results/acceptance.json`.
 
 
 ## Source Opening Facts ownership, 2026-10-18
@@ -79,8 +108,8 @@ and the stronger paired check rather than treating either as a universal ratio.
 670 default tests, 27 packaged contracts, both mandatory real-result smokes and
 ZIP/hash/license checks pass. One documented Qt typography flake recurred;
 targeted and complete reruns passed without typography edits. No unexpected
-native crash or new UE import. Evidence: `experiments/rust_xml/OPENING_OWNERSHIP.md`
-and `experiments/rust_xml/results/ownership/acceptance.json`.
+native crash or new UE import. Evidence: `<archive>/rust_xml/OPENING_OWNERSHIP.md`
+and `<archive>/rust_xml/results/ownership/acceptance.json`.
 
 ## Native XML opening and shared Wind snapshot, 2026-10-18
 
@@ -105,7 +134,7 @@ code in the module. Cow text views avoid copying ordinary packed fields;
 unusual numeric forms keep the authoritative Python interpretation. All UI
 assignment, canonical bone, placement and Scattered Parts owners are reused.
 Rust-skills guided memory/error handling and strict Clippy/format checks.
-Full report and raw evidence: `experiments/rust_xml/RESULTS.md`.
+Full report and raw evidence: `<archive>/rust_xml/RESULTS.md`.
 
 Final EXE UI acceptance, two runs per input: Simple Tree 0.113–0.161 s,
 Big Spruce 1.071–1.303 s, WorldTree 3.440–3.892 s, from path insertion to
@@ -114,7 +143,7 @@ WorldTree and both grass inputs without source-model cache creation. Passed
 664 default tests, 81 focused checks, 27 packaged contracts, both required
 real-result smokes, strict native lint/format and ZIP/hash/license validation.
 No new UE import or unexpected native crash. Artifact hashes and timing scope
-are retained in `experiments/rust_xml/results/acceptance.json`.
+are retained in `<archive>/rust_xml/results/acceptance.json`.
 
 ## Initial XML opening projection, 2026-10-17
 
@@ -143,7 +172,7 @@ unchanged leaf-only Wind limits the clustered case to a small total improvement.
 Rust XML parsing, a selective streaming reader and combined discovery/Wind IPC
 remain Unverified. Parallel duplicate reads were not introduced. Conversion
 cache creation can move to the later Convert action. Full results, methodology,
-input hashes and reproduction: `experiments/xml_opening/RESULTS.md`.
+input hashes and reproduction: `<archive>/xml_opening/RESULTS.md`.
 
 Validation: 632 default tests, 59 final focused checks, 27 Package contracts,
 repeated Detailed Cuts real-result smoke and injected-failure recovery passed.
@@ -158,7 +187,7 @@ Status: Source experiment validated; production integration and UE acceptance op
 
 The operator requested full XML-to-published-USDA profiling, followed by Rust
 replacement of measured hot loops while retaining UI and FBX loading. The
-isolated PyO3 candidate lives in `experiments/rust_conversion/`. It moves packed
+isolated PyO3 candidate lives in `<archive>/rust_conversion/`. It moves packed
 number parsing, vertex binding, batched point/normal transforms and numerical
 USDA arrays. Canonical Python models and the authoring/validation engine remain.
 Packed FBX arrays use borrowed buffer views and a UV-value cache preserving
@@ -199,7 +228,7 @@ the subsequent initial-opening change bypasses this cache for row discovery.
 Next useful native trial is the numerical writer behind the current authoring
 seam. Package, native worker lifecycle and UE 5.7.x gates remain mandatory before
 integration. Full report, exact inputs, code and raw evidence:
-`experiments/rust_conversion/RESULTS.md` and `results/` beside it.
+`<archive>/rust_conversion/RESULTS.md` and `results/` beside it.
 
 ## Bone overlay rendering experiments, 2026-10-13
 
