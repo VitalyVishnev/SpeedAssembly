@@ -4,6 +4,17 @@ Current defects, fail-loud limits, and validation gaps only. Resolved crash
 history lives in [Encountered Crashes](encountered-crashes.md); rejected fixes
 and benchmark detail live in [Experiments](experiments.md).
 
+## Tree Keep parent level can require export correction
+
+The default equivalent-fork policy may keep parent and both daughters in one
+non-Trunk group. Stock Dynamic Wind aggregates their chains; independent branch
+motion under that assignment is not established. Location: Tree hierarchy and
+Advanced Wind Settings summary/export. Preview permits the requested grouping;
+summary and export identify the non-Trunk same-group fork. Use Advance together,
+more Groups or manual corrections. Do not enable Trunk solely to bypass the
+guard. Deferred: a source-backed independent-chain export contract and new UE
+runtime validation. Source rig and existing JSON schema remain unchanged.
+
 ## Pending publication: bilingual public documentation
 
 All 12 registered public articles have Russian `.ru.md` translations as of
@@ -113,7 +124,8 @@ Related:
 
 Tree mode agrees with 96.0% of 3336 labelled joints on the operator's ten
 independent reference rigs. This is calibration, not held-out generalization.
-Willow still differs on 31/115 joints; 03_28mil differs on 47/545 versus 28 for
+With Keep parent level defaults, Willow differs on 32/115 joints; previous
+continuation differs on 31. 03_28mil differs on 47/545 versus 28 for
 Order, and Alder 01 differs on 35/346. The operator may compare modes and retain
 manual corrections. Do not add asset-name/ordinal exceptions to hide errors.
 

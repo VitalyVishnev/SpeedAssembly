@@ -23,7 +23,9 @@ from xml_to_usda.models import (
     Vector3,
 )
 from xml_to_usda.wind_preview_service import generate_wind_preview_from_request
-from xml_to_usda.wind_tree_hierarchy import analyze_tree_hierarchy
+from xml_to_usda.wind_tree_hierarchy import (
+    TreeHierarchySettings, analyze_tree_hierarchy, prepare_tree_hierarchy, classify_tree_hierarchy,
+)
 from xml_to_usda.wind_viewport_scene import (
     SELECTED_ALPHA,
     MUTED_ALPHA,
@@ -146,7 +148,9 @@ def test_tree_hierarchy_proposes_reference_groups_from_bare_format_independent_r
         )
         expected = {f"joint_{i}": group for i, (_parent, _matrix, group) in enumerate(case["joints"]) if group is not None}
         count = max(expected.values()) + 1
-        analysis = analyze_tree_hierarchy(skeleton)
+        # Preserve the measured previous rule as an explicit comparison mode.
+        previous = TreeHierarchySettings(equivalent_forks="continuation")
+        analysis = analyze_tree_hierarchy(skeleton, previous)
         data = build_auto_wind_viewport_data(skeleton, count, method="tree", tree_analysis=analysis)
         predicted = {assignment.joint_name: assignment.simulation_group_index for assignment in data.joint_assignments}
         mismatch = sum(predicted[name] != group for name, group in expected.items())
@@ -174,15 +178,58 @@ def test_tree_hierarchy_proposes_reference_groups_from_bare_format_independent_r
                 generator_level=99, generator_label="Ignored", source_id=99,
                 bind_end_transform=Matrix4d.from_translation(Vector3(9999, 9999, 9999)),
             ))
-        rotated = analyze_tree_hierarchy(tuple(reversed(transformed)))
+        rotated = analyze_tree_hierarchy(tuple(reversed(transformed)), previous)
         assert {j.name: j.branch_order for j in rotated} == {names[j.name]: j.branch_order for j in analysis}, case["reference"]
+        default = analyze_tree_hierarchy(skeleton)
+        default_rotated = analyze_tree_hierarchy(tuple(reversed(transformed)))
+        assert {j.name: j.branch_order for j in default_rotated} == {names[j.name]: j.branch_order for j in default}, case["reference"]
     assert wrong / total <= 0.05
 
     # A symmetric bare fork contains no evidence for selecting either child.
     symmetric = (_joint("root", None, 0, 0, 0), _joint("left", "root", -1, 1, 0), _joint("right", "root", 1, 1, 0))
     ambiguous = analyze_tree_hierarchy(symmetric)
     assert ambiguous[0].ambiguous
-    assert [j.branch_order for j in ambiguous] == [0, 1, 1]
+    assert ambiguous[0].equivalent
+    assert [j.branch_order for j in ambiguous] == [0, 0, 0]
+    prepared = prepare_tree_hierarchy(symmetric)
+    advanced = classify_tree_hierarchy(prepared, TreeHierarchySettings(equivalent_forks="advance"))
+    assert [j.branch_order for j in advanced] == [0, 1, 1]
+    previous = classify_tree_hierarchy(prepared, TreeHierarchySettings(equivalent_forks="continuation"))
+    assert [j.branch_order for j in previous] == [0, 1, 1]
+    bind_override = classify_tree_hierarchy(prepared, TreeHierarchySettings(direction_mode="bind"))
+    assert [j.display_end for j in bind_override] == [j.display_end for j in ambiguous]
+
+
+def test_tree_equivalent_daughters_keep_a_branch_level_and_obey_length_threshold() -> None:
+    # A side branch forks symmetrically. Neither daughter deserves a deeper
+    # level until there is sufficient directional/structural evidence.
+    def oriented(name, parent, position, angle):
+        from math import cos, sin, radians
+        c, s = cos(radians(angle)), sin(radians(angle))
+        return Joint(name, parent=parent, bind_transform=Matrix4d((
+            (c, s, 0, 0), (-s, c, 0, 0), (0, 0, 1, 0), (*position, 1),
+        )))
+
+    skeleton = (
+        oriented("root", None, (0, 0, 0), 90),
+        oriented("fork", "root", (1, 0, 0), 0),
+        oriented("left", "fork", (2, 0, 0), 45),
+        oriented("right", "fork", (2, 0, 0), -45),
+        oriented("left_tip", "left", (3, 1, 0), 45),
+        oriented("right_tip", "right", (3, -1, 0), -45),
+    )
+    prepared = prepare_tree_hierarchy(skeleton)
+    keep = classify_tree_hierarchy(prepared)
+    assert keep[1].equivalent
+    assert [j.branch_order for j in keep] == [0, 1, 1, 1, 1, 1]
+    advance = classify_tree_hierarchy(prepared, TreeHierarchySettings(equivalent_forks="advance"))
+    assert [j.branch_order for j in advance] == [0, 1, 2, 2, 2, 2]
+    longer = (*skeleton[:-2], replace(skeleton[-2], bind_transform=Matrix4d.from_translation(Vector3(8, 6, 0))), skeleton[-1])
+    prepared = prepare_tree_hierarchy(longer)
+    assert not classify_tree_hierarchy(prepared)[1].equivalent
+    relaxed = classify_tree_hierarchy(prepared, TreeHierarchySettings(equivalent_length=0))
+    assert relaxed[1].equivalent
+    assert relaxed[2].branch_order == relaxed[3].branch_order == 1
 
 
 @pytest.mark.parametrize("physical_segments", (False, True))
@@ -374,7 +421,7 @@ def test_wind_preview_service_falls_back_to_auto_when_xml_generator_labels_are_m
     assert result.source_model.prototypes == ()
     assert result.source_model.repeated_parts == ()
     assert result.xml_groups_available is False
-    assert result.preferred_grouping_mode == "auto"
+    assert result.preferred_grouping_mode == "auto_tree"
     assert result.diagnostics[-1].code == "wind_preview_xml_groups_unavailable"
 
 

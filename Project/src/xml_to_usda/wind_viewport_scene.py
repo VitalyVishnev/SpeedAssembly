@@ -251,6 +251,7 @@ def recolor_wind_viewport_scene(
     dynamic_wind: DynamicWindData,
     *,
     selection: WindViewportSelection | None = None,
+    tree_analysis: tuple[TreeHierarchyJoint, ...] | None = None,
 ) -> ViewportScene:
     group_by_joint = _group_by_joint(dynamic_wind)
     color_by_group = {group.group_index: group.color for group in build_wind_viewport_groups(dynamic_wind)}
@@ -279,7 +280,8 @@ def recolor_wind_viewport_scene(
     return replace(
         scene,
         draw_calls=tuple(draw_calls),
-        bone_segments=_bone_segments(model.skeleton, group_by_joint, color_by_group, selection, selected_joints),
+        bone_segments=_bone_segments(model.skeleton, group_by_joint, color_by_group, selection, selected_joints,
+                                     display_ends={j.name: j.display_end for j in tree_analysis} if tree_analysis is not None else None),
     )
 
 
