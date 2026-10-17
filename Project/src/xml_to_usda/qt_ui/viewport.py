@@ -23,6 +23,8 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLayout, QSizePolicy, QToolButton, QVBoxLayout, QWidget
 
 from .theme import BUTTON_OUTLINE_COLOR
+from .bone_overlay import project_bones, bone_shadow_centers, bone_quad_vertices, NO_BONE_SHADOW
+from .bone_renderer import OpaqueBoneRenderer
 
 from ..models import Color4, GeometryBuffer, Quaternion, Vector3
 from ..viewport_scene import ViewportBoneSegment, ViewportDrawCall, ViewportScene
@@ -79,6 +81,7 @@ class MatcapInstanceDraw:
     orientation: Quaternion
     scale: Vector3
     explode_offset: Vector3 = Vector3(0.0, 0.0, 0.0)
+    tint: Color4 | None = None
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,7 @@ class _MatcapInstanceBatch:
     vertex_count: int
     first_instance: int
     instance_count: int
+    tint: Color4 | None = None
 
 
 def _upload_matcap_vertices(
@@ -207,6 +211,7 @@ class MatcapViewport(QOpenGLWidget):
         self._collision_vertex_count = 0
         self._grid_vertex_count = 0
         self._mesh_dirty = False
+        self._instances_dirty = False
         self._grid_dirty = False
         self._ground_y = 0.0
         self._grid_origin: Vector3 | None = None
@@ -219,6 +224,15 @@ class MatcapViewport(QOpenGLWidget):
         self._collision_base_length_scale = 0.0
         self._gl_cleanup_context = None
         self._show_bones = False
+        self._bone_overlap_shading = False
+        self._bone_overlap_strength = 0.35
+        self._bone_overlap_radius = 1.0
+        self._bone_renderer = None
+        self._bone_array_cache = None
+        self._bone_projection_cache = None
+        self._bone_shadow_cache = None
+        self._bone_vertex_cache = None
+        self._bone_vertex_generation = 0
         self._selected_cut_tokens: tuple[str, ...] = ()
         self._hover_cut_token: str | None = None
         self._trace_callback: ViewportTraceCallback | None = None
@@ -374,6 +388,35 @@ class MatcapViewport(QOpenGLWidget):
             self._hover_cut_token = None
         self.update()
 
+    def set_bone_overlap_shading(self, enabled: bool, *, strength: float | None = None, radius: float | None = None) -> None:
+        """Adjust the rear shadow without rebuilding projected visibility."""
+        self._bone_overlap_shading = bool(enabled)
+        if strength is not None:
+            self._bone_overlap_strength = max(0.0, min(1.0, float(strength)))
+        if radius is not None:
+            self._bone_overlap_radius = max(0.0, min(3.0, float(radius)))
+        self.update()
+
+    def update_instanced_scene(self, scene: ViewportScene, draws: tuple[MatcapInstanceDraw, ...]) -> None:
+        """Update instances/bone overlays while retaining uploaded mesh geometry.
+
+        Caller owns the prepared vertex ranges. Mesh batches must be identical;
+        this boundary deliberately cannot replace or rebuild source geometry.
+        """
+        if self._scene is None or scene.mesh_batches is not self._scene.mesh_batches or self._precomputed_matcap_draws is None:
+            raise ValueError("viewport_instance_update: prepare the same mesh batches before updating instances.")
+        uploaded = len(self._precomputed_matcap_vertices) // MATCAP_VERTEX_STRIDE
+        if any(d.first_vertex < 0 or d.vertex_count < 0 or d.first_vertex + d.vertex_count > uploaded for d in draws):
+            raise ValueError("viewport_instance_update: draw range exceeds the prepared vertex buffer.")
+        if scene.bounds != self._scene.bounds:
+            self._update_bounds_metrics(scene.bounds.min_point, scene.bounds.max_point, frame_camera=False)
+            self._grid_dirty = True
+        self._scene = scene
+        self._precomputed_matcap_draws = draws
+        self._vertex_count = sum(d.vertex_count for d in draws)
+        self._instances_dirty = True
+        self.update()
+
     def set_scene(
         self,
         scene: ViewportScene | None,
@@ -522,6 +565,7 @@ class MatcapViewport(QOpenGLWidget):
         functions.glEnable(GL_DEPTH_TEST)
         self._program = _build_matcap_program()
         self._grid_program = _build_grid_program()
+        self._bone_renderer = OpaqueBoneRenderer(self)
         self._vao = QOpenGLVertexArrayObject(self)
         self._vao.create()
         self._vertex_buffer = QOpenGLBuffer(QOpenGLBuffer.Type.VertexBuffer)
@@ -553,6 +597,8 @@ class MatcapViewport(QOpenGLWidget):
         functions.glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         if self._mesh_dirty:
             self._upload_mesh()
+        elif self._instances_dirty:
+            self._upload_instances()
         if self._grid_dirty:
             self._upload_grid()
         view = self._view_matrix()
@@ -585,6 +631,13 @@ class MatcapViewport(QOpenGLWidget):
                     )
                     extra_functions = self.context().extraFunctions()
                     for batch in self._instance_batches:
+                        tint_location = self._program.uniformLocation("drawTint")
+                        enabled_location = self._program.uniformLocation("useDrawTint")
+                        if enabled_location >= 0:
+                            functions.glUniform1f(enabled_location, float(batch.tint is not None))
+                        if tint_location >= 0 and batch.tint is not None:
+                            tint = batch.tint
+                            functions.glUniform4f(tint_location, tint.r, tint.g, tint.b, tint.a)
                         _bind_matcap_instance_batch(
                             program=self._program,
                             instance_buffer=self._instance_buffer,
@@ -832,26 +885,24 @@ class MatcapViewport(QOpenGLWidget):
         bone_segments = self._bone_segments_for_overlay()
         if not bone_segments:
             return None
-        best: tuple[float, str, str] | None = None
-        for segment in bone_segments:
-            segment_start, segment_end = self._exploded_bone_segment_points(segment)
-            projected = self._project_segment_to_screen(segment_start, segment_end)
-            if projected is None:
-                continue
-            parent, child, visible_start_t, visible_end_t = projected
-            distance, visible_t = _distance_to_screen_segment(float(x), float(y), parent, child)
-            segment_t = visible_start_t + (visible_end_t - visible_start_t) * visible_t
-            token = _format_manual_segment_cut_token(
-                segment.parent_token,
-                segment.child_token,
-                _clamp_manual_segment_t(segment_t),
-            )
-            candidate = (distance, segment.child_token, token)
-            if best is None or candidate < best:
-                best = candidate
-        if best is None or best[0] > max_distance:
+        projected = self._projected_bone_overlay()
+        if not len(projected.indices):
             return None
-        return best[2]
+        delta = projected.points[:, 1, :2] - projected.points[:, 0, :2]
+        length2 = np.einsum("ij,ij->i", delta, delta)
+        t = np.full(len(delta), .5)
+        np.divide(np.einsum("ij,ij->i", np.asarray((x, y)) - projected.points[:, 0, :2], delta), length2, out=t, where=length2 > 1e-8)
+        t = np.clip(t, 0, 1)
+        distance = np.linalg.norm(projected.points[:, 0, :2] + delta * t[:, None] - (x, y), axis=1)
+        widths = self._bone_array_cache[3][projected.indices]
+        covered = np.flatnonzero(distance <= widths * .5 + .5)
+        depth = projected.points[:, 0, 2] + (projected.points[:, 1, 2] - projected.points[:, 0, 2]) * t
+        chosen = int(covered[np.argmin(depth[covered])]) if len(covered) else int(np.argmin(distance))
+        if distance[chosen] > max_distance:
+            return None
+        segment = bone_segments[int(projected.indices[chosen])]
+        segment_t = projected.start_t[chosen] + (projected.end_t[chosen] - projected.start_t[chosen]) * t[chosen]
+        return _format_manual_segment_cut_token(segment.parent_token, segment.child_token, _clamp_manual_segment_t(segment_t))
 
     def _update_empty_metrics(self, *, frame_camera: bool) -> None:
         self._frame_target = Vector3(0.0, 0.0, 0.0)
@@ -992,12 +1043,23 @@ class MatcapViewport(QOpenGLWidget):
             )
             return
         self._mesh_dirty = False
+        self._instances_dirty = False
         self._trace_viewport_event(
             "viewport.upload_end",
             vertex_count=uploaded_vertex_count + self._collision_vertex_count,
             byte_count=int(vertices.nbytes + collision_vertices.nbytes),
             program_bound=True,
         )
+
+    def _upload_instances(self) -> None:
+        if self._program is None or self._instance_buffer is None or self._vao is None:
+            return
+        instances, batches = _build_matcap_instance_batches(self._visible_instance_draws())
+        if _upload_matcap_instances(context=self.context(), program=self._program,
+                                    instance_buffer=self._instance_buffer, vao=self._vao, instances=instances):
+            self._instance_batches = batches
+            self._instances_dirty = False
+            self._trace_viewport_event("viewport.instance_upload", instance_count=len(instances), byte_count=int(instances.nbytes))
 
     def _upload_grid(self) -> None:
         if self._grid_program is None or self._grid_buffer is None or self._grid_vao is None:
@@ -1148,31 +1210,83 @@ class MatcapViewport(QOpenGLWidget):
         segment_start, _segment_end = self._exploded_bone_segment_points(segment)
         return self._project_point_to_screen(segment_start)
 
+    def _projected_bone_overlay(self):
+        segments = self._bone_segments_for_overlay()
+        geometry = tuple((s.start, s.end, s.explode_direction, s.selected or self._selected_cut_on_segment(s), s.parent_token, s.child_token) for s in segments)
+        if self._bone_array_cache is None or self._bone_array_cache[0] != geometry:
+            points = np.asarray([((s.start.x, s.start.y, s.start.z), (s.end.x, s.end.y, s.end.z)) for s in segments], dtype=np.float64).reshape((-1, 2, 3))
+            offsets = np.asarray([(s.explode_direction.x, s.explode_direction.y, s.explode_direction.z) for s in segments], dtype=np.float64).reshape((-1, 3))
+            widths = np.asarray([4.5 if item[3] else 3.6 for item in geometry])
+            tokens = dict.fromkeys(token for s in segments for token in (s.parent_token, s.child_token))
+            tokens = {token: i for i, token in enumerate(tokens)}
+            connections = np.asarray([(tokens[s.parent_token], tokens[s.child_token]) for s in segments], dtype=np.intp).reshape((-1, 2))
+            self._bone_array_cache = (geometry, points, offsets, widths, connections)
+        key = (geometry, self._target, self._radius, self._distance, self._yaw, self._pitch,
+               self.width(), self.height(), self._exploded_view_strength)
+        if self._bone_projection_cache is not None and self._bone_projection_cache[0] == key:
+            return self._bone_projection_cache[1]
+        matrix = self._projection_matrix() * self._view_matrix()
+        rows = [matrix.row(i) for i in range(4)]
+        matrix_array = np.asarray([(r.x(), r.y(), r.z(), r.w()) for r in rows])
+        positions = self._bone_array_cache[1]
+        if self._exploded_view_strength:
+            positions = positions + self._bone_array_cache[2][:, None, :] * self._exploded_view_strength
+        projected = project_bones(positions, matrix_array, self.width(), self.height())
+        self._bone_projection_cache = (key, projected)
+        return projected
+
+    def _bone_gpu_vertices(self, projected):
+        segments = self._bone_segments_for_overlay()
+        colors = tuple((s.color.r, s.color.g, s.color.b) for s in segments)
+        shadows_enabled = self._bone_overlap_shading and self._bone_overlap_strength > 0 and self._bone_overlap_radius > 0
+        cached = self._bone_vertex_cache
+        if cached is not None and cached[0] is projected and cached[1] == colors and cached[2] == shadows_enabled:
+            return cached[3]
+        if shadows_enabled:
+            if self._bone_shadow_cache is None or self._bone_shadow_cache[0] is not projected:
+                centers = bone_shadow_centers(projected.points, self._bone_array_cache[4][projected.indices])
+                self._bone_shadow_cache = (projected, centers)
+            centers = self._bone_shadow_cache[1]
+        else:
+            centers = np.full((len(projected.indices), 8), NO_BONE_SHADOW, dtype=np.float32)
+        vertices = bone_quad_vertices(projected.points, self._bone_array_cache[3][projected.indices],
+            np.asarray(colors, dtype=np.float32).reshape((-1, 3))[projected.indices], centers, self.width(), self.height())
+        self._bone_vertex_cache = (projected, colors, shadows_enabled, vertices)
+        self._bone_vertex_generation += 1
+        return vertices
+
+    def _bone_shadow_radius_pixels(self, screen_height=None):
+        # QScreen geometry is in logical pixels. The DPR cancels, so one unit
+        # occupies 1/120 of the monitor height: 12 physical pixels at 1440p.
+        if screen_height is None:
+            screen = self.screen()
+            screen_height = screen.size().height() if screen is not None else self.height()
+        return self._bone_overlap_radius * screen_height / 120.0
+
     def _paint_bone_overlay(self) -> None:
-        bone_segments = self._bone_segments_for_overlay()
-        if not bone_segments:
+        segments = self._bone_segments_for_overlay()
+        if not segments:
+            return
+        projected = self._projected_bone_overlay()
+        if self._bone_renderer is not None:
+            self._bone_renderer.draw(self.context().functions(), self._bone_gpu_vertices(projected),
+                self._bone_vertex_generation, self._bone_overlap_strength if self._bone_overlap_shading else 0.0,
+                self._bone_shadow_radius_pixels())
+        # Only sparse annotations use QPainter. Bone strokes never use it.
+        selected = [int(i) for i in projected.indices if segments[int(i)].selected]
+        if not selected and not self._selected_cut_tokens and self._hover_cut_token is None:
             return
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            for segment in bone_segments:
-                segment_start, segment_end = self._exploded_bone_segment_points(segment)
-                projected = self._project_segment_to_screen(segment_start, segment_end)
-                if projected is None:
-                    continue
-                parent, child, _visible_start_t, visible_end_t = projected
-                selected = segment.selected or self._selected_cut_on_segment(segment)
-                halo = QPen(QColor(6, 10, 12, 210), 7.0 if selected else 6.0)
-                halo.setCapStyle(Qt.PenCapStyle.RoundCap)
-                painter.setPen(halo)
-                painter.drawLine(int(round(parent[0])), int(round(parent[1])), int(round(child[0])), int(round(child[1])))
-                pen = QPen(_qcolor_from_color4(segment.color, alpha=255 if selected else 230), 4.5 if selected else 3.6)
-                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-                painter.setPen(pen)
-                painter.drawLine(int(round(parent[0])), int(round(parent[1])), int(round(child[0])), int(round(child[1])))
-                if segment.selected and visible_end_t >= 1.0 - 1e-8:
-                    painter.setPen(QPen(QColor(255, 245, 185, 245), 1.0))
-                    painter.drawText(int(round(child[0])) + 5, int(round(child[1])) - 5, segment.child_token)
+            # ponytail: keep mass-subtree selection from painting thousands of
+            # text labels each frame; all selected strokes still stay highlighted.
+            if len(selected) <= 32:
+                painter.setPen(QPen(QColor(255, 245, 185, 245), 1.0))
+                for row, index in enumerate(projected.indices):
+                    if segments[int(index)].selected and projected.end_t[row] >= 1 - 1e-8:
+                        x, y = projected.points[row, 1, :2]
+                        painter.drawText(int(x) + 5, int(y) - 5, segments[int(index)].child_token)
             for cut_token in self._selected_cut_tokens:
                 marker_point = self._cut_marker_position(cut_token)
                 if marker_point is not None:
@@ -1212,6 +1326,7 @@ class MatcapViewport(QOpenGLWidget):
                 self._grid_program,
                 self._grid_buffer,
                 self._grid_vao,
+                self._bone_renderer,
             )
         )
         if not has_resources:
@@ -1227,6 +1342,8 @@ class MatcapViewport(QOpenGLWidget):
             self.makeCurrent()
             made_current = True
         try:
+            if self._bone_renderer is not None:
+                self._bone_renderer.destroy()
             for buffer in (
                 self._vertex_buffer,
                 self._instance_buffer,
@@ -1243,6 +1360,7 @@ class MatcapViewport(QOpenGLWidget):
                     program.release()
                     program.removeAllShaders()
         finally:
+            self._bone_renderer = None
             self._program = None
             self._vertex_buffer = None
             self._instance_buffer = None
@@ -1519,6 +1637,7 @@ class ProxyViewport(MatcapViewport):
 
 def _build_instanced_scene_payload(
     scene: ViewportScene | None,
+    *, use_draw_tints: bool = False,
 ) -> tuple[np.ndarray, tuple[MatcapInstanceDraw, ...]]:
     if scene is None:
         return np.asarray([], dtype=np.float32), ()
@@ -1540,6 +1659,7 @@ def _build_instanced_scene_payload(
             translate=draw.translate,
             orientation=draw.orientation,
             scale=draw.scale,
+            tint=draw.tint if use_draw_tints else None,
         )
         for draw in scene.draw_calls
         if draw.batch_id in ranges and draw.visibility_group != "collision"
@@ -1836,6 +1956,8 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
         uniform float useInstancing;
         uniform float explodeStrength;
         uniform float pieceTintStrength;
+        uniform vec4 drawTint;
+        uniform float useDrawTint;
         uniform float geometryScale;
         uniform float capsuleLengthScale;
         uniform float capsuleBaseLengthScale;
@@ -1852,6 +1974,9 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
         }
         void main() {
             pieceColor = vec4(pieceTint.rgb, clamp(pieceTint.a * max(pieceTintStrength, 0.0), 0.0, 1.0));
+            if (useDrawTint > 0.5) {
+                pieceColor = vec4(drawTint.rgb, clamp(drawTint.a * max(pieceTintStrength, 0.0), 0.0, 1.0));
+            }
             float baseLength = max(0.001, 1.0 + max(capsuleBaseLengthScale, 0.0) * lengthScale);
             float currentLength = 1.0 + max(capsuleLengthScale, 0.0) * lengthScale;
             vec3 scaledPosition = scaleOrigin + (position - scaleOrigin) * max(geometryScale, 0.001) * currentLength / baseLength;
@@ -1921,13 +2046,13 @@ def _build_matcap_program() -> QOpenGLShaderProgram:
 def _build_matcap_instance_batches(
     draws: tuple[MatcapInstanceDraw, ...],
 ) -> tuple[np.ndarray, tuple[_MatcapInstanceBatch, ...]]:
-    grouped: dict[tuple[int, int], list[MatcapInstanceDraw]] = {}
+    grouped: dict[tuple[int, int, Color4 | None], list[MatcapInstanceDraw]] = {}
     for draw in draws:
-        grouped.setdefault((draw.first_vertex, draw.vertex_count), []).append(draw)
+        grouped.setdefault((draw.first_vertex, draw.vertex_count, draw.tint), []).append(draw)
 
     rows: list[tuple[float, ...]] = []
     batches: list[_MatcapInstanceBatch] = []
-    for (first_vertex, vertex_count), group in grouped.items():
+    for (first_vertex, vertex_count, tint), group in grouped.items():
         first_instance = len(rows)
         for draw in group:
             rows.append(
@@ -1953,6 +2078,7 @@ def _build_matcap_instance_batches(
                 vertex_count=vertex_count,
                 first_instance=first_instance,
                 instance_count=len(group),
+                tint=tint,
             )
         )
     return np.asarray(rows, dtype=np.float32).reshape((-1, _MATCAP_INSTANCE_STRIDE)), tuple(batches)
@@ -1988,6 +2114,9 @@ def _set_matcap_program_uniforms(
     instancing_location = program.uniformLocation("useInstancing")
     if instancing_location >= 0:
         functions.glUniform1f(instancing_location, 1.0 if use_instancing else 0.0)
+    draw_tint_location = program.uniformLocation("useDrawTint")
+    if draw_tint_location >= 0:
+        functions.glUniform1f(draw_tint_location, 0.0)
     flat_color_location = program.uniformLocation("useFlatColor")
     if flat_color_location >= 0:
         functions.glUniform1f(flat_color_location, 1.0 if flat_color is not None else 0.0)
@@ -2113,25 +2242,6 @@ def _face_normal(points: tuple[Vector3, Vector3, Vector3]) -> Vector3:
     return Vector3(nx / length, ny / length, nz / length)
 
 
-def _distance_to_screen_segment(
-    x: float,
-    y: float,
-    start: tuple[float, float],
-    end: tuple[float, float],
-) -> tuple[float, float]:
-    sx, sy = start
-    ex, ey = end
-    dx = ex - sx
-    dy = ey - sy
-    length_squared = dx * dx + dy * dy
-    if length_squared <= 1e-8:
-        return math.sqrt((x - sx) ** 2 + (y - sy) ** 2), 0.5
-    t = max(0.0, min(1.0, ((x - sx) * dx + (y - sy) * dy) / length_squared))
-    px = sx + t * dx
-    py = sy + t * dy
-    return math.sqrt((x - px) ** 2 + (y - py) ** 2), t
-
-
 def _clip_homogeneous_segment(
     start: QVector4D,
     end: QVector4D,
@@ -2202,15 +2312,6 @@ def _add_vector3(left: Vector3, right: Vector3) -> Vector3:
 
 def _scale_vector3(vector: Vector3, scale: float) -> Vector3:
     return Vector3(vector.x * scale, vector.y * scale, vector.z * scale)
-
-
-def _qcolor_from_color4(color: Color4, *, alpha: int) -> QColor:
-    return QColor(
-        max(0, min(255, int(round(float(color.r) * 255)))),
-        max(0, min(255, int(round(float(color.g) * 255)))),
-        max(0, min(255, int(round(float(color.b) * 255)))),
-        max(0, min(255, int(alpha))),
-    )
 
 
 def _paint_cut_marker(

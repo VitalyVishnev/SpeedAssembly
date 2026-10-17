@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from array import array
+from dataclasses import replace
 import sys
+import numpy as np
 
 import pytest
 
@@ -24,7 +26,8 @@ from xml_to_usda.qt_ui.fracture_preview import (
     apply_fracture_viewport_mesh,
     build_fracture_viewport_mesh_from_scene,
 )
-from xml_to_usda.qt_ui.viewport import MatcapViewport, _build_matcap_instance_batches
+from xml_to_usda.qt_ui.viewport import MatcapViewport, _build_matcap_instance_batches, _build_instanced_scene_payload
+from xml_to_usda.qt_ui.bone_overlay import bone_shadow_centers, NO_BONE_SHADOW, bone_quad_vertices
 from xml_to_usda.viewport_scene import (
     ViewportBoneSegment,
     ViewportBounds,
@@ -121,6 +124,27 @@ def test_fracture_viewport_keeps_repeated_parts_instanced_in_render_payload() ->
     assert len(payload.vertex_components) == 2 * 3 * FRACTURE_VERTEX_STRIDE
 
 
+def test_live_instance_colors_retain_prepared_geometry_and_split_tint_batches(qtbot) -> None:
+    triangle = GeometryBuffer("Triangle", array("f", (0, 0, 0, 1, 0, 0, 0, 1, 0)), array("i", (3,)), array("i", (0, 1, 2)))
+    scene = ViewportScene("wind", (ViewportMeshBatch("mesh", "Mesh", triangle),),
+        (ViewportDrawCall("first", "mesh"), ViewportDrawCall("second", "mesh")),
+        ViewportBounds(Vector3(0, 0, 0), Vector3(1, 1, 0)), ViewportStats(1, 2, 2))
+    vertices, draws = _build_instanced_scene_payload(scene, use_draw_tints=True)
+    viewport = MatcapViewport()
+    qtbot.addWidget(viewport)
+    viewport.set_precomputed_instanced_matcap_scene(scene, vertices=vertices, draws=draws,
+        min_point=scene.bounds.min_point, max_point=scene.bounds.max_point)
+    viewport._mesh_dirty = False
+    colors = (Color4(1, 0, 0, 1), Color4(0, 0, 1, 1))
+    updated_draws = tuple(replace(d, tint=c) for d, c in zip(draws, colors))
+    viewport.update_instanced_scene(scene, updated_draws)
+    assert viewport._precomputed_matcap_vertices is vertices
+    assert not viewport._mesh_dirty and viewport._instances_dirty
+    rows, batches = _build_matcap_instance_batches(updated_draws)
+    assert len(rows) == 2
+    assert tuple(b.tint for b in batches) == colors
+
+
 def test_fracture_viewport_smooths_shared_points_without_authored_normals() -> None:
     mesh = geometry_buffer_from_mesh(
         MeshData(
@@ -202,6 +226,45 @@ def test_viewport_can_focus_on_mesh_and_zoom_to_cut_detail(qtbot, qapp) -> None:
             viewport._target = expected_focus
             qapp.sendEvent(viewport, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_F, Qt.KeyboardModifier.NoModifier, scan_code, 0, 0, "f", repeat))
             assert viewport.camera_target == expected_focus
+
+
+def test_bone_overlap_depth_uses_crossing_depth_and_pick_matches_visible_front(qtbot) -> None:
+    # Only the actual crossing shadows the rear line. Midpoint depth gives
+    # the wrong order here, and mere proximity/adjacency must never cast AO.
+    points = np.asarray((((0, 0, .9), (100, 0, .1)), ((10, -30, .6), (10, 30, .6))))
+    unrelated = np.asarray(((0, 1), (2, 3)))
+    centers = bone_shadow_centers(points, unrelated)
+    assert centers[0, 0] == pytest.approx(10)
+    assert np.all(centers[1] == NO_BONE_SHADOW)
+    assert np.array_equal(bone_shadow_centers(points[::-1], unrelated[::-1]), centers[::-1])
+    assert np.all(bone_shadow_centers(points, np.asarray(((0, 1), (1, 2)))) == NO_BONE_SHADOW)
+    nearby = np.asarray((((0, 0, .1), (100, 0, .9)), ((0, 1, .9), (100, 1, .1))))
+    assert np.all(bone_shadow_centers(nearby, unrelated) == NO_BONE_SHADOW)
+    touching = np.asarray((((0, 0, .5), (100, 0, .5)), ((100, 0, .3), (100, 30, .3))))
+    assert np.all(bone_shadow_centers(touching, unrelated) == NO_BONE_SHADOW)
+    vertices = bone_quad_vertices(points, np.asarray((3.6, 3.6)), np.asarray(((1, 0, 0), (0, 0, 1))), centers, 500, 400)
+    assert vertices.shape == (12, 20)
+    assert np.isfinite(vertices).all()
+
+    viewport = MatcapViewport()
+    qtbot.addWidget(viewport)
+    viewport.resize(500, 400)
+    viewport._yaw = viewport._pitch = 0.0
+    viewport._distance = 5.0
+    segments = (
+        ViewportBoneSegment("back", "root", "a_back", Vector3(-1, 0, 0), Vector3(1, 0, 0), Color4(1, 0, 0, 1)),
+        ViewportBoneSegment("front", "root", "z_front", Vector3(0, -1, 1), Vector3(0, 1, 1), Color4(0, 0, 1, 1)),
+    )
+    scene = ViewportScene("crossing", (), (), ViewportBounds(Vector3(-1, -1, 0), Vector3(1, 1, 1)), ViewportStats(0, 0), bone_segments=segments)
+    viewport.set_scene(scene, frame_camera=False)
+    assert "z_front" in viewport.pick_bone_segment_child_token(250, 200)
+    projected = viewport._projected_bone_overlay()
+    viewport.set_bone_segments(tuple(replace(s, color=Color4(0, 1, 0, 1)) for s in segments))
+    assert viewport._projected_bone_overlay() is projected
+    viewport.set_bone_overlap_shading(True, strength=1, radius=1)
+    assert viewport._bone_shadow_radius_pixels(1440) == 12
+    assert viewport._bone_shadow_radius_pixels(2160) / 2160 == 12 / 1440
+    assert viewport._bone_shadow_radius_pixels(1080) / 1080 == 12 / 1440
 
 
 def test_viewport_keeps_offscreen_started_bone_visible_and_pickable(qtbot) -> None:

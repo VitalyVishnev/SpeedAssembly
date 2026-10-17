@@ -1,5 +1,22 @@
 # Experiments
 
+## Bone overlay rendering experiments, 2026-10-13
+
+Superseded: QPainter strokes and CPU clipping of projected ribbons. Grid-based
+candidate checks cost about 60 ms on Alder; X-bound filtering reduced planning
+to about 20 ms, but whole viewport remained slow. Mean-depth sorting was also
+incorrect at crossings, and outline-expanded cuts introduced black gaps.
+Operator feedback rejected fixed shadow values of 28% and 6%; then preferred
+35% and requested relative radius, 0-100% strength and realtime rendering.
+
+Current solution: opaque unlit OpenGL quads, one batch, hardware depth. NumPy
+projection and block-vectorized strict-crossing events replace per-bone Qt calls
+and pairwise clipping. Adjacent/endpoint/parallel contacts never cast AO. The
+shader evaluates at most eight centers per bone. Real pixels and rotating-camera
+CPU+GPU-finish measurements passed: 2.16 ms median for 347 joints; 6.22 ms for
+1108. Default shadow 35%, radius 1 = 12 pixels at 1440p, normalized to screen
+height/DPI. See [Tree hierarchy](wind-tree-hierarchy.md) for current contracts.
+
 Rejected, superseded, and partially validated work. Current contracts live in
 [decisions.md](decisions.md); active gaps live in [known-bugs.md](known-bugs.md).
 
