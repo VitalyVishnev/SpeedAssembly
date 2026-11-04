@@ -914,3 +914,21 @@ under `docs/raw/`; Git retains per-change detail.
   formatting and strict Clippy. Public home, Proxy Mesh and UDIM help routes
   return HTTP 200 in ENG and RU. Removed the obsolete UDIM-publication blocker;
   browser navigation/cache behavior was not revalidated in this check.
+
+## 2026-11-05 - Explain the long release-validation run
+
+- Audited existing candidate `751de6c` reports without rerunning the heavy tests.
+  Default pytest took 97.97 s; Package log timestamps span 169.09 s, including
+  3.60 s for Rust release builds. The additional 160-launch stability sweep
+  took 2249.55 s. Twenty interactive Fracture scenarios alone report 1201.69 s.
+- The long delay came from selecting extended Fracture/viewport validation,
+  not evidence of a Rust performance regression. The standalone gate code was
+  unchanged from `v0.5.0-beta`. The default repetition volume was added beyond
+  the completed ordinary full-build gate without a specific new failure to
+  investigate; that selection caused the extra delay.
+- Clarified that ordinary full builds retain source checks and all Package
+  checks/smokes. Extended stability requires an explicit request or a justified
+  repeated-state/native-lifetime regression. Historical raw instructions remain
+  preserved but are superseded by this maintained policy. No runtime, tests,
+  build scripts, candidate ZIP or GitHub draft changed.
+- Compact timing evidence: `<archive>/validation_duration_2026-11-05/`.

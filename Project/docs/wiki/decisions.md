@@ -1,5 +1,20 @@
 # Decisions
 
+## Extended stress is separate from a normal full build, 2026-11-05
+
+Required source checks plus the full Package gate define the normal full build,
+including release preparation. The standalone 50-worker/10-UI-cycle stability
+sweep is a separate extended repetition test, not an implicit release step.
+Run it for an explicit extended-stress request or a justified repeated-state,
+native-lifetime or viewport regression. Explain its scope/cost first. Preserve
+its strict crash/retry behavior and the ordinary Package smokes.
+
+The 0.6.0-beta.1 preparation added that sweep unnecessarily: it cost 37.49
+minutes, versus about 4.5 minutes for source tests and Package. This clarifies
+the current full-build contract and supersedes the blanket release-candidate
+instruction in historical `raw/local-python-environment.md`. See
+[Test policy](testing.md#full-builds-and-extended-stability).
+
 ## Durable experiments live outside the repository, 2026-10-18
 
 Store research code, documents and useful evidence in

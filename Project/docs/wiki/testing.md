@@ -34,6 +34,39 @@ frozen/native/runtime boundaries and before release. A normal UI defect found
 in Quick stays on the Quick loop until fixed, followed by one full Package gate;
 a packaged-only or native defect stays on Package validation.
 
+## Full builds and extended stability
+
+A normal full build runs the required source checks and the complete `-Package`
+gate, including its packaged contracts and real-result smokes. A release draft
+does not automatically add `run_packaged_stability_gate.ps1` to that definition.
+
+That separate script is an extended repetition test. Its defaults run 50 worker
+cases and ten cycles of three UI scenarios on each of two large inputs: 160
+fresh EXE launches. Reserve it for an explicit extended-stress request or an
+identified repeated-state/native-lifetime regression in Fracture, workers or
+OpenGL. State the risk, scope and expected cost before running it. Changes to
+unrelated serialization or a version number alone do not justify the full sweep.
+Keep the script and its strict crash/retry checks available; do not reduce
+timeouts, accept retries or remove contract tests to shorten routine builds.
+
+Observed on candidate `751de6c`, 2026-11-04:
+
+| Phase | Elapsed | Scope |
+| --- | --- | --- |
+| Default source suite | 97.97 s | 680 selected tests |
+| Complete Package | 169.09 s | Native build, 27 contracts, EXE/ZIP, required smokes |
+| Separate extended stability | 2249.55 s | 100 worker launches and 60 UI scenarios |
+
+Package elapsed uses its log creation/last-write timestamps. Its Rust release
+builds took 3.60 s combined. Within extended stability, the 20 interactive
+Fracture scenarios report 1201.69 s total, rapid-settings 223.23 s and Proxy
+82.83 s. Each interactive run rebuilds actual Detailed Cuts geometry several
+times; the event polling interval is 50 ms, not a minute-long fixed sleep.
+These measurements identify extra validation work, not a Rust slowdown.
+The ordinary source/Package portion was about 4.5 minutes in this run; that is
+an observation, not a universal time guarantee. The extended script itself
+was unchanged from `v0.5.0-beta`. Evidence: `<archive>/validation_duration_2026-11-05/`.
+
 ## System contract map
 
 | Contract | Minimal test | Integration | Packaged |

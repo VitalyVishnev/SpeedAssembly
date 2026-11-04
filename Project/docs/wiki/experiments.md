@@ -34,6 +34,13 @@ References starting with `<archive>/` below use this external root. Older
 `experiments/<name>/...` references in the project log now map to
 `<archive>/<name>/...`. The archive manifest records retained files and omissions.
 
+## Release-validation duration, 2026-11-05
+
+The later release-validation timing investigation is archived at
+`<archive>/validation_duration_2026-11-05/`. It attributes the long release run
+to the separately selected 160-launch stability sweep. The measured split and
+current execution policy live in [Test policy](testing.md#full-builds-and-extended-stability).
+
 ## Shared source extraction, 2026-10-18
 
 Architecture candidate 3 introduces `source_extraction.py` as the shared owner
