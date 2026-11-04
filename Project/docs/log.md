@@ -900,3 +900,17 @@ under `docs/raw/`; Git retains per-change detail.
   `Project/native/` and builds/tests do not depend on the archive.
 - Rechecked all retained hashes and current evidence paths. Production, native,
   test and build sources are unchanged; no new Package or Unreal import needed.
+
+## 2026-11-04 - Assign the next release candidate
+
+- Assigned `0.6.0-beta.1` for the requested full build and GitHub draft. MINOR
+  reflects Tree/PVE Wind grouping, live Wind controls and skeleton diagnostics
+  added since published `v0.5.0-beta`, alongside XML-opening and USDA-writing
+  performance work. The release stage remains beta.
+- The candidate must pass source checks, the complete Package gate and release
+  stability checks before its verified ZIP is attached to a draft. The version
+  remains fixed across repairs/rebuilds. Publish remains a manual operator step.
+- Source validation passed all 680 selected tests; both native crates passed
+  formatting and strict Clippy. Public home, Proxy Mesh and UDIM help routes
+  return HTTP 200 in ENG and RU. Removed the obsolete UDIM-publication blocker;
+  browser navigation/cache behavior was not revalidated in this check.

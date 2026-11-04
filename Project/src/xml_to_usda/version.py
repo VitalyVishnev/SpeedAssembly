@@ -10,7 +10,7 @@ import json
 import sys
 from importlib.resources import files
 
-__version__ = "0.5.0-beta"
+__version__ = "0.6.0-beta.1"
 
 
 def application_title() -> str:

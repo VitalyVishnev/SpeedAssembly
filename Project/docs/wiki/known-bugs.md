@@ -67,15 +67,6 @@ bundle source map identifies the caller. Deferred to preserve correct per-page
 changing alternate-link semantics. These requests do not fetch article bodies
 or prevent cache-backed transitions.
 
-## Pending publication: UDIM contextual help page
-
-On 2026-10-06, the public site home and `workflows/proxy-mesh/` returned HTTP
-200, while `workflows/udim/` returned 404. The UDIM article exists locally and
-is registered in `mkdocs.yml`; `qt_ui/documentation.py` targets that final route.
-Publishing the pending user-documentation changes is outside this UI change.
-Next step: publish the reviewed documentation and verify the UDIM URL returns
-200 before a release containing contextual help.
-
 ## Unreal risks: provider-less dense PCG and streamed wind controller
 
 Status: UE 5.7 provider-less PCG cause/workaround confirmed by operator with
