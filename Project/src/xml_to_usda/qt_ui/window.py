@@ -44,6 +44,9 @@ from PySide6.QtWidgets import (
     QScrollBar,
     QSizePolicy,
     QSpinBox,
+    QStyle,
+    QStyleOptionButton,
+    QStylePainter,
     QTabBar,
     QTabWidget,
     QToolButton,
@@ -241,6 +244,37 @@ def _conversion_mode_tooltip(mode_key: str) -> str:
         "static_parts": "Writes reusable static prototype files. No assembly, instancer, skeleton, or skinning data.",
         "pve_growth": "Exports branch hierarchy and radii as JSON for Unreal Engine 5.8's Growth Data Loader.",
     }.get(mode_key, "Conversion output shape. Lower complexity omits contracts; higher fidelity keeps assembly structure.")
+
+
+class ConversionActionButton(QPushButton):
+    def set_mode_caption(self, caption: str) -> None:
+        self._mode_caption = caption
+        self.setAccessibleDescription(caption)
+        self.update()
+
+    def paintEvent(self, event) -> None:  # type: ignore[override]
+        caption = getattr(self, "_mode_caption", "")
+        if not caption:
+            super().paintEvent(event)
+            return
+
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.text = ""
+        painter = QStylePainter(self)
+        painter.drawControl(QStyle.ControlElement.CE_PushButton, option)
+        painter.setPen(option.palette.color(QPalette.ColorRole.ButtonText))
+        painter.setFont(self.font())
+        alignment = Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter
+        painter.drawText(self.rect().translated(0, -6), alignment, self.text())
+
+        caption_font = QFont(self.font())
+        caption_font.setWeight(QFont.Weight.Normal)
+        caption_font.setPixelSize(max(8, round(self.fontMetrics().height() * 0.59)))
+        painter.setFont(caption_font)
+        painter.setOpacity(0.65)
+        caption = painter.fontMetrics().elidedText(caption, Qt.TextElideMode.ElideRight, self.width() - 10)
+        painter.drawText(self.rect().translated(0, 9), alignment, caption)
 
 
 def _format_bytes(value: int) -> str:
@@ -1140,7 +1174,7 @@ class MainWindow(QWidget):
         # Convert/Cancel intentionally lives on one shared button so the action
         # column stays compact. The gear segment selects the conversion mode; it
         # is not a second execute button.
-        self.convert_button = QPushButton("Convert to USDA", self)
+        self.convert_button = ConversionActionButton("Convert to USDA", self)
         self.convert_button.setObjectName("SplitActionMainButton")
         self.convert_button.clicked.connect(self._handle_convert_button_clicked)
         self.convert_mode_button = QToolButton(self)
@@ -1852,6 +1886,8 @@ class MainWindow(QWidget):
         has_output = bool(self.output_input.text().strip())
         convert_label = "Export Growth Data" if self._conversion_mode == ConversionMode.PVE_GROWTH else "Convert to USDA"
         self.convert_button.setText("Cancel" if self._conversion_running else convert_label)
+        mode_label = _CONVERSION_MODE_LABELS.get(self._conversion_mode, "")
+        self.convert_button.set_mode_caption("" if self._conversion_running else mode_label)
         self.convert_button.setEnabled(self._conversion_running or (has_input and has_output))
         self.convert_mode_button.setEnabled(not self._conversion_running)
         self.parts_folder_button.setEnabled(not self._conversion_running)

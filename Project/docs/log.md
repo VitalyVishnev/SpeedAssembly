@@ -965,4 +965,10 @@ under `docs/raw/`; Git retains per-change detail.
   A source Qt smoke confirmed the yellow fallback status. The broader
   status-card suite reproduced one pre-existing SkinningTickLabel teardown
   failure on HEAD.
+
 - Reused the resolved PVE parent indices and request validation.
+
+## 2026-11-10 - Show the active mode on the conversion button
+
+- The conversion button shows the active export mode beneath its action label.
+  The menu, button caption, and status summary share one label table.
