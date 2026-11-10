@@ -50,6 +50,7 @@ nav:
       - Convert in SpeedAssembly: workflows/basic-conversion.md
       - Import into Unreal Engine: workflows/unreal-import.md
   - Workflows:
+      - Export PVE Growth Data: workflows/pve-export.md
       - Proxy Mesh: workflows/proxy-mesh.md
       - UDIM workflow: workflows/udim.md
       - Scattered Rig: workflows/scattered-rig.md
@@ -88,6 +89,7 @@ plugins:
             Convert in SpeedAssembly: Конвертация в SpeedAssembly
             Import into Unreal Engine: Импорт в Unreal Engine
             Workflows: Дополнительные workflows
+            Export PVE Growth Data: Экспорт PVE Growth Data
             Scattered Rig: Scattered Rig
             Assigning materials: Назначение материалов
             Wiki: Вики

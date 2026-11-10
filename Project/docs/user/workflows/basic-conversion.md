@@ -7,6 +7,8 @@ description: Load your SpeedTree export, configure wind and geometry, assign Unr
 
 Start with the [XML](../wiki/xml-usd-usda-json.md#xml-carries-the-speedtree-source) exported using the settings in [Prepare SpeedTree](prepare-speedtree.md). Your Unreal project should also be [prepared for import](prepare-unreal.md), with the materials you want to use already available in its Content Browser.
 
+To export a skeleton for PVE instead, follow [Export PVE Growth Data](pve-export.md).
+
 ## 1. Select the input and output
 
 1. In SpeedAssembly, click **Input XML** and select your SpeedTree XML file.
@@ -156,6 +158,7 @@ See [Assigning materials](materials-tab.md) for Single Material, FBX slots, and 
 | **Skeletal Assembly Parts** | A separate skeletal mesh file for each unique repeated part, without the base tree. |
 | **Static Assembly** | The full plant as a static Nanite Assembly, with instanced parts but no skeleton or skeletal wind animation. |
 | **Static Assembly Parts** | A separate static mesh file for each unique repeated part, without the base tree. |
+| **[PVE Growth Data (UE 5.8)](pve-export.md)** | Branch hierarchy and radii as JSON for Procedural Vegetation Editor in Unreal Engine 5.8. |
 
 Use a Parts mode to build a branch library in Unreal first. Then convert full plants using **Use Unreal Reference** to share those imported branches between trees. In Parts modes, **Create Parts Folder** places the exported files in a dedicated folder; turn it off to write them beside the selected Output USDA.
 

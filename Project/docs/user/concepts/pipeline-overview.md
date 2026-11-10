@@ -39,6 +39,7 @@ Open SpeedAssembly, select the XML file in **Input XML**, then choose the output
 | **Static Assembly** | A visually similar tree without a skeleton or wind animation. |
 | **Skeletal Assembly Parts** | A separate reusable skeletal asset for every repeated branch or leaf part. |
 | **Static Assembly Parts** | A separate reusable static asset for every repeated branch or leaf part. |
+| **[PVE Growth Data (UE 5.8)](../workflows/pve-export.md)** | Branch hierarchy and radii as JSON for Procedural Vegetation Editor in Unreal Engine 5.8. |
 
 The normal tree workflow uses **Skeletal Assembly**. Choose a Parts mode when you need a reusable library of branches or leaves instead of one complete tree.
 

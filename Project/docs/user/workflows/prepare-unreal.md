@@ -27,6 +27,8 @@ Complete these steps once for each Unreal project, before importing plants from 
 
 3. Search for `vegetation` and enable **Procedural Vegetation Editor**.
 
+    To bring a SpeedTree skeleton into PVE in Unreal Engine 5.8, see [Export PVE Growth Data](pve-export.md).
+
     ![Procedural Vegetation Editor enabled in the Plugins window](../assets/images/unreal-procedural-vegetation-editor-plugin.png)
 
 4. Search for `usd` and enable **Interchange OpenUSD**. This is the plugin used to import SpeedAssembly's [USD exports](../wiki/xml-usd-usda-json.md#usd-describes-a-3d-scene).

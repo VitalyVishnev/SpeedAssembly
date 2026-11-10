@@ -22,6 +22,10 @@ SpeedAssembly создан специально для работы с раст�
 
     Создайте Skeletal Assembly, Static Assembly или библиотеку веток и листвы из SpeedTree Raw XML.
 
+-   **[PVE Growth Data](workflows/pve-export.md)**
+
+    Экспортируйте скелет дерева и радиусы ветвей в JSON для Procedural Vegetation Editor в Unreal Engine 5.8.
+
 -   **Dynamic Wind**
 
     Настройте группы костей и экспортируйте Dynamic Wind [JSON](wiki/xml-usd-usda-json.md#json-carries-the-wind-settings) для анимации ветра в Unreal.

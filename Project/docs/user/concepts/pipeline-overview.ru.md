@@ -39,6 +39,7 @@ Unreal Engine: импорт и проверка ассета
 | **Static Assembly** | Визуально похожее дерево без скелета и анимации ветра. |
 | **Skeletal Assembly Parts** | Отдельный Skeletal Mesh ассет для каждого повторяющегося элемента ветки или листвы. |
 | **Static Assembly Parts** | Отдельный Static Mesh ассет для каждого повторяющегося элемента ветки или листвы. |
+| **[PVE Growth Data (UE 5.8)](../workflows/pve-export.md)** | Иерархия и радиусы ветвей в JSON для Procedural Vegetation Editor в Unreal Engine 5.8. |
 
 Обычный workflow для дерева использует **Skeletal Assembly**. Выберите режим Parts, если нужна библиотека веток или листвы, а не целое дерево.
 

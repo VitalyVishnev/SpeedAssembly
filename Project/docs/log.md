@@ -972,3 +972,8 @@ under `docs/raw/`; Git retains per-change detail.
 
 - The conversion button shows the active export mode beneath its action label.
   The menu, button caption, and status summary share one label table.
+
+## 2026-11-10 - Document PVE Growth Data export
+
+- Added the English and Russian export guide and linked it from the workflow
+  lists and Unreal import guide. Both languages passed the strict site build.

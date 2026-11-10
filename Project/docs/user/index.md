@@ -19,6 +19,10 @@ SpeedAssembly is built specifically for the Unreal Engine 5.7–5.8 vegetation p
 
     Author a Skeletal Assembly, Static Assembly, or reusable parts library from SpeedTree Raw XML.
 
+-   **[PVE Growth Data](workflows/pve-export.md)**
+
+    Export the branch skeleton and radii as JSON for Procedural Vegetation Editor in Unreal Engine 5.8.
+
 -   **Dynamic Wind**
 
     Inspect wind groups and generate the separate Dynamic Wind [JSON](wiki/xml-usd-usda-json.md#json-carries-the-wind-settings) used by the Unreal workflow.

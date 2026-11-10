@@ -31,4 +31,6 @@ JSON means *JavaScript Object Notation*. Despite the name, many applications and
 
 Here, `*_DynamicWind.json` supplies Unreal with bone-to-group assignments and wind response settings. The geometry and skeleton stay in USDA. JSON contains no animation keyframes; Unreal's Dynamic Wind generates the motion at runtime.
 
+[PVE Growth Data](../workflows/pve-export.md) uses a separate JSON format for branch hierarchy and radii in Unreal Engine 5.8.
+
 For the complete handoff, see [Convert in SpeedAssembly](../workflows/basic-conversion.md). For the wind side, see [How Dynamic Wind works](how-dynamic-wind-works.md).

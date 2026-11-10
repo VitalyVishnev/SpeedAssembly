@@ -19,6 +19,7 @@ SpeedAssembly связывает SpeedTree с новым Nanite Assembly workflo
 | **Skeletal Assembly Parts** | Отдельные Skeletal Mesh ассеты веток и листвы для использования в других деревьях. |
 | **Static Assembly** | Целое дерево с инстансами веток и листьев, без скелета. |
 | **Static Assembly Parts** | Отдельные Static Mesh ассеты веток и листвы для использования в других деревьях. |
+| **[PVE Growth Data (UE 5.8)](../workflows/pve-export.md)** | Иерархия и радиусы ветвей в JSON для Procedural Vegetation Editor в Unreal Engine 5.8. |
 | **Dynamic Wind JSON** | Настройки ветра в [JSON-файле](../wiki/xml-usd-usda-json.md#json-carries-the-wind-settings) для импорта в Unreal и работы с Dynamic Wind. |
 | **Wind Preview** | Автоматические или ручные группы костей и их настройки ветра. Можно также создать данные ветра для внешнего FBX- или [USD](../wiki/xml-usd-usda-json.md#usd-describes-a-3d-scene)-скелета. |
 | **Proxy Mesh** | Low-poly mesh на основе дерева для distance fields и shadow proxy, с необязательными коллизиями ствола. |

@@ -19,6 +19,7 @@ Alongside the main tree export, SpeedAssembly provides tools for editing wind si
 | **Skeletal Assembly Parts** | Individual skeletal branch and leaf assets for reuse in other trees. |
 | **Static Assembly** | A complete tree with instanced branches and leaves, without a skeleton. |
 | **Static Assembly Parts** | Individual static branch and leaf assets for reuse in other trees. |
+| **[PVE Growth Data (UE 5.8)](../workflows/pve-export.md)** | Branch hierarchy and radii as JSON for Procedural Vegetation Editor in Unreal Engine 5.8. |
 | **Dynamic Wind JSON** | Wind settings in a [JSON file](../wiki/xml-usd-usda-json.md#json-carries-the-wind-settings) to import into Unreal for use with Dynamic Wind. |
 | **Wind Preview** | Automatic or manual bone groups and their wind settings. You can also generate wind data for an external FBX or [USD](../wiki/xml-usd-usda-json.md#usd-describes-a-3d-scene) skeleton. |
 | **Proxy Mesh** | A low-poly mesh based on the tree, for distance-field and shadow-proxy workflows, with optional trunk collision. |

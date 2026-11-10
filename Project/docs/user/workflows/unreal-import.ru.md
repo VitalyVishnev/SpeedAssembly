@@ -7,6 +7,8 @@ description: Импортируйте ассеты SpeedAssembly через Inte
 
 Перед импортом выполните [Подготовку Unreal Engine](prepare-unreal.md). Нужные плагины и Nanite Foliage должны быть включены. Подготовьте экспортированный [USDA](../wiki/xml-usd-usda-json.md#usda-is-usd-you-can-read) и, для растения со скелетом, соответствующий [Wind JSON](../wiki/xml-usd-usda-json.md#json-carries-the-wind-settings).
 
+Чтобы загрузить PVE Growth Data JSON в Growth Data Asset, следуйте инструкции [Экспорт PVE Growth Data](pve-export.md#load-the-json-in-unreal).
+
 ## 1. Импортируйте USDA {#1-import-the-usda}
 
 1. В **Content Browser** Unreal откройте папку для ассетов растения.

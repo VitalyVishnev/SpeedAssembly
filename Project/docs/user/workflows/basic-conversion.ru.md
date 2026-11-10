@@ -7,6 +7,8 @@ description: Загрузите экспорт SpeedTree, настройте в�
 
 Начните с [XML](../wiki/xml-usd-usda-json.md#xml-carries-the-speedtree-source), экспортированного по инструкции [Подготовка SpeedTree](prepare-speedtree.md). Проект Unreal должен быть [подготовлен к импорту](prepare-unreal.md), а нужные материалы уже должны находиться в его Content Browser.
 
+Чтобы экспортировать скелет для PVE, воспользуйтесь инструкцией [Экспорт PVE Growth Data](pve-export.md).
+
 ## 1. Выберите исходный файл и путь экспорта {#1-select-the-input-and-output}
 
 1. В SpeedAssembly нажмите **Input XML** и выберите XML из SpeedTree.
@@ -156,6 +158,7 @@ Single Material, FBX slots и подготовка Vertex Color Split в SpeedTr
 | **Skeletal Assembly Parts** | Отдельный файл Skeletal Mesh для каждого уникального элемента, без основной геометрии дерева. |
 | **Static Assembly** | Целое растение как Static Nanite Assembly с инстансами элементов, без скелета и скелетной анимации ветра. |
 | **Static Assembly Parts** | Отдельный файл Static Mesh для каждого уникального элемента, без основной геометрии дерева. |
+| **[PVE Growth Data (UE 5.8)](pve-export.md)** | Иерархия и радиусы ветвей в JSON для Procedural Vegetation Editor в Unreal Engine 5.8. |
 
 Используйте режим Parts, чтобы сначала собрать библиотеку веток в Unreal. Затем конвертируйте целые растения с **Use Unreal Reference**, чтобы разные деревья использовали общие импортированные ветки. В режимах Parts **Create Parts Folder** сохраняет файлы в отдельную папку. Выключите его, чтобы записать их рядом с выбранным Output USDA.
 

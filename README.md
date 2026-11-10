@@ -28,6 +28,8 @@ and leaves, materials, wind data, and optional companion assets.
 - **Tree fracturing.** Preview and export destructible tree pieces with
   optional collision shapes.
 - **More export choices.** Export static mesh assembly or individual parts
+- **PVE Growth Data.** Export branch hierarchy and radii as JSON for
+  Procedural Vegetation Editor in Unreal Engine 5.8.
 
 ## Quick start
 
@@ -52,6 +54,7 @@ Unreal import behavior.
 | Workflow | Use it when you need |
 | --- | --- |
 | Skeletal Mesh export | A tree ready for the Unreal vegetation pipeline |
+| [PVE Growth Data](Project/docs/user/workflows/pve-export.md) | An editable branch skeleton for Procedural Vegetation Editor in Unreal Engine 5.8 |
 | Dynamic Wind JSON | Wind groups and animation controls for Dynamic Wind Plugin |
 | Instanced parts | Repeated twigs and leaves without duplicated mesh payloads |
 | Proxy Mesh | A simplified companion mesh for collision, distance fields, and lower-cost shadows |

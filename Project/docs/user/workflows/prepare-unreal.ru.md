@@ -27,6 +27,8 @@ SpeedAssembly поддерживает Unreal Engine 5.7 и 5.8. Описанн�
 
 3. Найдите `vegetation` и включите **Procedural Vegetation Editor**.
 
+    Чтобы перенести скелет дерева из SpeedTree в PVE в Unreal Engine 5.8, см. [Экспорт PVE Growth Data](pve-export.md).
+
     ![Procedural Vegetation Editor включён в окне Plugins](../assets/images/unreal-procedural-vegetation-editor-plugin.png)
 
 4. Найдите `usd` и включите **Interchange OpenUSD**. Этот плагин используется для импорта [USD-файлов](../wiki/xml-usd-usda-json.md#usd-describes-a-3d-scene) из SpeedAssembly.

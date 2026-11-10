@@ -31,4 +31,6 @@ JSON расшифровывается как *JavaScript Object Notation*. Не�
 
 Здесь `*_DynamicWind.json` передаёт Unreal назначение костей в группы и настройки реакции на ветер. Геометрия и скелет остаются в USDA. В JSON нет animation keyframes. Dynamic Wind в Unreal генерирует движение во время игры.
 
+[PVE Growth Data](../workflows/pve-export.md) использует отдельный формат JSON для иерархии и радиусов ветвей в Unreal Engine 5.8.
+
 Полный порядок передачи ассетов описан в [Конвертации в SpeedAssembly](../workflows/basic-conversion.md). Подробности ветра см. в [Как работает Dynamic Wind](how-dynamic-wind-works.md).
