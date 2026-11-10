@@ -322,6 +322,25 @@ Evidence labels:
 - Regression gate: capture stack and reproduce stream-in/out with a provider-
   backed plant, comparing spatial loading on/off and Data Layer state.
 
+### CR-018 - PVE graph evaluation asserted on missing bud status
+
+- Observed: 2026-11-10, UE 5.8.4 CL 58902052, temporary `PVEProbe` project.
+- Signature: `Assertion failed: BudStatus.Num() == 10` in
+  `PVUtilities.cpp:331`, after `PVEditor initialized for SimpleTreeGraph`.
+- Boundary: Unreal Editor process during automatic PVE graph evaluation.
+- Evidence: Crash Reporter, crash context and editor log agree. The test JSON
+  has 17 points and no `points.attributes.budStatus`. Epic's Quaking Aspen
+  fixture has ten integers per point. Local source confirms the cause:
+  the JSON loader and Growth Data validity check accept the missing attribute,
+  then `AddInterpolatedPointToCollection` asserts when the accessor returns
+  an empty array. Mesh Builder calls that helper during resampling.
+- Fix verified for the fragment: supply ten status entries per point. The
+  original graph still references the malformed asset. The corrected
+  fixture also supplies a nonzero UpVector for Mesh Builder.
+- Regression gate: reject missing or malformed status data before export.
+  The corrected graph evaluated and baked 3,320 triangles in UE 5.8.4.
+  A future exporter must repeat that gate on a full tree.
+
 ## System rules derived from the incidents
 
 1. Keep heavy/native geometry in crash-isolated workers; when a native backend

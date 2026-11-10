@@ -30,10 +30,16 @@ most 4096 values per call. Authoring still owns every USDA declaration,
 relationship and schema field; `usda_writer.py` retains publication. Streamed
 writes check cancellation between chunks and release native buffer leases on
 failure. No backend choice enters settings, UI or canonical/resolved models.
-Both production extensions use `scripts/build_rust_extensions.ps1`.
+The production extensions use `scripts/build_rust_extensions.ps1`.
 On the retained heavy-FBX case, numerical writing improves 2.76x wall
 and 2.85x CPU; full conversion improves 1.53x locally, not several-fold.
 See `<archive>/rust_usda/RESULTS.md` for ranges, cache policy and acceptance.
+
+**PVE Growth Data (UE 5.8)** runs in the existing conversion worker. Its
+separate `pve_growth.py` adapter reads Spine or Bone facts with the shared XML
+reader and source transform. `native/pve_growth/` owns branch construction,
+joins, validation and PVE JSON encoding. The adapter selects one source for
+the whole tree, reports fallback, and publishes the JSON atomically.
 
 `source_extraction.py` owns shared SpeedTree interpretation for canonical and
 Proxy projections: geometry, skinning, skeleton, Object-local Repeated Part

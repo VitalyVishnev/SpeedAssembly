@@ -23,7 +23,7 @@ from ..gui_formatters import (
     format_conversion_results,
     format_telemetry_status,
 )
-from ..models import ConversionJobResult, ConversionRequest, ConversionTelemetry
+from ..models import ConversionJobResult, ConversionMode, ConversionRequest, ConversionTelemetry
 from ..proxy_mesh_service import ProxyMeshJobResult, ProxyMeshSettings, proxy_source_signature
 from .preview_jobs import PreviewProcessJob
 
@@ -237,14 +237,18 @@ class QtBackgroundJobsController:
         self._conversion_error_traceback = None
         self._last_conversion_telemetry = None
         self._window._set_conversion_running(True)
-        self._begin_conversion_status("Preparing conversion job...")
-        context = self._conversion_log_context(request)
-        context_suffix = f"\n\n{context}" if context else ""
-        self._window._set_log(
-            "Starting conversion.\n"
-            "The PySide6 shell keeps the UI responsive while backend services normalize XML, import FBX, and write USDA."
-            f"{context_suffix}"
-        )
+        if request.conversion_mode == ConversionMode.PVE_GROWTH:
+            self._begin_status_activity("PVE Growth Data", "Reading the tree skeleton...")
+            self._window._set_log("Exporting PVE Growth Data JSON.")
+        else:
+            self._begin_conversion_status("Preparing conversion job...")
+            context = self._conversion_log_context(request)
+            context_suffix = f"\n\n{context}" if context else ""
+            self._window._set_log(
+                "Starting conversion.\n"
+                "The PySide6 shell keeps the UI responsive while backend services normalize XML, import FBX, and write USDA."
+                f"{context_suffix}"
+            )
         if run_async:
             try:
                 process, message_queue, cancel_event = self._deps.start_conversion_process(
@@ -1070,6 +1074,10 @@ class QtBackgroundJobsController:
             output_path=result.output_path,
         )
         self._window._set_log(format_conversion_results((result,), resolved_request))
+        if resolved_request.conversion_mode == ConversionMode.PVE_GROWTH:
+            warning = next((issue.message for issue in result.diagnostics if issue.severity == "warning"), None)
+            self._finish_status_activity("warning" if warning else "success", warning or "PVE Growth Data exported.")
+            return
         if result.usda_document is None:
             self._finish_status_activity("error", "Conversion finished with errors.")
             self._window._append_log("Conversion finished without a USDA document. See diagnostics above.")

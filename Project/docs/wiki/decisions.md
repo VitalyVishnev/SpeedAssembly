@@ -1936,3 +1936,24 @@ collision reuse, silhouette comparison, and export must validate resolved path,
 file size, and nanosecond modification time. A changed source requests render
 and comparison payloads from one load; results spanning a source change are
 rejected. Preserve geometry reuse for collision-only settings on unchanged XML.
+
+## Decision: UE 5.8 PVE Growth Data uses one skeleton source
+
+The prototype writes one Growth Data JSON per SpeedTree XML. Prefer Object
+Spine curves, with local samples offset by the Object's absolute origin and
+ancestry from Object ParentID. Each source sample carries its exported radius.
+If the Spine hierarchy or samples are unusable, switch the entire tree to
+Bone Start, End, ParentID and Radius and surface the rejected Spine detail as
+a warning. Fail without writing if neither source is valid.
+
+On the Bone path, the first direct child whose Start coincides with the
+parent's End continues the physical curve. Other children attach to their
+parent Bone segment. This rule reconstructs geometry from exported segments.
+The existing Dynamic Wind continuation contract applies to joint orientation.
+
+Project each lateral onto its parent's curve and share the resulting point
+index. Interpolate the parent radius at the join. Where an offset exists,
+retain the original child start and bend the connector toward its outgoing
+tangent. The connector carries the child base radius after the shared point.
+PVE reconstructs the woody surface from those radii and its mesh settings.
+Growth simulation state uses defaults and reconstructed metadata.

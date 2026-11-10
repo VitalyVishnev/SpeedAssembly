@@ -212,6 +212,7 @@ try {
             '--hidden-import', 'xml_to_usda._ufbx',
             '--hidden-import', 'xml_to_usda._xml_reader',
             '--hidden-import', 'xml_to_usda._usda_numbers',
+            '--hidden-import', 'xml_to_usda._pve_growth',
             '--paths', (Join-Path $repoRoot 'src'),
             '--add-data', "$qtUiStagingRoot;xml_to_usda/qt_ui",
             '--add-data', "$(Join-Path $buildPath 'build_identity.json');xml_to_usda",

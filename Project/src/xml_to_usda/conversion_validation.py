@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from .asset_paths import is_valid_unreal_asset_path, normalize_unreal_asset_path
-from .models import ConversionRequest, MaterialPolicy, PrototypeSourceConfig, ScatteredRigMode, SkinningQuality, UdimMode
+from .models import ConversionMode, ConversionRequest, MaterialPolicy, PrototypeSourceConfig, ScatteredRigMode, SkinningQuality, UdimMode
 
 
 def validate_conversion_request(request: ConversionRequest) -> None:
@@ -9,6 +11,10 @@ def validate_conversion_request(request: ConversionRequest) -> None:
         raise ValueError("ConversionRequest requires at least one input path.")
     if request.output_path and len(request.input_paths) != 1:
         raise ValueError("Explicit output_path is only valid for single-file conversion.")
+    if request.conversion_mode == ConversionMode.PVE_GROWTH:
+        if not request.output_path or Path(request.output_path).suffix.lower() != ".json":
+            raise ValueError("Select an output JSON path.")
+        return
     try:
         SkinningQuality.parse(request.skinning_quality)
     except (TypeError, ValueError) as exc:

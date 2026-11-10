@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-from .models import ConversionRequest, ConversionTelemetry, MaterialPolicy, PrototypeSourceMode
+from .models import ConversionMode, ConversionRequest, ConversionTelemetry, MaterialPolicy, PrototypeSourceMode
 
 
 def format_conversion_results(
     results,
     request: ConversionRequest,
 ) -> str:
+    if request.conversion_mode == ConversionMode.PVE_GROWTH:
+        pve_lines: list[str] = []
+        for result in results:
+            pve_lines.extend((f"Input: {result.input_path}", f"Output: {result.output_path}"))
+            pve_lines.extend(f"[{issue.severity}] {issue.message}" for issue in result.diagnostics)
+        return "\n".join(pve_lines)
     lines: list[str] = [
         f"CPU profile: {request.cpu_profile.value}",
         f"Cleanup policy: {request.cleanup_policy.value}",

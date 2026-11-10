@@ -1,11 +1,30 @@
 # Known Bugs
 
+## PVE prototype coverage
+
+The Spine path detects malformed curves and missing parents of supplied
+curves. A missing terminal Spine with no Spine descendants can be
+indistinguishable from a non-woody Object. Bone count cannot establish Spine
+coverage because several bones can describe one curve. A future coverage
+check needs an independently verified SpeedTree branch identifier. Bark
+surface equivalence and skeletal/Nanite bake are Unverified. The prototype
+exports woody curves and radii. Foliage placements and SpeedTree growth
+settings are outside its current data contract.
+
 Current defects, fail-loud limits, and validation gaps only. Resolved crash
 history lives in [Encountered Crashes](encountered-crashes.md); rejected fixes
 and benchmark detail live in [Experiments](experiments.md).
 
 Evidence paths starting with `<archive>/` use the external experiment archive
 defined on that page; they are not repository-relative paths.
+
+## PVE accepts incomplete Growth Data and crashes during graph evaluation
+
+UE 5.8.4 imports and saves Growth Data that omits the per-point `budStatus`
+array required by Mesh Builder. Zero UpVectors also pass import and can
+produce NaN vertices. The corrected test fragment rendered and baked.
+A future exporter needs both checks before export and a full-tree evaluation.
+See [CR-018](encountered-crashes.md#cr-018---pve-graph-evaluation-asserted-on-missing-bud-status).
 
 ## OriginalScale validation differs between projections
 

@@ -270,6 +270,93 @@ Geometry-based continuation is a candidate for external rigs, not a replacement
 for the established SpeedTree order contract. Details and source navigation:
 [UE 5.8 PVE Mesh Extraction](ue58-pve-mesh-extraction.md).
 
+## SpeedTree Raw XML to UE 5.8 PVE Growth Data
+
+Status: Growth Data UI import, reload, corrected fragment preview and Static
+Mesh bake verified in UE 5.8.4 (CL 58902052). Full-tree mapping, interactive
+editing, skeletal export, and Nanite bake remain Unverified.
+
+Stock USD and Interchange code has no PVE asset translator. PVE's
+`Extract from Mesh` reads a Static Mesh and reconstructs branch curves.
+For a direct data path, the stock PVE plugin also has a development-only
+JSON importer and a Growth Data asset action, `UpdateDataAsset`.
+`PVJSONHelper.cpp::LoadGrowthDataJsonToCollection` reads branch points and
+ancestry and derives point scale from `budLateralMeristem`. This is an
+internal format. `Growth Data Loader` reads saved variations from the asset.
+
+The artist can import without running a script. In the Content Browser use
+**Add → Data → Data Asset** and choose **Procedural Vegetation Growth Data
+Asset**. Open it, set **Internal → Json Directory Path** to a folder of
+Growth Data JSON files, click **UpdateDataAsset**, and save. In a PVE graph,
+assign the asset to **Growth Data Loader**. The button replaces the existing
+variation list and names each loaded variation after its file. The UI probe
+created an empty asset, imported `SimpleTree01_Fragment` and saved the
+result. Unreal logged the import and package save. PVE's native button ran
+without any Python action. The editor still loaded Python at startup for
+other engine plugins.
+
+The separate **Growth Data Json Importer** node reads a file directly.
+`PV.DebugMode.Enabled 1` exposes it in the graph menu per engine source.
+The UI probe used the asset button only.
+
+In a scratch project, Unreal Python invoked `UpdateDataAsset` with Epic's
+sample and then with a JSON fragment from `SimpleTree_01.xml`. The fragment
+used 15 animation bones for 17 points and two branch curves. It approximated
+the junction with the nearest trunk sample and supplied minimal bud data.
+After restarting UE and moving the JSON aside, the stock Loader exposed the
+named variation. Python used the stock graph factory, found its embedded
+graph by name, and saved it with Loader, Manual Edit and Mesh Builder
+connected. The graph's private property was inaccessible through Python.
+
+The inspected SimpleTree, Alder and Spruce XMLs had bone endpoints and radii
+but no object spines. The current canonical Joint retains endpoints and
+ancestry without the XML radius. A production exporter needs a verified
+mapping for full branch chains, attachment points and radii. Mesh Builder
+regenerates woody geometry. PVE 5.8's stock Foliage Distributor places new
+instances. Exact SpeedTree bark geometry, foliage placements, and editable
+SpeedTree generator settings were outside this probe.
+
+The corrected fragment has ten `budStatus` integers per point, derived
+from PVE's root, tip and fork rules. It also has a finite, normalized
+`budDirection` UpVector perpendicular to the branch tangent. Adding status
+alone removed the assert but left a zero UpVector. Mesh Builder normalized it
+and produced NaN vertices. With both corrections and one Generation Materials
+slot in Mesh Builder, the graph displayed the trunk and branch. PVE reported
+153 resampled points, 1,681 vertices and 3,320 triangles and baked a Static
+Mesh with Nanite Foliage disabled. Branch-junction fidelity remains
+Unverified.
+
+Reproduction and compact logs: `<archive>/pve_growth_import_58/`.
+The final fixture, standalone generator and bake evidence are in its
+`verified/` directory. The generator reproduces the tested JSON byte for byte.
+
+Source audit: the Growth Data loader reads typed point and branch attributes.
+It computes `Scale` in centimeters from `budLateralMeristem[0]` in meters
+and recomputes bud IDs and branch source bud IDs. Mesh Builder uses Scale
+as the base radial distance, resamples curves, and recalculates gradients
+and material UVs. At a fused fork, it estimates the child's base radius from
+the child's next samples. XML bone radii are usable inputs, but agreement
+with the original bark surface has not been measured. An XML spine radius
+profile, where available, or a measured bark section can supply more detail.
+The Growth JSON loader does not run the legacy foliage or global attribute
+readers. Custom typed attributes can enter the collection; their use and
+preservation in downstream nodes require separate verification.
+
+### Full-tree prototype
+
+UE 5.8.4 accepted the current SimpleTree Spine output with 23 branches and
+472 input points. The graph connected Growth Data Loader, Manual Edit and
+Mesh Builder. The viewport reported 833 resampled points and 15,296
+triangles. Static Mesh export completed with Nanite Foliage disabled and
+no logged NaN vertices. The previous Bones-only SimpleTree exported
+22 branches and 169 input points and rendered 11,359 triangles in PVE.
+The packaged worker reproduced both imported files byte for byte.
+
+Spine JSON SHA-256:
+`2be16071374a668826d43613ce45b3f6b2ad92ca64ac8995c53a74f250baa226`.
+Bones JSON SHA-256:
+`37cf55e594d634c6177c2789135f05ff6a9053129eeeb74b6eb81c26c4572e5f`.
+
 ## Tree hierarchy from operator-selected reference rigs
 
 Status: Implemented as a comparison candidate; independent/UE validation open.

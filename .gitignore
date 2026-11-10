@@ -58,3 +58,4 @@ Project/samples/speedtree/simple_tree/variants/*.usda
 Project/samples/speedtree/BigSpruce/
 
 Project/src/xml_to_usda/_usda_numbers*.pyd
+Project/src/xml_to_usda/_pve_growth*.pyd

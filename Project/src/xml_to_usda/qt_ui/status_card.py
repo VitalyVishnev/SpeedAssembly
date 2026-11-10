@@ -279,6 +279,7 @@ class ProgramStatusCard(QFrame):
     def finish(self, outcome: str, message: str) -> None:
         labels = {
             "success": ("Success", "✓"),
+            "warning": ("Warning", "!"),
             "error": ("Error", "!"),
             "cancelled": ("Cancelled", "×"),
         }
@@ -290,7 +291,8 @@ class ProgramStatusCard(QFrame):
         self.progress.hide()
         if self._conversion_active:
             self.steps_frame.show()
-            self._render_steps(completed=outcome == "success", failed=outcome != "success")
+            completed = outcome in ("success", "warning")
+            self._render_steps(completed=completed, failed=not completed)
         else:
             self.steps_frame.hide()
         self._conversion_active = False

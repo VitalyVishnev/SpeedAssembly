@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .asset_paths import is_valid_unreal_asset_path, normalize_unreal_asset_path
+from .conversion_validation import validate_conversion_request
 from .models import (
     BaseMaterialOverride,
     CleanupPolicy,
@@ -63,6 +64,15 @@ def prepare_conversion_plan(
     resolved_output_path = output_path.strip()
     if not resolved_input_path:
         raise ValueError("Select a source XML file.")
+    resolved_conversion_mode = ConversionMode.parse(conversion_mode)
+    if resolved_conversion_mode == ConversionMode.PVE_GROWTH:
+        request = ConversionRequest(
+            input_paths=(resolved_input_path,),
+            output_path=resolved_output_path,
+            conversion_mode=resolved_conversion_mode,
+        )
+        validate_conversion_request(request)
+        return ConversionLaunchPlan(request=request, run_async=True)
     if not resolved_output_path:
         raise ValueError("Select an output USDA path.")
 
@@ -79,8 +89,6 @@ def prepare_conversion_plan(
         effective_single_material_path = None
     else:
         effective_single_material_path = None
-    resolved_conversion_mode = ConversionMode.parse(conversion_mode)
-
     use_explicit_material_contract = _should_use_explicit_material_contract(
         base_material_overrides,
         prototype_source_configs,

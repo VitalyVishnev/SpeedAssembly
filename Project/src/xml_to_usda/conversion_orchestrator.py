@@ -135,6 +135,11 @@ def _convert_single_input(
     )
     if export_target is not None:
         ensure_output_path_allowed(export_target)
+    if request.conversion_mode == ConversionMode.PVE_GROWTH:
+        from .pve_growth import export_pve_growth
+
+        assert export_target is not None
+        return export_pve_growth(input_path, export_target, cancel_event)
 
     job_workspace = JobWorkspace.create(
         runtime_paths,

@@ -1,0 +1,18 @@
+[package]
+name = "speedassembly-pve-growth"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85.1"
+publish = false
+
+[lib]
+name = "_pve_growth"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "=0.23.5", features = ["extension-module"] }
+serde_json = "=1.0.145"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

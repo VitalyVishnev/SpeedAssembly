@@ -211,12 +211,13 @@ class WindowAssets:
     noise: QPixmap
 
 
-CONVERSION_MODES: tuple[tuple[str, str, bool], ...] = (
-    ("skeletal_assembly", "Skeletal Assembly", True),
-    ("skeletal_parts", "Skeletal Assembly Parts", True),
-    ("static_assembly", "Static Assembly", True),
-    ("static_parts", "Static Assembly Parts", True),
-)
+_CONVERSION_MODE_LABELS = {
+    ConversionMode.SKELETAL_ASSEMBLY: "Skeletal Assembly",
+    ConversionMode.SKELETAL_PARTS: "Skeletal Assembly Parts",
+    ConversionMode.STATIC_ASSEMBLY: "Static Assembly",
+    ConversionMode.STATIC_PARTS: "Static Assembly Parts",
+    ConversionMode.PVE_GROWTH: "PVE Growth Data (UE 5.8)",
+}
 PARTS_FOLDER_SUFFIXES = {
     ConversionMode.SKELETAL_PARTS: "SkeletalParts",
     ConversionMode.STATIC_PARTS: "StaticParts",
@@ -238,6 +239,7 @@ def _conversion_mode_tooltip(mode_key: str) -> str:
         "skeletal_parts": "Writes reusable skeletal prototype files. Fewer assembly fields; more useful for part libraries.",
         "static_assembly": "Writes a rigid static Nanite Assembly. No skeleton; simpler output for non-skinned vegetation.",
         "static_parts": "Writes reusable static prototype files. No assembly, instancer, skeleton, or skinning data.",
+        "pve_growth": "Exports branch hierarchy and radii as JSON for Unreal Engine 5.8's Growth Data Loader.",
     }.get(mode_key, "Conversion output shape. Lower complexity omits contracts; higher fidelity keeps assembly structure.")
 
 
@@ -1270,26 +1272,35 @@ class MainWindow(QWidget):
         action_group = QActionGroup(menu)
         action_group.setExclusive(True)
         self._conversion_mode_actions: dict[str, QAction] = {}
-        for mode_key, label, supported in CONVERSION_MODES:
+        for mode, label in _CONVERSION_MODE_LABELS.items():
+            mode_key = mode.value
             action = QAction(label, menu)
             action.setCheckable(True)
             action.setData(mode_key)
-            action.setEnabled(supported)
             action.setToolTip(_conversion_mode_tooltip(mode_key))
             action.setChecked(mode_key == self._conversion_mode)
-            if supported:
-                action.triggered.connect(lambda _checked=False, selected=mode_key: self._set_conversion_mode(selected))
+            action.triggered.connect(lambda _checked=False, selected=mode_key: self._set_conversion_mode(selected))
             self._conversion_mode_actions[mode_key] = action
             action_group.addAction(action)
             menu.addAction(action)
         return menu
 
     def _set_conversion_mode(self, mode_key: str) -> None:
+        was_pve = self._conversion_mode == ConversionMode.PVE_GROWTH
         self._conversion_mode = mode_key
         self._operator_state = replace(self._operator_state, conversion_mode=ConversionMode(mode_key))
+        is_pve = mode_key == ConversionMode.PVE_GROWTH
+        if is_pve != was_pve:
+            suffix = ".json" if is_pve else ".usda"
+            output = self.output_input.text().strip()
+            if output:
+                self.output_input.setText(str(Path(output).with_suffix(suffix)))
+            if self._auto_output_path:
+                self._auto_output_path = str(Path(self._auto_output_path).with_suffix(suffix))
+        self._sync_output_format()
         for key, action in self._conversion_mode_actions.items():
             action.setChecked(key == mode_key)
-        selected_label = next((label for key, label, _supported in CONVERSION_MODES if key == mode_key), mode_key)
+        selected_label = _CONVERSION_MODE_LABELS.get(mode_key, mode_key)
         self._append_log(f"Conversion mode selected: {selected_label}")
         self._sync_parts_folder_button()
         self._schedule_operator_state_save()
@@ -1640,10 +1651,13 @@ class MainWindow(QWidget):
 
     def _apply_operator_state_to_widgets(self) -> None:
         self._persistence_suspended = True
+        self._conversion_mode = self._operator_state.conversion_mode.value
         self.source_input.setText(self._operator_state.input_path)
         self.output_input.setText(self._operator_state.output_path)
-        if self._operator_state.input_path:
-            self._auto_output_path = str(Path(self._operator_state.input_path).with_suffix(".usda"))
+        self._auto_output_path = (
+            str(Path(self._operator_state.input_path).with_suffix(self._conversion_output_suffix()))
+            if self._operator_state.input_path else None
+        )
         if self._operator_state.input_path and not self._operator_state.output_path:
             self._set_default_output_from_source("", None, force=True)
         self.wind_panel.set_global_options(
@@ -1657,7 +1671,7 @@ class MainWindow(QWidget):
         )
         self.geometry_panel.apply_proxy_settings(self._proxy_mesh_settings)
         self.geometry_panel.apply_fracture_preview_settings(self._fracture_preview_settings)
-        self._conversion_mode = self._operator_state.conversion_mode.value
+        self._sync_output_format()
         if hasattr(self, "_conversion_mode_actions"):
             for key, action in self._conversion_mode_actions.items():
                 action.setChecked(key == self._conversion_mode)
@@ -1802,7 +1816,7 @@ class MainWindow(QWidget):
         self._append_log(f"Cache maintenance warning: failed path(s)\n{formatted}")
 
     def _refresh_state_cards(self) -> None:
-        mode = next((label for key, label, _supported in CONVERSION_MODES if key == self._conversion_mode), self._conversion_mode)
+        mode = _CONVERSION_MODE_LABELS.get(self._conversion_mode, self._conversion_mode)
         policy = self._operator_state.material_policy.value.replace("_", " ").title()
         if self._operator_state.material_policy.value == "single_material":
             material_path = self._operator_state.single_material_path or "not set"
@@ -1836,7 +1850,8 @@ class MainWindow(QWidget):
     def _update_action_state(self) -> None:
         has_input = bool(self.source_input.text().strip())
         has_output = bool(self.output_input.text().strip())
-        self.convert_button.setText("Cancel" if self._conversion_running else "Convert to USDA")
+        convert_label = "Export Growth Data" if self._conversion_mode == ConversionMode.PVE_GROWTH else "Convert to USDA"
+        self.convert_button.setText("Cancel" if self._conversion_running else convert_label)
         self.convert_button.setEnabled(self._conversion_running or (has_input and has_output))
         self.convert_mode_button.setEnabled(not self._conversion_running)
         self.parts_folder_button.setEnabled(not self._conversion_running)
@@ -2220,15 +2235,16 @@ class MainWindow(QWidget):
         if not source_path:
             self._auto_output_path = None
             return
-        new_auto_output = str(Path(source_path).with_suffix(".usda"))
+        suffix = self._conversion_output_suffix()
+        new_auto_output = str(Path(source_path).with_suffix(suffix))
         current_output = self.output_input.text().strip()
-        previous_default = previous_auto_output or (str(Path(previous_input).with_suffix(".usda")) if previous_input else "")
+        previous_default = previous_auto_output or (str(Path(previous_input).with_suffix(suffix)) if previous_input else "")
         current_path = Path(current_output) if current_output else None
         current_is_relative = bool(current_path is not None and not current_path.is_absolute())
         if force or not current_output or current_output == previous_default or current_is_relative:
             next_output = new_auto_output
         else:
-            next_output = str(current_path.with_name(f"{Path(source_path).stem}{current_path.suffix or '.usda'}"))
+            next_output = str(current_path.with_name(f"{Path(source_path).stem}{current_path.suffix or suffix}"))
         if next_output != current_output:
             self._persistence_suspended = True
             self.output_input.setText(next_output)
@@ -2543,21 +2559,26 @@ class MainWindow(QWidget):
         self._set_status("Source XML selected.")
 
     def browse_output(self) -> None:
+        is_pve = self._conversion_mode == ConversionMode.PVE_GROWTH
+        format_name = "JSON" if is_pve else "USDA"
+        suffix = self._conversion_output_suffix()
         current_output = self.output_input.text().strip()
         if current_output and current_output != self._auto_output_path:
             initial = current_output
         else:
-            initial = self._operator_snapshot.last_output_path or current_output or "tree.usda"
+            initial = self._operator_snapshot.last_output_path or current_output or f"tree{suffix}"
+            if is_pve:
+                initial = str(Path(initial).with_suffix(suffix))
         selected, _ = QFileDialog.getSaveFileName(
             self,
-            "Select USDA output",
+            f"Select {format_name} output",
             initial,
-            "USDA files (*.usda *.usd);;All files (*.*)",
+            "Growth Data JSON (*.json)" if is_pve else "USDA files (*.usda *.usd);;All files (*.*)",
         )
         if not selected:
             return
         self.output_input.setText(selected)
-        self._set_status("Output USDA selected.")
+        self._set_status(f"Output {format_name} selected.")
         self._save_operator_state()
 
     def _browse_part_fbx(self, target_edit: QLineEdit) -> None:
@@ -2623,12 +2644,29 @@ class MainWindow(QWidget):
     def _sync_parts_folder_button(self) -> None:
         self.parts_folder_button.setVisible(self._operator_state.conversion_mode in PARTS_FOLDER_SUFFIXES)
 
+    def _conversion_output_suffix(self) -> str:
+        return ".json" if self._conversion_mode == ConversionMode.PVE_GROWTH else ".usda"
+
+    def _sync_output_format(self) -> None:
+        is_pve = self._conversion_mode == ConversionMode.PVE_GROWTH
+        label = "Output JSON" if is_pve else "Output USDA"
+        self.output_button.setText(label)
+        self.output_button.setToolTip(f"Choose the {label.removeprefix('Output ')} output path.")
+        self.output_input.setPlaceholderText(f"{label} path")
+        self.output_input.setToolTip(
+            "Growth Data JSON output path."
+            if is_pve else "USDA output path. The filename stem becomes the authored base asset name."
+        )
+        self._update_action_state()
+
     def _report_conversion_plan_error(self, exc: ValueError) -> None:
         message = str(exc)
         if message == "Select a source XML file.":
             self._report_error("Missing input", message)
         elif message == "Select an output USDA path.":
             self._report_error("Missing output", message)
+        elif message == "Select an output JSON path.":
+            self._report_error("Invalid output", message)
         elif message.startswith("Cannot convert until Unreal material paths are assigned"):
             self._report_error("Missing material assignments", message)
         else:
@@ -3433,13 +3471,14 @@ class MainWindow(QWidget):
         self._append_runtime_log("ERROR Proxy Mesh preview failed", message)
 
     def _build_proxy_source_request(self, *, proxy_output_path: str = "") -> ProxyMeshSourceRequest:
+        mode = self._operator_state.conversion_mode
         return prepare_proxy_mesh_source_request(
             input_path=self.source_input.text(),
             output_path=self.output_input.text().strip(),
             proxy_output_path=proxy_output_path,
             output_mode=OutputMode.SELF_CONTAINED,
             cpu_profile=self._operator_state.cpu_profile,
-            conversion_mode=self._operator_state.conversion_mode,
+            conversion_mode=ConversionMode.SKELETAL_ASSEMBLY if mode == ConversionMode.PVE_GROWTH else mode,
             fbx_cache_max_bytes=self._fbx_cache_max_bytes(),
             fbx_cache_max_age_seconds=self._fbx_cache_max_age_seconds(),
         )

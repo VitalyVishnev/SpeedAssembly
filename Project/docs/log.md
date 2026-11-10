@@ -932,3 +932,37 @@ under `docs/raw/`; Git retains per-change detail.
   preserved but are superseded by this maintained policy. No runtime, tests,
   build scripts, candidate ZIP or GitHub draft changed.
 - Compact timing evidence: `<archive>/validation_duration_2026-11-05/`.
+
+## 2026-11-09 - Probe SpeedTree import into UE 5.8 PVE
+
+- Verified Growth Data import and reload and saved a PVE graph from a
+  two-branch SpeedTree XML fragment in UE 5.8.4. Recorded the internal JSON
+  route and remaining graph evaluation and fidelity checks in
+  [Experiments](wiki/experiments.md#speedtree-raw-xml-to-ue-58-pve-growth-data).
+
+## 2026-11-10 - Verify the PVE Growth Data import UI
+
+- Created a Growth Data asset in the UE 5.8.4 Content Browser, loaded the
+  SpeedTree fragment through UpdateDataAsset, and saved the asset. Added
+  the click path and folder replacement behavior to the experiment record.
+- Traced the subsequent PVE graph crash to a missing per-point `budStatus`
+  array in the fragment and recorded CR-018 and its regression gate.
+- Corrected the fixture's bud status and UpVectors. Verified the fragment
+  in the PVE viewport and baked a non-Nanite Static Mesh in UE 5.8.4.
+- Traced the Growth Data radius channel and typed attributes, including
+  fields the importer and Mesh Builder recompute.
+
+## 2026-11-10 - Add the PVE Growth Data prototype
+
+- Added the UE 5.8 JSON mode to the conversion gear and packaged Rust
+  extensions. It uses Spine with a whole-tree Bones fallback and an operator
+  warning that identifies the rejected Spine data.
+- Tested the full SimpleTree through Growth Data Loader, Manual Edit and
+  Mesh Builder in UE 5.8.4. Added source regression coverage for physical
+  joins, preserved radii, deterministic output and fallback.
+- Package passed all 27 packaged contracts and all three smokes. The frozen
+  conversion worker reproduced both Unreal-tested JSON files byte for byte.
+  A source Qt smoke confirmed the yellow fallback status. The broader
+  status-card suite reproduced one pre-existing SkinningTickLabel teardown
+  failure on HEAD.
+- Reused the resolved PVE parent indices and request validation.

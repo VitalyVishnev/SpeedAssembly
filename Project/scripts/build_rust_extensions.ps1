@@ -1,7 +1,7 @@
 param(
     [string]$ToolchainBin = '',
-    [ValidateSet('xml_reader', 'usda_numbers')]
-    [string[]]$Modules = @('xml_reader', 'usda_numbers')
+    [ValidateSet('xml_reader', 'usda_numbers', 'pve_growth')]
+    [string[]]$Modules = @('xml_reader', 'usda_numbers', 'pve_growth')
 )
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
@@ -20,7 +20,7 @@ $env:TMP = Join-Path $repo 'Project/tmp/rust-extensions/compiler-temp'
 $env:TEMP = $env:TMP
 New-Item -ItemType Directory -Force -Path $env:TMP | Out-Null
 foreach ($module in $Modules) {
-    $extension = @{ xml_reader = '_xml_reader'; usda_numbers = '_usda_numbers' }[$module]
+    $extension = @{ xml_reader = '_xml_reader'; usda_numbers = '_usda_numbers'; pve_growth = '_pve_growth' }[$module]
     & $cargo build --release --locked --manifest-path (Join-Path $repo "Project/native/$module/Cargo.toml")
     if ($LASTEXITCODE -ne 0) { throw "Rust $module build failed." }
     Copy-Item -LiteralPath (Join-Path $repo "Project/native/$module/target/release/$extension.dll") -Destination (Join-Path $repo "Project/src/xml_to_usda/$extension.pyd")

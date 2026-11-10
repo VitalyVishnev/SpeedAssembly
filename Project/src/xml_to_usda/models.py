@@ -81,6 +81,7 @@ class ConversionMode(StrEnum):
     SKELETAL_PARTS = "skeletal_parts"
     STATIC_ASSEMBLY = "static_assembly"
     STATIC_PARTS = "static_parts"
+    PVE_GROWTH = "pve_growth"
 
     @classmethod
     def parse(cls, raw: "ConversionMode | str | None") -> "ConversionMode":
