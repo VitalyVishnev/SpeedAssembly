@@ -69,7 +69,7 @@ from ..fbx_payload_cache import (
     sweep_fbx_payload_cache,
 )
 from ..gui_formatters import format_wind_group_summary, format_wind_json_result
-from ..models import CleanupPolicy, ConversionMode, ConversionRequest, OutputMode, PrototypeSourceMode, ScatteredRigMode
+from ..models import CleanupPolicy, ConversionMode, ConversionRequest, DynamicWindData, OutputMode, PrototypeSourceMode, ScatteredRigMode
 from ..proxy_mesh_service import (
     ProxyMeshError,
     ProxyMeshResult,
@@ -91,6 +91,8 @@ from ..fracture_viewport_scene import build_fracture_viewport_scene
 from ..runtime_paths import resolve_runtime_paths
 from ..version import application_title, build_details
 from ..wind_external_skeleton import ExternalSkeletonChoicesResult
+from ..wind_operator_state import restore_wind_data, update_wind_session, wind_group_records
+from ..wind_profiles import FORCE_BASED, LEGACY
 from ..settings_service import (
     FACTORY_DEFAULT_PRESET_NAME,
     factory_default_preset,
@@ -1262,6 +1264,7 @@ class MainWindow(QWidget):
         self._left_column_layout = left_column
         left_column.setSpacing(0)
         self.program_status_card = ProgramStatusCard(self)
+        self.program_status_card.wind_profile_switch.profileChanged.connect(self._set_wind_profile)
         self.status_label = self.program_status_card.status_label
         left_column.addWidget(self.program_status_card, 1)
 
@@ -1694,6 +1697,8 @@ class MainWindow(QWidget):
         )
         if self._operator_state.input_path and not self._operator_state.output_path:
             self._set_default_output_from_source("", None, force=True)
+        self.wind_panel.set_profile(self._operator_state.wind_profile)
+        self.program_status_card.wind_profile_switch.set_profile(self._operator_state.wind_profile)
         self.wind_panel.set_global_options(
             is_ground_cover=self._operator_state.is_ground_cover,
             gust_attenuation=self._operator_state.gust_attenuation,
@@ -2321,6 +2326,17 @@ class MainWindow(QWidget):
         except OSError:
             return
 
+    def _set_wind_profile(self, profile: str) -> None:
+        self.program_status_card.wind_profile_switch.set_profile(profile)
+        self.wind_panel.set_profile(profile)
+        self._operator_state = replace(self._operator_state, wind_profile=profile)
+        self.program_status_card.wind_structure_warning.setVisible(
+            profile == FORCE_BASED and bool(self.program_status_card.wind_structure_warning.text())
+        )
+        if self._wind_preview_dialog is not None and self._wind_preview_dialog.isVisible():
+            self._wind_preview_dialog.set_profile(profile)
+        self._handle_tab_state_changed()
+
     def _handle_tab_state_changed(self) -> None:
         self._operator_snapshot = replace(
             self._operator_snapshot,
@@ -2336,6 +2352,20 @@ class MainWindow(QWidget):
                 self.wind_panel.orient_scattered_bones_from_instances()
             ),
         )
+        self._operator_snapshot = replace(
+            self._operator_snapshot,
+            wind_preview_session=update_wind_session(
+                self._operator_snapshot.wind_preview_session,
+                self.source_input.text().strip(),
+                self._wind_export_data(),
+            ),
+        )
+        if (
+            self._wind_preview_dialog is not None
+            and self._wind_preview_dialog.isVisible()
+            and self._current_dynamic_wind is not None
+        ):
+            self._wind_preview_dialog.apply_group_settings(self._wind_export_data())
         self._schedule_operator_state_save()
         self._refresh_state_cards()
 
@@ -2468,7 +2498,11 @@ class MainWindow(QWidget):
     def _reuse_source_wind(self, result: SourceDiscoveryResult) -> None:
         self._source_wind_ready_key = None
         wind = result.wind_data
-        if wind is not None and wind.is_ground_cover == self.wind_panel.is_ground_cover_enabled():
+        if (
+            self._operator_state.wind_profile == LEGACY
+            and wind is not None
+            and wind.is_ground_cover == self.wind_panel.is_ground_cover_enabled()
+        ):
             self._source_refresh_timer.stop()
             self._source_wind_ready_key = (result.input_path, wind.is_ground_cover)
             self._handle_wind_data_loaded(wind, used_retry=False)
@@ -2643,6 +2677,17 @@ class MainWindow(QWidget):
             return
         self._background_jobs.start_conversion(request=plan.request, run_async=plan.run_async)
 
+    def _wind_export_data(self) -> DynamicWindData | None:
+        if self._current_dynamic_wind is None:
+            return None
+        return replace(
+            self._current_dynamic_wind,
+            simulation_groups=self.wind_panel.collect_group_settings(),
+            profile=self._operator_state.wind_profile,
+            is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
+            gust_attenuation=self.wind_panel.gust_attenuation(),
+        )
+
     def _prepare_current_conversion_plan(self):
         return self._deps.prepare_conversion_plan(
             input_path=self.source_input.text().strip(),
@@ -2662,6 +2707,8 @@ class MainWindow(QWidget):
             orient_scattered_bones_from_instances=(
                 self.wind_panel.orient_scattered_bones_from_instances()
             ),
+            wind_profile=self._operator_state.wind_profile,
+            wind_data=self._wind_export_data(),
             async_threshold_bytes=self.ASYNC_CONVERSION_THRESHOLD_BYTES,
             fbx_cache_max_bytes=self._fbx_cache_max_bytes(),
             fbx_cache_max_age_seconds=self._fbx_cache_max_age_seconds(),
@@ -2718,6 +2765,7 @@ class MainWindow(QWidget):
             load_wind_group_records(self._operator_snapshot)
         )
         plan = self._deps.prepare_wind_inspection_plan(
+            profile=self._operator_state.wind_profile,
             input_path=input_path,
             is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
             scattered_rig_mode=self.wind_panel.scattered_rig_mode(),
@@ -2745,6 +2793,9 @@ class MainWindow(QWidget):
         request = self._deps.WindGenerationRequest(
             input_path=input_path,
             output_path=str(output_path),
+            data=self._wind_export_data(),
+            profile=self._operator_state.wind_profile,
+            root_name=Path(self.output_input.text()).stem if self.output_input.text().strip() else None,
             group_settings=self.wind_panel.collect_group_settings(),
             gust_attenuation=self.wind_panel.gust_attenuation(),
             is_ground_cover=self.wind_panel.is_ground_cover_enabled(),
@@ -2782,6 +2833,9 @@ class MainWindow(QWidget):
         dialog = WindPreviewDialog(
             parent=None,
             external_preview_requested=self._background_jobs.start_wind_preview,
+            profile=self._operator_state.wind_profile,
+            initial_wind_data=self._wind_export_data(),
+            root_name=Path(self.output_input.text()).stem if self.output_input.text().strip() else None,
             wind_session_snapshot=self._operator_snapshot.wind_preview_session,
             wind_session_changed=self._save_wind_preview_session,
         )
@@ -3551,8 +3605,18 @@ class MainWindow(QWidget):
         self._pending_wind_preview_after_refresh = False
 
     def _handle_wind_data_loaded(self, dynamic_wind, *, used_retry: bool) -> None:
+        restored = restore_wind_data(
+            self._operator_snapshot.wind_preview_session, self.source_input.text().strip(), dynamic_wind
+        )
+        if restored is not dynamic_wind:
+            self.wind_panel.set_persisted_settings(wind_group_records(restored.simulation_groups))
+        dynamic_wind = restored
         self._current_dynamic_wind = dynamic_wind
         self.wind_panel.rebuild(dynamic_wind)
+        self.program_status_card.wind_structure_warning.setText("\n".join(dynamic_wind.warnings))
+        self.program_status_card.wind_structure_warning.setVisible(
+            bool(dynamic_wind.warnings) and self._operator_state.wind_profile == FORCE_BASED
+        )
         self._finish_status_activity("success", f"Loaded {len(dynamic_wind.simulation_groups)} wind groups.")
         summary = format_wind_group_summary(dynamic_wind)
         if used_retry:
@@ -3596,6 +3660,9 @@ class MainWindow(QWidget):
             dialog = WindPreviewDialog(
                 parent=None,
                 external_preview_requested=self._background_jobs.start_wind_preview,
+                profile=self._operator_state.wind_profile,
+                initial_wind_data=self._wind_export_data(),
+                root_name=Path(self.output_input.text()).stem if self.output_input.text().strip() else None,
                 wind_session_snapshot=self._operator_snapshot.wind_preview_session,
                 wind_session_changed=self._save_wind_preview_session,
             )
@@ -3628,6 +3695,15 @@ class MainWindow(QWidget):
         focus_preview_dialog(dialog)
 
     def _save_wind_preview_session(self, session: dict[str, object]) -> None:
+        current = self._wind_export_data()
+        if current is not None:
+            data = restore_wind_data(session, self.source_input.text().strip(), current)
+            if data != current:
+                records = wind_group_records(data.simulation_groups)
+                self._current_dynamic_wind = data
+                self.wind_panel.set_persisted_settings(records)
+                self.wind_panel.rebuild(data)
+                self._operator_snapshot = replace(self._operator_snapshot, wind_group_settings=records)
         self._operator_snapshot = replace(self._operator_snapshot, wind_preview_session=dict(session))
         try:
             self._deps.save_gui_settings(self._operator_settings_path, self._operator_snapshot)

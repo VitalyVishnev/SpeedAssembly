@@ -6,6 +6,7 @@ This is the maintained entry point for project memory.
 - [Architecture](architecture.md) - module map, data flow, and runtime boundaries.
 - [External Dynamic Wind Rigs](external-dynamic-wind-rigs.md) - FBX/USD rig contract, audit checklist, and current external-loader limits.
 - [UE 5.8 PVE Mesh Extraction](ue58-pve-mesh-extraction.md) - source trace of branch reconstruction, hierarchy depth, and radius-based wind groups.
+- [UE 5.9 Dynamic Wind](ue59-dynamic-wind.md) - force-based architecture, per-instance tracks, and converter authoring support.
 - [Tree Hierarchy Calibration](wind-tree-hierarchy.md) - bare-rig grouping rules, operator references, comparison results, and remaining counterexamples.
 - [Decisions](decisions.md) - stable choices that should not be re-litigated casually.
 - [Known Bugs](known-bugs.md) - current fragilities, workarounds, and open validation gaps.

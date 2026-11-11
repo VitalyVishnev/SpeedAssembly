@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..models import ConversionPhase, ConversionTelemetry
+from .wind_profile_switch import WindProfileSwitch
 
 
 _CONVERSION_STEPS = (
@@ -63,6 +64,14 @@ class ProgramStatusCard(QFrame):
         layout.setSpacing(10)
         self.scroll.setWidget(host)
 
+        self.wind_profile_switch = WindProfileSwitch(host)
+        layout.addWidget(self.wind_profile_switch)
+        self.wind_structure_warning = QLabel(host)
+        self.wind_structure_warning.setWordWrap(True)
+        self.wind_structure_warning.setObjectName("ProgramStatusWarning")
+        self.wind_structure_warning.hide()
+        layout.addWidget(self.wind_structure_warning)
+        layout.addSpacing(18)
         title = QLabel("Status", host)
         title.setObjectName("ProgramStatusTitle")
         layout.addWidget(title)

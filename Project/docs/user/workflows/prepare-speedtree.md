@@ -97,7 +97,9 @@ SpeedAssembly reads these group assignments from the export. Naming them here is
 
 ## Export for SpeedAssembly
 
-In the **Export Mesh** window, match the settings in this screenshot exactly. Save them as a preset so you can reuse them for future exports.
+In the **Export Mesh** window, use the settings below and enable **Spines** for Force Based wind in UE 5.9 and PVE export. Save them as a preset for future exports.
+
+Spines carry the changing branch radius. SpeedAssembly uses them where their geometry matches the bones, with **Bone Radius** as a constant-section fallback. If neither supplies usable radii, Status reports the affected joints. Unreal then estimates mesh properties and uses its fallback frequency model for those joints.
 
 ![SpeedTree Export Mesh settings for the SpeedAssembly workflow](../assets/images/speedtree-xml-export.png)
 

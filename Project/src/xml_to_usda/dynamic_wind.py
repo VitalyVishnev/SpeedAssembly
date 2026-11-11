@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .models import DynamicWindData, DynamicWindJointAssignment, DynamicWindSimulationGroup, Joint, SourceObject
+from .wind_profiles import FORCE_BASED, ForceWindSettings, force_group_payload, validate_force_settings, wind_profile
 
 
 DEFAULT_TRUNK_INFLUENCE = 0.2
@@ -68,6 +69,20 @@ def write_dynamic_wind_json(dynamic_wind: DynamicWindData, output_path: str | Pa
 
 def render_dynamic_wind_payload(dynamic_wind: DynamicWindData) -> dict:
     validate_dynamic_wind_data(dynamic_wind)
+    if dynamic_wind.profile == FORCE_BASED:
+        return {
+            "Joints": [
+                {
+                    "JointName": assignment.joint_name,
+                    "SimulationGroupIndex": assignment.simulation_group_index,
+                    "AuthoredSegmentLengthM": assignment.segment_length_m,
+                    "AuthoredRadiusSamplesM": list(assignment.radius_samples_m),
+                    "AuthoredSampleDistancesM": list(assignment.sample_distances_m),
+                }
+                for assignment in dynamic_wind.joint_assignments
+            ],
+            "SimulationGroups": [force_group_payload(g.force) for g in dynamic_wind.simulation_groups],
+        }
     return {
         "Joints": [
             {
@@ -97,6 +112,7 @@ def default_group_settings(branch_orders: tuple[int, ...]) -> tuple[DynamicWindS
         DynamicWindSimulationGroup(
             group_index=index,
             branch_order=branch_order,
+            force=ForceWindSettings(is_trunk_group=index == 0),
             influence=DEFAULT_TRUNK_INFLUENCE if index == 0 else DEFAULT_BRANCH_INFLUENCE,
             shift_top=DEFAULT_TRUNK_SHIFT_TOP if index == 0 else DEFAULT_BRANCH_SHIFT_TOP,
             is_trunk_group=index == 0,
@@ -177,13 +193,31 @@ def validate_dynamic_wind_data(
     actual_group_indices = tuple(group.group_index for group in groups)
     if actual_group_indices != expected_group_indices:
         raise ValueError("dynamic_wind_group_indices: Simulation groups must use each contiguous index from zero exactly once.")
+    wind_profile(dynamic_wind.profile)
     for group in groups:
-        _validate_wind_group_values(group)
+        if dynamic_wind.profile == FORCE_BASED:
+            validate_force_settings(group.force)
+        else:
+            _validate_wind_group_values(group)
     if not math.isfinite(dynamic_wind.gust_attenuation):
         raise ValueError("dynamic_wind_gust_attenuation: Gust Attenuation must be finite.")
     for assignment in dynamic_wind.joint_assignments:
         if assignment.simulation_group_index not in expected_group_indices:
             raise ValueError(f"dynamic_wind_unknown_group: joint {assignment.joint_name!r} references group {assignment.simulation_group_index}.")
+        if dynamic_wind.profile == FORCE_BASED:
+            length = assignment.segment_length_m
+            radii, distances = assignment.radius_samples_m, assignment.sample_distances_m
+            if length or radii or distances:
+                valid = (
+                    math.isfinite(length) and length > 0 and len(radii) >= 2
+                    and len(radii) == len(distances)
+                    and all(math.isfinite(r) and r > 0 for r in radii)
+                    and all(math.isfinite(d) for d in distances)
+                    and distances[0] == 0 and math.isclose(distances[-1], length)
+                    and all(a < b for a, b in zip(distances, distances[1:]))
+                )
+                if not valid:
+                    raise ValueError(f"dynamic_wind_structure: invalid radius profile for {assignment.joint_name!r}.")
     if not skeleton:
         return
 
@@ -207,7 +241,13 @@ def validate_dynamic_wind_data(
         raise ValueError("dynamic_wind_unassigned_joint: " + ", ".join(missing))
     if require_linear_groups:
         _validate_linear_group_chains(
-            skeleton, assignments_by_name, {group.group_index for group in groups if group.is_trunk_group},
+            skeleton,
+            assignments_by_name,
+            {
+                group.group_index
+                for group in groups
+                if (group.force.is_trunk_group if dynamic_wind.profile == FORCE_BASED else group.is_trunk_group)
+            },
         )
 
 
@@ -279,6 +319,7 @@ def _resolve_simulation_groups(
             DynamicWindSimulationGroup(
                 group_index=index,
                 branch_order=branch_order,
+                force=source.force,
                 influence=source.influence,
                 shift_top=source.shift_top,
                 is_trunk_group=index in trunk_group_indices,

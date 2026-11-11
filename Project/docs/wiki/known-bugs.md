@@ -1,5 +1,37 @@
 # Known Bugs
 
+## UE 5.9 validation limits
+
+Force Based authoring is implemented and import/reimport plus runtime bone
+derivation are verified in UE 5.9.0 CL60351404. Visual motion quality, a cooked
+game and large-forest runtime cost remain Unverified. The headless D3D12 probe
+registered an Instanced Skinned Mesh, Force and Push Capsule, but does not
+measure visible capsule deflection. Missing or ambiguous structural profiles
+use the documented Bone Radius / engine fallback with a Status warning.
+
+See [the source findings](ue59-dynamic-wind.md).
+
+## Existing source-test fixture failures, 2026-11-11
+
+Full source run after the Wind ownership refactor: 678 passed, 9 failed,
+31 deselected on the normal Windows Qt platform. The nine failures also
+reproduce with HEAD source: two Boolean fracture expectations and seven stale
+SimpleTree expectations across discovery, normalization, pipeline, source
+analysis, USDA binding/Spines and wind viewport. Actual sample has 43 joints
+and 38 parts; several tests expect the older topology. No fixture assertions
+were weakened for the wind feature. Next: reconcile sample provenance and
+expected fracture output separately. Focused wind/UI/service tests pass.
+
+## Force structural reads during conversion
+
+`conversion_orchestrator.py` still queries Source Structure separately after
+loading the canonical/resolved model. That model and its cache do not retain
+Bone Radius or the strict structural Spine facts. Kept outside this ownership
+refactor to preserve the normalized/cache contract. Force inspection and JSON
+generation already share one structural snapshot for joints and sections.
+Additional conversion-read cost remains Unverified; profile it before adding
+source retention or changing cache storage.
+
 ## PVE prototype coverage
 
 The Spine path detects malformed curves and missing parents of supplied

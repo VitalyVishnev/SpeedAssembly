@@ -286,7 +286,6 @@ def test_advanced_wind_group_controls_only_edit_manual_groups_and_persist_settin
     qtbot.addWidget(legacy_restored)
     assert legacy_restored.bone_overlap_radius_editor.value() == 1
     assert restored._current_dynamic_wind() == dialog._current_dynamic_wind()
-    assert restored._group_settings_by_source_key[manual_group.source_key]["influence"] == pytest.approx(0.35)
     assert manual_group.source_key in restored._expanded_group_source_keys
 
 

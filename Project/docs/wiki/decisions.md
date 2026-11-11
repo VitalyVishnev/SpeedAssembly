@@ -1,5 +1,50 @@
 # Decisions
 
+## Wind editing and structural facts have shared owners, 2026-11-11
+
+Keep Main and Advanced as adapters over `wind_operator_state.py`. Stack edits
+retain source-key settings; transfers between panels match exact joint
+membership, not final group position. One acceptance rule checks session
+version, source path, size/mtime and joint coverage. Final assignments require
+a source revision; older display-only sessions remain readable. Main-panel
+edits supersede saved final Wind Data, and ordinary operator autosave preserves
+the Advanced session. Legacy/Force fields and Trunk flags remain independent.
+
+`opening_xml.py` reads Source Structure; `source_extraction.py` owns its
+interpretation. Named Bone/Spine facts replace Wind's dependency on private PVE
+rows. Missing radius is an absent fact, not an invented value. Wind may retain
+usable bones and warn for missing sections; PVE requires complete chosen-source
+facts and selects Spine/Bones for the whole tree. Keep those policies separate.
+Force Wind identities and sections share one query snapshot. Legacy's native
+opening path, canonical models/caches and the native PVE exchange stay intact.
+
+## Separate wind profiles with one export model, 2026-11-11
+
+The UI defaults to Force Based 5.9. Legacy remains available for 5.7/5.8 and
+5.9 Legacy mode. Backend requests default to Legacy for compatibility.
+Inactive controls are hidden; switching preserves both profiles, including
+independent Trunk flags. Group assignment is shared. Optional Force values use
+`None` for no override. JSON writes the override flag; USD omits the attribute.
+Neither export changes Unreal's global DynamicWind.Mode.
+
+The Status selector is one 48 px pill with two exclusive halves, using the
+conversion buttons' active/muted fills and shared dark outline. The Wind
+header keeps its Legacy height in both profiles; Force Based hides the Legacy
+global controls and vertically centers Skinning Quality. The actions stay put.
+
+Incoming parent-to-joint links use the parent's section only when the child
+start lies on that physical segment. Lateral connectors use the child's root
+section, following PVE's branch-root convention, without changing topology.
+Unambiguous geometric Spine matches supply taper; Bone Radius supplies a
+constant section. Missing profiles warn and defer to Unreal's fallback.
+JSON uses meters; USD uses stage units. Root aliases match the exported mesh.
+
+UE 5.9.0 CL60351404 imported all 11 non-default overrides from USD and JSON
+identically. Reimport with all overrides disabled cleared them in both paths.
+D3D12 registration with Force and Push Capsule components produced valid modal
+data for all 42 non-root bones of SimpleTree_01. Legacy output matches HEAD
+byte-for-byte, SHA-256 `2c277bf48d0cbfd5f4d8b66ad97042bb5f14ba96698a2d3f1cb67e8fe69945c7`.
+
 ## Extended stress is separate from a normal full build, 2026-11-05
 
 Required source checks plus the full Package gate define the normal full build,

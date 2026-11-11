@@ -21,6 +21,7 @@ from ..settings_service import (
     PartSourceSettingRecord,
     WindGroupSettingRecord,
 )
+from ..wind_profiles import FORCE_BASED
 from .dependencies import QtUiDependencies
 
 
@@ -39,6 +40,7 @@ class OperatorState:
     bark_material_path: str = ""
     leaves_material_path: str = ""
     single_material_path: str = ""
+    wind_profile: str = FORCE_BASED
     gust_attenuation: float = 0.0
     is_ground_cover: bool = False
     skinning_quality: SkinningQuality = SkinningQuality.ONE_WEIGHT
@@ -73,6 +75,7 @@ def load_operator_state(
             bark_material_path=snapshot.bark_material_path,
             leaves_material_path=snapshot.leaves_material_path,
             single_material_path=snapshot.single_material_path,
+            wind_profile=snapshot.wind_profile,
             gust_attenuation=snapshot.gust_attenuation,
             is_ground_cover=snapshot.is_ground_cover,
             skinning_quality=snapshot.skinning_quality,
@@ -173,8 +176,10 @@ def _operator_snapshot_fields(state: OperatorState, previous_snapshot: GuiSettin
         "bark_material_path": state.bark_material_path,
         "leaves_material_path": state.leaves_material_path,
         "single_material_path": state.single_material_path,
+        "wind_profile": state.wind_profile,
         "gust_attenuation": float(state.gust_attenuation),
         "is_ground_cover": bool(state.is_ground_cover),
+        "wind_preview_session": previous_snapshot.wind_preview_session,
         "skinning_quality": state.skinning_quality,
         "scattered_rig_mode": state.scattered_rig_mode,
         "orient_scattered_bones_from_instances": bool(
@@ -201,6 +206,7 @@ def preset_from_operator_state(
         bark_material_path=state.bark_material_path,
         leaves_material_path=state.leaves_material_path,
         single_material_path=state.single_material_path,
+        wind_profile=state.wind_profile,
         gust_attenuation=float(state.gust_attenuation),
         is_ground_cover=bool(state.is_ground_cover),
         wind_group_settings=dict(wind_group_records),
@@ -219,6 +225,7 @@ def apply_preset_to_operator_state(state: OperatorState, preset: GuiPresetRecord
         bark_material_path=preset.bark_material_path,
         leaves_material_path=preset.leaves_material_path,
         single_material_path=preset.single_material_path,
+        wind_profile=preset.wind_profile,
         gust_attenuation=float(preset.gust_attenuation),
         is_ground_cover=bool(preset.is_ground_cover),
     )

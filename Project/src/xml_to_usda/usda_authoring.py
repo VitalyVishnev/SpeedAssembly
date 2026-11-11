@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .asset_paths import is_valid_unreal_asset_path
@@ -1393,8 +1393,23 @@ def _render_main_skeleton(
     skeleton_name: str,
     base_joint_root_name: str | None,
 ) -> str:
+    from .wind_authoring import wind_usd_fields
+
+    wind = model.dynamic_wind
+    roots = {j.name for j in model.skeleton if j.parent is None}
+    if wind is not None and base_joint_root_name and len(roots) == 1:
+        wind = replace(
+            wind,
+            joint_assignments=tuple(
+                replace(a, joint_name=base_joint_root_name) if a.joint_name in roots else a
+                for a in wind.joint_assignments
+            ),
+        )
+    schemas, fields = wind_usd_fields(wind, meters_per_unit=contract.stage_meters_per_unit)
+    schema_text = ", ".join(f'"{name}"' for name in (contract.skel_binding_api, *schemas))
+    wind_text = "".join("\n    " + line for line in fields)
     return f'''def Skeleton "{skeleton_name}" (
-    prepend apiSchemas = ["{contract.skel_binding_api}"]
+    prepend apiSchemas = [{schema_text}]
 )
 {{
     uniform matrix4d[] bindTransforms = [{_render_bind_transforms(model)}]
@@ -1403,7 +1418,7 @@ def _render_main_skeleton(
     uniform token purpose = "guide"
     uniform matrix4d[] restTransforms = [{_render_rest_transforms(model)}]
     append rel skel:animationSource = </{contract.root_prim_name}/{base_skel_root_name}/{base_animation_name}>
-    uniform token visibility = "invisible"
+    uniform token visibility = "invisible"{wind_text}
 }}'''
 
 

@@ -2,6 +2,28 @@
 
 The codebase is organized around one deterministic conversion system with different execution strategies around the edges.
 
+Wind profiles share group assignment but retain independent settings.
+`wind_profiles.py` owns the Force Based field contract; `wind_authoring.py`
+resolves incoming-joint structural sections and prepares one Wind Data model
+for JSON and main-Skeleton USD. The conversion orchestrator attaches that model
+only for Force Based Skeletal Assembly. `ForceWindEditor` is shared by the main
+and Advanced panels. Advanced sessions persist the final group assignment;
+`wind_operator_state.py` owns both profiles' group settings, membership-based
+Main/Advanced exchange, settings-record conversion and one session acceptance
+rule. Both adapters check source path, size/mtime and joint coverage. The
+dialog captures its source revision when accepting a preview, not on every
+save. Ordinary operator autosave preserves the Advanced session; main edits
+update its final Wind Data. Camera/display/expansion state stays in Qt.
+Legacy can reuse discovery's Wind result.
+
+`opening_xml.read_source_structure` owns structural XML loading and source
+transform preparation. `source_extraction.SourceStructure` exposes named Bone
+sections, Spine samples and authored joint identities. Force Wind inspection
+and JSON generation use one such snapshot for identities and sections; PVE
+adapts the same facts to native rows. Wind retains incoming-section/taper
+selection and per-joint fallback; PVE retains whole-tree source selection and
+strict required radii. Neither depends on the other's private parsers.
+
 Research code and evidence live in the external experiment archive documented
 in [Experiments](experiments.md). Paths starting with `<archive>/` refer to that
 root. The isolated `rust_conversion` PyO3 kernels retain canonical Python

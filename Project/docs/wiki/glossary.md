@@ -39,6 +39,7 @@
 - `CanonicalTreeModel` - the normalized source-facts model used by conversion and validation.
 - `Source Opening Facts` - source-derived material/prototype listings, skeleton warnings, Repeated Part classification and authored Dynamic Wind information needed when opening XML, before conversion. Excludes persisted operator settings and full geometry.
 - `Source extraction` - shared interpretation of SpeedTree geometry, skinning, skeleton and Repeated Part placement. Canonical and Proxy projections compose these facts under their own identity, diagnostics and cache policies.
+- `Source Structure` - Bone sections, Spine samples and authored joint identities from one Observed Source XML snapshot, before Wind incoming-section selection or PVE branch reconstruction.
 - `ResolvedAssemblyModel` - the authoring-stage model that combines source facts with operator intent.
 - `Operator State` - the current UI-selected values for a conversion workflow.
 - `Persisted Operator Settings` - saved global operator values and presets.

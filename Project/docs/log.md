@@ -977,3 +977,68 @@ under `docs/raw/`; Git retains per-change detail.
 
 - Added the English and Russian export guide and linked it from the workflow
   lists and Unreal import guide. Both languages passed the strict site build.
+
+## 2026-11-11 - Compare UE 5.7/5.8 and 5.9 Dynamic Wind
+
+- Archived a Russian standalone HTML report with architecture diagrams,
+  structural work/memory charts and 37 source-file hashes.
+- Recorded GPU-only provider semantics, force-mode track lifecycle, automatic
+  bake compatibility, authored-radius/modal-frequency requirements and exact
+  JSON/USD units. Added the 5.9 authoring/reimport gap to known bugs.
+- Checked desktop/mobile rendering and source anchors. Source research only;
+  no production code, engine files, runtime validation or build changed.
+
+## 2026-11-11 - Add UE 5.9 Force Based export
+
+- Added the Status profile switch, independent saved Legacy/Force settings and
+  shared optional-override controls in Wind and Advanced Wind Settings.
+- Added one JSON/USD Wind model with structural sections from Spines/Bone Radius,
+  missing-radius warnings and matching exported root names. Legacy bytes match HEAD.
+- UE 5.9 import/reimport matched groups and all structural profiles; runtime bake
+  accepted 42 non-root modal bones. Package contracts, three required smokes,
+  frozen Force export parity and strict bilingual documentation build passed.
+- Recorded nine existing source-test failures and remaining visual/cooked-game
+  validation limits. SpeedTree screenshot replacement awaits app access.
+
+## 2026-11-11 - Restyle the wind profile selector
+
+- Joined both modes into one rounded pill using the shared tab colors and
+  button outlines. Verified both states visually; four wind tests passed.
+- Quick preview built. The packaged EXE retains the previous styling until
+  the UI is approved and Package is run again.
+- Follow-up: reduced selector height from 60 to 48 px and used sage/olive
+  colors. Visual check, four wind tests and Quick preview passed again.
+- Final styling correction uses the Convert/Generate button palette. Wind
+  retains Ground Cover and Gust Attenuation in Legacy only, reserves the same
+  header height in Force Based, and centers its remaining controls. Both
+  layouts checked; four wind tests passed; Quick preview updated.
+
+## 2026-11-11 - Replace the SpeedTree export screenshot
+
+- Replaced the shared English/Russian export-settings image with the operator's screenshot showing Branch spines enabled. Verified an exact SHA-256 match to the supplied PNG.
+
+## 2026-11-11 - Consolidate Wind state and structural Source extraction
+
+- Moved Main/Advanced group exchange, both profiles' settings and session
+  acceptance into one Qt-free owner. Match joint membership instead of list
+  position; retain Advanced state through ordinary autosave and main edits.
+- Shared named structural facts between Wind and PVE. Force inspection/JSON
+  use one source snapshot for identities and sections. PVE keeps whole-tree
+  fallback and native row adaptation; Wind keeps incoming-section policy.
+- Ten USD/Wind/PVE outputs match their pre-refactor SHA-256. Source checks:
+  678 passed, the same nine known failures. Package passed 27 contracts and all
+  three required real-result smokes. No version bump or new Unreal import.
+
+## 2026-11-11 - Polish the complete working diff
+
+- Clarified Wind state/payload construction, typed shared Qt controls and reused
+  profile constants. Simplified Skeleton USD field indentation with identical
+  bytes. Kept transformation math, error rules and public parameters unchanged.
+- Corrected stale wiki claims about USD Wind support, private PVE parsing and
+  the already-replaced export screenshot. Public ENG/RU copy and image unchanged.
+- Baseline and final focused checks: 115 passed. Full source: 678 passed with
+  the same nine known failures. All ten export hashes still match; serialization
+  CPU checks at 43/16,384 joints detect no regression. Strict documentation and
+  the 30-page bilingual contract passed. No new tests or dependencies.
+- Package passed 27 contracts and all three required real-result smokes without
+  bypasses. Version unchanged; byte-identical exports reuse Unreal acceptance.

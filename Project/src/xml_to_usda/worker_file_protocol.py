@@ -28,6 +28,7 @@ _CLASS_KEY = "__xml_to_usda_worker_payload_class__"
 WORKER_TOKEN_ENV = "XML_TO_USDA_WORKER_TOKEN"
 _WORKER_PAYLOAD_MODULES = (
     "xml_to_usda.models",
+    "xml_to_usda.wind_profiles",
     "xml_to_usda.runtime_paths",
     "xml_to_usda.conversion_worker_subprocess",
     "xml_to_usda.proxy_mesh_service",

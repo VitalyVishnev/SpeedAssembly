@@ -118,7 +118,9 @@ Drag the separately exported Proxy USDA into the desired Content Browser folder 
 
 ## 3. Import Wind JSON
 
-Skip this step for static exports.
+Skip this step for static exports and Force Based Skeletal Assembly USD in UE 5.9. That USD imports its Wind Data automatically. Check **Asset User Data > Dynamic Wind Skeletal Data > Simulation Groups** on the final Skeletal Mesh. JSON remains available to apply the same settings separately.
+
+Importing Wind Data replaces the group settings. Keep the intended settings in SpeedAssembly before reimporting; do not expect edits made only in Unreal to survive.
 
 1. In the **Content Browser**, right-click the final plant's **Skeletal Mesh**, not its Skeleton or one of its branch parts.
 2. Select **Scripted Asset Actions > Import Dynamic Wind Data**.
@@ -177,6 +179,8 @@ Use an **Instanced Skinned Mesh** component for the wind test. Placing a regular
 Assign the provider before generating the graph, even if you plan to tune wind later. Leaving it unset disables skeleton batching, so Unreal allocates skeleton buffers separately for components instead of sharing them. Dense vegetation can exceed the buffers' offset limits and crash with a `SkinningSceneExtension.h` assertion. This crash was confirmed in UE 5.7; assigning **Wind_TransformProvider** restored batching and resolved it. The same allocation risk remains in UE 5.8 according to source inspection, although the crash has not been reproduced there. The provider is required for Dynamic Wind in both versions.
 
 ## 6. Control the wind in the level
+
+For Force Based in UE 5.9, use an actor with a **Dynamic Wind Force** component and select its force shape. Add a **Dynamic Wind Push Capsule** component to test local branch interaction. The project must use Force Based mode, `DynamicWind.Mode 1`. Exporting the Force Based profile does not change this engine setting. The following global controller instructions describe the Legacy workflow.
 
 Drag **BP_GlobalFoliageActor_UE5** from the sample folder into the level. Use its exposed wind controls to test the plant's response. You can later use the Blueprint as a reference for your own wind controller, including exposing Wind Amplitude if needed.
 

@@ -1,5 +1,55 @@
 # Experiments
 
+## Safe polish across the working diff, 2026-11-11
+
+Reviewed all 43 modified/untracked files against a saved working-tree snapshot.
+Kept the work local: typed shared Qt controls, reused profile constants and
+expanded dense state/payload construction. Skeleton USD now prefixes Wind
+fields directly instead of embedding a conditional newline expression.
+No new dependency, format, grouping rule or source-cache contract.
+
+All ten retained export hashes below remain identical. Public conversion/Wind
+function parameters are unchanged; the incoming-section and taper functions
+have identical syntax trees. The 115 relevant checks pass before and after.
+Interleaved CPU checks for JSON, USD and session restoration at 43 and 16,384
+joints detect no regression. Windows CPU timing is coarse; claim no speedup.
+Strict MkDocs and the bilingual 30-page link/anchor contract pass.
+Full source checks retain 678 passes and the same nine recorded failures.
+Package passed all 27 contracts and all three required real-result smokes.
+No smoke bypass, version change or new Unreal import; byte-identical output
+retains the previous import acceptance.
+
+## Wind ownership refactor parity, 2026-11-11
+
+Captured exports immediately before and after the two ownership changes using
+the current working source, default inline payloads and unchanged settings.
+All ten SHA-256 pairs match. Output stems were `<sample>_<profile>` for USD and
+JSON root naming, and `<sample>_growth` for PVE. Generated files used disposable
+OS temp storage. Keep only the comparison hashes below; no performance claim.
+The baseline Force feature's existing Unreal acceptance is unchanged.
+
+| Sample / profile / output | Identical before and after SHA-256 |
+| --- | --- |
+| SimpleTree_01 / Legacy / USD | `31b7b937a446c3af132b964cc2bcecd83dc43fba1f0b582637ec8bfc38a041f6` |
+| SimpleTree_01 / Legacy / Wind JSON | `443dd855bc93b505dbdbeda11094465a4bf9fa0a393526ef91d7a529428dfab2` |
+| SimpleTree_01 / Force / USD | `579a8738e4813a8583ede125c40bd78c5cab3ac967ee3ee7869d42c091f2cca7` |
+| SimpleTree_01 / Force / Wind JSON | `468d541f2692618d14263f8886ccd92dc3ebfd3e4a8871ba17d46ae3aa3f25c7` |
+| SimpleTree_01 / PVE | `2be16071374a668826d43613ce45b3f6b2ad92ca64ac8995c53a74f250baa226` |
+| SimpleTree_02_three_trunks / Legacy / USD | `4a187d599b1b31a5c35bc67e81be2331c5290d1840f4cabd795be09c9a14dfae` |
+| SimpleTree_02_three_trunks / Legacy / Wind JSON | `878dfdbb6a000bf096cdfd3a5b0ae5b18f13d7b62f1d6ed42b225b49efadc936` |
+| SimpleTree_02_three_trunks / Force / USD | `f4d59ad2c029d89de8ede524aff185838b7bb6fe56e400ab67cb215135b1fb5b` |
+| SimpleTree_02_three_trunks / Force / Wind JSON | `c2b4cc5ac782a494e9113467307124c2a0c55a12d6663c7323b9e31c3ab781e9` |
+| SimpleTree_02_three_trunks / PVE | `72961f7d862528a3431d840d0f31ac856961c527ff4f4de763f657a680637c0a` |
+
+The new intent-level state test covers membership-based exchange, both profiles,
+JSON persistence and stale-source rejection. The existing Advanced test now
+exercises real MainWindow transport and ordinary autosave. The incoming-section
+test also checks that Force joints/sections come from one read. Normal Windows
+Qt source checks: 678 passed and the same nine recorded fixture/Boolean failures.
+Package passed all 27 contracts and the required Detailed Cuts stability,
+injected worker-recovery and conversion-worker real-result smokes, without
+`-SkipSmoke`. No version change or extended stress sweep.
+
 ## Storage policy
 
 Keep experiment source code and durable evidence outside the repository at:
@@ -33,6 +83,31 @@ them. The external archive is not backed up by this repository's Git history.
 References starting with `<archive>/` below use this external root. Older
 `experiments/<name>/...` references in the project log now map to
 `<archive>/<name>/...`. The archive manifest records retained files and omissions.
+
+## UE 5.9 force-based Dynamic Wind source comparison, 2026-11-11
+
+Compared local 5.7.4, 5.8.2 and 5.9.0 implementations, including GPU track
+lifecycle, mesh/assembly bake, modal-frequency requirements and JSON/USD
+import fields. Durable HTML, source hashes and a report builder live in
+`<archive>/dynamic_wind_ue59_2026-11-11/`. The builder accepts explicit
+repository, Engine and disposable scratch paths; run with Python `-B`.
+
+The maintained [findings](ue59-dynamic-wind.md) distinguish source facts,
+operator-observed compatibility and unmeasured performance expectations.
+Legacy already used GPU compute; force mode adds persistent state and local
+tracks. Physical modal frequency requires authored radius profiles, which the
+Wind JSON did not export at the time of that research. The report proposes group-field support
+before a separately validated per-joint structural mapping. No engine or
+production converter changes, new Unreal validation, benchmark or build.
+Browser QA verified the standalone HTML, source anchors and desktop/mobile
+layout without remote requests.
+
+Implementation followed the report. Compact import/reimport, runtime derivation,
+Legacy hash and frozen-worker evidence is in the same archive's `implementation/`
+folder. All 42 non-root bones used authored radii and had valid modal data.
+JSON and USD object dumps matched all 43 structural entries. Package contracts
+and all three required smokes passed; the additional frozen Force Based export
+matched source bytes. See `implementation/VALIDATION.md` for scope and limits.
 
 ## Release-validation duration, 2026-11-05
 

@@ -29,6 +29,7 @@ from .models import (
     SkinningQuality,
     UdimMaterialSetting,
 )
+from .wind_profiles import LEGACY
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,8 @@ def prepare_conversion_plan(
     scattered_rig_mode: ScatteredRigMode | str = ScatteredRigMode.PER_CLUSTER_SKINNED,
     orient_scattered_bones_from_instances: bool = False,
     udim_material_settings: tuple[UdimMaterialSetting, ...] = (),
+    wind_profile: str = LEGACY,
+    wind_data=None,
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024,
     fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60,
 ) -> ConversionLaunchPlan:
@@ -128,6 +131,8 @@ def prepare_conversion_plan(
         skinning_quality=SkinningQuality.parse(skinning_quality),
         scattered_rig_mode=ScatteredRigMode.parse(scattered_rig_mode),
         orient_scattered_bones_from_instances=bool(orient_scattered_bones_from_instances),
+        wind_profile=wind_profile,
+        wind_data=wind_data,
         fbx_cache_max_bytes=fbx_cache_max_bytes,
         fbx_cache_max_age_seconds=fbx_cache_max_age_seconds,
     )

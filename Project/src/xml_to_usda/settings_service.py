@@ -9,7 +9,7 @@ Older payload shapes are rejected instead of migrated.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .fracture_collision import FractureCollisionMode, FractureCollisionSettings
@@ -31,6 +31,7 @@ from .proxy_mesh_service import (
     PROXY_METHOD_DENSITY_FIELD,
     ProxyMeshSettings,
 )
+from .wind_profiles import FORCE_BASED, ForceWindSettings, parse_force_settings, wind_profile
 
 
 GUI_SETTINGS_SCHEMA_VERSION = 1
@@ -77,6 +78,7 @@ class PartSourceSettingRecord:
 
 @dataclass(frozen=True)
 class WindGroupSettingRecord:
+    force: ForceWindSettings = field(default_factory=ForceWindSettings)
     is_trunk_group: bool = False
     use_dual_influence: bool = True
     influence: float = 1.0
@@ -97,6 +99,7 @@ class GuiPresetRecord:
     single_material_path: str = ""
     gust_attenuation: float = 0.0
     is_ground_cover: bool = False
+    wind_profile: str = FORCE_BASED
     wind_group_settings: dict[str, WindGroupSettingRecord] = field(default_factory=dict)
     base_material_settings: tuple[BaseMaterialSettingRecord, ...] = ()
     part_mesh_settings: tuple[PartSourceSettingRecord, ...] = ()
@@ -119,6 +122,7 @@ class GuiSettingsSnapshot:
     skinning_quality: SkinningQuality = SkinningQuality.ONE_WEIGHT
     scattered_rig_mode: ScatteredRigMode = ScatteredRigMode.PER_CLUSTER_SKINNED
     orient_scattered_bones_from_instances: bool = False
+    wind_profile: str = FORCE_BASED
     wind_group_settings: dict[str, WindGroupSettingRecord] = field(default_factory=dict)
     base_material_settings: tuple[BaseMaterialSettingRecord, ...] = ()
     part_mesh_settings: tuple[PartSourceSettingRecord, ...] = ()
@@ -179,6 +183,7 @@ def load_gui_settings(settings_path: str | Path) -> GuiSettingsSnapshot:
         orient_scattered_bones_from_instances=bool(
             payload.get("orient_scattered_bones_from_instances", False)
         ),
+        wind_profile=wind_profile(payload.get("wind_profile", FORCE_BASED)),
         wind_group_settings=wind_group_settings,
         base_material_settings=base_material_settings,
         part_mesh_settings=part_mesh_settings,
@@ -215,6 +220,7 @@ def save_gui_settings(settings_path: str | Path, snapshot: GuiSettingsSnapshot) 
         "orient_scattered_bones_from_instances": bool(
             snapshot.orient_scattered_bones_from_instances
         ),
+        "wind_profile": snapshot.wind_profile,
         "wind_group_settings": _serialize_wind_group_settings(snapshot.wind_group_settings),
         "base_material_settings": _serialize_base_material_settings(snapshot.base_material_settings),
         "part_mesh_settings": _serialize_part_mesh_settings(snapshot.part_mesh_settings),
@@ -382,6 +388,7 @@ def _parse_wind_group_settings(raw_value) -> dict[str, WindGroupSettingRecord]:
         if not isinstance(value, dict):
             continue
         settings[str(key)] = WindGroupSettingRecord(
+            force=parse_force_settings(value.get("force", {"is_trunk_group": str(key) == "0"})),
             is_trunk_group=_coerce_bool(value.get("is_trunk_group"), False),
             use_dual_influence=_coerce_bool(value.get("use_dual_influence"), True),
             influence=_coerce_float(value.get("influence", 1.0), 1.0),
@@ -656,6 +663,7 @@ def _parse_preset(name: str, payload: dict) -> GuiPresetRecord:
         single_material_path=str(payload.get("single_material_path", "")),
         gust_attenuation=_coerce_float(payload.get("gust_attenuation", 0.0), 0.0),
         is_ground_cover=bool(payload.get("is_ground_cover", False)),
+        wind_profile=wind_profile(payload.get("wind_profile", FORCE_BASED)),
         wind_group_settings=_parse_wind_group_settings(payload.get("wind_group_settings")),
         base_material_settings=_parse_base_material_settings(payload.get("base_material_settings")),
         part_mesh_settings=_parse_part_mesh_settings(payload.get("part_mesh_settings")),
@@ -775,6 +783,7 @@ def _serialize_wind_group_settings(
 ) -> dict[str, dict[str, object]]:
     return {
         str(key): {
+            "force": asdict(record.force),
             "is_trunk_group": bool(record.is_trunk_group),
             "use_dual_influence": record.use_dual_influence,
             "influence": round(float(record.influence), 4),
@@ -863,6 +872,7 @@ def _serialize_preset(preset: GuiPresetRecord) -> dict[str, object]:
         "single_material_path": preset.single_material_path,
         "gust_attenuation": round(float(preset.gust_attenuation), 4),
         "is_ground_cover": bool(preset.is_ground_cover),
+        "wind_profile": preset.wind_profile,
         "wind_group_settings": _serialize_wind_group_settings(preset.wind_group_settings),
         "base_material_settings": _serialize_base_material_settings_by_input_path(
             {"preset": preset.base_material_settings}

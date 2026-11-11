@@ -37,6 +37,7 @@ from .output_resolution import (
 )
 from .runtime_paths import JobWorkspace, RuntimePaths, resolve_runtime_paths
 from .usda_writer import write_resolved_usda_document, write_usda_document
+from .wind_profiles import FORCE_BASED
 
 
 _PARTS_CONVERSION_MODES = {ConversionMode.SKELETAL_PARTS, ConversionMode.STATIC_PARTS}
@@ -171,8 +172,23 @@ def _convert_single_input(
             telemetry_callback=runtime_telemetry,
             cancel_event=cancel_event,
         )
+        if request.wind_profile == FORCE_BASED and request.conversion_mode == ConversionMode.SKELETAL_ASSEMBLY:
+            from .wind_authoring import prepare_wind_export
+
+            wind = prepare_wind_export(
+                resolved.authoring_model.skeleton,
+                profile=request.wind_profile,
+                data=request.wind_data,
+                input_path=input_path,
+            )
+            resolved = replace(resolved, authoring_model=replace(resolved.authoring_model, dynamic_wind=wind))
         model = resolved.authoring_model
         diagnostics = resolved.diagnostics
+        if model.dynamic_wind and request.wind_profile == FORCE_BASED:
+            diagnostics += tuple(
+                ValidationIssue("warning", "wind_structural_radii", warning)
+                for warning in model.dynamic_wind.warnings
+            )
         errors = [issue for issue in diagnostics if issue.severity == "error"]
         if errors:
             diagnostics = _append_cleanup_warning(

@@ -127,6 +127,7 @@ def test_source_result_reuses_wind_and_does_not_launch_another_worker(qtbot, tmp
     window = MainWindow(load_theme(), UiShellState(help_prompt_dismissed=True), dependencies=deps,
                         state_path=tmp_path / 'state.json', operator_settings_path=tmp_path / 'settings.json')
     qtbot.addWidget(window)
+    window._set_wind_profile("legacy")
     window.wind_panel.ground_cover_checkbox.setChecked(ground_cover)
     window.source_input.setText(str(xml_path))
     qtbot.wait(350)

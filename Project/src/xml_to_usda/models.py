@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any
 
+from .wind_profiles import ForceWindSettings, LEGACY
+
 try:
     from enum import StrEnum
 except ImportError:
@@ -872,6 +874,9 @@ class ConversionRequest:
     fbx_cache_max_bytes: int = 20 * 1024 * 1024 * 1024
     fbx_cache_max_age_seconds: int = 14 * 24 * 60 * 60
 
+    wind_profile: str = LEGACY
+    wind_data: "DynamicWindData | None" = None
+
 
 @dataclass(frozen=True, slots=True)
 class ConversionResult:
@@ -888,6 +893,9 @@ class DynamicWindJointAssignment:
     joint_name: str
     simulation_group_index: int
     branch_order: int
+    segment_length_m: float = 0.0
+    radius_samples_m: tuple[float, ...] = ()
+    sample_distances_m: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -901,6 +909,8 @@ class DynamicWindSimulationGroup:
     min_influence: float = 0.5
     max_influence: float = 1.0
 
+    force: ForceWindSettings = field(default_factory=ForceWindSettings)
+
 
 @dataclass(frozen=True, slots=True)
 class DynamicWindData:
@@ -908,6 +918,9 @@ class DynamicWindData:
     simulation_groups: tuple[DynamicWindSimulationGroup, ...]
     is_ground_cover: bool = False
     gust_attenuation: float = 0.0
+
+    profile: str = LEGACY
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

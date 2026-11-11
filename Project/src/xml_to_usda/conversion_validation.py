@@ -4,9 +4,11 @@ from pathlib import Path
 
 from .asset_paths import is_valid_unreal_asset_path, normalize_unreal_asset_path
 from .models import ConversionMode, ConversionRequest, MaterialPolicy, PrototypeSourceConfig, ScatteredRigMode, SkinningQuality, UdimMode
+from .wind_profiles import wind_profile
 
 
 def validate_conversion_request(request: ConversionRequest) -> None:
+    wind_profile(request.wind_profile)
     if not request.input_paths:
         raise ValueError("ConversionRequest requires at least one input path.")
     if request.output_path and len(request.input_paths) != 1:

@@ -10,6 +10,7 @@ import math
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
 
 from .models import (
     Color4,
@@ -27,6 +28,121 @@ from .models import (
 from .skeleton_rules import joint_name_from_bone_id, parse_generator_label
 from .skeleton_processing import orient_skeleton_x
 from .source_transform import SourceTransform
+
+if TYPE_CHECKING:
+    from .xml_reader import SourceNodeIndex
+
+
+@dataclass(frozen=True)
+class SourceBoneSection:
+    source_id: int
+    parent_id: int | None
+    start: tuple[float, float, float]
+    end: tuple[float, float, float]
+    radius: float | None
+
+
+@dataclass(frozen=True)
+class SourceSpineSection:
+    source_id: int
+    parent_id: int | None
+    samples: tuple[tuple[float, float, float, float], ...]
+
+
+@dataclass(frozen=True)
+class SourceStructure:
+    """One source snapshot; consumers retain their own fallback policies."""
+
+    _nodes: SourceNodeIndex
+    _transform: SourceTransform
+
+    def authored_skeleton(self) -> tuple[Joint, ...]:
+        return extract_authored_wind_joints(self._nodes.bones)
+
+    def bones(self, *, skip_invalid: bool = False) -> tuple[SourceBoneSection, ...]:
+        sections = []
+        for node in self._nodes.bones:
+            try:
+                start = self._transform.point_to_stage(_structure_point(node, "Start"))
+                end = self._transform.point_to_stage(_structure_point(node, "End"))
+                radius = node.get("Radius")
+                sections.append(SourceBoneSection(
+                    int(node.attrib["ID"]), _structure_parent(node),
+                    (start.x, start.y, start.z), (end.x, end.y, end.z),
+                    float(radius) * self._transform.linear_scale if radius is not None else None,
+                ))
+            except (KeyError, ValueError) as exc:
+                if not skip_invalid:
+                    raise ValueError(f"Bone {node.get('ID', '<missing>')}: {exc}") from exc
+        return tuple(sections)
+
+    def spines(self) -> tuple[SourceSpineSection, ...]:
+        spine_objects = [(obj, spine) for obj in self._nodes.objects if (spine := obj.find("Spine")) is not None]
+        if not spine_objects:
+            raise ValueError("No Spine curves in the XML.")
+        try:
+            spine_ids = {int(obj.attrib["ID"]) for obj, _ in spine_objects}
+            containers = {
+                int(obj.attrib["ID"]) for obj in self._nodes.objects
+                if "ID" in obj.attrib and _structure_parent(obj) is None and obj.find("Points") is None
+            }
+        except (KeyError, ValueError) as exc:
+            raise ValueError(f"Invalid object hierarchy: {exc}") from exc
+        sections = []
+        for obj, spine in spine_objects:
+            try:
+                parent = _structure_parent(obj)
+                if parent is not None and parent not in spine_ids:
+                    if parent not in containers:
+                        raise ValueError(f"parent object {parent} has no Spine")
+                    parent = None
+                columns = [list(map(float, (spine.findtext(key) or "").split())) for key in ("X", "Y", "Z", "Radius")]
+                if len(columns[0]) < 2 or len({len(col) for col in columns}) != 1:
+                    raise ValueError("Spine point and radius counts do not match or have fewer than two samples")
+                if int(spine.get("Count", len(columns[0]))) != len(columns[0]):
+                    raise ValueError("Spine Count does not match its samples")
+                origin = _structure_point(obj, "Abs")
+                samples = []
+                for x, y, z, radius in zip(*columns, strict=True):
+                    p = self._transform.point_components_to_stage(x + origin.x, y + origin.y, z + origin.z)
+                    samples.append((p.x, p.y, p.z, radius * self._transform.linear_scale))
+                sections.append(SourceSpineSection(int(obj.attrib["ID"]), parent, tuple(samples)))
+            except (KeyError, ValueError) as exc:
+                raise ValueError(f"Object {obj.get('ID', '<missing>')}: {exc}") from exc
+        return tuple(sections)
+
+
+def _structure_point(node: ET.Element, prefix: str) -> Vector3:
+    return Vector3(*(float(node.attrib[f"{prefix}{axis}"]) for axis in "XYZ"))
+
+
+def _structure_parent(node: ET.Element) -> int | None:
+    value = int(node.get("ParentID", "-1"))
+    return value if value >= 0 else None
+
+
+def extract_authored_wind_joints(elements) -> tuple[Joint, ...]:
+    joints: list[Joint] = []
+    for elem in elements:
+        if elem.tag != "Bone":
+            continue
+        raw_bone_id = elem.attrib.get("ID")
+        if raw_bone_id is None or not raw_bone_id.lstrip("-").isdigit():
+            continue
+        bone_id = int(raw_bone_id)
+        raw_parent_id = elem.attrib.get("ParentID")
+        parsed_parent_id = None
+        if raw_parent_id not in {None, "", "-1"} and raw_parent_id.lstrip("-").isdigit():
+            parsed_parent_id = int(raw_parent_id)
+        generator_label, generator_level = parse_generator_label(elem.attrib.get("Generator"), bone_id)
+        joints.append(Joint(
+            name=joint_name_from_bone_id(bone_id),
+            source_id=bone_id,
+            parent=joint_name_from_bone_id(parsed_parent_id) if parsed_parent_id is not None else None,
+            generator_label=generator_label,
+            generator_level=generator_level,
+        ))
+    return tuple(joints)
 
 
 @dataclass(frozen=True)

@@ -59,6 +59,9 @@ from ..settings_service import (
     PartSourceSettingRecord,
     WindGroupSettingRecord,
 )
+from ..wind_operator_state import wind_group_records
+from ..wind_profiles import LEGACY, wind_profile
+from .force_wind_editor import ForceWindEditor
 from .scrollbars import keep_vertical_scrollbar_visible
 from .documentation import DocumentationButton
 from .material_controls import (
@@ -441,6 +444,7 @@ class WindRowWidgets:
     shift_spin: SliderSpinEditor
     single_frame: QFrame
     dual_frame: QFrame
+    force_editor: ForceWindEditor
 
 
 class WindTabPanel(QWidget):
@@ -450,6 +454,7 @@ class WindTabPanel(QWidget):
         self._on_change = on_change
         self._on_refresh_requested = on_refresh_requested
         self._on_preview_requested = on_preview_requested
+        self.profile = LEGACY
         self._persisted_settings: dict[str, WindGroupSettingRecord] = {}
         self._rows: list[WindRowWidgets] = []
         self._scattered_parts_active = False
@@ -464,7 +469,9 @@ class WindTabPanel(QWidget):
         outer.setSpacing(12)
 
         controls = QFrame(self)
+        self.controls_card = controls
         controls.setObjectName("PanelCard")
+        controls.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         controls_layout = QHBoxLayout(controls)
         controls_layout.setContentsMargins(16, 12, 16, 12)
         controls_layout.setSpacing(12)
@@ -539,7 +546,7 @@ class WindTabPanel(QWidget):
         skinning_layout.addLayout(self.skinning_slider_row, 1, 0, 1, 3)
         skinning_layout.addWidget(self.skinning_tick_labels, 2, 0, 1, 3)
         self.skinning_description_label.hide()
-        gust_label = QLabel("Gust Attenuation", controls)
+        gust_label = self.gust_label = QLabel("Gust Attenuation", controls)
         set_tooltip(self.gust_spin.toolTip(), gust_label)
         skinning_layout.addWidget(gust_label, 3, 0)
         skinning_layout.addWidget(self.gust_spin, 3, 1, 1, 2)
@@ -557,14 +564,27 @@ class WindTabPanel(QWidget):
         actions_layout.addWidget(self.refresh_button)
         actions_layout.addWidget(self.preview_button)
 
-        controls_layout.addWidget(skinning_controls, 2)
-        controls_layout.addWidget(actions, 1)
+        controls_layout.addWidget(skinning_controls, 2, Qt.AlignmentFlag.AlignVCenter)
+        controls_layout.addWidget(actions, 1, Qt.AlignmentFlag.AlignVCenter)
         outer.addWidget(controls)
 
         self.scroll = _make_scroll_area(self)
         self.scroll_container, self.scroll_layout = _make_scroll_host(self)
         self.scroll.setWidget(self.scroll_container)
         outer.addWidget(self.scroll, 1)
+
+    def set_profile(self, profile: str) -> None:
+        self.profile = wind_profile(profile)
+        legacy_controls = (self.ground_cover_checkbox, self.gust_spin, self.gust_label)
+        # Measure the complete header so hiding Legacy options cannot collapse it.
+        for control in legacy_controls:
+            control.show()
+        self.controls_card.layout().invalidate()
+        self.controls_card.setMinimumHeight(self.controls_card.sizeHint().height())
+        for control in legacy_controls:
+            control.setVisible(self.profile == LEGACY)
+        for row in self._rows:
+            self._apply_row_mode(row)
 
     def set_persisted_settings(self, settings: dict[str, WindGroupSettingRecord]) -> None:
         self._persisted_settings = dict(settings)
@@ -783,6 +803,10 @@ class WindTabPanel(QWidget):
             dual_layout.addRow(shift_label, shift_spin)
             card_layout.addWidget(dual_frame)
 
+            persisted = self._persisted_settings.get(str(group.group_index))
+            force = persisted.force if persisted else group.force
+            force_editor = ForceWindEditor(force, lambda _settings: self._on_change(), card)
+            card_layout.addWidget(force_editor)
             row = WindRowWidgets(
                 group_index=group.group_index,
                 branch_order=group.branch_order,
@@ -794,6 +818,7 @@ class WindTabPanel(QWidget):
                 shift_spin=shift_spin,
                 single_frame=single_frame,
                 dual_frame=dual_frame,
+                force_editor=force_editor,
             )
             self._rows.append(row)
             self._apply_row_mode(row)
@@ -808,6 +833,7 @@ class WindTabPanel(QWidget):
             DynamicWindSimulationGroup(
                 group_index=row.group_index,
                 branch_order=row.branch_order,
+                force=row.force_editor.settings(),
                 influence=float(row.influence_spin.value()),
                 shift_top=float(row.shift_spin.value()),
                 is_trunk_group=bool(row.trunk_checkbox.isChecked()),
@@ -821,16 +847,7 @@ class WindTabPanel(QWidget):
     def serialize_settings(self) -> dict[str, WindGroupSettingRecord]:
         if not self._rows:
             return dict(self._persisted_settings)
-        payload: dict[str, WindGroupSettingRecord] = {}
-        for row in self._rows:
-            payload[str(row.group_index)] = WindGroupSettingRecord(
-                is_trunk_group=bool(row.trunk_checkbox.isChecked()),
-                use_dual_influence=bool(row.dual_checkbox.isChecked()),
-                influence=float(row.influence_spin.value()),
-                min_influence=float(row.min_influence_spin.value()),
-                max_influence=float(row.max_influence_spin.value()),
-                shift_top=float(row.shift_spin.value()),
-            )
+        payload = wind_group_records(self.collect_group_settings())
         self._persisted_settings = dict(payload)
         return payload
 
@@ -855,11 +872,14 @@ class WindTabPanel(QWidget):
         self._apply_row_mode(row)
         self._on_change()
 
-    @staticmethod
-    def _apply_row_mode(row: WindRowWidgets) -> None:
+    def _apply_row_mode(self, row: WindRowWidgets) -> None:
+        legacy = self.profile == LEGACY
         dual = bool(row.dual_checkbox.isChecked())
-        row.single_frame.setVisible(not dual)
-        row.dual_frame.setVisible(dual)
+        row.trunk_checkbox.setVisible(legacy)
+        row.dual_checkbox.setVisible(legacy)
+        row.single_frame.setVisible(legacy and not dual)
+        row.dual_frame.setVisible(legacy and dual)
+        row.force_editor.setVisible(not legacy)
 
     @staticmethod
     def _make_spin(minimum: float, maximum: float, step: float, value: float) -> SliderSpinEditor:

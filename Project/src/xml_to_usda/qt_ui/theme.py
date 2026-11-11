@@ -513,6 +513,34 @@ QToolButton {{
 QPushButton:hover {{
     background: {accent_fill};
 }}
+QFrame#WindProfileSwitch {{
+    background: transparent;
+    border: none;
+}}
+QFrame#WindProfileSwitch QPushButton {{
+    min-width: 0px;
+    min-height: 38px;
+    padding: 4px 2px;
+    border: 1px solid {BUTTON_OUTLINE_COLOR};
+    border-radius: 0px;
+    background: {button_fill_disabled};
+    color: {button_text};
+}}
+QFrame#WindProfileSwitch QPushButton#WindProfileLegacy {{
+    border-top-left-radius: 24px;
+    border-bottom-left-radius: 24px;
+}}
+QFrame#WindProfileSwitch QPushButton#WindProfileForce {{
+    border-top-right-radius: 24px;
+    border-bottom-right-radius: 24px;
+}}
+QFrame#WindProfileSwitch QPushButton:hover {{
+    background: {control_hover_fill};
+}}
+QFrame#WindProfileSwitch QPushButton:checked {{
+    background: {button_fill};
+    color: {button_text};
+}}
 QPushButton#CollisionModeButton {{
     min-width: 0px;
     padding: 6px 10px;

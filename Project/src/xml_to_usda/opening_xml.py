@@ -14,10 +14,12 @@ import xml.etree.ElementTree as ET
 from .dynamic_wind import build_dynamic_wind_data
 from .models import BaseMaterialOverride, DynamicWindData, Joint, PrototypeDiscoveryEntry, SourceXmlDocument
 from .normalizer import normalize_to_canonical
-from .source_extraction import count_source_part_instances, normalize_source_skeleton, validate_source_part_hosts
+from .source_extraction import (
+    SourceStructure, count_source_part_instances, extract_authored_wind_joints,
+    normalize_source_skeleton, validate_source_part_hosts,
+)
 from .scattered_parts import ScatteredPartsAnalysis, analyze_scattered_parts
 from .skeleton_processing import strictly_vertical_joint_names
-from .skeleton_rules import joint_name_from_bone_id, parse_generator_label
 from .source_analysis import discover_missing_bone_generator_groups, discover_part_prototypes, discover_source_materials
 from .source_limits import DEFAULT_SOURCE_LIMITS, SourceLimits
 from .source_transform import build_source_transform
@@ -63,7 +65,7 @@ def inspect_source_opening(input_path: str, *, is_ground_cover: bool = False) ->
         scattered_parts = analyze_scattered_parts(source_model)
     wind_data = None
     if opening is not None:
-        wind_skeleton = _wind_skeleton_from_bones(analysis.source_nodes.bones)
+        wind_skeleton = extract_authored_wind_joints(analysis.source_nodes.bones)
         if wind_skeleton:
             try:
                 wind_data = build_dynamic_wind_data(wind_skeleton, is_ground_cover=is_ground_cover)
@@ -82,36 +84,23 @@ def inspect_source_opening(input_path: str, *, is_ground_cover: bool = False) ->
     )
 
 
+def read_source_structure(input_path: str) -> SourceStructure:
+    """Read structural facts once without changing native opening projections."""
+    document = read_source_xml(input_path)
+    analysis = analyze_xml(document)
+    transform = build_source_transform(
+        document.tree.getroot(), analysis.report.units_hint,
+        analysis.report.up_axis_hint, analysis.source_nodes.meshes,
+    )
+    return SourceStructure(analysis.source_nodes, transform)
+
+
 def read_authored_wind_skeleton(input_path: str) -> tuple[Joint, ...]:
     """Reread authored Wind identities; synthetic rig resolution belongs to Wind."""
     opening = _read_native_opening(input_path)
     elements = (opening.document.tree.iter('Bone') if opening is not None else
                 (elem for _event, elem in iterparse_source_xml(input_path, events=("end",)) if elem.tag == 'Bone'))
-    return _wind_skeleton_from_bones(elements)
-
-
-def _wind_skeleton_from_bones(elements) -> tuple[Joint, ...]:
-    joints: list[Joint] = []
-    for elem in elements:
-        if elem.tag != "Bone":
-            continue
-        raw_bone_id = elem.attrib.get("ID")
-        if raw_bone_id is None or not raw_bone_id.lstrip("-").isdigit():
-            continue
-        bone_id = int(raw_bone_id)
-        raw_parent_id = elem.attrib.get("ParentID")
-        parsed_parent_id = None
-        if raw_parent_id not in {None, "", "-1"} and raw_parent_id.lstrip("-").isdigit():
-            parsed_parent_id = int(raw_parent_id)
-        generator_label, generator_level = parse_generator_label(elem.attrib.get("Generator"), bone_id)
-        joints.append(Joint(
-            name=joint_name_from_bone_id(bone_id),
-            source_id=bone_id,
-            parent=joint_name_from_bone_id(parsed_parent_id) if parsed_parent_id is not None else None,
-            generator_label=generator_label,
-            generator_level=generator_level,
-        ))
-    return tuple(joints)
+    return extract_authored_wind_joints(elements)
 
 
 @dataclass(frozen=True)

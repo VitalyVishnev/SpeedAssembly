@@ -36,11 +36,13 @@ from ..wind_external_skeleton import (
     external_skeleton_backend_available,
     list_external_usd_skeletons,
     load_external_skeleton_preview,
-    prepare_external_dynamic_wind_export,
     transform_external_skeleton_scene,
 )
 from ..wind_service import derive_wind_json_output_path
 from ..wind_preview_service import WindPreviewResult
+from ..wind_authoring import prepare_wind_export
+from ..wind_operator_state import WindGroupState, source_revision, wind_session_notice
+from ..wind_profiles import LEGACY, FORCE_BASED, ForceWindSettings, wind_profile
 from ..wind_tree_hierarchy import TreeHierarchySettings, prepare_tree_hierarchy, classify_tree_hierarchy
 from ..wind_group_stack import (
     EDIT_MODE_BONES,
@@ -67,6 +69,7 @@ from ..wind_viewport_scene import (
 )
 from .material_controls import set_tooltip
 from .panels import SliderSpinEditor
+from .force_wind_editor import ForceWindEditor
 from .preview_shell import CollapsibleSettingsSection, PreviewShellDialog, apply_compact_preview_panel_style
 from .viewport import MatcapViewport, _build_instanced_scene_payload
 
@@ -89,8 +92,6 @@ SOURCE_MODE_XML = "source_xml"
 SOURCE_MODE_EXTERNAL = "source_external"
 DISPLAY_UNITS = (("Millimeters", "mm"), ("Centimeters", "cm"), ("Meters", "m"))
 DISPLAY_UP_AXES = (("Y-up", "Y"), ("Z-up", "Z"))
-_WIND_GROUP_BOOLEAN_FIELDS = frozenset({"is_trunk_group", "use_dual_influence"})
-_WIND_GROUP_NUMERIC_FIELDS = frozenset({"influence", "min_influence", "max_influence", "shift_top"})
 
 # Ratios are displayed as percentages; numerical degeneracy tolerances stay internal.
 _TREE_THRESHOLDS = (
@@ -154,6 +155,9 @@ class WindPreviewDialog(PreviewShellDialog):
         self,
         *,
         preview: WindPreviewResult | None = None,
+        profile: str = LEGACY,
+        initial_wind_data: DynamicWindData | None = None,
+        root_name: str | None = None,
         external_preview_requested=None,
         wind_session_snapshot: dict[str, object] | None = None,
         wind_session_changed: Callable[[dict[str, object]], None] | None = None,
@@ -161,6 +165,11 @@ class WindPreviewDialog(PreviewShellDialog):
     ) -> None:
         super().__init__(title="Advanced Wind Settings", parent=parent)
         self.resize(WIND_PREVIEW_DEFAULT_WIDTH, WIND_PREVIEW_DEFAULT_HEIGHT)
+        self.profile = wind_profile(profile)
+        self._initial_wind_data = initial_wind_data
+        self._group_state = WindGroupState(initial_wind_data)
+        self._source_revision = None
+        self._root_name = root_name
         self.current_preview: WindPreviewResult | None = None
         self._external_preview_requested = external_preview_requested
         self._initial_wind_session_snapshot = dict(wind_session_snapshot or {})
@@ -171,7 +180,6 @@ class WindPreviewDialog(PreviewShellDialog):
         self._group_cards: dict[int, QFrame] = {}
         self._manual_group_cards: dict[int, QFrame] = {}
         self._expanded_group_source_keys: set[str] = set()
-        self._group_settings_by_source_key: dict[str, dict[str, bool | float]] = {}
         self._auto_group_count = 1
         self._auto_continuous_levels: set[int] = set()
         self._tree_analysis = None
@@ -552,6 +560,18 @@ class WindPreviewDialog(PreviewShellDialog):
         if preview is not None:
             self.set_preview(preview)
 
+    def apply_group_settings(self, data: DynamicWindData) -> None:
+        if self.current_preview is None or self.source_mode_combo.currentData() != SOURCE_MODE_XML:
+            return
+        self._group_state.apply(data, self._flattened())
+        self._rebuild_group_list()
+        self._save_wind_session()
+
+    def set_profile(self, profile: str) -> None:
+        self.profile = wind_profile(profile)
+        self._rebuild_group_list()
+        self._save_wind_session()
+
     def set_loading(self, message: str = "Preparing wind preview...") -> None:
         self.summary_label.setText(message)
 
@@ -578,6 +598,7 @@ class WindPreviewDialog(PreviewShellDialog):
         self._tree_update_timer.stop()
         self._tree_save_timer.stop()
         self.current_preview = preview
+        self._source_revision = source_revision(preview.input_path)
         self._tree_analysis = None
         self._prepared_tree = None
         self._base_data_cache = self._flatten_cache = None
@@ -601,7 +622,7 @@ class WindPreviewDialog(PreviewShellDialog):
         self._auto_continuous_levels = set()
         self._manual_groups = ()
         self._expanded_group_source_keys = set()
-        self._group_settings_by_source_key = {}
+        self._group_state = WindGroupState(self._initial_wind_data)
         self._active_manual_layer_id = None
         self._undo_stack = []
         self._redo_stack = []
@@ -618,6 +639,9 @@ class WindPreviewDialog(PreviewShellDialog):
             with QSignalBlocker(self.grouping_mode_combo):
                 self.grouping_mode_combo.setCurrentIndex(preferred_index)
         restore_notice = self._restore_wind_session_if_matching(preview)
+        if self._initial_wind_data is not None and self.source_mode_combo.currentData() == SOURCE_MODE_XML:
+            self._group_state.apply(self._initial_wind_data, self._flattened())
+            self._initial_wind_data = None
         if self._grouping_mode() == GROUPING_MODE_TREE:
             try:
                 self._get_tree_analysis()
@@ -784,7 +808,13 @@ class WindPreviewDialog(PreviewShellDialog):
             self.summary_label.setText("Load a Wind Preview source before generating JSON.")
             return
         try:
-            dynamic_wind = prepare_external_dynamic_wind_export(preview, self._current_dynamic_wind())
+            dynamic_wind = prepare_wind_export(
+                preview.source_model.skeleton,
+                profile=self.profile,
+                data=self._current_dynamic_wind(),
+                input_path=preview.input_path if self.source_mode_combo.currentData() == SOURCE_MODE_XML else None,
+                root_name=self._root_name if self.source_mode_combo.currentData() == SOURCE_MODE_XML else None,
+            )
         except ValueError as exc:
             self.set_error(str(exc))
             return
@@ -1129,41 +1159,10 @@ class WindPreviewDialog(PreviewShellDialog):
         return self._grouping_mode() in {GROUPING_MODE_AUTO, GROUPING_MODE_PVE, GROUPING_MODE_TREE}
 
     def _current_dynamic_wind(self) -> DynamicWindData:
-        flattened = self._flattened()
-        groups = tuple(
-            self._group_settings_for_flattened_group(group, fallback)
-            for group, fallback in zip(flattened.groups, flattened.dynamic_wind.simulation_groups)
-        )
-        return replace(flattened.dynamic_wind, simulation_groups=groups)
-
-    def _group_settings_for_flattened_group(
-        self,
-        group,
-        fallback: DynamicWindSimulationGroup,
-    ) -> DynamicWindSimulationGroup:
-        if group.source_group_index is not None:
-            source_group = next(
-                (
-                    item
-                    for item in self._base_dynamic_wind().simulation_groups
-                    if item.group_index == group.source_group_index
-                ),
-                fallback,
-            )
-            fallback = replace(
-                source_group,
-                group_index=fallback.group_index,
-                branch_order=fallback.branch_order,
-            )
-        values = self._group_settings_by_source_key.get(group.source_key, {})
-        return replace(fallback, **values)
+        return self._group_state.resolve(self._flattened(), self._base_dynamic_wind(), profile=self.profile)
 
     def _group_settings_for_editor(self, group) -> DynamicWindSimulationGroup:
-        flattened = self._flattened()
-        return self._group_settings_for_flattened_group(
-            group,
-            flattened.dynamic_wind.simulation_groups[group.final_group_index],
-        )
+        return self._current_dynamic_wind().simulation_groups[group.final_group_index]
 
     def _toggle_group_settings(self, source_key: str) -> None:
         if source_key in self._expanded_group_source_keys:
@@ -1175,6 +1174,8 @@ class WindPreviewDialog(PreviewShellDialog):
 
     def _make_group_settings_editor(self, group, parent: QWidget) -> QFrame:
         settings = self._group_settings_for_editor(group)
+        if self.profile == FORCE_BASED:
+            return ForceWindEditor(settings.force, lambda value: self._set_force_setting(group.source_key, value), parent)
         frame = QFrame(parent)
         frame.setObjectName("WindGroupSettings")
         layout = QVBoxLayout(frame)
@@ -1234,14 +1235,12 @@ class WindPreviewDialog(PreviewShellDialog):
         dual_checkbox.toggled.connect(dual_frame.setVisible)
         return frame
 
+    def _set_force_setting(self, source_key: str, settings: ForceWindSettings) -> None:
+        self._group_state.set_value(source_key, "force", settings)
+        self._save_wind_session()
+
     def _set_group_setting(self, source_key: str, field: str, value: bool | float) -> None:
-        if field in _WIND_GROUP_BOOLEAN_FIELDS:
-            normalized: bool | float = bool(value)
-        elif field in _WIND_GROUP_NUMERIC_FIELDS:
-            normalized = max(0.0, min(float(value), 1.0))
-        else:
-            return
-        self._group_settings_by_source_key.setdefault(source_key, {})[field] = normalized
+        self._group_state.set_value(source_key, field, value)
         if self._grouping_mode() == GROUPING_MODE_TREE and self._active_scene is not None:
             self._update_summary(self._active_scene, self._current_groups())
         self._save_wind_session()
@@ -1572,6 +1571,7 @@ class WindPreviewDialog(PreviewShellDialog):
             return {}
         return {
             "schema_version": 4,
+            "source_revision": self._source_revision,
             "fingerprint": self._preview_fingerprint,
             "input_path": str(preview.input_path),
             "source_mode": self.source_mode_combo.currentData() or SOURCE_MODE_XML,
@@ -1589,10 +1589,7 @@ class WindPreviewDialog(PreviewShellDialog):
             "tree_hierarchy_settings": asdict(self._tree_settings),
             "auto_continuous_levels": sorted(int(level) for level in self._auto_continuous_levels),
             "expanded_group_source_keys": sorted(self._expanded_group_source_keys),
-            "group_settings": {
-                source_key: dict(sorted(settings.items()))
-                for source_key, settings in sorted(self._group_settings_by_source_key.items())
-            },
+            **self._group_state.snapshot(self._current_dynamic_wind()),
             "active_manual_layer_id": self._active_manual_layer_id,
             "manual_groups": [
                 {
@@ -1617,11 +1614,10 @@ class WindPreviewDialog(PreviewShellDialog):
         session = self._initial_wind_session_snapshot
         if not session:
             return ""
-        session_version = session.get("schema_version")
-        if session_version not in {1, 2, 3, 4}:
-            return "Previous Wind Preview session reset: unsupported session version."
-        if session.get("fingerprint") != self._preview_fingerprint:
-            return "Previous Wind Preview session reset: skeleton changed."
+        notice = wind_session_notice(session, preview.input_path, preview.dynamic_wind)
+        if notice:
+            return notice
+        session_version = session["schema_version"]
 
         valid_tokens = {joint.name for joint in preview.source_model.skeleton}
         self._restoring_session = True
@@ -1702,9 +1698,7 @@ class WindPreviewDialog(PreviewShellDialog):
             self._expanded_group_source_keys = _restore_expanded_group_source_keys(
                 session.get("expanded_group_source_keys") if session_version >= 3 else None
             )
-            self._group_settings_by_source_key = _restore_group_settings(
-                session.get("group_settings") if session_version >= 3 else None
-            )
+            self._group_state.restore(session)
             self._manual_groups = _restore_manual_groups(session.get("manual_groups"), valid_tokens)
             active_layer = _coerce_optional_int(session.get("active_manual_layer_id"))
             self._active_manual_layer_id = (
@@ -1887,31 +1881,6 @@ def _restore_expanded_group_source_keys(value) -> set[str]:
     if not isinstance(value, list):
         return set()
     return {item for item in value if isinstance(item, str) and item}
-
-
-def _restore_group_settings(value) -> dict[str, dict[str, bool | float]]:
-    if not isinstance(value, dict):
-        return {}
-    restored: dict[str, dict[str, bool | float]] = {}
-    for source_key, raw_settings in value.items():
-        if not isinstance(source_key, str) or not source_key or not isinstance(raw_settings, dict):
-            continue
-        settings: dict[str, bool | float] = {}
-        for field in _WIND_GROUP_BOOLEAN_FIELDS:
-            raw_value = raw_settings.get(field)
-            if isinstance(raw_value, bool):
-                settings[field] = raw_value
-        for field in _WIND_GROUP_NUMERIC_FIELDS:
-            raw_value = raw_settings.get(field)
-            if isinstance(raw_value, bool):
-                continue
-            try:
-                settings[field] = max(0.0, min(float(raw_value), 1.0))
-            except (TypeError, ValueError):
-                continue
-        if settings:
-            restored[source_key] = settings
-    return restored
 
 
 def _add_group_header(layout, parent, title: str) -> None:

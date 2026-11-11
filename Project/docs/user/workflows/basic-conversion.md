@@ -60,13 +60,19 @@ Skinning Quality determines the weights written into the USDA geometry. It is no
 
 ### Set group behavior
 
+Choose the wind profile above **Status**. **Force Based 5.9** is the default and requires UE 5.9. **Legacy 5.7–5.8** also works with Legacy mode in UE 5.9. Switching preserves each profile's values; group assignments are shared. **Advanced Wind Settings** uses the same profile and controls.
+
+In Force Based, mark trunk groups with **Trunk** and set **Wind Response**. Enable a parameter's checkbox to reveal its override slider. Unchecked parameters use Unreal's defaults. **Modal Frequency Scale** affects physically derived frequencies when usable structural radii are available. **Skinning Quality** remains available in both profiles.
+
+The following controls appear only in Legacy:
+
 1. Review the detected groups, such as **Group 0**, **Group 1**, and **Group 2**.
 2. Mark trunk groups with **Trunk**.
 3. Adjust **Influence**, or enable **Dual Influence** and adjust **Min Influence**, **Max Influence**, and **Shift Top**.
 4. Adjust **Gust Attenuation** for trunk gust response.
 5. Enable **Ground Cover** for low-growing plants when appropriate.
 
-These group and wind settings go into Wind JSON, which you import onto the Skeletal Mesh in Unreal. You can change them later in Skeletal Mesh settings in Unreal. If you are unsure, keep the defaults and tune the motion in Unreal.
+Both profiles export Wind JSON. Force Based also writes the same group assignments, overrides, and structural radii into the main Skeleton of a Skeletal Assembly USD. Start with defaults and tune the motion in Unreal.
 
 **Total bones** shows the current skeleton count. Click **Refresh Wind Groups** to repeat the analysis, or **Advanced Wind Settings** to inspect the skeleton and edit group assignments in a separate viewport.
 
@@ -163,10 +169,10 @@ See [Assigning materials](materials-tab.md) for Single Material, FBX slots, and 
 Use a Parts mode to build a branch library in Unreal first. Then convert full plants using **Use Unreal Reference** to share those imported branches between trees. In Parts modes, **Create Parts Folder** places the exported files in a dedicated folder; turn it off to write them beside the selected Output USDA.
 
 2. Click **Convert to USDA** and wait for conversion to finish.
-3. For a skeletal plant using Dynamic Wind, click **Generate Wind JSON** to export its wind settings separately.
+3. For Legacy, click **Generate Wind JSON**. For Force Based this is optional: Skeletal Assembly USD already contains the wind data. JSON exports the same settings separately.
 
 ![Convert to USDA, export-mode gear, and Generate Wind JSON highlighted](../assets/images/conversion-export.png)
 
-The full-plant modes produce a USDA at the selected output path. Parts modes produce the individual part files. Wind JSON supplies the group assignments and settings needed for Dynamic Wind in Unreal; generating the USDA alone does not connect the wind data.
+The full-plant modes produce a USDA at the selected output path. Parts modes produce the individual part files. Force Based Wind Data is embedded in the full Skeletal Assembly export; Legacy requires a separate Wind JSON import.
 
 Next, [import the exported assets and apply Wind JSON in Unreal Engine](unreal-import.md).
