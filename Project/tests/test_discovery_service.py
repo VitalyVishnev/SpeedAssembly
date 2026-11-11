@@ -17,6 +17,7 @@ from xml_to_usda.settings_service import (
     FbxMaterialSlotSettingRecord,
     PartSourceSettingRecord,
 )
+from xml_to_usda.xml_reader import read_source_xml
 
 
 SIMPLE_TREE_01 = Path(__file__).resolve().parents[1] / "samples" / "speedtree" / "simple_tree" / "variants" / "SimpleTree_01.xml"
@@ -155,7 +156,9 @@ def test_discover_part_prototype_rows_restores_persisted_modes() -> None:
         ),
     )
 
-    assert discovery.summary == "Found 39 repeated branch instances across 2 prototype(s)."
+    document = read_source_xml(SIMPLE_TREE_01)
+    instance_count = sum(int(ref.attrib["Count"]) for ref in document.tree.iter("LeafReferences"))
+    assert discovery.summary == f"Found {instance_count} repeated branch instances across 2 prototype(s)."
     assert discovery.rows[0].source_name == "Twig_01"
     assert discovery.rows[0].source_mode == PrototypeSourceMode.FBX_FILE
     assert discovery.rows[0].fbx_material_mode == FbxMaterialMode.MATERIAL_SLOTS

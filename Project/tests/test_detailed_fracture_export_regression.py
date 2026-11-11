@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 
 from usda_test_inventory import UsdaInventory
@@ -25,6 +26,17 @@ SIMPLE_TREE_01 = (
 def test_detailed_boolean_export_preserves_repeated_parts_normals_and_collision(monkeypatch, tmp_path: Path) -> None:
     _, source_model, _ = load_source_tree_model(SIMPLE_TREE_01)
     default_skinning_model = apply_skinning_quality(source_model)
+    parent_tokens = {joint.parent for joint in source_model.skeleton}
+    attachment_counts = Counter(part.binding.joint_tokens for part in source_model.repeated_parts)
+    terminal_parts = [
+        (index, part)
+        for index, part in enumerate(source_model.repeated_parts)
+        if len(part.binding.joint_tokens) == 1
+        and part.binding.joint_tokens[0] not in parent_tokens
+        and attachment_counts[part.binding.joint_tokens] == 1
+    ]
+    assert terminal_parts, "The fixture needs a terminal branch owning exactly one Repeated Part."
+    detached_index, detached_part = terminal_parts[0]
     boolean_meshes = {}
     authored_models = {}
     collision_inputs = []
@@ -60,7 +72,7 @@ def test_detailed_boolean_export_preserves_repeated_parts_normals_and_collision(
         ),
         FractureSettings(
             target_piece_count=0,
-            pinned_cut_joint_tokens=("bone_032",),
+            pinned_cut_joint_tokens=detached_part.binding.joint_tokens,
             detailed_cuts_enabled=True,
             detailed_cut_intensity=20.0,
             detailed_cut_density=8,
@@ -70,7 +82,7 @@ def test_detailed_boolean_export_preserves_repeated_parts_normals_and_collision(
     owned_indices = [index for piece in result.plan.pieces for index in piece.repeated_part_indices]
     assert sorted(owned_indices) == list(range(len(source_model.repeated_parts)))
     assert len(owned_indices) == len(set(owned_indices))
-    assert result.plan.pieces[1].repeated_part_indices == (6,)
+    assert result.plan.pieces[1].repeated_part_indices == (detached_index,)
 
     collision_by_piece = {name: (mesh, face_indices) for name, mesh, face_indices in collision_inputs}
     assert set(boolean_meshes) == set(authored_models) == set(collision_by_piece)
@@ -100,5 +112,5 @@ def test_detailed_boolean_export_preserves_repeated_parts_normals_and_collision(
         assert inventory.has_attribute(base_path, "normals")
 
     detached_text = Path(result.outputs[1].output_path).read_text(encoding="utf-8")
-    assert "Twig_01" in detached_text
-    assert "Twig_02" not in detached_text
+    for prototype in source_model.prototypes:
+        assert (prototype.source_name in detached_text) == (prototype.source_key == detached_part.prototype_key)

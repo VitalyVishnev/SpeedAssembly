@@ -364,25 +364,19 @@ def test_auto_wind_viewport_groups_can_continue_selected_levels_by_endpoint() ->
     assert continuous_by_joint["upper_trunk"] == 0
     assert continuous_by_joint["branch_a_cont"] == 1
 
-
-def test_auto_wind_viewport_groups_can_keep_simple_tree_tip_continuation_in_trunk() -> None:
-    _document, model, _diagnostics = load_source_tree_model(Path("samples/speedtree/simple_tree/variants/SimpleTree_01.xml"))
-    skeleton_without_wind_labels = tuple(
-        replace(joint, generator_level=None, generator_label=None)
-        for joint in model.skeleton
-    )
-
-    auto_groups = build_auto_wind_viewport_data(
-        skeleton_without_wind_labels,
-        group_count=10,
+    trunk_groups = build_auto_wind_viewport_data(
+        skeleton,
+        group_count=3,
         continuous_branch_orders=frozenset({0}),
     )
-
-    by_joint = {assignment.joint_name: assignment.simulation_group_index for assignment in auto_groups.joint_assignments}
-    assert by_joint["bone_086"] == 0
-    assert by_joint["bone_087"] == 0
-    assert by_joint["bone_088"] == 0
-    assert by_joint["bone_101"] == 1
+    assert {assignment.joint_name: assignment.simulation_group_index for assignment in trunk_groups.joint_assignments} == {
+        "root": 0,
+        "trunk_1": 0,
+        "branch_a": 1,
+        "branch_b": 1,
+        "branch_a_cont": 2,
+        "upper_trunk": 0,
+    }
 
 
 def test_wind_viewport_subtree_selection_uses_descendant_joints() -> None:

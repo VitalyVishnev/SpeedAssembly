@@ -255,46 +255,6 @@ def test_discover_part_prototypes_matches_canonical_prototype_identity_for_gui_l
     ]
 
 
-def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
-    document = read_source_xml(SIMPLE_TREE_01)
-    report = inspect_xml(document)
-    model = normalize_to_canonical(document, report)
-
-    assert model.base_mesh is not None
-    assert len(model.materials) == 3
-    assert model.source_objects
-    assert model.skeleton
-    assert model.base_tree_parts
-    assert model.branch_segments
-    assert model.assembly_parts
-    assert model.mesh_library
-    assert model.prototypes
-    assert model.skeletal_support_primvars is not None
-    assert model.dynamic_wind is None
-    assert model.binding_mode == "single_joint"
-    assert model.binding_element_size == 1
-    assert model.base_mesh.skel_joint_indices
-    assert model.base_mesh.skel_joint_weights
-    assert model.base_mesh.uv_coords
-    assert (model.skeleton[0].bind_translate.x, model.skeleton[0].bind_translate.y, model.skeleton[0].bind_translate.z) == pytest.approx((0.0, 0.0, 0.0))
-    assert (model.skeleton[0].rest_translate.x, model.skeleton[0].rest_translate.y, model.skeleton[0].rest_translate.z) == pytest.approx((0.0, 0.0, 0.0))
-    assert model.skeleton[1].rest_translate != pytest.approx(model.skeleton[1].bind_translate)
-    assert abs(model.skeleton[1].bind_translate.y) > 0
-    assert len(model.base_mesh.skel_joint_indices) == len(model.base_mesh.points)
-    assert len(model.base_mesh.skel_joint_weights) == len(model.base_mesh.points)
-    assert len(model.base_mesh.uv_coords) == len(model.base_mesh.face_vertex_indices)
-    assert {material.source_id for material in model.materials} == {0, 1, 2}
-    assert {section.material_id for section in model.base_mesh.sections} == {0, 1}
-    assert all(
-        prototype.mesh is not None and {section.material_id for section in prototype.mesh.sections} == {0}
-        for prototype in model.prototypes
-    )
-    assert all(part.binding.joint_tokens for part in model.assembly_parts)
-    assert all(len(part.binding.joint_tokens) == len(part.binding.weights) for part in model.assembly_parts)
-    assert all(token.startswith("bone_") or token == "root" for part in model.assembly_parts for token in part.binding.joint_tokens)
-    assert {prototype.source_key for prototype in model.prototypes} == {part.prototype_key for part in model.assembly_parts}
-
-
 def test_base_tree_mesh_merges_trunk_and_branch_geometry_in_stage_space() -> None:
     document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)

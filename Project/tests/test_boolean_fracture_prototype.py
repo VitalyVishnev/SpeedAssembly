@@ -388,23 +388,46 @@ def test_multi_replan_reuses_unchanged_cut_sessions_and_results() -> None:
 
 
 def test_multi_prototype_sequences_stump_and_branch_cuts_on_one_shell() -> None:
-    source = Path(__file__).resolve().parents[1] / "samples/speedtree/simple_tree/variants/SimpleTree_01.xml"
-    model = load_source_tree_model(source)[1]
+    model = build_synthetic_boolean_cylinder_model()
+    root, stem = model.skeleton
+    stem = replace(stem, bind_end_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 0.0)))
+    tip = Joint(
+        name="tip",
+        source_id=2,
+        parent=stem.name,
+        bind_transform=Matrix4d.from_translation(Vector3(0.0, 0.0, 0.0)),
+        rest_transform=Matrix4d.from_translation(Vector3(0.0, 2.0, 0.0)),
+        bind_end_transform=Matrix4d.from_translation(Vector3(0.0, 2.0, 0.0)),
+    )
+    model = replace(
+        model,
+        skeleton=(root, stem, tip),
+        base_mesh=replace(model.base_mesh, skel_joint_indices=tuple(
+            0 if point.y < -1.0 else 1 if point.y < 0.0 else 2
+            for point in model.base_mesh.points
+        )),
+    )
     settings = BooleanMultiPrototypeSettings(
-        auto_branch_count=3,
+        auto_branch_count=0,
         intensity=0.0,
         remesh_density=4,
         force_stump_piece=True,
+        pinned_cut_joint_tokens=(tip.name,),
     )
 
     session = prepare_boolean_multi_prototype(model, settings)
     result = session.build(settings)
 
     assert session._cut_sessions[0].selected_component_index == session._cut_sessions[1].selected_component_index
-    assert len(result.cuts) == 4
-    assert len(result.pieces) == 5
+    assert [site.reason for site in result.cut_sites] == ["stump_piece", "manual_pinned"]
+    assert len(result.cuts) == 2
+    assert len(result.pieces) == 3
     assert all(piece.meshes for piece in result.pieces)
-    for cut in result.cuts[:2]:
+    assert result.cuts[0].child_result == result.cuts[1].parent_result
+    stages = [dict(cut.diagnostics.stages) for cut in result.cuts]
+    piece_volume = sum(stage["Parent Stub"].volume for stage in stages) + stages[-1]["Detached Branch"].volume
+    assert piece_volume == pytest.approx(stages[0]["Closed Solid"].volume, rel=1e-5)
+    for cut in result.cuts:
         assert cut.diagnostics.cap_vertex_count > 0
         for mesh in (cut.parent_result, cut.child_result):
             assert len(mesh.uv_coords) == len(mesh.face_vertex_indices)

@@ -11,17 +11,6 @@ use the documented Bone Radius / engine fallback with a Status warning.
 
 See [the source findings](ue59-dynamic-wind.md).
 
-## Existing source-test fixture failures, 2026-11-11
-
-Full source run after the Wind ownership refactor: 678 passed, 9 failed,
-31 deselected on the normal Windows Qt platform. The nine failures also
-reproduce with HEAD source: two Boolean fracture expectations and seven stale
-SimpleTree expectations across discovery, normalization, pipeline, source
-analysis, USDA binding/Spines and wind viewport. Actual sample has 43 joints
-and 38 parts; several tests expect the older topology. No fixture assertions
-were weakened for the wind feature. Next: reconcile sample provenance and
-expected fracture output separately. Focused wind/UI/service tests pass.
-
 ## Force structural reads during conversion
 
 `conversion_orchestrator.py` still queries Source Structure separately after

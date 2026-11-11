@@ -1,5 +1,39 @@
 # Experiments
 
+## SimpleTree fixture failures reconciled, 2026-11-12
+
+Commit `98f0dc1` re-exported SimpleTree_01 while adding Spines. Compared with
+`6a0f5cb`, the sample changed from 105 joints / 39 Repeated Parts / no Spines
+to 43 joints / 38 parts / 23 Spines, with a nonzero root translation. This
+invalidated nine tests' asset-specific assumptions. Production code is
+unchanged by the reconciliation.
+
+Running the current backend against the older XML reproduces both original
+Boolean prerequisites: stump and first branch use component 0, and the cut at
+`bone_032` owns instance 6. In the current XML the first branch uses component
+11 and that bone owns no instances. Preserve the contracts with explicit input:
+
+- Same-shell sequential cuts use the existing synthetic cylinder with three
+  joints and two cuts. Check the shared middle mesh, total volume, caps, UVs
+  and skin width.
+- Detailed export selects a terminal branch with exactly one Repeated Part.
+  Check its exact owner index, prototype filtering, normals and collision.
+- Discovery counts come from raw XML Count/MeshID data; root translation is
+  checked against raw Start coordinates in the default Z-up meter basis.
+- OpenUSD reads every exported instance binding and weight; source joint
+  tokens and zero padding replace assertions on old bone numbers.
+- Removing Spine nodes leaves ordinary Legacy USDA byte-identical.
+- The existing endpoint fixture now also verifies trunk-only continuation and
+  excludes continuation on an unselected branch level. Remove the old real-tree
+  duplicate and the exact normalizer duplicate from test_pipeline.py.
+
+No test is skipped or marked expected-failing; two duplicate cases are merged
+into their stronger owners. No runtime, importer, fixture asset or version edit.
+Full source gate: 685 passed, 31 deselected by the existing stress/packaged
+selection. The previous nine failures are resolved.
+Package passed 27 contracts and all three required real-result smokes without
+`-SkipSmoke`. No extended stress sweep or Unreal reimport was needed.
+
 ## Safe polish across the working diff, 2026-11-11
 
 Reviewed all 43 modified/untracked files against a saved working-tree snapshot.

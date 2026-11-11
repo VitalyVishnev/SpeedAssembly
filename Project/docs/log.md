@@ -1042,3 +1042,18 @@ under `docs/raw/`; Git retains per-change detail.
   the 30-page bilingual contract passed. No new tests or dependencies.
 - Package passed 27 contracts and all three required real-result smokes without
   bypasses. Version unchanged; byte-identical exports reuse Unreal acceptance.
+
+## 2026-11-12 - Reconcile the nine stale fixture checks
+
+- Traced all nine failures to the SimpleTree_01 re-export in `98f0dc1` and
+  checked the old Boolean prerequisites against the XML from `6a0f5cb`.
+- Preserved same-shell cuts on a minimal synthetic cylinder; selected a real
+  terminal branch with one Repeated Part for Detailed Cuts export. Replaced
+  stale counts, root origin and bone IDs with source-derived contracts.
+- Verified complete USD bindings through OpenUSD and byte-identical Legacy
+  USDA with/without Spines. Merged two duplicate cases into stronger tests.
+- Full source gate: 685 passed. No skip/xfail additions, production or fixture
+  asset edits, version change or new Unreal import. Removed the resolved issue
+  from Known Bugs; retained the evidence in Experiments.
+- Package passed all 27 contracts and all three required real-result smokes,
+  without bypasses or the separate extended stress sweep.

@@ -5,6 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from pxr import Usd
 
 from xml_to_usda.canonical_loader import load_canonical_model, load_resolved_assembly_model
 from xml_to_usda.models import (
@@ -191,20 +192,16 @@ def test_point_instancer_binding_attrs_use_joint_tokens_from_main_skeleton() -> 
     assert inventory.has_attribute("/Tree/AssemblyPartsInstancer", "elementSize")
     assert inventory.has_attribute("/Tree/AssemblyPartsInstancer", "orientations")
     assert inventory.direct_contains("/Tree/AssemblyPartsInstancer", "elementSize = 2")
-    bind_joints_payload = _slice_between(
-        usda.text,
-        'token[] primvars:unreal:naniteAssembly:bindJoints = [',
-        'int[] primvars:unreal:naniteAssembly:bindJoints:indices = None',
-    )
-    bind_weights_payload = _slice_between(
-        usda.text,
-        'float[] primvars:unreal:naniteAssembly:bindJointWeights = [',
-        'int[] primvars:unreal:naniteAssembly:bindJointWeights:indices = None',
-    )
-    assert '"bone_017"' in bind_joints_payload
-    assert '"bone_104"' in bind_joints_payload
-    assert '"Tree_point_17"' not in bind_joints_payload
-    assert '0]' in bind_weights_payload or ', 0,' in bind_weights_payload
+    stage = Usd.Stage.CreateInMemory()
+    assert stage.GetRootLayer().ImportFromString(usda.text)
+    instancer = stage.GetPrimAtPath("/Tree/AssemblyPartsInstancer")
+    joint_tokens = list(instancer.GetAttribute("primvars:unreal:naniteAssembly:bindJoints").Get())
+    weights = list(instancer.GetAttribute("primvars:unreal:naniteAssembly:bindJointWeights").Get())
+    assert len(joint_tokens) == len(weights) == 2 * len(model.repeated_parts)
+    assert set(joint_tokens) <= {joint.name for joint in model.skeleton}
+    assert joint_tokens[::2] == [part.binding.joint_tokens[0] for part in model.repeated_parts]
+    assert weights[::2] == pytest.approx([part.binding.weights[0] for part in model.repeated_parts])
+    assert weights[1::2] == [0.0] * len(model.repeated_parts)
 
 
 @pytest.mark.parametrize("quality", (SkinningQuality.THREE_WEIGHTS, SkinningQuality.FOUR_WEIGHTS))
@@ -448,12 +445,20 @@ def test_leaf_binding_distribution_maps_to_mesh_library_without_hardcoded_counts
 def test_spines_are_optional_source_data_for_writer() -> None:
     document = read_source_xml(SIMPLE_TREE_01)
     report = inspect_xml(document)
+    with_spines = normalize_to_canonical(document, report)
+    assert with_spines.spines, "The fixture needs authored Spines to exercise their optionality."
+    reference = render_usda(with_spines, validate_model(with_spines))
+    for obj in document.tree.iter("Object"):
+        for spine in obj.findall("Spine"):
+            obj.remove(spine)
+    report = inspect_xml(document)
     model = normalize_to_canonical(document, report)
     diagnostics = validate_model(model)
     usda = render_usda(model, diagnostics)
 
     assert not model.spines
     assert "Spine" not in usda.text
+    assert usda.text == reference.text
 
 
 def test_base_tree_skinning_indices_resolve_to_authored_skeleton_range() -> None:

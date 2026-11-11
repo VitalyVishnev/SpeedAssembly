@@ -80,8 +80,11 @@ def test_canonical_model_extracts_base_tree_and_assembly_parts() -> None:
     assert model.base_mesh.skel_joint_indices
     assert model.base_mesh.skel_joint_weights
     assert model.base_mesh.uv_coords
-    assert (model.skeleton[0].bind_translate.x, model.skeleton[0].bind_translate.y, model.skeleton[0].bind_translate.z) == pytest.approx((0.0, 0.0, 0.0))
-    assert (model.skeleton[0].rest_translate.x, model.skeleton[0].rest_translate.y, model.skeleton[0].rest_translate.z) == pytest.approx((0.0, 0.0, 0.0))
+    root_bone = next(bone for bone in document.tree.iter("Bone") if bone.get("ParentID") == "-1")
+    # Default SpeedTree Z-up meters map to Stage Space as (X, Z, -Y), without recentering.
+    expected_root = (float(root_bone.attrib["StartX"]), float(root_bone.attrib["StartZ"]), -float(root_bone.attrib["StartY"]))
+    assert (model.skeleton[0].bind_translate.x, model.skeleton[0].bind_translate.y, model.skeleton[0].bind_translate.z) == pytest.approx(expected_root)
+    assert (model.skeleton[0].rest_translate.x, model.skeleton[0].rest_translate.y, model.skeleton[0].rest_translate.z) == pytest.approx(expected_root)
     assert model.skeleton[0].bind_end_translate is not None
     assert model.skeleton[0].bind_end_translate.y > 0.5
     assert model.skeleton[1].rest_translate != pytest.approx(model.skeleton[1].bind_translate)

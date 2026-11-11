@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -24,10 +25,16 @@ def test_source_analysis_inspect_source_smoke() -> None:
 
 def test_source_analysis_discovers_part_prototypes_for_simple_tree() -> None:
     discovered = discover_part_prototypes(str(SIMPLE_TREE_01))
+    document = read_source_xml(SIMPLE_TREE_01)
+    mesh_counts = Counter(
+        int(mesh_id)
+        for ref in document.tree.iter("LeafReferences")
+        for mesh_id in ref.findtext("MeshID").split()
+    )
 
     assert discovered == (
-        discovered[0].__class__(source_key="Mesh_1", source_mesh_id=1, source_name="Twig_01", instance_count=13),
-        discovered[1].__class__(source_key="Mesh_2", source_mesh_id=2, source_name="Twig_02", instance_count=26),
+        PrototypeDiscoveryEntry(source_key="Mesh_1", source_mesh_id=1, source_name="Twig_01", instance_count=mesh_counts[1]),
+        PrototypeDiscoveryEntry(source_key="Mesh_2", source_mesh_id=2, source_name="Twig_02", instance_count=mesh_counts[2]),
     )
 
 
